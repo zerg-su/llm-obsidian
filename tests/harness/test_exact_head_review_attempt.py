@@ -866,6 +866,52 @@ with tempfile.TemporaryDirectory(prefix="exact-protocol-selector.") as raw:
     def forbidden_finalizing_recovery(*_args: object, **_kwargs: object):
         raise AssertionError("exact protocol selected legacy finalizing recovery")
 
+    skip_task_id = "33333333-3333-4333-8333-333333333333"
+    skip_runtime_root = (
+        vault / ".vault-meta/harness/review-runtime" / skip_task_id
+    )
+    skip_meta = {
+        **meta,
+        "task_id": skip_task_id,
+        "review_policy": {
+            "mode": "skip",
+            "cross_model": False,
+            "runtime": "",
+            "model": "",
+            "effort": "",
+            "max_verify_iterations": 0,
+            "verification_profile": "scoped",
+            "verification_profile_sha256": profile_sha,
+        },
+    }
+    skip_runtime = FakeRuntime(store, owner_id=skip_task_id)
+    skipped = _run_review(
+        skip_meta,
+        vault,
+        product,
+        skip_task_id,
+        skip_runtime_root,
+        runtime_manager=skip_runtime,
+        apply_finalizing_recovery=forbidden_finalizing_recovery,
+    )
+    skip_gate_root = (
+        vault
+        / ".vault-meta/harness/review-data"
+        / skip_task_id
+        / skip_task_id
+    )
+    skip_state = json.loads(
+        (skip_gate_root / "review-gate.json").read_text(encoding="utf-8")
+    )
+    check(
+        "exact-HEAD no-review policy terminates without a provider effect",
+        skipped["status"] == "skipped"
+        and skip_state["status"] == "skipped"
+        and skip_state["lanes"] == []
+        and skip_runtime.started == 0
+        and store.list(skip_task_id) == [],
+    )
+
     started = _run_review(
         meta,
         vault,

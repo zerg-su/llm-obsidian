@@ -561,6 +561,23 @@ def _run_exact_head_review(
         meta, vault, worktree, runtime_root, task_id
     )
     preset, request = _request(meta, vault, task_id, context)
+    if not preset.enabled:
+        ReviewGateController.skip(
+            gate_root,
+            dispatch_operation_id=task_id,
+            owner_id=task_id,
+            preset=preset,
+            context=context,
+            product_root=worktree,
+        )
+        return _receipt(
+            status="skipped",
+            meta=meta,
+            vault=vault,
+            worktree=worktree,
+            runtime_root=runtime_root,
+            context_manifest=context_manifest,
+        )
     if request is None:
         raise TaskReviewError("enabled review has no request")
 
