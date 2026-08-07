@@ -936,12 +936,14 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         "expert review override participates in operation identity",
         base_spec.idempotency_key != expert_spec.idempotency_key,
     )
+    expert_preview = runner.review_topology_preview(expert, expert_policy)
     check(
         "single-model deep preview shows two specialist sessions",
-        runner.review_topology_preview(expert, expert_policy)
-        == {
-            "session_count": 2,
-            "lanes": [
+        expert_preview["session_count"] == 2
+        and expert_preview["effective_mode"] == "deep"
+        and len(expert_preview["topology_sha256"]) == 64
+        and expert_preview["lanes"]
+        == [
                 {
                     "lane": "anthropic-intent",
                     "provider": "anthropic",
@@ -957,31 +959,28 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
                     "responsibility": "engineering",
                 },
             ],
-        },
     )
     deep_default_raw = json.loads(json.dumps(raw_request))
     deep_default_raw["review"] = {"mode": "deep"}
     deep_default = runner.validate_request(deep_default_raw)
     deep_default_policy = runner.review_policy(deep_default, config)
     check(
-        "default deep preview shows two independent holistic sessions",
-        runner.review_topology_preview(deep_default, deep_default_policy)[
-            "lanes"
-        ]
+        "default deep preview equals cycle-one single-model runtime",
+        runner.review_topology_preview(deep_default, deep_default_policy)["lanes"]
         == [
             {
-                "lane": "anthropic-holistic",
-                "provider": "anthropic",
-                "runtime": "claude",
-                "model": "fable",
-                "responsibility": "holistic",
-            },
-            {
-                "lane": "openai-holistic",
+                "lane": "openai-intent",
                 "provider": "openai",
                 "runtime": "codex",
                 "model": "gpt-5.6-sol",
-                "responsibility": "holistic",
+                "responsibility": "intent",
+            },
+            {
+                "lane": "openai-engineering",
+                "provider": "openai",
+                "runtime": "codex",
+                "model": "gpt-5.6-sol",
+                "responsibility": "engineering",
             },
         ],
     )
@@ -996,6 +995,8 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         full_policy.depth == "full"
         and full_policy.max_verify_iterations == 2
         and full_preview["session_count"] == 4
+        and full_preview["effective_mode"] == "full"
+        and len(full_preview["topology_sha256"]) == 64
         and [lane["lane"] for lane in full_preview["lanes"]]
         == [
             "anthropic-intent",
@@ -1434,6 +1435,26 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         and public_ledger["max_cycles"] == 5
         and len(public_ledger["cycles"]) == 1,
         (public_review, public_gate, public_ledger),
+    )
+    public_preview = runner.review_topology_preview(
+        expert, runner.review_policy(expert, config)
+    )
+    check(
+        "dispatch preview and launched gate bind one topology digest",
+        public_gate["topology_sha256"]
+        == public_preview["topology_sha256"]
+        and public_gate["topology"]["session_count"]
+        == public_preview["session_count"]
+        and [lane["axis"] for lane in public_gate["topology"]["lanes"]]
+        == [lane["lane"] for lane in public_preview["lanes"]],
+        json.dumps(
+            {
+                "gate_sha256": public_gate["topology_sha256"],
+                "preview": public_preview,
+                "gate_topology": public_gate["topology"],
+            },
+            sort_keys=True,
+        ),
     )
     check("runner writes one plan branch", (worktree / ".task-prompt.md").read_text().count("## Approved plan") == 1)
     check("runner metadata validates", runner.normalize_task_contract(meta)["interaction_policy"] == "unattended")

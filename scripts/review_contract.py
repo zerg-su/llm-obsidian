@@ -76,6 +76,7 @@ class EffectiveReviewLane:
 class EffectiveReviewTopology:
     """Canonical effect-free review topology shared by every call site."""
 
+    requested_mode: str
     mode: str
     cross_model: bool
     max_verify_iterations: int
@@ -86,6 +87,7 @@ class EffectiveReviewTopology:
     def payload(self) -> dict[str, Any]:
         return {
             "schema_version": 1,
+            "requested_mode": self.requested_mode,
             "mode": self.mode,
             "cross_model": self.cross_model,
             "max_verify_iterations": self.max_verify_iterations,
@@ -146,9 +148,29 @@ def compile_effective_review_topology(
         raise ReviewContractError(
             "review verification profile digest is invalid"
         )
+    providers = set(routes)
+    effective_mode = mode
+    if selected_provider:
+        if providers != {selected_provider}:
+            raise ReviewContractError(
+                "selected review provider must own the only route"
+            )
+    elif len(providers) == 1:
+        if mode == "full":
+            raise ReviewContractError(
+                "Full review requires both provider routes"
+            )
+        selected_provider = next(iter(providers))
+    elif providers == set(PROVIDERS):
+        if mode == "simple":
+            effective_mode = "deep"
+    else:
+        raise ReviewContractError(
+            "review routes must select one provider or both providers"
+        )
     try:
         axes = compile_review_axes(
-            mode, selected_provider=selected_provider
+            effective_mode, selected_provider=selected_provider
         )
     except ValueError as exc:
         raise ReviewContractError(str(exc)) from exc
@@ -199,7 +221,8 @@ def compile_effective_review_topology(
             )
         )
     return EffectiveReviewTopology(
-        mode=mode,
+        requested_mode=mode,
+        mode=effective_mode,
         cross_model=cross_model,
         max_verify_iterations=max_verify_iterations,
         verification_profile=verification_profile,

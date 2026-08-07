@@ -6,7 +6,7 @@ import hashlib
 import json
 import re
 import time
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 from typing import Callable, Mapping, Protocol
@@ -23,11 +23,14 @@ from ..runtime_sessions import RuntimeSessionRequest
 from ..state_machine import TERMINAL
 from ..review_program import PURPOSES
 from review_contract import (
+    EffectiveReviewTopology,
     MATERIAL_SEVERITIES,
     MODES,
     SEVERITIES,
     VERIFY_BUDGETS,
+    compile_effective_review_topology,
     compile_review_axes,
+    review_axis_provider,
     review_axis_responsibility,
     review_parent_kind,
 )
@@ -136,6 +139,9 @@ class ReviewOperationRequest:
     context: ReviewContext
     axis_routes: Mapping[str, RuntimeRoute] | None = None
     lane_ids: Mapping[str, str] | None = None
+    requested_mode: str = ""
+    topology_sha256: str = ""
+    topology: EffectiveReviewTopology = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.policy.purpose != self.context.purpose:
@@ -169,6 +175,36 @@ class ReviewOperationRequest:
             if len(set(lanes.values())) != len(lanes):
                 raise ValueError("deep review axes require independent lanes")
             object.__setattr__(self, "lane_ids", MappingProxyType(lanes))
+        requested_mode = self.requested_mode or self.policy.depth
+        routes_by_provider: dict[str, RuntimeRoute] = {}
+        for axis in self.policy.axes:
+            provider = review_axis_provider(axis)
+            route = self.route_for(axis)
+            prior = routes_by_provider.setdefault(provider, route)
+            if prior != route:
+                raise ValueError(
+                    "one provider cannot use divergent routes in one topology"
+                )
+        topology = compile_effective_review_topology(
+            mode=requested_mode,
+            cross_model=self.policy.cross_model,
+            max_verify_iterations=self.policy.max_verify_iterations,
+            verification_profile=self.context.verification_profile,
+            verification_profile_sha256=(
+                self.context.verification_profile_sha256
+            ),
+            routes=routes_by_provider,
+        )
+        if (
+            topology.mode != self.policy.depth
+            or tuple(lane.axis for lane in topology.lanes) != self.policy.axes
+        ):
+            raise ValueError("review request differs from its effective topology")
+        if self.topology_sha256 and self.topology_sha256 != topology.sha256:
+            raise ValueError("review effective topology digest changed")
+        object.__setattr__(self, "requested_mode", requested_mode)
+        object.__setattr__(self, "topology_sha256", topology.sha256)
+        object.__setattr__(self, "topology", topology)
 
     def route_for(self, axis: str) -> RuntimeRoute:
         if axis not in self.policy.axes:
@@ -211,6 +247,7 @@ def operation_spec(request: ReviewOperationRequest) -> OperationSpec:
         "cross_model": policy.cross_model,
         "axes": policy.axes,
         "max_verify_iterations": policy.max_verify_iterations,
+        "topology_sha256": request.topology_sha256,
         "route": {
             "runtime": route.runtime,
             "model": route.model,

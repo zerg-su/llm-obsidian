@@ -145,11 +145,18 @@ class ReviewGateAttemptMixin:
             model=request.policy.model,
             effort=request.policy.effort,
         )
+        requested_preset = ReviewPreset(
+            depth=request.requested_mode,
+            cross_model=request.policy.cross_model,
+            runtime=request.policy.runtime,
+            model=request.policy.model,
+            effort=request.policy.effort,
+        )
         expected_budget = (
             0
             if request.policy.purpose == "release"
             else min(
-                preset.max_verify_iterations,
+                requested_preset.max_verify_iterations,
                 1 if request.policy.purpose == "intent" else 2,
             )
         )
@@ -172,6 +179,8 @@ class ReviewGateAttemptMixin:
             "product_root": str(product_root),
             "active_review_operation_id": request.policy.operation_id,
             "context": self._context(request.context),
+            "topology": request.topology.payload(),
+            "topology_sha256": request.topology_sha256,
             "lanes": [],
             "round_results": {},
             "final_results": {},
@@ -256,6 +265,8 @@ class ReviewGateAttemptMixin:
                     "product_root",
                     "active_review_operation_id",
                     "context",
+                    "topology",
+                    "topology_sha256",
                 ):
                     if current.get(field) != initial[field]:
                         raise ReviewAttemptError(

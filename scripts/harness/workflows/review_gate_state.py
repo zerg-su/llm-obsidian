@@ -389,11 +389,18 @@ class ReviewGateStateMixin:
             model=request.policy.model,
             effort=request.policy.effort,
         )
+        requested_preset = ReviewPreset(
+            depth=request.requested_mode,
+            cross_model=request.policy.cross_model,
+            runtime=request.policy.runtime,
+            model=request.policy.model,
+            effort=request.policy.effort,
+        )
         expected_budget = (
             0
             if request.policy.purpose == "release"
             else min(
-                preset.max_verify_iterations,
+                requested_preset.max_verify_iterations,
                 1 if request.policy.purpose == "intent" else 2,
             )
         )
@@ -414,6 +421,8 @@ class ReviewGateStateMixin:
             "product_root": str(product_root),
             "active_review_operation_id": request.policy.operation_id,
             "context": self._context(request.context),
+            "topology": request.topology.payload(),
+            "topology_sha256": request.topology_sha256,
             "fresh_reevaluation_used": False,
             "lanes": [],
             "round_results": {},
@@ -431,6 +440,8 @@ class ReviewGateStateMixin:
                     "owner_id",
                     "policy",
                     "product_root",
+                    "topology",
+                    "topology_sha256",
                 ):
                     if current.get(field) != initial[field]:
                         raise ValueError(
@@ -445,6 +456,8 @@ class ReviewGateStateMixin:
         state = self.read()
         policy = state.get("policy")
         context = state.get("context")
+        topology = state.get("topology")
+        topology_sha256 = str(state.get("topology_sha256") or "")
         raw_lanes = state.get("lanes")
         if (
             not isinstance(policy, dict)
@@ -613,6 +626,14 @@ class ReviewGateStateMixin:
             review_context,
             axis_routes=routes,
             lane_ids={lane.axis: lane.lane_id for lane in lanes},
+            requested_mode=(
+                str(topology.get("requested_mode") or "")
+                if isinstance(topology, dict)
+                else ""
+            ),
+            topology_sha256=topology_sha256,
         )
+        if isinstance(topology, dict) and request.topology.payload() != topology:
+            raise ValueError("stored review effective topology changed")
         execution = ReviewExecution(request, tuple(lanes))
         return ReviewGateRun(execution, rounds)

@@ -127,6 +127,7 @@ def compile_task_finalization_routes(
         explicit_runtime=runtime,
         explicit_model=model,
         explicit_effort=effort,
+        required_mode=str(review.get("mode") or ""),
         now_epoch=now_epoch,
     )
 

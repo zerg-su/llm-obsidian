@@ -45,13 +45,15 @@ from model_routing import (
 from outcome_contract import extract_from_bytes
 from task_contract import ContractError, normalize as normalize_task_contract
 from harness.git_ops import GitAdapter, GitError
+from harness.finalization_policy import (
+    AvailabilityEvidence,
+    FinalizationPolicy,
+    compile_finalization_routes,
+)
 from harness.verification import load_profiles
 from harness.workflows.dispatch import ReviewPolicy
 from review_contract import (
-    compile_review_axes,
-    review_axis_provider,
-    review_axis_responsibility,
-    review_provider_runtime,
+    compile_effective_review_topology,
     review_runtime_provider,
 )
 
@@ -419,58 +421,75 @@ def review_policy(
 
 
 def review_topology_preview(
-    request: dict[str, Any], review: ReviewPolicy
+    request: dict[str, Any],
+    review: ReviewPolicy,
+    *,
+    cycle_number: int = 1,
+    independent_permitted: bool = True,
+    availability: AvailabilityEvidence | None = None,
+    now_epoch: int = 0,
 ) -> dict[str, Any]:
     """Compile the exact effect-free public lane preview."""
 
     if not review.enabled:
-        return {"session_count": 0, "lanes": []}
+        return {
+            "session_count": 0,
+            "effective_mode": "skip",
+            "topology_sha256": "",
+            "lanes": [],
+        }
     config = load_config(request["vault_root"])
-    selected_provider = ""
-    routes: dict[str, dict[str, Any]] = {}
-    if review.depth == "simple" or (
-        review.depth == "deep" and (review.runtime or review.model)
-    ):
-        selected = resolve(
-            config,
-            "review",
-            session=request["session_route"],
-            explicit_runtime=review.runtime,
-            explicit_model=review.model,
-            explicit_effort=review.effort,
-            same_model=not review.cross_model,
-            review_profile=(
-                "deep" if review.depth == "deep" else "simple"
-            ),
-        )
-        selected_provider = review_runtime_provider(str(selected["runtime"]))
-        routes[selected_provider] = selected
-    else:
-        for provider in ("anthropic", "openai"):
-            routes[provider] = resolve(
-                config,
-                "review",
-                session=request["session_route"],
-                explicit_runtime=review_provider_runtime(provider),
-                explicit_effort=review.effort,
-                same_model=False,
-                review_profile="deep",
-            )
-    axes = compile_review_axes(
-        review.depth,
-        selected_provider=selected_provider,
+    finalization_policy = FinalizationPolicy()
+    if request.get("pipeline") == "custom":
+        declared = custom_contract_for_request(request)[0].finalization_policy
+        if declared is not None:
+            finalization_policy = declared
+    decision = compile_finalization_routes(
+        config=config,
+        policy=finalization_policy,
+        cycle_number=cycle_number,
+        independent_permitted=independent_permitted,
+        availability=availability,
+        explicit_runtime=review.runtime,
+        explicit_model=review.model,
+        explicit_effort=review.effort,
+        required_mode=review.depth,
+        now_epoch=now_epoch,
+    )
+    routes = {
+        review_runtime_provider(route.runtime): {
+            "runtime": route.runtime,
+            "model": route.model,
+            "effort": route.effort,
+            "profile": "reviewer-callback",
+            "routing_sha256": config.fingerprint,
+        }
+        for route in decision.routes
+    }
+    topology = compile_effective_review_topology(
+        mode=review.depth,
+        cross_model=review.cross_model,
+        max_verify_iterations=review.max_verify_iterations,
+        verification_profile=review.verification_profile,
+        verification_profile_sha256=review.verification_profile_sha256,
+        routes=routes,
     )
     lanes = [
         {
-            "lane": axis,
-            "provider": review_axis_provider(axis),
-            "runtime": routes[review_axis_provider(axis)]["runtime"],
-            "model": routes[review_axis_provider(axis)]["model"],
-            "responsibility": review_axis_responsibility(axis),
+            "lane": lane.axis,
+            "provider": lane.provider,
+            "runtime": lane.runtime,
+            "model": lane.model,
+            "responsibility": lane.responsibility,
         }
-        for axis in axes
+        for lane in topology.lanes
     ]
-    return {"session_count": len(lanes), "lanes": lanes}
+    return {
+        "session_count": len(lanes),
+        "effective_mode": topology.mode,
+        "topology_sha256": topology.sha256,
+        "lanes": lanes,
+    }
 
 
 def resolved_routes(request: dict[str, Any], *, persist: bool = True) -> tuple[dict[str, Any], dict[str, Any]]:

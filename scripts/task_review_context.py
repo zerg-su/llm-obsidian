@@ -8,6 +8,7 @@ import shlex
 import sys
 import tempfile
 import uuid
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -48,7 +49,7 @@ from task_review_request import (
     _canonical_sha256,
     _envelope,
     _prompt,
-    _request,
+    _request as _unbound_request,
     _route,
 )
 from task_review_shared import (
@@ -78,6 +79,35 @@ _BOUNDARY_ARTIFACTS = {
         ("review-accepted-deviations", "accepted_deviations_path", "accepted_deviations_sha256"),
     ),
 }
+
+
+def _request(
+    meta: Mapping[str, Any],
+    vault: Path,
+    task_id: str,
+    context: ReviewContext,
+) -> tuple[ReviewPreset, ReviewOperationRequest | None]:
+    """Compile the frozen task preset and bind its canonical topology."""
+
+    routing = meta.get("routing")
+    effective = routing.get("effective") if isinstance(routing, Mapping) else None
+    if isinstance(effective, Mapping):
+        expected_config = str(effective.get("config_sha256") or "")
+        if expected_config and load_config(vault).fingerprint != expected_config:
+            raise TaskReviewError(
+                "review routing config drifted from frozen task metadata"
+            )
+    preset, request = _unbound_request(meta, vault, task_id, context)
+    if request is None:
+        return preset, None
+    return (
+        preset,
+        replace(
+            request,
+            requested_mode=str(meta["review_policy"]["mode"]),
+            topology_sha256="",
+        ),
+    )
 
 
 def _bounded_review_diff(raw: bytes) -> bytes:

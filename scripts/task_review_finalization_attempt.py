@@ -16,7 +16,11 @@ from harness.review_finalization import (
 )
 from harness.workflows.review import ReviewOperationRequest
 from model_routing import load_config
-from review_contract import review_axis_provider, review_runtime_provider
+from review_contract import (
+    compile_effective_review_topology,
+    review_axis_provider,
+    review_runtime_provider,
+)
 from task_review_shared import TaskReviewError
 
 
@@ -94,47 +98,47 @@ def _bind_routes(
         )
         for route in selected
     )
-    if len(compiled) == 1:
-        route = compiled[0]
-        policy = replace(
-            request.policy,
-            operation_id=attempt_id,
-            cross_model=False,
-            runtime=route.runtime,
-            model=route.model,
-            effort=route.effort,
-            selected_provider=review_runtime_provider(route.runtime),
-        )
-        return replace(
-            request,
-            policy=policy,
-            route=route,
-            axis_routes={axis: route for axis in policy.axes},
-        )
     by_provider = {
         review_runtime_provider(route.runtime): route for route in compiled
     }
-    if set(by_provider) != {"anthropic", "openai"}:
+    if len(compiled) == 2 and set(by_provider) != {"anthropic", "openai"}:
         raise FinalizationAttemptError(
             "independent finalization routes are not independent"
         )
+    requested_mode = request.requested_mode or request.policy.depth
+    topology = compile_effective_review_topology(
+        mode=requested_mode,
+        cross_model=request.policy.cross_model,
+        max_verify_iterations=request.policy.max_verify_iterations,
+        verification_profile=request.context.verification_profile,
+        verification_profile_sha256=(
+            request.context.verification_profile_sha256
+        ),
+        routes=by_provider,
+    )
+    selected_provider = (
+        topology.lanes[0].provider if len(by_provider) == 1 else ""
+    )
+    selected_route = by_provider[topology.lanes[0].provider]
     policy = replace(
         request.policy,
         operation_id=attempt_id,
-        cross_model=True,
-        runtime="",
-        model="",
-        effort="",
-        selected_provider="",
+        depth=topology.mode,
+        runtime=selected_route.runtime if selected_provider else "",
+        model=selected_route.model if selected_provider else "",
+        effort=selected_route.effort if selected_provider else "",
+        selected_provider=selected_provider,
     )
     return replace(
         request,
         policy=policy,
-        route=compiled[0],
+        route=selected_route,
         axis_routes={
             axis: by_provider[review_axis_provider(axis)]
             for axis in policy.axes
         },
+        requested_mode=requested_mode,
+        topology_sha256=topology.sha256,
     )
 
 

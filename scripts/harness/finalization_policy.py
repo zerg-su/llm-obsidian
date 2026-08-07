@@ -272,6 +272,7 @@ def compile_finalization_routes(
     explicit_runtime: str = "",
     explicit_model: str = "",
     explicit_effort: str = "",
+    required_mode: str = "",
     now_epoch: int,
 ) -> FinalizationRouteDecision:
     """Compile one finalization cycle without performing availability effects."""
@@ -288,6 +289,8 @@ def compile_finalization_routes(
         )
     if type(independent_permitted) is not bool:
         raise FinalizationPolicyError("independent_permitted must be boolean")
+    if required_mode not in {"", "simple", "deep", "full"}:
+        raise FinalizationPolicyError("required review mode is invalid")
     _bounded_epoch(now_epoch, "now_epoch")
     primary = _registered_route(
         config, policy.primary_route_alias, effort_override=explicit_effort
@@ -299,6 +302,21 @@ def compile_finalization_routes(
     if primary.runtime == independent.runtime:
         raise FinalizationPolicyError(
             "finalization routes must use different providers"
+        )
+    if required_mode == "full":
+        if explicit_runtime or explicit_model:
+            raise FinalizationPolicyError(
+                "Full finalization cannot carry a single-model override"
+            )
+        if not independent_permitted:
+            raise FinalizationPolicyError(
+                "Full finalization requires both permitted providers"
+            )
+        return FinalizationRouteDecision(
+            cycle_number,
+            (primary, independent),
+            "explicit-full",
+            availability,
         )
     if explicit_runtime or explicit_model:
         selected = _explicit_route(

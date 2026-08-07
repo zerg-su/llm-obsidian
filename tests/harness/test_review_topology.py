@@ -7,6 +7,7 @@ import hashlib
 import json
 import sys
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 
 
@@ -136,6 +137,7 @@ simple_effective = compile_effective_review_topology(
 )
 expected_simple_payload = {
     "schema_version": 1,
+    "requested_mode": "simple",
     "mode": "simple",
     "cross_model": False,
     "max_verify_iterations": 1,
@@ -186,6 +188,37 @@ changed_effort = compile_effective_review_topology(
 check(
     "any concrete route mutation changes the effective topology digest",
     changed_effort.sha256 != simple_effective.sha256,
+)
+adaptive_routes = {
+    "anthropic": {
+        "runtime": "claude",
+        "model": "claude-opus-5",
+        "effort": "xhigh",
+        "profile": "reviewer-callback",
+        "routing_sha256": "9" * 64,
+    },
+    "openai": {
+        "runtime": "codex",
+        "model": "gpt-5.6-sol",
+        "effort": "xhigh",
+        "profile": "reviewer-callback",
+        "routing_sha256": "9" * 64,
+    },
+}
+late_simple = compile_effective_review_topology(
+    mode="simple",
+    cross_model=False,
+    max_verify_iterations=1,
+    verification_profile="scoped",
+    verification_profile_sha256="8" * 64,
+    routes=adaptive_routes,
+)
+check(
+    "two adaptive routes promote Simple to the existing holistic Deep topology",
+    late_simple.payload()["requested_mode"] == "simple"
+    and late_simple.mode == "deep"
+    and tuple(lane.axis for lane in late_simple.lanes)
+    == ("anthropic-holistic", "openai-holistic"),
 )
 check(
     "responsibility is derived from the exact lane identity",
@@ -369,6 +402,39 @@ check(
     and [full_request.route_for(axis).runtime for axis in full_request.policy.axes]
     == ["claude", "claude", "codex", "codex"],
 )
+check(
+    "every runtime request carries the canonical effective topology digest",
+    all(
+        len(request.topology_sha256) == 64
+        and request.topology.sha256 == request.topology_sha256
+        for request in (
+            simple_request,
+            deep_request,
+            single_request,
+            full_request,
+        )
+    ),
+)
+drifted_routes = dict(full_request.axis_routes or {})
+drifted_routes["openai-engineering"] = replace(
+    drifted_routes["openai-engineering"], effort="high"
+)
+try:
+    replace(
+        full_request,
+        axis_routes=drifted_routes,
+        topology_sha256=full_request.topology_sha256,
+    )
+except ValueError as exc:
+    check(
+        "non-primary route drift rejects the request before provider effect",
+        "topology" in str(exc),
+    )
+else:
+    check(
+        "non-primary route drift rejects the request before provider effect",
+        False,
+    )
 for label, request, expected_kinds in (
     (
         "default deep compiles two holistic parent sessions",

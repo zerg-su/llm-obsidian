@@ -23,6 +23,12 @@ from model_routing_config import (  # noqa: E402
     load_tracked_config,
 )
 from review_contract import compile_review_axes  # noqa: E402
+from review_contract import (  # noqa: E402
+    ReviewContractError,
+    compile_effective_review_topology,
+    review_runtime_provider,
+    validate_review_axes,
+)
 
 
 def check(label: str, value: bool) -> None:
@@ -255,5 +261,76 @@ check(
     compile_review_axes("deep")
     == ("anthropic-holistic", "openai-holistic"),
 )
+
+matrix_cases = 0
+for mode in ("simple", "deep", "full"):
+    for cycle in range(1, 6):
+        for availability_case in (None, available):
+            decision = compile_finalization_routes(
+                config=config,
+                policy=policy,
+                cycle_number=cycle,
+                availability=availability_case,
+                required_mode=mode,
+                now_epoch=1_000,
+            )
+            routes = {
+                review_runtime_provider(route.runtime): {
+                    "runtime": route.runtime,
+                    "model": route.model,
+                    "effort": route.effort,
+                    "profile": "reviewer-callback",
+                    "routing_sha256": config.fingerprint,
+                }
+                for route in decision.routes
+            }
+            topology = compile_effective_review_topology(
+                mode=mode,
+                cross_model=False,
+                max_verify_iterations={"simple": 1, "deep": 2, "full": 2}[mode],
+                verification_profile="scoped",
+                verification_profile_sha256="8" * 64,
+                routes=routes,
+            )
+            expected_mode = (
+                "deep"
+                if mode == "simple"
+                and cycle >= 4
+                and availability_case is available
+                else mode
+            )
+            expected_count = (
+                4
+                if mode == "full"
+                else 2
+                if expected_mode == "deep"
+                else 1
+            )
+            check(
+                f"{mode} cycle {cycle} availability "
+                f"{availability_case is available} is classified exactly",
+                topology.mode == expected_mode
+                and len(topology.lanes) == expected_count,
+            )
+            matrix_cases += 1
+
+check(
+    "the bounded topology matrix has zero unclassified cases",
+    matrix_cases == 30,
+)
+try:
+    validate_review_axes(
+        "deep", ("anthropic-intent", "openai-engineering")
+    )
+except ReviewContractError:
+    check(
+        "cross-provider responsibility pairs remain forbidden",
+        True,
+    )
+else:
+    check(
+        "cross-provider responsibility pairs remain forbidden",
+        False,
+    )
 
 print("\nAll finalization routing tests passed.")
