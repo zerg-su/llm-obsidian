@@ -51,6 +51,7 @@ with tempfile.TemporaryDirectory(prefix="ephemeral-provider.") as raw:
         encoding="utf-8",
     )
     schema = {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "properties": {
             "verdict": {"type": "string", "enum": ["approved", "blocked"]},

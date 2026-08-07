@@ -38,6 +38,7 @@ DISPOSITIONS = frozenset(
 )
 MAX_PACKET_BYTES = 1_048_576
 MAX_PROCESS_OUTPUT_BYTES = 1_048_576
+JSON_SCHEMA_DIALECT = "https://json-schema.org/draft/2020-12/schema"
 
 
 class EphemeralProviderError(ValueError):
@@ -103,8 +104,12 @@ def _validate_schema_shape(schema: object, *, root: bool = False) -> None:
         "enum",
         "const",
     }
+    if root:
+        allowed.add("$schema")
     if set(schema) - allowed:
         raise EphemeralProviderError("output schema uses an unsupported keyword")
+    if "$schema" in schema and schema["$schema"] != JSON_SCHEMA_DIALECT:
+        raise EphemeralProviderError("output schema dialect is unsupported")
     kind = schema.get("type")
     if kind not in {"object", "array", "string", "integer", "number", "boolean", "null"}:
         raise EphemeralProviderError("output schema type is unsupported")
