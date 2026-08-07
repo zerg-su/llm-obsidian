@@ -1381,6 +1381,16 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         )
 
     started = manager.start(request, on_surface_opened=prepare_surface)
+    transport_receipt = json.loads(
+        (
+            store.root
+            / "owners"
+            / "owner-1"
+            / "runtime"
+            / "runtime-1"
+            / "surface-transport.json"
+        ).read_text(encoding="utf-8")
+    )
     check(
         "start persists caller-provided lane and run identities",
         started.operation_id == "runtime-1"
@@ -1393,6 +1403,12 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         < events.index("surface-prepared")
         < events.index("provider-send"),
         events,
+    )
+    check(
+        "surface transport durably records command submission",
+        transport_receipt
+        == {"schema_version": 1, "status": "command-submitted"},
+        transport_receipt,
     )
     check(
         "start binds exact surface and PGID then awaits callback",

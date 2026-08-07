@@ -186,15 +186,31 @@ class RuntimeSessionLaunchMixin:
         self._notify(supervisor.owner_id, supervisor.operation_id)
 
     def _start_prepared_provider(self, launch: object, surface_id: str) -> object:
+        transport_path = (
+            Path(str(getattr(launch, "ready_path"))).parent
+            / "surface-transport.json"
+        )
         if not await_surface_transport_ready(self.cmux, surface_id=surface_id):
             raise RuntimeSessionError("surface terminal did not become ready")
+        self._write_json(
+            transport_path,
+            {"schema_version": 1, "status": "terminal-ready"},
+        )
         command = str(getattr(launch, "command"))
         self.cmux.send(surface_id, command)
+        self._write_json(
+            transport_path,
+            {"schema_version": 1, "status": "command-sent"},
+        )
         if not await_surface_transport_visible(
             self.cmux, surface_id=surface_id, text=command
         ):
             raise RuntimeSessionError("surface worker command was not visible")
         self.cmux.send_key(surface_id, "Enter")
+        self._write_json(
+            transport_path,
+            {"schema_version": 1, "status": "command-submitted"},
+        )
         return self.process.await_surface_handle(
             launch, timeout_seconds=self.start_timeout_seconds
         )

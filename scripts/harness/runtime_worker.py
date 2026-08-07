@@ -396,13 +396,45 @@ def run(spec_path: Path, *, poll_seconds: float=0.1, checkpoint_probe: Callable[
     return worker.execute(spec_path, poll_seconds=poll_seconds, checkpoint_probe=checkpoint_probe, cmux_adapter=cmux_adapter, review_launcher=review_launcher, verification_runner=verification_runner, callback_submit_policy=callback_submit_policy, clock=clock, wall_clock=wall_clock, monotonic_clock=monotonic_clock, sleeper=sleeper)
 
 
+def _publish_early_failure(spec_path: Path, reason: str) -> None:
+    """Leave a bounded diagnostic when failure precedes worker initialization."""
+
+    try:
+        lexical = spec_path.expanduser()
+        if lexical.is_symlink() or lexical.name != "launch.json":
+            return
+        launch = lexical.resolve(strict=True)
+        parent = launch.parent
+        stat = parent.stat()
+        if not parent.is_dir() or stat.st_uid != os.getuid() or stat.st_mode & 0o022:
+            return
+        value = json.loads(launch.read_text(encoding="utf-8"))
+        raw_ready = value.get("ready_path") if isinstance(value, dict) else None
+        if not isinstance(raw_ready, str) or not raw_ready:
+            return
+        ready = Path(raw_ready).expanduser().resolve(strict=False)
+        if ready != parent / "ready.json":
+            return
+        _atomic_json(
+            ready,
+            {
+                "schema_version": 1,
+                "status": "failed",
+                "reason": reason[:200],
+            },
+        )
+    except (OSError, ValueError, json.JSONDecodeError):
+        return
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--spec", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
         return run(args.spec)
-    except RuntimeWorkerError:
+    except RuntimeWorkerError as exc:
+        _publish_early_failure(args.spec, str(exc))
         return 2
 
 

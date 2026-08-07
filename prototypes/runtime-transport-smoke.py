@@ -162,6 +162,21 @@ def live_cmux_probe(repo: Path) -> None:
             and len(re.findall(r"\bpane pane:\d+", layout)) == 3,
         )
 
+        transport_marker = "CMUX_LONG_COMMAND_VISIBLE_" + "x" * 320
+        cmux_command(
+            repo,
+            "send",
+            "--surface",
+            right,
+            transport_marker,
+        )
+        screen = cmux_command(repo, "read-screen", "--surface", right)
+        require(
+            "cmux makes a long worker command observable before submit",
+            transport_marker[:96] in " ".join(screen.split()),
+        )
+        cmux_command(repo, "send-key", "--surface", right, "ctrl+u")
+
         close_surface(repo, workspace_id, left)
         close_surface(repo, workspace_id, right)
         collapsed = cmux_tree(repo, workspace_id)

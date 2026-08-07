@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -159,6 +160,34 @@ except runtime_worker.RuntimeWorkerError as exc:
     check("provider restart fails closed without a checkpoint", "checkpoint" in str(exc))
 else:
     check("provider restart fails closed without a checkpoint", False)
+
+with tempfile.TemporaryDirectory(prefix="runtime-worker-early-failure.") as raw:
+    failure_root = Path(raw)
+    launch_path = failure_root / "launch.json"
+    ready_path = failure_root / "ready.json"
+    launch_path.write_text(
+        json.dumps({"ready_path": str(ready_path)}), encoding="utf-8"
+    )
+    os.chmod(failure_root, 0o700)
+    original_run = runtime_worker.run
+    runtime_worker.run = lambda _path: (_ for _ in ()).throw(
+        runtime_worker.RuntimeWorkerError("runtime launch authority drifted")
+    )
+    try:
+        status = runtime_worker.main(["--spec", str(launch_path)])
+    finally:
+        runtime_worker.run = original_run
+    startup_failure = json.loads(ready_path.read_text(encoding="utf-8"))
+    check(
+        "early runtime-worker failure leaves one durable diagnostic",
+        status == 2
+        and startup_failure
+        == {
+            "schema_version": 1,
+            "status": "failed",
+            "reason": "runtime launch authority drifted",
+        },
+    )
 
 
 class CallbackWakeCmux:
