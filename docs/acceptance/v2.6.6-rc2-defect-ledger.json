@@ -228,6 +228,78 @@
       "owner": {"kind": "governance", "id": "harness.coverage"},
       "rationale": "Rehome exact active-owner assertions and public callback rejection tests; do not restore deleted compatibility code or lower coverage floors.",
       "external_effects_observed": false
+    },
+    {
+      "finding_id": "RC2.REVIEW_DRIVE_FAILURE_DIAGNOSTIC",
+      "observed_at_stage": "RC2 automatic post-verification review drive",
+      "subject_head_sha": "c5937f1864dcab12aadc988d94dd6797fe32a09e",
+      "reproducer_or_evidence": "callback-error.json status review-drive-failed with no durable reason receipt",
+      "severity": "important",
+      "rc1_relation": "The old in-memory worker retained only a generic latch after the exact scoped verification completed.",
+      "disposition": "fixed-rc2",
+      "owner": {"kind": "component", "id": "harness.runtime_worker_review_bridge"},
+      "rationale": "Persist one content-free reason receipt at the review-drive boundary. One supported resume was attempted; stale worker generation was not replayed or broadened, and independent exact-current review supplied the bounded diagnostic evidence.",
+      "external_effects_observed": false
+    },
+    {
+      "finding_id": "RC2.SCOPED_VERIFICATION_OUTPUT_BINDING",
+      "observed_at_stage": "RC2 exact Codex implementation review",
+      "subject_head_sha": "348c50ab640e97e419d1effce84acc1d2b582c19",
+      "reproducer_or_evidence": "eng.verification-output-unbound",
+      "severity": "important",
+      "rc1_relation": "Scoped Harness evidence named an output path but did not bind its persisted bytes.",
+      "disposition": "fixed-rc2",
+      "owner": {"kind": "component", "id": "harness.verification"},
+      "rationale": "Version scoped evidence, record output SHA-256 and byte size at execution, and require the exact binding during runtime and review recovery; historical unbound evidence cannot authorize current recovery.",
+      "external_effects_observed": false
+    },
+    {
+      "finding_id": "RC2.CALLBACK_STALE_DUPLICATE_RUN_ID",
+      "observed_at_stage": "RC2 exact Codex implementation review",
+      "subject_head_sha": "348c50ab640e97e419d1effce84acc1d2b582c19",
+      "reproducer_or_evidence": "eng.callback-stale-duplicate-skips-run",
+      "severity": "important",
+      "rc1_relation": "The idempotent stale-callback fast path ran before immutable run identity validation.",
+      "disposition": "fixed-rc2",
+      "owner": {"kind": "component", "id": "harness.store"},
+      "rationale": "Validate operation and run identities before considering an exact duplicate, with a deterministic wrong-run stale regression.",
+      "external_effects_observed": false
+    },
+    {
+      "finding_id": "RC2.REVIEW_DRIVE_REASON_CLASSIFICATION",
+      "observed_at_stage": "RC2 exact Codex implementation review",
+      "subject_head_sha": "348c50ab640e97e419d1effce84acc1d2b582c19",
+      "reproducer_or_evidence": "eng.review-drive-generic-misclassified",
+      "severity": "important",
+      "rc1_relation": "The stable task-review-runner prefix caused unknown failures to be classified as review-contract rejection.",
+      "disposition": "fixed-rc2",
+      "owner": {"kind": "component", "id": "harness.runtime_worker_review_bridge"},
+      "rationale": "Strip only the stable runner prefix before mapping content-free reason codes, preserving the generic nonzero fallback.",
+      "external_effects_observed": false
+    },
+    {
+      "finding_id": "RC2.VAULT_REPAIR_RESULT_IDENTITY",
+      "observed_at_stage": "RC2 exact Codex implementation review",
+      "subject_head_sha": "348c50ab640e97e419d1effce84acc1d2b582c19",
+      "reproducer_or_evidence": "RC2-E5-success-sha-missing",
+      "severity": "important",
+      "rc1_relation": "The bounded repair skill reported completion without requiring the resulting commit identity or no-change distinction.",
+      "disposition": "fixed-rc2",
+      "owner": {"kind": "governance", "id": "skills.vault-repair"},
+      "rationale": "Use the existing read-only Git command before and after the one repair attempt and report the exact resulting SHA or no-change; no writer or retry authority was added.",
+      "external_effects_observed": false
+    },
+    {
+      "finding_id": "RC2.READINESS_LOC_SNAPSHOT",
+      "observed_at_stage": "RC2 exact Fable implementation review",
+      "subject_head_sha": "348c50ab640e97e419d1effce84acc1d2b582c19",
+      "reproducer_or_evidence": "rc2-readiness-stale-loc-snapshot",
+      "severity": "minor",
+      "rc1_relation": "The readiness narrative retained the pre-diagnostic Python line count.",
+      "disposition": "fixed-rc2",
+      "owner": {"kind": "release", "id": "readiness"},
+      "rationale": "Refresh the reproducible snapshot after the bounded review fixes; executable scope tests remain authoritative.",
+      "external_effects_observed": false
     }
   ]
 }
