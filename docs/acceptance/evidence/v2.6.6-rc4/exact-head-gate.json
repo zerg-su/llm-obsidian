@@ -6,9 +6,9 @@
   "evidence_id": "RC4-E10-documentation-and-release-gate",
   "exit_code": 0,
   "log_pointer": "docs/acceptance/evidence/v2.6.6-rc4/exact-head-gate.log",
-  "log_sha256": "9eea6b1e323d5535ab8653a020a681936be0d20021598a1f7b2cb6675bd540ac",
+  "log_sha256": "f1588b69ce5e16c4bbd58c2da23ca97e1db186dc7c7cc3b91a0988b904de3a01",
   "note": "A receipt cannot be committed in the commit it attests, so this record binds the commit it was produced at. The RC4 regression suite requires that commit to be an ancestor of HEAD and this verdict to be green.",
-  "produced_at_head_sha": "df68b0e8009a0acd378f5bccb657c8a5814e5446",
+  "produced_at_head_sha": "005067eed7337084765f2b665a6c332ce0e12fbc",
   "release": "2.6.6-rc4",
   "schema_version": 1,
   "self_reference_excluded": [
@@ -84,7 +84,7 @@
     "test_dcg_assets.sh",
     "test_with_timeout.sh"
   ],
-  "tracked_tree_sha256": "6e8f6bac437c9f1f3437068abbc7d214f13e01ddc5dacdfea33dd49e0636f2c6",
+  "tracked_tree_sha256": "0fbefe1b16c345e4e041c11d0a1b94a7eac2e72f97f9f7b18b2ea0aeb8d57615",
   "tracked_worktree_clean_at_run": true,
   "untracked_path_count_at_run": 0,
   "verdict": "green"
