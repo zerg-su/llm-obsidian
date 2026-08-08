@@ -19,9 +19,10 @@ from typing import Any, Mapping
 
 from review_contract import REVIEW_PARENT_KINDS
 
-from .contracts import OperationRecord
+from .contracts import ContractError, OperationRecord
+from .custom_pipelines import CustomPipelinePolicy, resolve_custom_executable
 from .diagnostics import observe
-from .pipeline_builtins import compiled_executable_for_contract
+from .pipeline_builtins import builtin_registry, compiled_executable_for_contract
 from .pipelines import CompiledPipeline, reconcile_pipeline
 from .state_machine import TERMINAL
 from .status_segment import CONTROLLER_KINDS, LiveInventory
@@ -202,7 +203,9 @@ def _program_gate(
     return gate if subject == record.spec.operation_id else None
 
 
-def _compiled(record: OperationRecord) -> tuple[str, CompiledPipeline | None]:
+def _compiled(
+    store: OperationStore, record: OperationRecord
+) -> tuple[str, CompiledPipeline | None]:
     """Resolve the exact compiled contract the operation was dispatched under."""
 
     if not record.spec.contract_sha256:
@@ -212,7 +215,18 @@ def _compiled(record: OperationRecord) -> tuple[str, CompiledPipeline | None]:
             record.spec.contract_sha256
         )
     except ValueError:
-        return "", None
+        try:
+            _baseline, compiled, _commands, spec = resolve_custom_executable(
+                store_root=_runtime_root(store, record).parent,
+                operation_id=record.spec.operation_id,
+                definition_sha256=record.spec.contract_sha256,
+                registry=builtin_registry(),
+                policy=CustomPipelinePolicy.default(),
+                capabilities=("route:resolved",),
+            )
+        except (ContractError, OSError, ValueError):
+            return "", None
+        return f"custom/{spec.spec_id}", compiled
     return name, compiled
 
 
@@ -728,7 +742,7 @@ def _program(
     inventory: LiveInventory | None,
     tree: Mapping[str, list[OperationRecord]],
 ) -> ProgramView:
-    name, compiled = _compiled(record)
+    name, compiled = _compiled(store, record)
     runtime = _runtime_root(store, record)
     gate = _program_gate(gate, record)
     lanes = _lanes(members, gate)

@@ -242,46 +242,17 @@ def _read_marker(path: Path) -> dict[str, object]:
 
 def _open_dashboard_unlocked(
     *,
-    vault: Path,
-    store: Path,
+    resolved_store: Path,
     caller_surface: str,
-    adapter: CmuxAdapter | None = None,
-    marker_root: Path | None = None,
-    clock: Callable[[], float] = time.time,
+    cmux: CmuxAdapter,
+    inventory: object,
+    workspace_id: str,
+    marker: Path,
+    expected: dict[str, object],
+    clock: Callable[[], float],
+    crash_hook: Callable[[str], None] | None,
 ) -> OpenResult:
     """Open at most one external observer split for one vault/workspace pair."""
-
-    resolved_vault = vault.expanduser().resolve()
-    resolved_store = store.expanduser().resolve()
-    if not resolved_vault.is_dir() or not resolved_store.is_dir():
-        raise CmuxError("dashboard vault and store must be existing directories")
-    if not resolved_store.is_relative_to(resolved_vault):
-        raise CmuxError("dashboard store must belong to the exact vault")
-    if not UUID_RE.fullmatch(caller_surface):
-        raise CmuxError("coordinator surface must be an exact UUID")
-
-    cmux = adapter or CmuxAdapter()
-    inventory = cmux.surface_workspaces()
-    caller_key = caller_surface.casefold()
-    if caller_key in inventory.ambiguous_surfaces:
-        raise CmuxError("coordinator surface placement is ambiguous")
-    workspace_id = inventory.surface_workspaces.get(caller_key, "")
-    if not UUID_RE.fullmatch(workspace_id):
-        raise CmuxError("coordinator surface has no exact workspace identity")
-
-    vault_digest = _digest(str(resolved_vault))
-    store_digest = _digest(str(resolved_store))
-    marker_key = _digest(f"{vault_digest}\0{workspace_id.casefold()}")
-    markers = (marker_root or _marker_root()).expanduser().resolve()
-    markers.mkdir(parents=True, exist_ok=True, mode=0o700)
-    marker = markers / f"{marker_key}.json"
-    expected = {
-        "schema_version": 2,
-        "marker_key": marker_key,
-        "vault_sha256": vault_digest,
-        "store_sha256": store_digest,
-        "workspace_id": workspace_id,
-    }
     marker_exists = marker.exists()
     if marker_exists:
         value = _read_marker(marker)
@@ -298,8 +269,19 @@ def _open_dashboard_unlocked(
         )
         if state == "ready" and live:
             return OpenResult(surface_id, workspace_id, True)
-        if state == "starting" and live:
-            raise CmuxError("dashboard startup is incomplete on a live exact surface")
+        if state == "starting":
+            started_at = value.get("reserved_at")
+            if (
+                not isinstance(started_at, (int, float))
+                or isinstance(started_at, bool)
+            ):
+                raise CmuxError("dashboard starting marker is invalid")
+            if live and clock() - float(started_at) < RESERVATION_STALE_SECONDS:
+                raise CmuxError(
+                    "dashboard startup is incomplete on a live exact surface"
+                )
+            if live:
+                cmux.close_exact(surface_id)
         if state == "reserved":
             reserved_at = value.get("reserved_at")
             if (
@@ -350,9 +332,11 @@ def _open_dashboard_unlocked(
             **expected,
             "state": "starting",
             "surface_id": surface.surface_id,
-            "reserved_at": 0,
+            "reserved_at": clock(),
         },
     )
+    if crash_hook is not None:
+        crash_hook("starting-published")
     command = shlex.join(
         [
             sys.executable,
@@ -368,6 +352,8 @@ def _open_dashboard_unlocked(
     try:
         cmux.send(surface.surface_id, command)
         cmux.send_key(surface.surface_id, "Enter")
+        if crash_hook is not None:
+            crash_hook("startup-delivered")
     except Exception:
         try:
             cmux.close_exact(surface.surface_id)
@@ -402,6 +388,7 @@ def open_dashboard(
     adapter: CmuxAdapter | None = None,
     marker_root: Path | None = None,
     clock: Callable[[], float] = time.time,
+    crash_hook: Callable[[str], None] | None = None,
 ) -> OpenResult:
     """Serialize and open one external observer for a vault/workspace pair."""
 
@@ -414,26 +401,36 @@ def open_dashboard(
     if not UUID_RE.fullmatch(caller_surface):
         raise CmuxError("coordinator surface must be an exact UUID")
     cmux = adapter or CmuxAdapter()
-    inventory = cmux.surface_workspaces()
-    caller_key = caller_surface.casefold()
-    if caller_key in inventory.ambiguous_surfaces:
-        raise CmuxError("coordinator surface placement is ambiguous")
-    workspace_id = inventory.surface_workspaces.get(caller_key, "")
-    if not UUID_RE.fullmatch(workspace_id):
-        raise CmuxError("coordinator surface has no exact workspace identity")
     markers = (marker_root or _marker_root()).expanduser().resolve()
     markers.mkdir(parents=True, exist_ok=True, mode=0o700)
-    marker_key = _digest(
-        f"{_digest(str(resolved_vault))}\0{workspace_id.casefold()}"
-    )
-    with _marker_lock(markers / f"{marker_key}.json"):
+    vault_digest = _digest(str(resolved_vault))
+    with _marker_lock(markers / f"{vault_digest}.guard"):
+        inventory = cmux.surface_workspaces()
+        caller_key = caller_surface.casefold()
+        if caller_key in inventory.ambiguous_surfaces:
+            raise CmuxError("coordinator surface placement is ambiguous")
+        workspace_id = inventory.surface_workspaces.get(caller_key, "")
+        if not UUID_RE.fullmatch(workspace_id):
+            raise CmuxError("coordinator surface has no exact workspace identity")
+        marker_key = _digest(f"{vault_digest}\0{workspace_id.casefold()}")
+        marker = markers / f"{marker_key}.json"
+        expected = {
+            "schema_version": 2,
+            "marker_key": marker_key,
+            "vault_sha256": vault_digest,
+            "store_sha256": _digest(str(resolved_store)),
+            "workspace_id": workspace_id,
+        }
         return _open_dashboard_unlocked(
-            vault=resolved_vault,
-            store=resolved_store,
+            resolved_store=resolved_store,
             caller_surface=caller_surface,
-            adapter=cmux,
-            marker_root=markers,
+            cmux=cmux,
+            inventory=inventory,
+            workspace_id=workspace_id,
+            marker=marker,
+            expected=expected,
             clock=clock,
+            crash_hook=crash_hook,
         )
 
 

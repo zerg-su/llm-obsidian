@@ -54,6 +54,11 @@ and distinguishes failed or cancelled roots from successful completion.  The
 file surface stays fixed while the line ceiling moves by the measured 221-line
 correction.
 
+The third typed review adds read-only resolution of the exact frozen custom
+pipeline and collapses launcher placement/marker ownership into one critical
+section with bounded stale-start recovery.  No production file is added; the
+line ceiling moves by the measured 100-line correction.
+
 The historical RC2 snapshot is retained separately in
 ``tests/test_v266_rc2_scope.py``; it is evidence about a released commit, not a
 constraint on this one.
@@ -68,7 +73,7 @@ from pathlib import Path
 SCRIPT_FILE_CEILING = 265
 
 #: Maximum total lines across those files for the RC4 candidate.
-SCRIPT_LINE_CEILING = 90_553
+SCRIPT_LINE_CEILING = 90_653
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

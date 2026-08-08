@@ -23,7 +23,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from harness.cli import main as cli_main
 from harness.callbacks import CallbackBroker
 from harness import dashboard_receipts
-from harness.adapters.cmux import CmuxAdapter
+from harness.adapters.cmux import CmuxAdapter, Surface, SurfaceWorkspaceIndex
 from harness.contracts import CallbackEnvelope, OperationSpec, OwnedResources, RuntimeRoute, VerificationEvidence, to_dict
 from harness.dashboard_projection import (
     ATTENTION,
@@ -41,6 +41,15 @@ from harness.dashboard_projection import (
     project,
 )
 from harness.dashboard_view import MAX_LINE, render
+from harness.custom_pipelines import (
+    CustomPipelinePolicy,
+    ExplicitPipelineApproval,
+    FrozenPipelineStore,
+    compile_custom_spec,
+    freeze_custom_pipeline,
+    parse_pipeline_spec,
+    render_custom_approval,
+)
 from harness.pipeline_builtins import builtin_registry, compiled_builtin
 from harness.pipelines import (
     PipelineDefinition,
@@ -1075,6 +1084,57 @@ check(
     and _single_loose == (),
 )
 
+with tempfile.TemporaryDirectory(prefix="harness-dashboard-custom.") as raw:
+    store_root = Path(raw) / "harness"
+    store = OperationStore(store_root)
+    spec = parse_pipeline_spec(
+        (ROOT / "examples" / "pipelines" / "document-project-v1.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    policy = CustomPipelinePolicy.default()
+    compiled = compile_custom_spec(
+        spec,
+        builtin_registry(),
+        policy=policy,
+        capabilities=("route:resolved",),
+    )
+    card = render_custom_approval(spec, compiled, policy=policy)
+    approval = ExplicitPipelineApproval.for_card(
+        definition_sha256=compiled.definition_sha256,
+        approval_card=card,
+        actor="user",
+        decision="approve",
+    )
+    frozen = freeze_custom_pipeline(spec, compiled, approval, card)
+    owner = "dashboard-custom-root"
+    _create(
+        store,
+        owner,
+        "dispatch",
+        lane_id="lane-custom",
+        contract_sha256=compiled.definition_sha256,
+        owner=owner,
+    )
+    _advance(store, owner, "preflight", "starting", "running", owner=owner)
+    FrozenPipelineStore(
+        store_root / "owners" / owner / "runtime"
+    ).save(operation_id=owner, spec=spec, frozen=frozen, approval=approval)
+    custom = project(store_root, owner, inventory=LiveInventory({}))
+    program = custom.programs[0]
+    check(
+        "a frozen custom dispatch projects its exact compiled graph",
+        program.pipeline == f"custom/{spec.spec_id}@{compiled.definition.version}"
+        and tuple(step.step_id for step in program.steps)
+        == tuple(step.step_id for step in compiled.definition.steps)
+        and program.controls == compiled.resolved_control_primitives
+        and program.steps[0].status == "running"
+        and all(step.status == "pending" for step in program.steps[1:])
+        and _route_of(program.steps[0])
+        == ("claude", "claude-opus-5", "medium", "executor")
+        and program.pipeline != "unresolved",
+    )
+
 
 def _load_dashboard_script() -> object:
     path = ROOT / "scripts" / "harness-dashboard.py"
@@ -1273,6 +1333,34 @@ class AmbiguousCmux:
         raise AssertionError("ambiguous identity reached a cmux effect")
 
 
+class MovingCmux:
+    def __init__(self, caller: str, dashboard: str, workspaces: tuple[str, str]) -> None:
+        self.caller = caller
+        self.dashboard = dashboard
+        self.workspaces = workspaces
+        self.probes = 0
+        self.created = 0
+
+    def surface_workspaces(self) -> SurfaceWorkspaceIndex:
+        workspace = self.workspaces[min(self.probes, 1)]
+        self.probes += 1
+        return SurfaceWorkspaceIndex({self.caller.casefold(): workspace})
+
+    def open_split(self, _caller: str) -> Surface:
+        self.created += 1
+        workspace = self.workspaces[min(self.probes - 1, 1)]
+        return Surface(self.dashboard, workspace_id=workspace)
+
+    def send(self, _surface: str, _text: str) -> None:
+        pass
+
+    def send_key(self, _surface: str, _key: str) -> None:
+        pass
+
+    def close_exact(self, _surface: str) -> None:
+        pass
+
+
 with tempfile.TemporaryDirectory(prefix="harness-dashboard-open.") as raw:
     root = Path(raw)
     vault = root / "vault"
@@ -1461,6 +1549,63 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-open.") as raw:
         "fresh reservations reject concurrency while stale reservations recover once",
         concurrent_rejected and stale.surface_id == dashboard and reserved_fake.created,
     )
+    moved_workspace = "4D5E6F70-7777-4066-8B66-6F6F6F6F6F6F"
+    moving = MovingCmux(caller, dashboard, (workspace, moved_workspace))
+    moved = dashboard_script.open_dashboard(
+        vault=vault,
+        store=store_root,
+        caller_surface=caller,
+        adapter=moving,
+        marker_root=root / "moving-markers",
+    )
+    check(
+        "one critical section binds one immutable caller placement probe",
+        moving.probes == 1
+        and moving.created == 1
+        and moved.workspace_id == workspace,
+    )
+
+    for crash_stage in ("starting-published", "startup-delivered"):
+        crash_fake = FakeCmuxRunner(caller, dashboard, workspace)
+        crash_adapter = CmuxAdapter(runner=crash_fake, binary="cmux")
+        crash_markers = root / f"crash-{crash_stage}"
+
+        def stop_after(stage: str, expected: str = crash_stage) -> None:
+            if stage == expected:
+                raise SystemExit(91)
+
+        try:
+            dashboard_script.open_dashboard(
+                vault=vault,
+                store=store_root,
+                caller_surface=caller,
+                adapter=crash_adapter,
+                marker_root=crash_markers,
+                clock=lambda: 100.0,
+                crash_hook=stop_after,
+            )
+        except SystemExit as exc:
+            crashed = exc.code == 91
+        else:
+            crashed = False
+        recovered = dashboard_script.open_dashboard(
+            vault=vault,
+            store=store_root,
+            caller_surface=caller,
+            adapter=crash_adapter,
+            marker_root=crash_markers,
+            clock=lambda: 131.0,
+        )
+        check(
+            f"stale {crash_stage} state closes and replaces its exact split",
+            crashed
+            and recovered.surface_id == dashboard
+            and not recovered.reused
+            and len([call for call in crash_fake.calls if "new-split" in call])
+            == 2
+            and len([call for call in crash_fake.calls if "close-surface" in call])
+            == 1,
+        )
     ambiguous = AmbiguousCmux(caller)
     try:
         dashboard_script.open_dashboard(
