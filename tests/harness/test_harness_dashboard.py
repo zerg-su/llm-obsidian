@@ -4,8 +4,11 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import io
 import json
+import os
+import subprocess
 import sys
 import tempfile
 from contextlib import redirect_stdout
@@ -16,15 +19,19 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from harness.cli import main as cli_main
+from harness.adapters.cmux import CmuxAdapter
 from harness.contracts import OperationSpec, OwnedResources, RuntimeRoute
 from harness.dashboard_projection import (
     ATTENTION,
     COORDINATOR,
     HEALTHY,
     MAX_ISSUES,
+    MAX_PROGRAMS,
     UNKNOWN_ROUTE,
     WAITING,
     ChildView,
+    DashboardProjection,
+    IssueView,
     _bind_children,
     escalate,
     project,
@@ -350,7 +357,7 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-unknown.") as raw:
         == ["pipeline-contract-unresolved", "operation-resources-absent"],
     )
 
-    for index in range(MAX_ISSUES + 1):
+    for index in range(max(MAX_ISSUES, MAX_PROGRAMS) + 1):
         operation_id = f"dashboard-extra-{index}"
         _create(
             store,
@@ -366,11 +373,31 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-unknown.") as raw:
     projection = project(store_root, OWNER, inventory=LiveInventory({}))
     check(
         "recent issues stay bounded while the classification still escalates",
-        len(projection.issues) == MAX_ISSUES
+        len(projection.issues) == MAX_ISSUES == 5
         and projection.truncated["issues"] > 0
         and projection.truncated["programs"] > 0
         and projection.classification == COORDINATOR
         and "+" in render(projection),
+    )
+    non_english = DashboardProjection(
+        OWNER,
+        ATTENTION,
+        "unavailable",
+        (),
+        (
+            IssueView(
+                "typed-attention",
+                DISPATCH,
+                "необработанная причина",
+                ATTENTION,
+            ),
+        ),
+    )
+    check(
+        "a non-English persisted reason is omitted rather than translated",
+        "typed-attention" in render(non_english)
+        and "причина" not in render(non_english)
+        and render(non_english).isascii(),
     )
 
     unreadable = store_root / "owners" / OWNER / "operations" / "broken.json"
@@ -669,7 +696,7 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-identity.") as raw:
             inventory=LiveInventory({ROOT_SURFACE.casefold(): "workspace-9"}),
         )
     )
-    rendered = [line.strip() for line in text.splitlines() if "…" in line]
+    rendered = [line.strip() for line in text.splitlines() if "..." in line]
     check(
         "nested operations stay distinguishable on production-shaped ids",
         len(rendered) == 2
@@ -720,5 +747,264 @@ check(
     and _single_step == {"verify": [_verify_child]}
     and _single_loose == (),
 )
+
+
+def _load_dashboard_script() -> object:
+    path = ROOT / "scripts" / "harness-dashboard.py"
+    spec = importlib.util.spec_from_file_location("harness_dashboard", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+dashboard_script = _load_dashboard_script()
+
+with tempfile.TemporaryDirectory(prefix="harness-dashboard-cli.") as raw:
+    store_root = Path(raw) / "harness"
+    compiled = compiled_builtin("engineering/change")
+    active_owner = "dashboard-active"
+    active_store = OperationStore(store_root)
+    _create(
+        active_store,
+        active_owner,
+        "dispatch",
+        lane_id="lane-active",
+        contract_sha256=compiled.definition_sha256,
+        owner=active_owner,
+    )
+    _advance(
+        active_store,
+        active_owner,
+        "preflight",
+        "starting",
+        owner=active_owner,
+    )
+    for index in range(4):
+        owner = f"dashboard-terminal-{index}"
+        _create(
+            active_store,
+            owner,
+            "dispatch",
+            lane_id=f"lane-terminal-{index}",
+            contract_sha256=compiled.definition_sha256,
+            owner=owner,
+        )
+        _advance(
+            active_store,
+            owner,
+            "preflight",
+            "starting",
+            "running",
+            "finalizing",
+            "exiting",
+            "complete",
+            owner=owner,
+        )
+        record_path = store_root / "owners" / owner / "operations" / f"{owner}.json"
+        os.utime(record_path, (100 + index, 100 + index))
+
+    baseline = _tree_bytes(store_root)
+    command = [
+        sys.executable,
+        str(ROOT / "scripts" / "harness-dashboard.py"),
+        "--store",
+        str(store_root),
+        "--once",
+        "--recent",
+        "2",
+        "--no-color",
+    ]
+    cli_environment = {
+        **os.environ,
+        "CMUX_BUNDLED_CLI_PATH": str(Path(raw) / "missing-cmux"),
+    }
+    result = subprocess.run(
+        command,
+        text=True,
+        capture_output=True,
+        check=False,
+        env=cli_environment,
+    )
+    check(
+        "the standalone CLI shows every active pipeline and bounded terminal history",
+        result.returncode == 0
+        and "Active pipelines: 1" in result.stdout
+        and "Terminal history: 2" in result.stdout
+        and "dashboard-terminal-3" in result.stdout
+        and "dashboard-terminal-2" in result.stdout
+        and "dashboard-terminal-1" not in result.stdout
+        and "\x1b[" not in result.stdout
+        and result.stdout.isascii()
+        and _tree_bytes(store_root) == baseline,
+    )
+    for option, value in (("--interval", "0"), ("--recent", "4")):
+        rejected = subprocess.run(
+            [*command[:4], option, value, "--once"],
+            text=True,
+            capture_output=True,
+            check=False,
+            env=cli_environment,
+        )
+        check(
+            f"the standalone CLI bounds {option}",
+            rejected.returncode == 2,
+        )
+
+    rendered: list[str] = []
+
+    def interrupt(_interval: float) -> None:
+        raise KeyboardInterrupt
+
+    code = dashboard_script.main(
+        ["--store", str(store_root), "--interval", "0.1", "--no-color"],
+        inventory_probe=lambda **_kwargs: None,
+        sleeper=interrupt,
+        output=rendered.append,
+    )
+    check(
+        "live mode redraws locally and exits cleanly on Ctrl-C",
+        code == 0
+        and len(rendered) == 1
+        and rendered[0].startswith("\x1b[2J\x1b[H")
+        and _tree_bytes(store_root) == baseline,
+    )
+
+
+class FakeCmuxRunner:
+    def __init__(self, caller: str, dashboard: str, workspace: str) -> None:
+        self.caller = caller
+        self.dashboard = dashboard
+        self.workspace = workspace
+        self.created = False
+        self.calls: list[list[str]] = []
+
+    def __call__(self, argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        self.calls.append(argv)
+        args = argv[1:]
+        if args[-3:] == ["tree", "--all", "--json"]:
+            surfaces = [{"id": self.caller}]
+            if self.created:
+                surfaces.append({"id": self.dashboard})
+            payload = {
+                "windows": [
+                    {
+                        "id": "6D3C2B1A-3333-4C22-9D22-2B2B2B2B2B2B",
+                        "workspaces": [
+                            {
+                                "id": self.workspace,
+                                "panes": [{"surfaces": surfaces}],
+                            }
+                        ],
+                    }
+                ]
+            }
+            return subprocess.CompletedProcess(argv, 0, json.dumps(payload), "")
+        if "new-split" in args:
+            self.created = True
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                json.dumps(
+                    {
+                        "surface_id": self.dashboard,
+                        "workspace_id": self.workspace,
+                    }
+                ),
+                "",
+            )
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+
+class AmbiguousCmux:
+    def __init__(self, caller: str) -> None:
+        from harness.adapters.cmux import SurfaceWorkspaceIndex
+
+        self.inventory = SurfaceWorkspaceIndex(
+            {}, frozenset({caller.casefold()}), frozenset({caller.casefold()})
+        )
+        self.created = False
+
+    def surface_workspaces(self) -> object:
+        return self.inventory
+
+    def open_split(self, _caller: str) -> object:
+        self.created = True
+        raise AssertionError("ambiguous identity reached a cmux effect")
+
+
+with tempfile.TemporaryDirectory(prefix="harness-dashboard-open.") as raw:
+    root = Path(raw)
+    vault = root / "vault"
+    store_root = vault / ".vault-meta" / "harness"
+    store_root.mkdir(parents=True)
+    caller = "1A2B3C4D-4444-4D33-8E33-3C3C3C3C3C3C"
+    dashboard = "2B3C4D5E-5555-4E44-9F44-4D4D4D4D4D4D"
+    workspace = "3C4D5E6F-6666-4F55-8A55-5E5E5E5E5E5E"
+    fake = FakeCmuxRunner(caller, dashboard, workspace)
+    adapter = CmuxAdapter(runner=fake, binary="cmux")
+    marker_root = root / "markers"
+    baseline = _tree_bytes(store_root)
+    first = dashboard_script.open_dashboard(
+        vault=vault,
+        store=store_root,
+        caller_surface=caller,
+        adapter=adapter,
+        marker_root=marker_root,
+    )
+    second = dashboard_script.open_dashboard(
+        vault=vault,
+        store=store_root,
+        caller_surface=caller,
+        adapter=adapter,
+        marker_root=marker_root,
+    )
+    create_calls = [call for call in fake.calls if "new-split" in call]
+    send_calls = [call for call in fake.calls if "send" in call]
+    enter_calls = [call for call in fake.calls if "send-key" in call]
+    check(
+        "the external launcher creates once, reuses exactly, and never owns Harness state",
+        first.surface_id == dashboard
+        and not first.reused
+        and second.surface_id == dashboard
+        and second.reused
+        and create_calls
+        == [[
+            "cmux",
+            "--id-format",
+            "both",
+            "new-split",
+            "right",
+            "--surface",
+            caller,
+            "--focus",
+            "false",
+            "--json",
+        ]]
+        and len(send_calls) == 1
+        and send_calls[0][2:4] == ["--surface", dashboard]
+        and "harness-dashboard.py" in send_calls[0][-1]
+        and enter_calls == [["cmux", "send-key", "--surface", dashboard, "Enter"]]
+        and not any("focus" in call and "new-split" not in call for call in fake.calls)
+        and _tree_bytes(store_root) == baseline,
+    )
+    ambiguous = AmbiguousCmux(caller)
+    try:
+        dashboard_script.open_dashboard(
+            vault=vault,
+            store=store_root,
+            caller_surface=caller,
+            adapter=ambiguous,
+            marker_root=root / "ambiguous-markers",
+        )
+    except Exception as exc:
+        rejected = "ambiguous" in str(exc)
+    else:
+        rejected = False
+    check(
+        "ambiguous caller placement is rejected before any cmux effect",
+        rejected and not ambiguous.created,
+    )
 
 print("harness dashboard tests passed")

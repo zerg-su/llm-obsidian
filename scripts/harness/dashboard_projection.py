@@ -28,7 +28,7 @@ from .status_segment import CONTROLLER_KINDS, LiveInventory
 from .store import OperationStore, StoreError
 
 
-MAX_ISSUES = 8
+MAX_ISSUES = 5
 MAX_PROGRAMS = 8
 MAX_LANES = 8
 MAX_VISITS = 16

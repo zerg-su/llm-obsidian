@@ -36,6 +36,11 @@ nonterminal records reported as unresolved rather than live.  That cost lines
 inside the same two modules and added no script, so the file ceiling is
 unchanged and only the line ceiling moves.
 
+The final Fix2 dashboard slices add the approved standalone live CLI and
+external cmux launcher in ``harness-dashboard.py``.  The existing file ceiling
+already had room for that one script; the line ceiling moves by exactly its
+bounded implementation cost.
+
 The historical RC2 snapshot is retained separately in
 ``tests/test_v266_rc2_scope.py``; it is evidence about a released commit, not a
 constraint on this one.
@@ -50,7 +55,7 @@ from pathlib import Path
 SCRIPT_FILE_CEILING = 264
 
 #: Maximum total lines across those files for the RC4 candidate.
-SCRIPT_LINE_CEILING = 89_650
+SCRIPT_LINE_CEILING = 90_020
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

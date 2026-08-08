@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "records": [
+    {
+      "skill": "dispatch",
+      "verdict": "fix",
+      "passes": {
+        "invocation": "pass",
+        "hierarchy": "FIX2-DASH-DISPATCH-01",
+        "steering": "pass",
+        "pruning": "pass",
+        "goal_preservation": "pass"
+      },
+      "overall_input": "An approved dispatch request, exact coordinator surface, canonical vault and Harness store, and the existing protected validate/start lifecycle.",
+      "overall_outcome": "Approved work launches through the unchanged Harness lifecycle while one idempotent read-only external dashboard may observe it beside the coordinator.",
+      "local_subgoal": "Open the external dashboard once before built-in validation/start without granting it lifecycle authority or making display success a launch prerequisite.",
+      "completion_proxies": [
+        "The dashboard open command returns a created or reused exact surface.",
+        "The dispatch skill audit, instruction lint, and budget gates pass."
+      ],
+      "required_outcome_evidence": [
+        "FIX2-DASH-E4-cmux",
+        "FIX2-DASH-E6-skill",
+        "FIX2-DASH-E7-review"
+      ],
+      "evidence": "The approved Fix2 Slice D requires one concise pre-launch instruction before the built-in validate/start boundary; skills/dispatch/SKILL.md previously contained no dashboard entry point.",
+      "change": "Add one conditional command through the code-owned idempotent launcher and state its contained-failure and external-ownership boundaries.",
+      "behavior_proof": "Dispatch triggers, request resolution, approval, validate/start ordering, cmux placement, Harness resource ownership, callbacks, no-poll return, review, reap, permissions, and completion semantics remain unchanged."
+    }
+  ]
+}

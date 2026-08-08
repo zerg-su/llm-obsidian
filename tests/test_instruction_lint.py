@@ -237,6 +237,9 @@ assert "materialize_current_context" in dispatch_runner
 assert 'origin_surface=request["origin_surface"]' in dispatch_execution
 assert "identify --surface \"$CMUX_SURFACE_ID\" --no-caller" not in dispatch
 assert "never inspects the globally focused surface" in dispatch
+assert "harness-dashboard.py open" in dispatch
+assert "contained display failure" in dispatch
+assert "external to Harness ownership" in dispatch
 assert "awk '/^\\*/" not in dispatch
 assert "verify that its exact target exists under `wiki/`" in dispatch
 assert "reap type/title/`plan_mode`" in dispatch

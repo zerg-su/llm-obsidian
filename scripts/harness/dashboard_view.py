@@ -14,6 +14,7 @@ from .dashboard_projection import (
     ProgramView,
     RouteView,
 )
+from .state_machine import TERMINAL
 
 MAX_LINE = 96
 SHORT_ID = 8
@@ -50,11 +51,11 @@ def _identity(value: str) -> str:
     if len(value) <= CHILD_ID:
         return value
     tail = CHILD_ID - CHILD_ID_HEAD - 1
-    return f"{value[:CHILD_ID_HEAD]}…{value[-tail:]}"
+    return f"{value[:CHILD_ID_HEAD]}...{value[-tail:]}"
 
 
 def _clip(value: str) -> str:
-    return value if len(value) <= MAX_LINE else value[: MAX_LINE - 1] + "…"
+    return value if len(value) <= MAX_LINE else value[: MAX_LINE - 3] + "..."
 
 
 def _route(route: RouteView) -> str:
@@ -151,30 +152,66 @@ def _issue_lines(projection: DashboardProjection) -> list[str]:
     suffix = f" (+{dropped} more)" if dropped else ""
     lines = [f"Recent issues: {len(projection.issues)}{suffix}"]
     for issue in projection.issues:
+        detail = issue.detail if issue.detail.isascii() else ""
+        suffix = f"  {detail}" if detail else ""
         lines.append(
             f"  - {issue.code}  {_short(issue.operation_id)}  "
-            f"{issue.classification}  {issue.detail}"
+            f"{issue.classification}{suffix}"
         )
     return lines
 
 
-def render(projection: DashboardProjection) -> str:
+def _colorize(line: str, *, color: bool) -> str:
+    if not color:
+        return line
+    if "[!]" in line or "attention-required" in line:
+        return f"\x1b[31m{line}\x1b[0m"
+    if "[>]" in line or "in-progress" in line:
+        return f"\x1b[36m{line}\x1b[0m"
+    if "[x]" in line or "healthy" in line:
+        return f"\x1b[32m{line}\x1b[0m"
+    return line
+
+
+def _history_line(program: ProgramView) -> str:
+    return (
+        f"  {program.operation_id}  {program.kind}  {program.state}  "
+        f"pipeline {program.pipeline}  rev {program.revision}"
+    )
+
+
+def render(
+    projection: DashboardProjection,
+    *,
+    recent: int = 3,
+    color: bool = False,
+) -> str:
     """Render one bounded read-only English dashboard for a terminal."""
 
     dropped = int(projection.truncated.get("programs", 0))
     suffix = f" (+{dropped} more)" if dropped else ""
+    active = tuple(
+        program for program in projection.programs if program.state not in TERMINAL
+    )
+    terminal = tuple(
+        program for program in projection.programs if program.state in TERMINAL
+    )[:recent]
     lines = [
-        f"Harness dashboard — owner {projection.owner_id}",
+        f"Harness dashboard - owner {projection.owner_id}",
         f"Classification: {projection.classification}",
         f"cmux surface probe: {projection.surface_probe}",
         f"Programs: {len(projection.programs)}{suffix}",
+        f"Active pipelines: {len(active)}",
         "",
     ]
     if not projection.programs:
         lines.append("No program is bound to this owner.")
         lines.append("")
-    for program in projection.programs:
+    for program in active:
         lines.extend(_program_lines(program))
         lines.append("")
+    lines.append(f"Terminal history: {len(terminal)}")
+    lines.extend(_history_line(program) for program in terminal)
+    lines.append("")
     lines.extend(_issue_lines(projection))
-    return "\n".join(_clip(line) for line in lines) + "\n"
+    return "\n".join(_colorize(_clip(line), color=color) for line in lines) + "\n"
