@@ -42,6 +42,7 @@ test-harness:
 	@python3 tests/harness/test_pipeline_builtins.py
 	@python3 tests/harness/test_regressions.py
 	@python3 tests/harness/test_store.py
+	@python3 tests/harness/test_cascade_cancel.py
 	@python3 tests/harness/test_adapters.py
 	@python3 tests/harness/test_darwin_exact_process_status.py
 	@python3 tests/harness/test_provider_events.py
