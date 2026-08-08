@@ -150,14 +150,23 @@ check(
     and live_evidence["receipt"]["summary"]
     == {"total": 4, "passed": 4, "failed": 0},
 )
+# The two working directories must stay distinguishable, but published evidence
+# no longer carries operator-local absolute paths (rc4-live-evidence-embeds-
+# operator-paths), so the distinction is asserted on the stable placeholders.
 check(
     "RC4 live evidence distinguishes command-log and execution working directories",
     live_evidence["command_capture"]["command_event"]["cwd"]
-    == "/Users/zak/Projects/llm-obsidian-swarm"
-    and live_evidence["execution"]["cwd"]
-    == "/Users/zak/Projects/worktrees/llm-obsidian-2-6-6-rc4-skill-quality"
+    == "<coordinator-vault>"
+    and live_evidence["execution"]["cwd"] == "<task-worktree>"
     and live_evidence["command_capture"]["exec_workdir"]
-    == live_evidence["execution"]["cwd"],
+    == live_evidence["execution"]["cwd"]
+    and live_evidence["command_capture"]["command_event"]["cwd"]
+    != live_evidence["execution"]["cwd"],
+)
+check(
+    "RC4 live evidence publishes no operator-local path",
+    "/Users/"
+    not in json.dumps(live_evidence, ensure_ascii=False),
 )
 expected_equivalence = {
     "rc4.ambiguity": (
