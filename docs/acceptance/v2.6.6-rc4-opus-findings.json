@@ -1,0 +1,165 @@
+{
+  "schema_version": 1,
+  "release": "2.6.6-rc4",
+  "review_callback": "review-3e2e0ab62748d463a7cf2d53",
+  "base_head_sha": "269d096c2982419b75d58156a93d5087428af5e2",
+  "purpose": "Durable per-finding disposition map for the Opus RC4 release review. The approved plan's prose says fourteen findings; its Required-dispositions table holds fifteen distinct rows, all of which are dispositioned here.",
+  "finding_count": 15,
+  "findings": [
+    {
+      "finding_id": "rc4-rc2-scope-ratchet-neutered",
+      "severity": "critical",
+      "disposition": "applied",
+      "fix_commits": [
+        "2c7748c7",
+        "9cf797ed"
+      ],
+      "regression_carrier": "tests/rc4_scope_ratchet.py; tests/test_rc4_opus_findings.py",
+      "notes": "Live current-tree ratchet with justified RC4 ceilings (262 files / 88,600 lines); RC2 numbers retained as historical evidence only; EN/RU changelog entries added."
+    },
+    {
+      "finding_id": "rc4-e10-exact-head-gate-and-disposition-unproven",
+      "severity": "important",
+      "disposition": "applied",
+      "fix_commits": [
+        "51c710f8",
+        "e09dfc1d",
+        "c682fbf1"
+      ],
+      "regression_carrier": "scripts/rc4_gate_bundle.py; docs/acceptance/evidence/v2.6.6-rc4/",
+      "notes": "Green 68-stage exact-HEAD gate bundle committed; disposition schema and tool generalized to admit 2.6.6-rc4 and its holistic-primary role. Disposition instance deferred to the join as D-266-RC4-05."
+    },
+    {
+      "finding_id": "rc4-default-deep-topology-docs-contradiction",
+      "severity": "important",
+      "disposition": "applied",
+      "fix_commits": [
+        "9cf797ed"
+      ],
+      "regression_carrier": "tests/test_rc4_opus_findings.py",
+      "notes": "Cycle gating corrected at four sites (README.md x3, docs/model-routing.md x1); drift assertion derives all five cycles from compile_finalization_routes under both availability states."
+    },
+    {
+      "finding_id": "rc4-accepted-deviations-artifact-absent",
+      "severity": "important",
+      "disposition": "applied",
+      "fix_commits": [
+        "9cf797ed"
+      ],
+      "regression_carrier": "docs/acceptance/v2.6.6-rc4-accepted-deviations.json",
+      "notes": "Distinct RC4 artifact with id, scope, rationale, residual risk, remediation; digest asserted distinct from rc1, rc2, and v2.6.4."
+    },
+    {
+      "finding_id": "rc4-certificate-events-derived-from-tests",
+      "severity": "important",
+      "disposition": "applied",
+      "fix_commits": [
+        "9cf797ed"
+      ],
+      "regression_carrier": "tests/harness/test_rc4_transition_certificate.py",
+      "notes": "Provider event kinds read from harness.provider_events (7, recovering input-accepted and provider-started); all tests/harness imports removed from the production script; simulator verbs moved to simulator_scenario_actions and cross-checked by the test layer (D-266-RC4-04)."
+    },
+    {
+      "finding_id": "rc4-certificate-release-disposition-witness-mismatch",
+      "severity": "minor",
+      "disposition": "applied",
+      "fix_commits": [
+        "9cf797ed"
+      ],
+      "regression_carrier": "config/lifecycle-transition-v1.json; scripts/lifecycle_transition_certificate.py",
+      "notes": "Witness renamed to summary-disposition-classification; new release-boundary-rejection witness covers missing digest, byte substitution, symlink escape, parent traversal, absolute pointer."
+    },
+    {
+      "finding_id": "rc4-zero-effect-gate-shape-duplicated",
+      "severity": "minor",
+      "disposition": "applied",
+      "fix_commits": [
+        "9cf797ed"
+      ],
+      "regression_carrier": "scripts/review_zero_effect.py; tests/test_rc4_opus_findings.py",
+      "notes": "Three divergent copies replaced by one owner with an explicit None policy; five negative cases pin each field's contribution."
+    },
+    {
+      "finding_id": "rc4-complete-ready-results-dead-half",
+      "severity": "minor",
+      "disposition": "applied",
+      "fix_commits": [
+        "9cf797ed"
+      ],
+      "regression_carrier": "tests/test_rc4_opus_findings.py",
+      "notes": "One exact-HEAD completion path; already_awaiting, the sort arm, both non-exact arms, _should_defer_ready_results and _requires_lane_barrier removed. Orphaned gate method retained as D-266-RC4-01."
+    },
+    {
+      "finding_id": "rc4-frozen-topology-optional-fail-open",
+      "severity": "minor",
+      "disposition": "applied",
+      "fix_commits": [
+        "9cf797ed",
+        "c2a2e5c8"
+      ],
+      "regression_carrier": "tests/test_rc4_opus_findings.py",
+      "notes": "Binding created at dispatch for every review-enabled task; drifted binding fails closed at launch; missing binding tolerated for pre-field records and current-checkout reviews. E1 narrowed; residual gap is D-266-RC4-02."
+    },
+    {
+      "finding_id": "rc4-instruction-weakening-heuristic-brittle",
+      "severity": "minor",
+      "disposition": "applied",
+      "fix_commits": [
+        "9cf797ed"
+      ],
+      "regression_carrier": "tests/test_instruction_lint.py; tests/test_rc4_opus_findings.py",
+      "notes": "Positional line-walk replaced by block/item parsing; no indentation inference. All existing weakening regressions preserved (D-266-RC4-03)."
+    },
+    {
+      "finding_id": "rc4-certificate-doc-pins-stale-head",
+      "severity": "minor",
+      "disposition": "applied",
+      "fix_commits": [
+        "c2a2e5c8"
+      ],
+      "regression_carrier": "tests/test_rc4_opus_findings.py",
+      "notes": "Certificate regenerated and republished; binding is digest agreement recomputed against the current tree, not a commit label. Out-of-lineage child HEAD retained as labelled provenance."
+    },
+    {
+      "finding_id": "rc4-live-evidence-embeds-operator-paths",
+      "severity": "minor",
+      "disposition": "applied",
+      "fix_commits": [
+        "9cf797ed",
+        "9e762a6d"
+      ],
+      "regression_carrier": "tests/test_rc4_opus_findings.py; tests/test_engineering_eval_runner.py",
+      "notes": "No operator path, session UUID, or provider tool identifier published; transcript byte offsets dropped; every evidentiary digest retained."
+    },
+    {
+      "finding_id": "rc4-exact-attempt-readability-and-telemetry-gap",
+      "severity": "minor",
+      "disposition": "applied",
+      "fix_commits": [
+        "9cf797ed"
+      ],
+      "regression_carrier": "tests/test_rc4_opus_findings.py",
+      "notes": "Packed signature and mapping lines reflowed, blank lines restored; the already-recorded retry now completes telemetry, closing the durable-completion crash window."
+    },
+    {
+      "finding_id": "rc4-initial-input-addendum-outside-contract",
+      "severity": "minor",
+      "disposition": "applied",
+      "fix_commits": [
+        "9cf797ed"
+      ],
+      "regression_carrier": "docs/unattended-pipeline-operations.md; tests/test_rc4_opus_findings.py",
+      "notes": "Enrolled as RC4-E11 with the semantic-start boundary, the bounded observation budget, and four-step operator recovery for input-unconfirmed."
+    },
+    {
+      "finding_id": "rc4-same-head-preflight-retry-relaxation",
+      "severity": "minor",
+      "disposition": "applied",
+      "fix_commits": [
+        "9cf797ed"
+      ],
+      "regression_carrier": "scripts/review_zero_effect.py; docs/unattended-pipeline-operations.md",
+      "notes": "Hand-inlined predicate removed; relaxation calls zero_effect_terminal_attempt and the exact predicate is documented."
+    }
+  ]
+}

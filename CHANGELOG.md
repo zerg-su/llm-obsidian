@@ -23,9 +23,16 @@ deterministic without adding another orchestrator or provider route.
   engineering review denominator covering quality, implementation, testing,
   simplification, documentation, and security.
 - Added bounded skill-quality evidence and exact release-boundary fixtures.
+- Added a committed exact-HEAD gate bundle and a distinct RC4
+  accepted-deviations artifact.
 
 ### Fixed
 
+- Restored the live `scripts/` scope ratchet: it measures the working tree again
+  instead of a frozen historical commit, under explicit RC4 ceilings declared in
+  `tests/rc4_scope_ratchet.py` (262 files, 88,600 lines). The RC2 numbers are
+  retained in `tests/test_v266_rc2_scope.py` as historical evidence only and no
+  longer stand in for the ratchet.
 - Resume accepted review callbacks incrementally and exactly once across crash
   prefixes, stale surfaces, changed-HEAD verification, and zero-lane preflight.
 - Bind release evidence to its exact plan, Outcome Contract, artifact root,

@@ -29,9 +29,16 @@
   engineering review denominator: quality, implementation, testing,
   simplification, documentation и security.
 - Добавлены bounded skill-quality evidence и exact release-boundary fixtures.
+- Добавлены committed exact-HEAD gate bundle и отдельный RC4
+  accepted-deviations artifact.
 
 ### Исправлено
 
+- Восстановлен живой scope ratchet для `scripts/`: он снова измеряет рабочее
+  дерево, а не замороженный исторический коммит, с явными RC4-потолками в
+  `tests/rc4_scope_ratchet.py` (262 файла, 88 600 строк). Числа RC2 остаются в
+  `tests/test_v266_rc2_scope.py` только как историческое свидетельство и больше
+  не подменяют собой ratchet.
 - Accepted review callbacks возобновляются инкрементально и ровно один раз
   после crash prefixes, stale surfaces, changed-HEAD verification и zero-lane
   preflight.

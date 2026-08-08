@@ -85,7 +85,17 @@ def run_gate() -> dict[str, object]:
 
     BUNDLE_DIR.mkdir(parents=True, exist_ok=True)
     head = _git("rev-parse", "HEAD")
-    dirty = bool(_git("status", "--porcelain", "--untracked-files=no"))
+    # Two different notions of "clean" exist here and conflating them overstates
+    # the claim.  Tracked cleanliness is what makes the attested tree
+    # reproducible from the commit; untracked paths (harness pipeline transport
+    # lives in the worktree during a run) do not change the tracked tree but do
+    # mean the directory is not pristine.  Publish both, named for what they are.
+    tracked_dirty = bool(_git("status", "--porcelain", "--untracked-files=no"))
+    untracked = [
+        line
+        for line in _git("status", "--porcelain", "--untracked-files=all").splitlines()
+        if line.startswith("??")
+    ]
     environment = dict(os.environ)
     environment[SELF_REFERENCE_ENV] = "1"
     completed = subprocess.run(
@@ -105,7 +115,8 @@ def run_gate() -> dict[str, object]:
         "evidence_id": "RC4-E10-documentation-and-release-gate",
         "command": list(GATE_COMMAND),
         "produced_at_head_sha": head,
-        "worktree_clean_at_run": not dirty,
+        "tracked_worktree_clean_at_run": not tracked_dirty,
+        "untracked_path_count_at_run": len(untracked),
         "tracked_tree_sha256": _tracked_tree_digest(
             exclude=(
                 str(RECEIPT_PATH.relative_to(ROOT)),
@@ -144,7 +155,8 @@ def verify() -> dict[str, object]:
         "evidence_id",
         "command",
         "produced_at_head_sha",
-        "worktree_clean_at_run",
+        "tracked_worktree_clean_at_run",
+        "untracked_path_count_at_run",
         "tracked_tree_sha256",
         "exit_code",
         "verdict",
@@ -162,6 +174,8 @@ def verify() -> dict[str, object]:
         raise GateBundleError("RC4 gate receipt does not record a green gate")
     if not receipt.get("stages_run"):
         raise GateBundleError("RC4 gate receipt records no stage")
+    if receipt.get("tracked_worktree_clean_at_run") is not True:
+        raise GateBundleError("RC4 gate ran against a dirty tracked worktree")
     produced = str(receipt.get("produced_at_head_sha") or "")
     if not re.fullmatch(r"[0-9a-f]{40}", produced):
         raise GateBundleError("RC4 gate receipt head is not an exact commit")

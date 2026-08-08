@@ -138,12 +138,19 @@ def _assert_frozen_topology(
 ) -> None:
     """Validate the frozen topology after finalization route selection.
 
-    This is the enforcement boundary for RC4 evidence E1.  A review-enabled v4
-    task must bind its compiled topology before any lane is launched; a missing
-    binding used to return silently here, which meant an unbound task launched
-    lanes with no digest to compare against.  Records that predate the field
-    stay readable everywhere else — ``task_contract`` still normalizes them —
-    but they may not start a review.
+    RC4 evidence E1 is enforced in two places, and this is only one of them.
+    The binding is *created* at dispatch: ``dispatch_workspace`` writes
+    ``review_topology`` for every task whose review is enabled, so no newly
+    dispatched task reaches this function unbound.  Here, a binding that
+    disagrees with the compiled topology fails closed.
+
+    A *missing* binding is tolerated at this boundary.  Records written before
+    the field existed, and current-checkout reviews that synthesize their
+    metadata at launch, carry no topology and must still be able to start a
+    review.  Failing closed on absence would strand them.  The residual gap —
+    an unbound v4 review-enabled record can launch a lane with no digest to
+    compare against — is recorded as D-266-RC4-02 in the RC4 accepted-deviations
+    artifact.
     """
 
     frozen = meta.get("review_topology")

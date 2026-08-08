@@ -31,12 +31,14 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 FAILURES: list[tuple[str, str]] = []
 PASSES = 0
+PINNED_FINDINGS: set[str] = set()
 
 
 def check(finding: str, label: str, value: object, detail: object = "") -> None:
     """Record one finding-scoped assertion without aborting the suite."""
 
     global PASSES
+    PINNED_FINDINGS.add(finding)
     if value:
         PASSES += 1
         print(f"OK   {finding}: {label}")
@@ -115,6 +117,18 @@ else:
         f"{SCRIPT_LINE_CEILING - lines} lines",
     )
 
+# The critical finding's required result included updating the changelog, which
+# the repository keeps in EN/RU parity.
+for changelog in ("CHANGELOG.md", "CHANGELOG.ru.md"):
+    text = source(changelog)
+    rc4_section = text.partition("2.6.6-rc4")[2].partition("\n## [")[0]
+    check(
+        FINDING,
+        f"{changelog} records the restored live scope ratchet under 2.6.6-rc4",
+        "rc4_scope_ratchet" in rc4_section
+        and str(SCRIPT_FILE_CEILING) in rc4_section,
+    )
+
 rc2_scope = source("tests/test_v266_rc2_scope.py")
 check(
     FINDING,
@@ -165,10 +179,19 @@ else:
             gate_receipt["command"] == ["make", "test"],
             gate_receipt["command"],
         )
+        # Named for what it measures: the tracked tree is what the commit
+        # reproduces, and the untracked count is published beside it rather than
+        # folded into a broader "clean" claim.
         check(
             FINDING,
-            "the gate ran against a clean worktree",
-            gate_receipt["worktree_clean_at_run"] is True,
+            "the gate ran against a clean tracked worktree",
+            gate_receipt["tracked_worktree_clean_at_run"] is True,
+        )
+        check(
+            FINDING,
+            "the receipt publishes its untracked-path count separately",
+            isinstance(gate_receipt["untracked_path_count_at_run"], int),
+            gate_receipt.get("untracked_path_count_at_run"),
         )
 
 disposition_schemas = sorted(
@@ -545,6 +568,7 @@ FINDING = "rc4-frozen-topology-optional-fail-open"
 import task_contract  # noqa: E402
 
 live_meta = json.loads(source(".task-meta.json") or "{}")
+readiness_e1_source = source("docs/acceptance/v2.6.6-rc4-release-readiness.md")
 def normalize_error(payload: dict) -> str:
     """Return the contract rejection reason, or '' when the record is accepted."""
 
@@ -645,8 +669,7 @@ check(
 check(
     FINDING,
     "RC4-E1 is narrowed to what is actually enforced",
-    "bound at the review launch boundary"
-    in source("docs/acceptance/v2.6.6-rc4-release-readiness.md"),
+    "tolerates a missing binding" in readiness_e1_source,
 )
 check(
     FINDING,
@@ -655,14 +678,36 @@ check(
     in source("docs/acceptance/v2.6.6-rc4-accepted-deviations.json"),
 )
 
+# The launch boundary deliberately tolerates a MISSING binding (D-266-RC4-02).
+# What it must never tolerate is a *drifted* one, and the published wording must
+# not claim more than that.  A previous version of this check asserted the
+# opposite proposition with a character-bounded regex; it went vacuously green
+# when the docstring grew past the window, so the shape guard now reads the
+# parsed function body instead of the whole module.
 context_src = source("scripts/task_review_context.py")
+frozen_fn = function_def("scripts/task_review_context.py", "_assert_frozen_topology")
+frozen_body = ast.get_source_segment(context_src, frozen_fn) if frozen_fn else ""
 check(
     FINDING,
-    "_assert_frozen_topology no longer returns on a missing binding",
-    not re.search(
-        r"def _assert_frozen_topology[\s\S]{0,320}?if not isinstance\(frozen, Mapping\):\s*\n\s*return\b",
-        context_src,
-    ),
+    "the launch boundary still rejects a drifted binding",
+    "raise TaskReviewError" in (frozen_body or ""),
+)
+check(
+    FINDING,
+    "the launch-boundary docstring matches the tolerated-absence behavior",
+    "tolerated at this boundary" in (frozen_body or ""),
+)
+check(
+    FINDING,
+    "published E1 evidence does not claim launch-time fail-closed on absence",
+    "cannot start a review\nlane" not in readiness_e1_source
+    and "bound at **dispatch**" in readiness_e1_source,
+)
+check(
+    FINDING,
+    "the deviations artifact states the real residual risk",
+    "can still launch a review lane with no frozen digest"
+    in source("docs/acceptance/v2.6.6-rc4-accepted-deviations.json"),
 )
 
 
@@ -899,6 +944,46 @@ check(
     "the exact same-HEAD zero-effect predicate is documented",
     "same-HEAD" in docs_text or "same_head" in docs_text,
 )
+
+
+# --- committed all-findings map ----------------------------------------------
+#
+# The plan requires one typed summary listing every disposition ID.  The typed
+# summary is untracked runtime transport, so the same map is committed here as
+# release evidence a later reader can inspect without the pipeline scratch dir.
+
+FINDING = "rc4-typed-summary-omits-finding-ids"
+findings_map_rel = "docs/acceptance/v2.6.6-rc4-opus-findings.json"
+findings_map_text = source(findings_map_rel)
+check(FINDING, "a committed all-findings map exists", bool(findings_map_text))
+if findings_map_text:
+    findings_map = json.loads(findings_map_text)
+    mapped = {row["finding_id"] for row in findings_map["findings"]}
+    # Every plan finding in the map must be pinned by a check in this suite.
+    # PINNED_FINDINGS also holds review-round identities, so the meaningful
+    # direction is containment, not equality.
+    check(
+        FINDING,
+        "every finding in the map is pinned by a check in this suite",
+        mapped <= PINNED_FINDINGS,
+        sorted(mapped - PINNED_FINDINGS),
+    )
+    check(
+        FINDING,
+        "the map records a disposition and a regression carrier for each",
+        all(
+            row["disposition"] in {"applied", "rejected", "out-of-scope"}
+            and row["regression_carrier"]
+            and row["fix_commits"]
+            for row in findings_map["findings"]
+        ),
+    )
+    check(
+        FINDING,
+        "the map declares its own count truthfully",
+        findings_map["finding_count"] == len(findings_map["findings"]) == 15,
+        findings_map["finding_count"],
+    )
 
 
 # --- report ------------------------------------------------------------------
