@@ -152,20 +152,7 @@ def verification_receipt_status(
             or not evidence
         ):
             raise ValueError
-        if value["schema_version"] == 2:
-            attempt = VerificationAttempt.from_dict(
-                value.get("verification_attempt")
-            )
-            if value.get("verification_attempt_sha256") != attempt.sha256:
-                raise ValueError
-        else:
-            attempt = VerificationAttempt(
-                record.spec.operation_id,
-                record.spec.verification_profile,
-                str(value["profile_sha256"]),
-                str(value["head_sha"]),
-                0,
-            )
+        attempt = _verification_attempt(value, record)
         input_sha = str(value.get("input_sha256") or "")
         if not re.fullmatch(r"[0-9a-f]{64}", input_sha):
             raise ValueError
@@ -221,26 +208,87 @@ def verification_receipt_status(
         return "invalid"
 
 
+def _verification_attempt(
+    value: dict[str, Any], record: OperationRecord
+) -> VerificationAttempt:
+    """Load the exact attempt identity carried by one receipt generation."""
+
+    if value.get("schema_version") == 2:
+        attempt = VerificationAttempt.from_dict(
+            value.get("verification_attempt")
+        )
+        if value.get("verification_attempt_sha256") != attempt.sha256:
+            raise VerificationAttemptError(
+                "verification attempt digest is invalid"
+            )
+        return attempt
+    if value.get("schema_version") == 1:
+        return VerificationAttempt(
+            record.spec.operation_id,
+            record.spec.verification_profile,
+            str(value.get("profile_sha256") or ""),
+            str(value.get("head_sha") or ""),
+            0,
+        )
+    raise VerificationAttemptError("verification attempt schema is invalid")
+
+
 def verification_receipt_visits(
     store: OperationStore,
     record: OperationRecord,
     runtime: Path,
+    *,
+    exact_head_sha: str = "",
 ) -> tuple[tuple[int, ...], str]:
-    """Return complete verification visits and one bounded issue code."""
+    """Return bounded visit history and current exact-HEAD receipt truth."""
 
     root = runtime / "pipeline-verification"
     if not root.is_dir():
         return (), ""
-    visits: list[int] = []
-    issue = ""
-    for path in sorted(root.glob("*/receipt.json"))[:MAX_VISITS]:
+    observations: list[tuple[VerificationAttempt | None, str, str]] = []
+    for path in sorted(root.glob("*/receipt.json")):
+        value = _read_object(path)
+        try:
+            attempt = (
+                _verification_attempt(value, record)
+                if value is not None
+                else None
+            )
+        except VerificationAttemptError:
+            attempt = None
         status = verification_receipt_status(store, record, runtime, path)
-        if status == "complete":
-            visits.append(len(visits))
+        head_sha = str(value.get("head_sha") or "") if value else ""
+        observations.append((attempt, status, head_sha))
+    complete_count = min(
+        sum(status == "complete" for _attempt, status, _head in observations),
+        MAX_VISITS,
+    )
+    visits = tuple(range(complete_count))
+    current = observations
+    if exact_head_sha:
+        exact = tuple(
+            item
+            for item in observations
+            if item[2] == exact_head_sha
+        )
+        if not exact:
+            return visits, ""
+        valid_attempts = tuple(item[0] for item in exact if item[0] is not None)
+        if not valid_attempts:
+            current = exact
         else:
+            latest_attempt = max(item.attempt_index for item in valid_attempts)
+            current = [
+                item
+                for item in exact
+                if item[0] is None or item[0].attempt_index == latest_attempt
+            ]
+    issue = ""
+    for _attempt, status, _head in current:
+        if status != "complete":
             issue = (
                 "verification-receipt-failed"
                 if status == "failed"
                 else "verification-receipt-invalid"
             )
-    return tuple(visits), issue
+    return visits, issue

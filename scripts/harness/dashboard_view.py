@@ -142,6 +142,11 @@ def _program_lines(program: ProgramView) -> list[str]:
         lines.append("  children with no exact step lineage")
         lines.extend(_child_lines(program.children, 4))
     lines.extend(_lane_lines(program))
+    if program.dropped_children or program.dropped_lanes:
+        lines.append(
+            "  truncated "
+            f"children +{program.dropped_children}, lanes +{program.dropped_lanes}"
+        )
     lines.append(f"  status   {program.classification}")
     return lines
 

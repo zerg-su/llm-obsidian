@@ -150,6 +150,8 @@ class ProgramView:
     executor: RouteView = UNKNOWN_ROUTE
     executor_status: str = UNKNOWN
     children: tuple[ChildView, ...] = ()
+    dropped_children: int = 0
+    dropped_lanes: int = 0
 
 
 @dataclass(frozen=True)
@@ -337,9 +339,25 @@ def _child_views(
     parent_id: str,
     tree: Mapping[str, list[OperationRecord]],
     depth: int = 0,
+    *,
+    current_ids: frozenset[str] = frozenset(),
+    dropped: dict[str, int] | None = None,
 ) -> tuple[ChildView, ...]:
     if depth >= MAX_DEPTH:
+        if dropped is not None:
+            dropped["children"] += len(tree.get(parent_id, ()))
         return ()
+    records = sorted(
+        tree.get(parent_id, ()),
+        key=lambda record: (
+            record.spec.operation_id not in current_ids,
+            record.state in TERMINAL,
+            record.spec.operation_id,
+        ),
+    )
+    selected = records[:MAX_CHILDREN]
+    if dropped is not None:
+        dropped["children"] += len(records) - len(selected)
     return tuple(
         ChildView(
             record.spec.operation_id,
@@ -347,9 +365,15 @@ def _child_views(
             record.state,
             _record_activity(record),
             _route_view(record),
-            _child_views(record.spec.operation_id, tree, depth + 1),
+            _child_views(
+                record.spec.operation_id,
+                tree,
+                depth + 1,
+                current_ids=current_ids,
+                dropped=dropped,
+            ),
         )
-        for record in tree.get(parent_id, ())[:MAX_CHILDREN]
+        for record in selected
     )
 
 
@@ -363,6 +387,29 @@ def _child_tree(
         if parent_id in by_id and parent_id != record.spec.operation_id:
             tree.setdefault(parent_id, []).append(record)
     return tree
+
+
+def _current_review_ids(
+    gate: Mapping[str, Any] | None,
+    tree: Mapping[str, list[OperationRecord]],
+) -> frozenset[str]:
+    """Return the gate-selected review parent and every live descendant."""
+
+    active = str(gate.get("active_review_operation_id") or "") if gate else ""
+    if not active:
+        return frozenset()
+    current = {active}
+    pending = [active]
+    while pending:
+        parent = pending.pop()
+        for child in tree.get(parent, ()):
+            if child.state in TERMINAL:
+                continue
+            operation_id = child.spec.operation_id
+            if operation_id not in current:
+                current.add(operation_id)
+                pending.append(operation_id)
+    return frozenset(current)
 
 
 def _bind_children(
@@ -411,6 +458,11 @@ def _review_status(gate: Mapping[str, Any] | None) -> str:
     if gate is None:
         return "pending"
     return REVIEW_OBSERVATIONS.get(str(gate.get("status") or ""), "unknown")
+
+
+def _review_head(gate: Mapping[str, Any] | None) -> str:
+    context = gate.get("context") if isinstance(gate, Mapping) else None
+    return str(context.get("head_sha") or "") if isinstance(context, Mapping) else ""
 
 
 def _step_route(
@@ -470,7 +522,12 @@ def _step_view(
         else:
             evidence, status = bool(children), _aggregate(child_statuses)
     elif step.primitive_id == "verify":
-        visits, issue = verification_receipt_visits(store, record, runtime)
+        visits, issue = verification_receipt_visits(
+            store,
+            record,
+            runtime,
+            exact_head_sha=_review_head(gate),
+        )
         if issue:
             evidence, status = True, "attention"
         elif visits:
@@ -607,13 +664,13 @@ def _lane_status(records: list[OperationRecord]) -> str:
 def _lanes(
     members: list[OperationRecord],
     gate: Mapping[str, Any] | None,
-) -> tuple[LaneView, ...]:
+) -> tuple[tuple[LaneView, ...], int]:
     """Project the durable operation lanes plus any declared review axes."""
 
     grouped: dict[str, list[OperationRecord]] = {}
     for member in members:
         grouped.setdefault(member.lane_id, []).append(member)
-    lanes = [
+    operation_lanes = [
         LaneView(
             lane_id,
             "operation",
@@ -622,14 +679,24 @@ def _lanes(
         )
         for lane_id, records in sorted(grouped.items())
     ]
+    axis_lanes: list[LaneView] = []
     axes = gate.get("lanes") if isinstance(gate, Mapping) else None
+    review_active = _review_status(gate) == "running"
     if isinstance(axes, list):
-        status = "active" if _review_status(gate) == "running" else "idle"
+        status = "active" if review_active else "idle"
         for axis in axes:
             name = axis.get("axis") if isinstance(axis, Mapping) else None
             if isinstance(name, str) and name:
-                lanes.append(LaneView(name, "review-axis", (), status))
-    return tuple(lanes[:MAX_LANES])
+                axis_lanes.append(LaneView(name, "review-axis", (), status))
+    operation_lanes.sort(
+        key=lambda lane: (lane.status != "active", lane.lane_id)
+    )
+    lanes = (
+        axis_lanes + operation_lanes
+        if review_active
+        else operation_lanes + axis_lanes
+    )
+    return tuple(lanes[:MAX_LANES]), max(len(lanes) - MAX_LANES, 0)
 
 
 def _surface(
@@ -698,6 +765,8 @@ def _uncompiled_program(
     lanes: tuple[LaneView, ...],
     surface: str,
     children: tuple[ChildView, ...],
+    dropped_children: int,
+    dropped_lanes: int,
 ) -> ProgramView:
     """Project an operation that no compiled pipeline currently explains.
 
@@ -730,6 +799,8 @@ def _uncompiled_program(
         _route_view(record),
         _record_activity(record),
         children,
+        dropped_children,
+        dropped_lanes,
     )
 
 
@@ -745,12 +816,25 @@ def _program(
     name, compiled = _compiled(store, record)
     runtime = _runtime_root(store, record)
     gate = _program_gate(gate, record)
-    lanes = _lanes(members, gate)
+    lanes, dropped_lanes = _lanes(members, gate)
     surface = _surface(record, inventory)
-    direct = _child_views(record.spec.operation_id, tree)
+    dropped = {"children": 0}
+    direct = _child_views(
+        record.spec.operation_id,
+        tree,
+        current_ids=_current_review_ids(gate, tree),
+        dropped=dropped,
+    )
     by_step, loose = _bind_children(direct, compiled)
     if compiled is None:
-        return _uncompiled_program(record, lanes, surface, loose)
+        return _uncompiled_program(
+            record,
+            lanes,
+            surface,
+            loose,
+            dropped["children"],
+            dropped_lanes,
+        )
     steps, next_action = _steps(store, record, compiled, runtime, gate, by_step)
     definition = compiled.definition
     return ProgramView(
@@ -787,6 +871,8 @@ def _program(
         _route_view(record),
         _executor_status(record, steps),
         loose,
+        dropped["children"],
+        dropped_lanes,
     )
 
 
@@ -991,5 +1077,7 @@ def project(
         {
             "programs": 0,
             "issues": max(len(bounded) - MAX_ISSUES, 0),
+            "children": sum(program.dropped_children for program in programs),
+            "lanes": sum(program.dropped_lanes for program in programs),
         },
     )

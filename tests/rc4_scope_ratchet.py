@@ -64,6 +64,11 @@ protected amendment from the authoritative escalation chain and binds its
 identity and digest into review metadata.  It adds no production file and moves
 the line ceiling by the measured 64-line repair.
 
+The fourth typed review makes child and lane bounds current-work aware, exposes
+their dropped counts, and separates exact-HEAD verification truth from bounded
+historical visits.  It adds no production file and moves the line ceiling by
+the measured 141-line correction.
+
 The historical RC2 snapshot is retained separately in
 ``tests/test_v266_rc2_scope.py``; it is evidence about a released commit, not a
 constraint on this one.
@@ -78,7 +83,7 @@ from pathlib import Path
 SCRIPT_FILE_CEILING = 265
 
 #: Maximum total lines across those files for the RC4 candidate.
-SCRIPT_LINE_CEILING = 90_717
+SCRIPT_LINE_CEILING = 90_858
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

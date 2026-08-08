@@ -29,7 +29,9 @@ from harness.dashboard_projection import (
     ATTENTION,
     COORDINATOR,
     HEALTHY,
+    MAX_CHILDREN,
     MAX_ISSUES,
+    MAX_LANES,
     MAX_PROGRAMS,
     UNKNOWN_ROUTE,
     WAITING,
@@ -59,6 +61,7 @@ from harness.pipelines import (
 from harness.status_segment import LiveInventory
 from harness.store import OperationStore
 from harness.supervisor import OperationSupervisor
+from harness.verification_attempt import VerificationAttempt
 from harness.workflows.engineering_fix import FixStepReceipt
 from harness.workflows.engineering_fix_model import PHASE_SCHEMAS
 
@@ -228,11 +231,13 @@ def _verification_receipt(
     *,
     status: str = "complete",
     input_char: str = "6",
+    head_char: str = "8",
+    attempt_index: int = 0,
 ) -> str:
     parent_record = store.read(OWNER, parent)
     input_sha = input_char * 64
     operation_id, lane_id, run_id, effect_id = dashboard_receipts.verification_identity(
-        parent_record.spec, definition, input_sha, 0
+        parent_record.spec, definition, input_sha, attempt_index
     )
     store.create(
         OperationSpec(
@@ -252,19 +257,27 @@ def _verification_receipt(
     output = runtime / "verification-output.log"
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_bytes(b"ok\n")
+    head_sha = head_char * 40
     evidence = VerificationEvidence(
-        "scoped", "7" * 64, "8" * 40, "scoped-1", ".",
+        "scoped", "7" * 64, head_sha, "scoped-1", ".",
         0 if status == "complete" else 1, "1", "2",
         "verification-output.log", hashlib.sha256(b"ok\n").hexdigest(), 3, 2,
     )
+    attempt = VerificationAttempt(
+        parent,
+        "scoped",
+        "7" * 64,
+        head_sha,
+        attempt_index,
+    )
     payload = {
-        "schema_version": 1,
+        "schema_version": 2,
         "parent_operation_id": parent,
         "definition_sha256": definition,
         "step_id": "verify",
         "profile": "scoped",
         "profile_sha256": "7" * 64,
-        "head_sha": "8" * 40,
+        "head_sha": head_sha,
         "status": status,
         "operation_id": operation_id,
         "lane_id": lane_id,
@@ -272,6 +285,8 @@ def _verification_receipt(
         "effect_id": effect_id,
         "input_sha256": input_sha,
         "evidence": [to_dict(evidence)],
+        "verification_attempt": attempt.as_dict(),
+        "verification_attempt_sha256": attempt.sha256,
     }
     path = runtime / "pipeline-verification" / operation_id / "receipt.json"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -279,16 +294,26 @@ def _verification_receipt(
     return operation_id
 
 
-def _write_gate(store: OperationStore, status: str, *, subject: str) -> None:
-    gate_root = store.root / "review-data" / OWNER / OWNER
+def _write_gate(
+    store: OperationStore,
+    status: str,
+    *,
+    subject: str,
+    active_review: str = "",
+    head_sha: str = "8" * 40,
+    owner: str = OWNER,
+) -> None:
+    gate_root = store.root / "review-data" / owner / owner
     gate_root.mkdir(parents=True, exist_ok=True)
     (gate_root / "review-gate.json").write_text(
         json.dumps(
             {
                 "schema_version": 1,
-                "owner_id": OWNER,
+                "owner_id": owner,
                 "dispatch_operation_id": subject,
                 "status": status,
+                "active_review_operation_id": active_review,
+                "context": {"head_sha": head_sha},
                 "lanes": [{"axis": "openai-holistic"}, {"axis": "claude-spec"}],
                 "round_results": {},
             },
@@ -700,6 +725,81 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-receipts.") as raw:
         == "invalid",
     )
 
+with tempfile.TemporaryDirectory(prefix="harness-dashboard-stale-verify.") as raw:
+    store_root = Path(raw) / "harness"
+    store = OperationStore(store_root)
+    compiled = compiled_builtin("engineering/change")
+    _create(
+        store,
+        DISPATCH,
+        "dispatch",
+        lane_id="lane-primary",
+        contract_sha256=compiled.definition_sha256,
+    )
+    _advance(store, DISPATCH, "preflight", "starting", "running")
+    runtime = store_root / "owners" / OWNER / "runtime" / DISPATCH
+    _verification_receipt(
+        store,
+        DISPATCH,
+        runtime,
+        compiled.definition_sha256,
+        status="failed",
+        input_char="6",
+        head_char="8",
+    )
+    current_verification = _verification_receipt(
+        store,
+        DISPATCH,
+        runtime,
+        compiled.definition_sha256,
+        input_char="9",
+        head_char="a",
+    )
+    _write_gate(
+        store,
+        "reviewing",
+        subject=DISPATCH,
+        head_sha="a" * 40,
+    )
+
+    recovered = project(store_root, OWNER, inventory=LiveInventory({}))
+    recovered_steps = {
+        step.step_id: step for step in recovered.programs[0].steps
+    }
+    check(
+        "an old failed HEAD cannot poison successful exact-HEAD verification",
+        recovered_steps["verify"].status == "complete"
+        and recovered_steps["review"].status == "running"
+        and recovered.programs[0].next_action == "wait"
+        and not any(
+            issue.code.startswith("verification-receipt-")
+            for issue in recovered.issues
+        ),
+    )
+    current_path = (
+        runtime
+        / "pipeline-verification"
+        / current_verification
+        / "receipt.json"
+    )
+    current_payload = json.loads(current_path.read_text(encoding="utf-8"))
+    current_payload["verification_attempt_sha256"] = "0" * 64
+    current_path.write_text(json.dumps(current_payload) + "\n", encoding="utf-8")
+    tampered_current = project(store_root, OWNER, inventory=LiveInventory({}))
+    check(
+        "tampered current-HEAD attempt identity remains visible attention",
+        next(
+            step
+            for step in tampered_current.programs[0].steps
+            if step.step_id == "verify"
+        ).status
+        == "attention"
+        and any(
+            issue.code == "verification-receipt-invalid"
+            for issue in tampered_current.issues
+        ),
+    )
+
 with tempfile.TemporaryDirectory(prefix="harness-dashboard-terminal-truth.") as raw:
     for terminal in ("failed", "cancelled"):
         store_root = Path(raw) / terminal / "harness"
@@ -853,6 +953,123 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-tree.") as raw:
         and "review-round" in text
         and "executor claude/claude-opus-5/medium" in text
         and "awaiting-transition" in text,
+    )
+
+with tempfile.TemporaryDirectory(prefix="harness-dashboard-current-tree.") as raw:
+    store_root = Path(raw) / "harness"
+    store = OperationStore(store_root)
+    compiled = compiled_builtin("engineering/change")
+    _create(
+        store,
+        TREE_ROOT,
+        "dispatch",
+        lane_id="lane-root",
+        contract_sha256=compiled.definition_sha256,
+        owner=TREE_ROOT,
+    )
+    _advance(store, TREE_ROOT, "preflight", "starting", "running", owner=TREE_ROOT)
+    OperationSupervisor(store, TREE_ROOT, TREE_ROOT).bind_resources(
+        OwnedResources(surface_id=ROOT_SURFACE)
+    )
+    for index in range(MAX_CHILDREN + 1):
+        child = f"history-verify-{index:02d}"
+        _create(
+            store,
+            child,
+            "pipeline-verify",
+            lane_id=f"history-lane-{index:02d}",
+            contract_sha256=compiled.definition_sha256,
+            parent=TREE_ROOT,
+            owner=TREE_ROOT,
+        )
+        _advance(
+            store,
+            child,
+            "preflight",
+            "starting",
+            "running",
+            "verifying",
+            "finalizing",
+            "exiting",
+            "complete",
+            owner=TREE_ROOT,
+        )
+    active_parent = "zz-current-review-parent"
+    active_round = f"{active_parent}-round"
+    _create(
+        store,
+        active_parent,
+        "simple-review-holistic",
+        lane_id="zz-current-review-lane",
+        owner=TREE_ROOT,
+        route=_reviewer_route(),
+    )
+    _advance(
+        store,
+        active_parent,
+        "preflight",
+        "starting",
+        "running",
+        "awaiting-callback",
+        owner=TREE_ROOT,
+    )
+    OperationSupervisor(store, TREE_ROOT, active_parent).bind_resources(
+        OwnedResources(surface_id="current-review-surface")
+    )
+    _create(
+        store,
+        active_round,
+        "review-round",
+        lane_id="zz-current-review-lane",
+        parent=active_parent,
+        owner=TREE_ROOT,
+        route=_reviewer_route(),
+    )
+    _advance(
+        store,
+        active_round,
+        "preflight",
+        "starting",
+        "running",
+        "awaiting-callback",
+        owner=TREE_ROOT,
+    )
+    OperationSupervisor(store, TREE_ROOT, active_round).bind_resources(
+        OwnedResources(surface_id="current-round-surface")
+    )
+    _write_gate(
+        store,
+        "reviewing",
+        subject=TREE_ROOT,
+        active_review=active_parent,
+        owner=TREE_ROOT,
+    )
+
+    current = project(
+        store_root,
+        TREE_ROOT,
+        inventory=LiveInventory({ROOT_SURFACE.casefold(): "workspace-9"}),
+    )
+    current_program = current.programs[0]
+    current_steps = {step.step_id: step for step in current_program.steps}
+    visible_parent = next(
+        child
+        for child in current_steps["review"].children
+        if child.operation_id == active_parent
+    )
+    visible_lanes = {lane.lane_id: lane for lane in current_program.lanes}
+    check(
+        "history caps retain the current review lineage axes and drop counts",
+        visible_parent.children[0].operation_id == active_round
+        and current_steps["review"].status == "running"
+        and current_program.next_action == "wait"
+        and _route_of(current_steps["review"])
+        == ("claude", "claude-opus-5", "high", "reviewer-callback")
+        and visible_lanes["openai-holistic"].scope == "review-axis"
+        and visible_lanes["claude-spec"].scope == "review-axis"
+        and len(current_program.lanes) == MAX_LANES
+        and current.truncated["children"] > 0
+        and current.truncated["lanes"] > 0,
     )
 
 with tempfile.TemporaryDirectory(prefix="harness-dashboard-closed.") as raw:
