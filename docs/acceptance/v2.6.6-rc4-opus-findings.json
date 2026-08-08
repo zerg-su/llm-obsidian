@@ -3,7 +3,7 @@
   "release": "2.6.6-rc4",
   "review_callback": "review-3e2e0ab62748d463a7cf2d53",
   "base_head_sha": "269d096c2982419b75d58156a93d5087428af5e2",
-  "purpose": "Durable per-finding disposition map for the Opus RC4 release review. The approved plan's prose says fourteen findings; its Required-dispositions table holds fifteen distinct rows, all of which are dispositioned here.",
+  "purpose": "Durable per-finding disposition map for all fifteen findings in the Opus RC4 release review, as confirmed by the operator.",
   "finding_count": 15,
   "findings": [
     {

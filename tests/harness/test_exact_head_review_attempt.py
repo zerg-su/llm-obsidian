@@ -1096,6 +1096,12 @@ with tempfile.TemporaryDirectory(prefix="exact-protocol-selector.") as raw:
         apply_finalizing_recovery=forbidden_finalizing_recovery,
     )
     second_state = gate.read()
+    first_boundary = next(iter(boundaries.values()))
+    archived_callback = (
+        callback_path.parent
+        / "accepted"
+        / f"{first_boundary['callback_sha256']}.review-callback.json"
+    )
     ledger = json.loads(
         (
             vault
@@ -1113,6 +1119,12 @@ with tempfile.TemporaryDirectory(prefix="exact-protocol-selector.") as raw:
         and (
             gate.root / "attempts/cycle-1.json"
         ).is_file()
+        and archived_callback.is_file()
+        and not callback_path.exists()
+        and json.loads(
+            archived_callback.read_text(encoding="utf-8")
+        )["callback_id"]
+        == first_boundary["callback_id"]
         and runtime.started == 2,
     )
 

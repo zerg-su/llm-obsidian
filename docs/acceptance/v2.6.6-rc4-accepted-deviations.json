@@ -69,20 +69,5 @@
       "remediation": "At the join, compile and commit the 2.6.6-rc4 release disposition with scripts/rc3_release_disposition.py using the generalized schema and the RELEASE_ROLE_SETS entry landed here, then restore the full RC4-E10 claim."
     }
   ],
-  "open_questions": [
-    {
-      "id": "Q-266-RC4-01",
-      "scope": "plan-finding-count",
-      "question": "The approved plan's prose says 'fourteen findings' while its Required finding dispositions table contains fifteen distinct rows, none duplicated. All fifteen were reproduced and dispositioned.",
-      "requested_of": "coordinator",
-      "residual_risk": "If the intended scope really was fourteen, one finding was fixed that the operator did not ask for; every such change is additive and regression-backed, so the risk is scope rather than correctness."
-    },
-    {
-      "id": "Q-266-RC4-02",
-      "scope": "release-review-effort",
-      "question": "docs/acceptance/v2.6.6-rc4-release-readiness.md states RC4 reviews run at effort xhigh, while the approved plan's Exact review boundary and .task-meta.json review_policy.effort both state high. The documents were left as they are because which value is authoritative is an operator decision, not a code fact.",
-      "requested_of": "coordinator",
-      "residual_risk": "The release review may run at a different effort than the readiness document advertises."
-    }
-  ]
+  "open_questions": []
 }
