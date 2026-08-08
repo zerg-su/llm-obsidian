@@ -36,6 +36,7 @@ from model_routing import load_config, resolve, session_from_meta
 from outcome_contract import OutcomeContractError, extract_from_bytes
 from task_contract import normalize
 from task_review_delta_packet import DeltaPacket, build_delta_packet
+from task_escalation_records import EscalationRecordError, load_chain
 from task_review_resolution_bundle import _bounded_input
 from task_review_identity import (
     _current_review_is_quiescent,
@@ -192,6 +193,62 @@ def _bounded_review_diff(raw: bytes) -> bytes:
 
 class _ReviewedArtifactMissing(TaskReviewError):
     """The exact reviewed tree has no entry for a boundary artifact."""
+
+
+def _amendment_evidence(
+    meta: Mapping[str, Any], worktree: Path
+) -> tuple[ContextInput, dict[str, str]] | None:
+    """Select one exact protected amendment from the authoritative chain."""
+
+    try:
+        amendments = tuple(
+            record
+            for record in load_chain(worktree)
+            if record.record_type == "amendment"
+        )
+    except EscalationRecordError as exc:
+        raise TaskReviewError(
+            "authoritative amendment evidence is invalid"
+        ) from exc
+    if not amendments:
+        return None
+    plan_sha256 = str(meta.get("approved_plan_sha256") or "")
+    outcome_sha256 = str(meta.get("outcome_contract_sha256") or "")
+    matching = tuple(
+        record
+        for record in amendments
+        if record.payload.get("plan_sha256") == plan_sha256
+        and record.payload.get("outcome_sha256") == outcome_sha256
+    )
+    if not matching:
+        raise TaskReviewError(
+            "authoritative amendment does not match reviewed task metadata"
+        )
+    if len(matching) != 1:
+        raise TaskReviewError("authoritative amendment evidence is ambiguous")
+    record = matching[0]
+    try:
+        if record.path.is_symlink():
+            raise OSError("amendment record is a symlink")
+        raw = record.path.read_bytes()
+    except OSError as exc:
+        raise TaskReviewError(
+            "authoritative amendment evidence is invalid"
+        ) from exc
+    if hashlib.sha256(raw).hexdigest() != record.sha256:
+        raise TaskReviewError("authoritative amendment evidence is invalid")
+    return (
+        ContextInput(
+            "approved-amendment.json",
+            str(record.path),
+            raw,
+            role="outcome",
+        ),
+        {
+            "amendment_record_id": record.record_id,
+            "amendment_record_sha256": record.sha256,
+        },
+    )
 
 
 def _reviewed_artifact_input(
@@ -521,6 +578,12 @@ def _context(
         "task_name": str(meta.get("task_name") or ""),
         "head_sha": head,
     }
+    amendment_inputs: list[ContextInput] = []
+    amendment = _amendment_evidence(meta, worktree)
+    if amendment is not None:
+        amendment_input, amendment_metadata = amendment
+        amendment_inputs.append(amendment_input)
+        packet_metadata.update(amendment_metadata)
     if plan_review is not None:
         if not isinstance(plan_review, Mapping):
             raise TaskReviewError("plan review metadata is invalid")
@@ -598,6 +661,7 @@ def _context(
             (head + "\n").encode(),
             role="head",
         ),
+        *amendment_inputs,
         *plan_review_inputs,
     ]
     if boundary_input_sha256:

@@ -59,6 +59,11 @@ pipeline and collapses launcher placement/marker ownership into one critical
 section with bounded stale-start recovery.  No production file is added; the
 line ceiling moves by the measured 100-line correction.
 
+The coordinator-authorized ContextPacket repair transports one exact validated
+protected amendment from the authoritative escalation chain and binds its
+identity and digest into review metadata.  It adds no production file and moves
+the line ceiling by the measured 64-line repair.
+
 The historical RC2 snapshot is retained separately in
 ``tests/test_v266_rc2_scope.py``; it is evidence about a released commit, not a
 constraint on this one.
@@ -73,7 +78,7 @@ from pathlib import Path
 SCRIPT_FILE_CEILING = 265
 
 #: Maximum total lines across those files for the RC4 candidate.
-SCRIPT_LINE_CEILING = 90_653
+SCRIPT_LINE_CEILING = 90_717
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:
