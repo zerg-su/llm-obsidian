@@ -18,6 +18,7 @@ from .store import OperationStore, StoreError
 from .verification import output_binding_valid
 from .verification_attempt import VerificationAttempt, VerificationAttemptError
 from .workflows.engineering_fix import FixWorkflowError, load_receipt
+from .workflows.engineering_fix_model import PAYLOAD_FIELDS
 
 
 MAX_VISITS = 16
@@ -56,6 +57,13 @@ def fix_receipt_visits(
         try:
             receipt = load_receipt(receipt_path)
             child = store.read(record.spec.owner_id, receipt.operation_id)
+            receipt_fields = receipt.to_dict()
+            payload = {key: receipt_fields[key] for key in PAYLOAD_FIELDS}
+            payload_sha256 = hashlib.sha256(
+                json.dumps(
+                    payload, sort_keys=True, separators=(",", ":")
+                ).encode()
+            ).hexdigest()
             if (
                 receipt.parent_operation_id != record.spec.operation_id
                 or receipt.definition_sha256 != record.spec.contract_sha256
@@ -66,6 +74,11 @@ def fix_receipt_visits(
                 or child.spec.contract_sha256 != record.spec.contract_sha256
                 or child.lane_id != receipt.lane_id
                 or child.run_id != receipt.run_id
+                or child.state != "complete"
+                or child.accepted_callback_id != receipt.callback_id
+                or child.accepted_callback_kind != "result"
+                or child.accepted_callback_sha256 != payload_sha256
+                or receipt.callback_id != f"result-{payload_sha256[:24]}"
             ):
                 raise FixWorkflowError("fix receipt identity changed")
         except (FixWorkflowError, StoreError, OSError, ValueError):

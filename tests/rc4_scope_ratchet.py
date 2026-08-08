@@ -48,6 +48,12 @@ loop counts, and a stopped marker.  The receipt authority is extracted into
 quality ceiling.  The file ceiling moves by one and the line ceiling by the
 review correction's measured 312-line cost.
 
+The second typed review binds fix visits to the production callback acceptance
+fact, serializes recovery of the external observer marker with atomic writes,
+and distinguishes failed or cancelled roots from successful completion.  The
+file surface stays fixed while the line ceiling moves by the measured 221-line
+correction.
+
 The historical RC2 snapshot is retained separately in
 ``tests/test_v266_rc2_scope.py``; it is evidence about a released commit, not a
 constraint on this one.
@@ -62,7 +68,7 @@ from pathlib import Path
 SCRIPT_FILE_CEILING = 265
 
 #: Maximum total lines across those files for the RC4 candidate.
-SCRIPT_LINE_CEILING = 90_332
+SCRIPT_LINE_CEILING = 90_553
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

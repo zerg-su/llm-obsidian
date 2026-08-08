@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -13,6 +14,7 @@ import sys
 import tempfile
 import time
 from dataclasses import dataclass
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable, Sequence
 
@@ -189,14 +191,42 @@ def _digest(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
-def _write_marker(path: Path, value: dict[str, object], *, exclusive: bool) -> None:
-    flags = os.O_WRONLY | os.O_CREAT | (os.O_EXCL if exclusive else os.O_TRUNC)
-    descriptor = os.open(path, flags, 0o600)
+def _write_marker(path: Path, value: dict[str, object]) -> None:
+    descriptor, temporary = tempfile.mkstemp(
+        prefix=f".{path.name}.", dir=path.parent
+    )
     try:
         payload = json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n"
         os.write(descriptor, payload.encode("ascii"))
         os.fsync(descriptor)
+        os.close(descriptor)
+        descriptor = -1
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, path)
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
     finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+
+
+@contextmanager
+def _marker_lock(marker: Path) -> object:
+    """Serialize one vault/workspace marker on the marker filesystem."""
+
+    descriptor = os.open(marker.with_suffix(".lock"), os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        yield
+    finally:
+        fcntl.flock(descriptor, fcntl.LOCK_UN)
         os.close(descriptor)
 
 
@@ -210,7 +240,7 @@ def _read_marker(path: Path) -> dict[str, object]:
     return value
 
 
-def open_dashboard(
+def _open_dashboard_unlocked(
     *,
     vault: Path,
     store: Path,
@@ -288,9 +318,9 @@ def open_dashboard(
         "reserved_at": clock(),
     }
     try:
-        _write_marker(marker, reservation, exclusive=not marker_exists)
-    except FileExistsError:
-        raise CmuxError("dashboard marker was reserved concurrently") from None
+        _write_marker(marker, reservation)
+    except OSError as exc:
+        raise CmuxError("dashboard marker reservation failed") from exc
 
     try:
         surface = cmux.open_split(caller_surface)
@@ -298,7 +328,6 @@ def open_dashboard(
         _write_marker(
             marker,
             {**expected, "state": "retryable", "surface_id": "", "reserved_at": 0},
-            exclusive=False,
         )
         raise
     if (
@@ -313,7 +342,6 @@ def open_dashboard(
         _write_marker(
             marker,
             {**expected, "state": "retryable", "surface_id": "", "reserved_at": 0},
-            exclusive=False,
         )
         raise CmuxError("dashboard split returned an invalid placement")
     _write_marker(
@@ -324,7 +352,6 @@ def open_dashboard(
             "surface_id": surface.surface_id,
             "reserved_at": 0,
         },
-        exclusive=False,
     )
     command = shlex.join(
         [
@@ -353,7 +380,6 @@ def open_dashboard(
                     "surface_id": "",
                     "reserved_at": 0,
                 },
-                exclusive=False,
             )
         raise
     _write_marker(
@@ -364,9 +390,51 @@ def open_dashboard(
             "surface_id": surface.surface_id,
             "reserved_at": 0,
         },
-        exclusive=False,
     )
     return OpenResult(surface.surface_id, workspace_id, False)
+
+
+def open_dashboard(
+    *,
+    vault: Path,
+    store: Path,
+    caller_surface: str,
+    adapter: CmuxAdapter | None = None,
+    marker_root: Path | None = None,
+    clock: Callable[[], float] = time.time,
+) -> OpenResult:
+    """Serialize and open one external observer for a vault/workspace pair."""
+
+    resolved_vault = vault.expanduser().resolve()
+    resolved_store = store.expanduser().resolve()
+    if not resolved_vault.is_dir() or not resolved_store.is_dir():
+        raise CmuxError("dashboard vault and store must be existing directories")
+    if not resolved_store.is_relative_to(resolved_vault):
+        raise CmuxError("dashboard store must belong to the exact vault")
+    if not UUID_RE.fullmatch(caller_surface):
+        raise CmuxError("coordinator surface must be an exact UUID")
+    cmux = adapter or CmuxAdapter()
+    inventory = cmux.surface_workspaces()
+    caller_key = caller_surface.casefold()
+    if caller_key in inventory.ambiguous_surfaces:
+        raise CmuxError("coordinator surface placement is ambiguous")
+    workspace_id = inventory.surface_workspaces.get(caller_key, "")
+    if not UUID_RE.fullmatch(workspace_id):
+        raise CmuxError("coordinator surface has no exact workspace identity")
+    markers = (marker_root or _marker_root()).expanduser().resolve()
+    markers.mkdir(parents=True, exist_ok=True, mode=0o700)
+    marker_key = _digest(
+        f"{_digest(str(resolved_vault))}\0{workspace_id.casefold()}"
+    )
+    with _marker_lock(markers / f"{marker_key}.json"):
+        return _open_dashboard_unlocked(
+            vault=resolved_vault,
+            store=resolved_store,
+            caller_surface=caller_surface,
+            adapter=cmux,
+            marker_root=markers,
+            clock=clock,
+        )
 
 
 def _open_main(argv: Sequence[str]) -> int:

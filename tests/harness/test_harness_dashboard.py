@@ -11,6 +11,8 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import redirect_stdout
 from pathlib import Path
 
@@ -19,9 +21,10 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from harness.cli import main as cli_main
+from harness.callbacks import CallbackBroker
 from harness import dashboard_receipts
 from harness.adapters.cmux import CmuxAdapter
-from harness.contracts import OperationSpec, OwnedResources, RuntimeRoute, VerificationEvidence, to_dict
+from harness.contracts import CallbackEnvelope, OperationSpec, OwnedResources, RuntimeRoute, VerificationEvidence, to_dict
 from harness.dashboard_projection import (
     ATTENTION,
     COORDINATOR,
@@ -134,6 +137,8 @@ def _fix_receipt(
     definition: str,
     step_id: str,
     iteration: int,
+    *,
+    accept: bool = True,
 ) -> None:
     operation_id = f"{parent}-{step_id}-{iteration}"
     lane_id = "lane-primary"
@@ -146,9 +151,31 @@ def _fix_receipt(
         contract_sha256=definition,
         parent=parent,
     )
+    _advance(store, operation_id, "preflight", "starting", "running", "awaiting-callback")
     input_schema, output_schema = PHASE_SCHEMAS[step_id]
+    payload = {
+        "schema_version": 1,
+        "parent_operation_id": parent,
+        "definition_sha256": definition,
+        "step_id": step_id,
+        "iteration": iteration,
+        "input_schema": input_schema,
+        "input_sha256": "1" * 64,
+        "input_head_sha": "2" * 40,
+        "prior_receipt_sha256": "" if iteration == 0 else "3" * 64,
+        "verification_sha256": "" if iteration == 0 else "4" * 64,
+        "output_schema": output_schema,
+        "output_pointer": f"results/{step_id}-{iteration}.json",
+        "output_sha256": "5" * 64,
+        "head_sha": "2" * 40,
+        "status": "complete",
+    }
+    payload_sha256 = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    callback_id = f"result-{payload_sha256[:24]}"
     receipt = FixStepReceipt(
-        callback_id=f"callback-{step_id}-{iteration}",
+        callback_id=callback_id,
         operation_id=operation_id,
         parent_operation_id=parent,
         lane_id=lane_id,
@@ -157,19 +184,31 @@ def _fix_receipt(
         step_id=step_id,
         iteration=iteration,
         input_schema=input_schema,
-        input_sha256="1" * 64,
-        input_head_sha="2" * 40,
-        prior_receipt_sha256="" if iteration == 0 else "3" * 64,
-        verification_sha256="" if iteration == 0 else "4" * 64,
+        input_sha256=payload["input_sha256"],
+        input_head_sha=payload["input_head_sha"],
+        prior_receipt_sha256=payload["prior_receipt_sha256"],
+        verification_sha256=payload["verification_sha256"],
         output_schema=output_schema,
-        output_pointer=f"results/{step_id}-{iteration}.json",
-        output_sha256="5" * 64,
-        head_sha="2" * 40,
-        status="complete",
+        output_pointer=payload["output_pointer"],
+        output_sha256=payload["output_sha256"],
+        head_sha=payload["head_sha"],
+        status=payload["status"],
     )
     path = runtime / "pipeline-fix" / f"pass-{iteration}" / step_id / "receipt.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(receipt.to_dict(), sort_keys=True) + "\n", encoding="utf-8")
+    if accept:
+        CallbackBroker(store, OWNER).accept(
+            CallbackEnvelope(
+                callback_id,
+                operation_id,
+                f"{operation_id}-run",
+                "result",
+                payload,
+                payload_sha256,
+            )
+        )
+        _advance(store, operation_id, "exiting", "complete")
 
 
 def _verification_receipt(
@@ -454,6 +493,59 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard.") as raw:
         == "attention",
     )
 
+with tempfile.TemporaryDirectory(prefix="harness-dashboard-unaccepted-fix.") as raw:
+    store_root = Path(raw) / "harness"
+    store = OperationStore(store_root)
+    compiled = compiled_builtin("engineering/fix")
+    _create(
+        store,
+        DISPATCH,
+        "dispatch",
+        lane_id="lane-primary",
+        contract_sha256=compiled.definition_sha256,
+    )
+    _advance(store, DISPATCH, "preflight", "starting", "running")
+    runtime = store_root / "owners" / OWNER / "runtime" / DISPATCH
+    _fix_receipt(
+        store,
+        DISPATCH,
+        runtime,
+        compiled.definition_sha256,
+        "reproduce",
+        0,
+        accept=False,
+    )
+    fabricated = project(store_root, OWNER, inventory=LiveInventory({}))
+    reproduce = next(
+        step for step in fabricated.programs[0].steps if step.step_id == "reproduce"
+    )
+    check(
+        "a valid-looking receipt without durable callback acceptance is invalid",
+        reproduce.visits == 0
+        and reproduce.status == "attention"
+        and any(issue.code == "fix-receipt-invalid" for issue in fabricated.issues),
+    )
+    _fix_receipt(
+        store, DISPATCH, runtime, compiled.definition_sha256, "root-cause", 0
+    )
+    accepted_path = (
+        runtime / "pipeline-fix" / "pass-0" / "root-cause" / "receipt.json"
+    )
+    changed = json.loads(accepted_path.read_text(encoding="utf-8"))
+    changed["callback_id"] = "result-" + "0" * 24
+    accepted_path.write_text(json.dumps(changed) + "\n", encoding="utf-8")
+    drifted = project(store_root, OWNER, inventory=LiveInventory({}))
+    check(
+        "a receipt drifting from its accepted callback identity is invalid",
+        any(issue.code == "fix-receipt-invalid" for issue in drifted.issues)
+        and next(
+            step
+            for step in drifted.programs[0].steps
+            if step.step_id == "root-cause"
+        ).visits
+        == 0,
+    )
+
 with tempfile.TemporaryDirectory(prefix="harness-dashboard-unknown.") as raw:
     store_root = Path(raw) / "harness"
     store = OperationStore(store_root)
@@ -598,6 +690,46 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-receipts.") as raw:
         )
         == "invalid",
     )
+
+with tempfile.TemporaryDirectory(prefix="harness-dashboard-terminal-truth.") as raw:
+    for terminal in ("failed", "cancelled"):
+        store_root = Path(raw) / terminal / "harness"
+        store = OperationStore(store_root)
+        compiled = compiled_builtin("engineering/change")
+        owner = f"terminal-{terminal}"
+        _create(
+            store,
+            owner,
+            "dispatch",
+            lane_id="lane-primary",
+            contract_sha256=compiled.definition_sha256,
+            owner=owner,
+        )
+        states = (
+            ("preflight", "starting", "running", "failed")
+            if terminal == "failed"
+            else (
+                "preflight",
+                "starting",
+                "running",
+                "cancelling",
+                "exiting",
+                "cancelled",
+            )
+        )
+        _advance(store, owner, *states, owner=owner)
+        projection = project(store_root, owner, inventory=LiveInventory({}))
+        steps = projection.programs[0].steps
+        check(
+            f"a {terminal} root stops only its interrupted frontier",
+            steps[0].status == "stopped"
+            and all(step.status == "pending" for step in steps[1:])
+            and projection.programs[0].classification == ATTENTION
+            and any(
+                issue.code == f"terminal-{terminal}"
+                for issue in projection.issues
+            ),
+        )
 
 with tempfile.TemporaryDirectory(prefix="harness-dashboard-tree.") as raw:
     # The production shape: the dispatch operation id is the owner id, the
@@ -1206,6 +1338,53 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-open.") as raw:
         == [["cmux", "send-key", "--surface", dashboard, "Enter"]] * 2
         and not any("focus" in call and "new-split" not in call for call in fake.calls)
         and _tree_bytes(store_root) == baseline,
+    )
+    race_fake = FakeCmuxRunner(caller, dashboard, workspace)
+    race_adapter = CmuxAdapter(runner=race_fake, binary="cmux")
+    race_markers = root / "race-markers"
+    dashboard_script.open_dashboard(
+        vault=vault,
+        store=store_root,
+        caller_surface=caller,
+        adapter=race_adapter,
+        marker_root=race_markers,
+    )
+    race_fake.created = False
+    start = threading.Barrier(2)
+
+    def recover_dead_ready() -> object:
+        start.wait()
+        return dashboard_script.open_dashboard(
+            vault=vault,
+            store=store_root,
+            caller_surface=caller,
+            adapter=race_adapter,
+            marker_root=race_markers,
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        recoveries = tuple(pool.map(lambda _index: recover_dead_ready(), range(2)))
+    race_creates = [call for call in race_fake.calls if "new-split" in call]
+    check(
+        "simultaneous dead-ready recovery owns exactly one replacement split",
+        len(race_creates) == 2
+        and sum(not result.reused for result in recoveries) == 1
+        and sum(result.reused for result in recoveries) == 1,
+    )
+    race_fake.created = False
+    race_marker = next(race_markers.glob("*.json"))
+    retryable = json.loads(race_marker.read_text(encoding="ascii"))
+    retryable.update(state="retryable", surface_id="", reserved_at=0)
+    race_marker.write_text(json.dumps(retryable), encoding="ascii")
+    start = threading.Barrier(2)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        retries = tuple(pool.map(lambda _index: recover_dead_ready(), range(2)))
+    race_creates = [call for call in race_fake.calls if "new-split" in call]
+    check(
+        "simultaneous retryable recovery owns exactly one replacement split",
+        len(race_creates) == 3
+        and sum(not result.reused for result in retries) == 1
+        and sum(result.reused for result in retries) == 1,
     )
     for failure in ("open", "send", "enter"):
         failed_fake = FakeCmuxRunner(caller, dashboard, workspace)

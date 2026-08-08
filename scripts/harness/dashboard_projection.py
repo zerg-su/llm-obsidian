@@ -384,8 +384,10 @@ def _bind_children(
 def _model_step_status(record: OperationRecord) -> str:
     if record.state == "attention-required":
         return "attention"
-    if record.state in TERMINAL:
+    if record.state == "complete":
         return "complete"
+    if record.state in {"failed", "cancelled"}:
+        return "stopped"
     if record.state in {"created", "preflight"}:
         return "pending"
     return "running"
@@ -510,6 +512,30 @@ def _steps(
             strict=True,
         )
     ]
+    if record.state in {"failed", "cancelled"}:
+        accepted_frontier = max(
+            (
+                index
+                for index, (view, evidence) in enumerate(raw)
+                if evidence and view.status == "complete"
+            ),
+            default=-1,
+        )
+        interrupted = accepted_frontier + 1
+        return (
+            tuple(
+                replace(
+                    view,
+                    status=(
+                        "complete"
+                        if index <= accepted_frontier
+                        else "stopped" if index == interrupted else "pending"
+                    ),
+                )
+                for index, (view, _evidence) in enumerate(raw)
+            ),
+            "attention",
+        )
     # Durable evidence for a later step proves that every earlier step already
     # finished, and nothing after the frontier can have started. Only derived
     # statuses are corrected this way, so a genuine evidence conflict still
@@ -621,8 +647,10 @@ def _program_classification(
         return COORDINATOR
     if surface in {"missing", "unbound"} and record.state in SURFACE_BOUND_STATES:
         return ATTENTION
-    if record.state in TERMINAL:
+    if record.state == "complete":
         return HEALTHY
+    if record.state in {"failed", "cancelled"}:
+        return ATTENTION
     if record.state == "awaiting-callback":
         return WAITING
     return ACTIVE
@@ -784,6 +812,15 @@ def _program_issues(programs: tuple[ProgramView, ...]) -> list[IssueView]:
                         ATTENTION,
                     )
                 )
+        if program.state in {"failed", "cancelled"}:
+            issues.append(
+                IssueView(
+                    f"terminal-{program.state}",
+                    program.operation_id,
+                    f"operation terminated as {program.state}",
+                    ATTENTION,
+                )
+            )
         if program.pipeline == "unresolved":
             issues.append(
                 IssueView(
