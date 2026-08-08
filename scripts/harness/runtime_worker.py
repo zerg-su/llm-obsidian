@@ -165,6 +165,18 @@ def _review_resolution_handoff_ready(
 
     awaiting = gate_state.get("awaiting_resolution")
     if not isinstance(awaiting, dict) or not awaiting:
+        attempt = gate_state.get("attempt")
+        terminal = (
+            attempt.get("terminal") if isinstance(attempt, dict) else None
+        )
+        if (
+            isinstance(attempt, dict)
+            and attempt.get("status") == "terminal"
+            and isinstance(terminal, dict)
+            and terminal.get("result") == "changes-requested"
+        ):
+            awaiting = gate_state.get("review_notification_evidence")
+    if not isinstance(awaiting, dict) or not awaiting:
         return False
     reviewed_heads = {
         str(boundary.get("reviewed_head_sha") or "")

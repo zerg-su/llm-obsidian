@@ -1287,6 +1287,37 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
             current_head=resolved_head,
         ),
     )
+    terminal_handoff_gate = {
+        "active_review_operation_id": handoff_review_operation,
+        "attempt": {
+            "schema_version": 1,
+            "status": "terminal",
+            "terminal": {
+                "schema_version": 1,
+                "result": "changes-requested",
+            },
+        },
+        "review_notification_evidence": handoff_gate["awaiting_resolution"],
+    }
+    check(
+        "terminal exact review resumes after the durable resolution handoff",
+        _review_resolution_handoff_ready(
+            worktree=handoff,
+            operation_id=TASK,
+            gate_state=terminal_handoff_gate,
+            current_head=resolved_head,
+        ),
+    )
+    terminal_handoff_gate["attempt"]["terminal"]["result"] = "approved"
+    check(
+        "terminal non-resolution result cannot consume finding evidence",
+        not _review_resolution_handoff_ready(
+            worktree=handoff,
+            operation_id=TASK,
+            gate_state=terminal_handoff_gate,
+            current_head=resolved_head,
+        ),
+    )
     stale_handoff = json.loads(
         (handoff / ".task-review-resolution.json").read_text(
             encoding="utf-8"
