@@ -558,6 +558,25 @@ def _recover_finalizing_review_if_present(
     recovery_kind = _review_recovery_kind(gate, response_path)
     if not recovery_kind:
         return ""
+    if (
+        recovery_kind == "accepted-exact-callbacks"
+        and gate.get("status") == "changes-requested"
+    ):
+        try:
+            _publish_recovered_review_resolution(
+                store_root=store_root,
+                owner=owner,
+                operation_id=operation_id,
+                worktree=worktree,
+                gate_path=gate_path,
+                gate_state=gate,
+                cmux_adapter=cmux_adapter,
+            )
+        except Exception as exc:
+            raise RuntimeSessionError(
+                "dispatch review resolution transport recovery failed"
+            ) from exc
+        return "changes-requested"
     runner_path = Path(__file__).resolve().parents[1] / "task-review-runner.py"
     module_spec = importlib.util.spec_from_file_location(
         "_harness_task_review_recovery",
@@ -597,22 +616,6 @@ def _recover_finalizing_review_if_present(
         raise RuntimeSessionError(
             "dispatch finalizing review recovery did not make bounded progress"
         )
-    if receipt.get("status") == "changes-requested":
-        try:
-            recovered_gate = json.loads(gate_path.read_text(encoding="utf-8"))
-            _publish_recovered_review_resolution(
-                store_root=store_root,
-                owner=owner,
-                operation_id=operation_id,
-                worktree=worktree,
-                gate_path=gate_path,
-                gate_state=recovered_gate,
-                cmux_adapter=cmux_adapter,
-            )
-        except Exception as exc:
-            raise RuntimeSessionError(
-                "dispatch review resolution transport recovery failed"
-            ) from exc
     return str(receipt["status"])
 
 

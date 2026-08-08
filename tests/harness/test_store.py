@@ -1670,6 +1670,17 @@ with tempfile.TemporaryDirectory(prefix="review-resolution-recovery.") as raw:
         + "\n",
         encoding="utf-8",
     )
+    (recovery_runtime_root / "session.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "operation_id": recovery_operation,
+                "cwd": str(recovery_worktree),
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     recovery_gate_root = (
         recovery_store_root
         / "review-data"
@@ -1681,6 +1692,11 @@ with tempfile.TemporaryDirectory(prefix="review-resolution-recovery.") as raw:
     recovery_gate = {
         "schema_version": 1,
         "status": "changes-requested",
+        "execution_protocol": "exact-head-attempt-v1",
+        "attempt": {
+            "status": "terminal",
+            "terminal": {"result": "changes-requested"},
+        },
     }
     recovery_gate_path.write_text(
         json.dumps(recovery_gate) + "\n", encoding="utf-8"
@@ -1716,4 +1732,29 @@ with tempfile.TemporaryDirectory(prefix="review-resolution-recovery.") as raw:
         == hashlib.sha256(recovery_summary).hexdigest()
         and recovery_transport_calls[0]["runtime_spec_path"]
         == recovery_runtime_root / "launch.json",
+    )
+    recovery_entry_calls: list[dict[str, object]] = []
+    original_recovery_transport = (
+        harness_cli._publish_recovered_review_resolution
+    )
+
+    def capture_recovery_entry(**kwargs: object) -> None:
+        recovery_entry_calls.append(kwargs)
+
+    harness_cli._publish_recovered_review_resolution = capture_recovery_entry
+    try:
+        recovery_status = harness_cli._recover_finalizing_review_if_present(
+            OperationStore(recovery_store_root),
+            recovery_owner,
+            recovery_operation,
+            cmux_adapter=FakeCmux("alive"),
+        )
+    finally:
+        harness_cli._publish_recovered_review_resolution = (
+            original_recovery_transport
+        )
+    check(
+        "terminal findings recovery bypasses stale resolution parsing",
+        recovery_status == "changes-requested"
+        and len(recovery_entry_calls) == 1,
     )
