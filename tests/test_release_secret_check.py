@@ -62,7 +62,7 @@ with tempfile.TemporaryDirectory(prefix="release-secret-check.") as raw:
     assert json.loads(safe_assignments.stdout)["status"] == "passed"
 
     (repo / "wrapped_leak.py").write_text(
-        'token = load("AKIAIOSFODNN7EXAMPLE")\n', encoding="utf-8"
+        'token = load("' + "AKIA" + 'IOSFODNN7EXAMPLE")\n', encoding="utf-8"
     )
     commit(repo, "candidate wrapped credential literal")
     wrapped_leak = check(repo)
