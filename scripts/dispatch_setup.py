@@ -6,6 +6,7 @@ import fcntl
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tomllib
@@ -172,6 +173,39 @@ def keep_plan_branch(body: str) -> str:
     return body
 
 
+def bind_harness_diagnostics(body: str, request: dict[str, Any]) -> str:
+    generic = (
+        "Use `scripts/harness-cli.py status|inspect|resume|reconcile|cancel|close|doctor`\n"
+        "for lifecycle operations; do not orchestrate cmux/model commands manually."
+    )
+    if body.count(generic) != 1:
+        raise DispatchError("dispatch prompt harness completion contract is invalid")
+    vault_root = request["vault_root"]
+    argv = (
+        "python3",
+        str(vault_root / "scripts" / "harness-cli.py"),
+        "--store",
+        str(vault_root / ".vault-meta" / "harness"),
+        "--owner",
+        request["request_id"],
+        "--json",
+    )
+    prefix = shlex.join(argv)
+    bound = "\n".join(
+        (
+            "Use only these exact, read-only Harness diagnostics:",
+            f"- `{prefix} status`",
+            f"- `{prefix} inspect <operation-id>`",
+            f"- `{prefix} doctor`",
+            f"- `{prefix} diagnose`",
+            "`resume`, `reconcile`, `cancel`, and `close` are coordinator-owned;",
+            "raise through the typed escalation path instead of invoking them here.",
+            "Do not orchestrate cmux/model commands manually.",
+        )
+    )
+    return body.replace(generic, bound, 1)
+
+
 def render_task_prompt(request: dict[str, Any], config: dict[str, Any]) -> str:
     approved = request.get("_approved_prompt")
     if isinstance(approved, str):
@@ -241,6 +275,7 @@ def render_task_prompt(request: dict[str, Any], config: dict[str, Any]) -> str:
     }
     for old, new in replacements.items():
         body = body.replace(old, new)
+    body = bind_harness_diagnostics(body, request)
     if request["placement"] == "workspace":
         body = body.replace("the left wiki split", "the coordinator workspace")
     split_policy = request.get("split")

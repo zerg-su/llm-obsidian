@@ -386,7 +386,27 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     check(
         "prompt delegates lifecycle mechanics to harness",
         "scripts/harness-cli.py" in prompt
-        and "do not orchestrate cmux/model commands manually" in prompt,
+        and "Do not orchestrate cmux/model commands manually" in prompt,
+    )
+    harness_prefix = (
+        f"python3 {request['vault_root']}/scripts/harness-cli.py "
+        f"--store {request['vault_root']}/.vault-meta/harness "
+        f"--owner {request['request_id']} --json"
+    )
+    check(
+        "task prompt binds read-only harness diagnostics to canonical ownership",
+        f"`{harness_prefix} status`" in prompt
+        and f"`{harness_prefix} inspect <operation-id>`" in prompt
+        and f"`{harness_prefix} doctor`" in prompt,
+        prompt,
+    )
+    check(
+        "task prompt keeps harness mutations coordinator-owned",
+        "`resume`, `reconcile`, `cancel`, and `close` are coordinator-owned"
+        in prompt
+        and "scripts/harness-cli.py status|inspect|resume|reconcile|cancel|close|doctor"
+        not in prompt,
+        prompt,
     )
     check(
         "default dispatch requires automatic simple review",
