@@ -1783,3 +1783,17 @@ with tempfile.TemporaryDirectory(prefix="review-resolution-recovery.") as raw:
         recovery_status == "changes-requested"
         and len(recovery_entry_calls) == 1,
     )
+    original_handoff_ready = harness_cli._review_resolution_handoff_ready
+    harness_cli._review_resolution_handoff_ready = lambda **_kwargs: True
+    try:
+        transport_required = harness_cli._review_findings_transport_required(
+            worktree=recovery_worktree,
+            operation_id=recovery_operation,
+            gate_state=recovery_gate,
+        )
+    finally:
+        harness_cli._review_resolution_handoff_ready = original_handoff_ready
+    check(
+        "completed resolution handoff advances instead of redelivering findings",
+        not transport_required,
+    )

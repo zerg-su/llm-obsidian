@@ -41,6 +41,7 @@ from .status_segment import live_inventory, publish as publish_status
 from .store import OperationStore, StoreError
 from .supervisor import OperationSupervisor
 from .runtime_sessions import RuntimeSessionError, RuntimeSessionManager
+from .runtime_worker import _review_resolution_handoff_ready
 from .runtime_worker_review_bridge import publish_review_resolution_transport
 
 
@@ -561,6 +562,11 @@ def _recover_finalizing_review_if_present(
     if (
         recovery_kind == "accepted-exact-callbacks"
         and gate.get("status") == "changes-requested"
+        and _review_findings_transport_required(
+            worktree=worktree,
+            operation_id=operation_id,
+            gate_state=gate,
+        )
     ):
         try:
             _publish_recovered_review_resolution(
@@ -617,6 +623,33 @@ def _recover_finalizing_review_if_present(
             "dispatch finalizing review recovery did not make bounded progress"
         )
     return str(receipt["status"])
+
+
+def _review_findings_transport_required(
+    *,
+    worktree: Path,
+    operation_id: str,
+    gate_state: dict[str, object],
+) -> bool:
+    """Distinguish an undelivered finding packet from a completed handoff."""
+
+    resolution_path = worktree / ".task-review-resolution.json"
+    current_head = ""
+    if resolution_path.is_file() and not resolution_path.is_symlink():
+        try:
+            resolution = json.loads(resolution_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            resolution = None
+        if isinstance(resolution, dict):
+            candidate = resolution.get("resolved_head_sha")
+            if isinstance(candidate, str):
+                current_head = candidate
+    return not _review_resolution_handoff_ready(
+        worktree=worktree,
+        operation_id=operation_id,
+        gate_state=gate_state,
+        current_head=current_head,
+    )
 
 
 def _publish_recovered_review_resolution(
