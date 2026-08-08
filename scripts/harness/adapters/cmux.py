@@ -112,6 +112,42 @@ def surface_workspaces_from_tree(value: object) -> SurfaceWorkspaceIndex:
     )
 
 
+def _surface_window_from_tree(value: object, surface_id: str) -> str:
+    """Return one exact containing window for an offscreen surface."""
+
+    if not UUID_RE.fullmatch(surface_id):
+        raise CmuxError("origin surface must be an exact UUID")
+    if not isinstance(value, dict) or not isinstance(value.get("windows"), list):
+        raise CmuxError("cmux tree returned an invalid hierarchy")
+    matches: list[str] = []
+    for window in value["windows"]:
+        if not isinstance(window, dict):
+            continue
+        window_id = str(window.get("id") or window.get("window_id") or "")
+        for workspace in window.get("workspaces", []):
+            if not isinstance(workspace, dict):
+                continue
+            for pane in workspace.get("panes", []):
+                if not isinstance(pane, dict):
+                    continue
+                for surface in pane.get("surfaces", []):
+                    if not isinstance(surface, dict):
+                        continue
+                    observed = str(
+                        surface.get("id") or surface.get("surface_id") or ""
+                    )
+                    if observed.casefold() != surface_id.casefold():
+                        continue
+                    if not UUID_RE.fullmatch(window_id):
+                        raise CmuxError(
+                            "origin surface has no exact window identity"
+                        )
+                    matches.append(window_id)
+    if len(matches) != 1:
+        raise CmuxError("origin surface has no unique window identity")
+    return matches[0]
+
+
 def run_cmux(
     args: Sequence[str],
     *,
@@ -286,7 +322,9 @@ class CmuxAdapter:
         )
         window_id = str(caller.get("window_id") or "") if isinstance(caller, dict) else ""
         if not UUID_RE.fullmatch(window_id):
-            raise CmuxError("origin surface has no exact window identity")
+            window_id = _surface_window_from_tree(
+                self._tree(), origin_surface
+            )
         args = [
             "--id-format",
             "both",

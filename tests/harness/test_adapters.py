@@ -126,6 +126,56 @@ check(
         for call in calls
     ),
 )
+
+
+def offscreen_workspace(
+    command: list[str], **_kwargs: object
+) -> subprocess.CompletedProcess[str]:
+    calls.append(command)
+    if "identify" in command:
+        payload = {"caller": None}
+    elif "tree" in command:
+        payload = {
+            "windows": [
+                {
+                    "id": window,
+                    "workspaces": [
+                        {
+                            "id": workspace,
+                            "panes": [{"surfaces": [{"id": surface}]}],
+                        }
+                    ],
+                }
+            ]
+        }
+    elif "workspace" in command and "create" in command:
+        payload = {
+            "surface_id": surface,
+            "surface_ref": "surface:8",
+            "workspace_id": workspace,
+            "workspace_ref": "workspace:9",
+            "window_id": window,
+            "window_ref": "window:5",
+        }
+    else:
+        payload = {}
+    return subprocess.CompletedProcess(command, 0, json.dumps(payload), "")
+
+
+offscreen_start = len(calls)
+offscreen_opened = CmuxAdapter(offscreen_workspace).open_workspace(
+    surface, cwd=ROOT
+)
+check(
+    "workspace creation derives the exact window for an offscreen origin",
+    offscreen_opened.workspace_id == workspace
+    and any(
+        "workspace" in call
+        and "create" in call
+        and call[call.index("--window") + 1] == window
+        for call in calls[offscreen_start:]
+    ),
+)
 cmux.send(surface, "bounded prompt pointer")
 cmux.send_key(surface, "Enter")
 cmux.send_key(surface, "down")
