@@ -399,6 +399,7 @@ Acceptance heartbeat хранит только stage/status/counters/timestamps.
 
 | Тема | Документ |
 |---|---|
+| Ограниченные dogfood-исправления в v2.6.6 RC4-fix1 | [Release notes v2.6.6 RC4-fix1](docs/releases/v2.6.6-rc4-fix1.md) |
 | v2.6.6 RC4 — детерминированный review control plane | [Release notes v2.6.6 RC4](docs/releases/v2.6.6-rc4.md) |
 | Воспроизводимый evidence и release disposition в 2.6.6 RC3 | [Release notes 2.6.6 RC3](docs/releases/v2.6.6-rc3.md) |
 | Repair-and-delete polishing в 2.6.6 RC2 | [Release notes 2.6.6 RC2](docs/releases/v2.6.6-rc2.md) |

@@ -394,6 +394,7 @@ There is no speculative roadmap in this README. The repository describes what is
 
 | Topic | Document |
 |---|---|
+| v2.6.6 RC4-fix1 bounded dogfood repairs | [v2.6.6 RC4-fix1 release notes](docs/releases/v2.6.6-rc4-fix1.md) |
 | v2.6.6 RC4 deterministic review control plane | [v2.6.6 RC4 release notes](docs/releases/v2.6.6-rc4.md) |
 | v2.6.6 RC3 reproducible evidence and release disposition | [v2.6.6 RC3 release notes](docs/releases/v2.6.6-rc3.md) |
 | v2.6.6 RC2 repair-and-delete polishing | [v2.6.6 RC2 release notes](docs/releases/v2.6.6-rc2.md) |

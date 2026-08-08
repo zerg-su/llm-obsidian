@@ -10,6 +10,25 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.6.6-rc4-fix1] - 2026-08-08
+
+This bounded RC4 dogfood patch repairs seven observed dispatch, review,
+diagnostic, cancellation, and vault-log failures without changing the RC4
+pipeline DSL, review topology, provider routing, or security boundary.
+
+### Fixed
+
+- Start reviews from exact offscreen cmux surfaces instead of requiring the
+  coordinator surface to be visible.
+- Bind task diagnostics to the durable Harness owner.
+- Resume the exact live executor after a recoverable review-drive failure.
+- Keep folded log extracts wikilink-safe.
+- Compile Claude callback permissions through edit-only path rules.
+- Cancel the exact owned lifecycle subtree child-first and report a blocked
+  cascade as partial instead of claiming success.
+- Resume an exact terminal review-resolution handoff from its durable accepted
+  findings without replaying reviewer or provider effects.
+
 ## [2.6.6-rc4] - 2026-08-08
 
 This control-plane candidate makes review routing and callback continuation

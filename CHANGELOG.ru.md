@@ -16,6 +16,25 @@
 внутренними контрольными точками и вошли в следующие публичные релизы; тегов и
 пакетов с этими номерами не выпускалось.
 
+## [2.6.6-rc4-fix1] — 2026-08-08
+
+Этот ограниченный dogfood-патч RC4 исправляет семь наблюдавшихся сбоев
+dispatch, review, diagnostics, cancellation и vault log, не меняя pipeline DSL,
+review topology, provider routing или security boundary RC4.
+
+### Исправлено
+
+- Review запускается с точной offscreen cmux surface и не требует, чтобы
+  coordinator surface была видимой.
+- Task diagnostics привязаны к durable Harness owner.
+- Точный live executor возобновляется после исправимого review-drive failure.
+- Folded log extracts сохраняют корректные wikilinks.
+- Claude callback permissions компилируются через edit-only path rules.
+- Точное владеемое lifecycle subtree отменяется child-first, а заблокированный
+  cascade возвращает partial вместо ложного успеха.
+- Exact terminal review-resolution handoff возобновляется из durable accepted
+  findings без повтора reviewer/provider effects.
+
 ## [2.6.6-rc4] — 2026-08-08
 
 Этот control-plane candidate делает review routing и callback continuation
