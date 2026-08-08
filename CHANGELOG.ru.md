@@ -46,6 +46,13 @@
   reviewed bytes и candidate HEAD.
 - Initial input считается принятым только после semantic provider activity,
   включая текущий Claude UI с пробелом перед activity timer.
+- Отмена закрывает точное владеемое поддерево lifecycle. `harness-cli
+  cancel|close` теперь обходит цепочку `parent_operation_id` в пределах того же
+  durable owner и терминализует каждого точного потомка child-first до самого
+  root, поэтому отмена root больше не оставляет review parent и review-round в
+  `awaiting-callback`. Каскад, заблокированный нетерминальным потомком,
+  сообщает `"status": "partial"` с запрошенным root и блокирующим потомком и
+  завершается с кодом `3`, а не как успех.
 
 ## [2.6.6-rc3] — 2026-08-07
 

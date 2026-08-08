@@ -88,7 +88,21 @@ python3 scripts/harness-cli.py reconcile
 python3 scripts/harness-cli.py resume <operation-id>
 ```
 
-Use `cancel` or `close` only for the exact operation after ownership is proven.
+Use `cancel` or `close` only after ownership is proven. Both commands act on the
+exact owned subtree, not on a single record: they walk the
+`parent_operation_id` lineage under the same durable owner and terminalize every
+exact descendant child-first before the requested root. Operations belonging to
+another owner, or outside that lineage, are never read into the cascade.
+
+If a descendant cannot reach a terminal state — an unreconciled effect, a live
+owned surface, or a reviewer session whose durable cleanup ownership cannot be
+proven — the cascade stops before the root. The root is deliberately left
+nonterminal rather than reported cancelled over a live subtree. The command then
+prints `"status": "partial"` with the requested root plus `blocked_operation_id`
+and `blocked_state`, and exits `3` instead of `0`. Resolve the named descendant
+(`inspect`, then `reconcile`) and re-run the same command; it resumes from the
+durable boundary the previous pass reached.
+
 The harness never retries an uncertain model start, callback, send, or close
 until reconciliation proves the prior effect. Unknown state remains visible as
 `attention-required`.

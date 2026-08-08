@@ -39,6 +39,13 @@ deterministic without adding another orchestrator or provider route.
   reviewed bytes, and candidate HEAD.
 - Require semantic provider activity before recording initial input accepted,
   including the current Claude spaced activity display.
+- Cancel the exact owned lifecycle subtree. `harness-cli cancel|close` now walks
+  the `parent_operation_id` lineage under the same durable owner and
+  terminalizes every exact descendant child-first before the root, so a root
+  cancellation no longer leaves a review parent and review-round
+  `awaiting-callback`. A cascade blocked by a nonterminal descendant reports
+  `"status": "partial"` with the requested root and the blocking descendant, and
+  exits `3` rather than reporting success.
 
 ## [2.6.6-rc3] - 2026-08-07
 

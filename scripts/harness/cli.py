@@ -6,6 +6,7 @@ import argparse
 import importlib.util
 import json
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 from time import time
 from typing import Sequence
@@ -377,6 +378,23 @@ def _exact_cancel_subtree(
     return order
 
 
+CASCADE_PARTIAL_EXIT = 3
+
+
+@dataclass(frozen=True)
+class CascadeOutcome:
+    """Result of one supported root cancellation over its exact owned subtree."""
+
+    root_operation_id: str
+    root_state: str
+    result: TransitionResult | None
+    blocked: TransitionResult | None
+
+    @property
+    def complete(self) -> bool:
+        return self.blocked is None
+
+
 def _cancel_or_close_subtree(
     store: OperationStore,
     owner: str,
@@ -384,13 +402,15 @@ def _cancel_or_close_subtree(
     *,
     process_adapter: object,
     cmux_adapter: object,
-) -> TransitionResult:
+) -> CascadeOutcome:
     """Apply the supported per-operation cancellation child-first, then the root.
 
     Each per-operation call is its own durable boundary, so repeating the
     request is harmless and a crash mid-cascade resumes from the same command.
     A descendant that cannot reach a terminal state stops the cascade before the
-    root, keeping the root honest about its still-live subtree.
+    root, keeping the root honest about its still-live subtree; the outcome then
+    reports the requested root together with the exact blocking descendant so
+    the truncation is never mistaken for a completed cascade.
     """
 
     order = _exact_cancel_subtree(store, owner, root_operation_id)
@@ -404,8 +424,33 @@ def _cancel_or_close_subtree(
             cmux_adapter=cmux_adapter,
         )
         if result.state not in TERMINAL and operation_id != root_operation_id:
-            return result
-    return result
+            return CascadeOutcome(
+                root_operation_id,
+                store.read(owner, root_operation_id).state,
+                None,
+                result,
+            )
+    return CascadeOutcome(root_operation_id, result.state, result, None)
+
+
+def _cascade_payload(outcome: CascadeOutcome) -> dict[str, object]:
+    """Render one cascade outcome without hiding a truncated cancellation."""
+
+    if outcome.complete:
+        return to_dict(outcome.result)
+    blocked = outcome.blocked
+    return {
+        "operation_id": outcome.root_operation_id,
+        "status": "partial",
+        "state": outcome.root_state,
+        "blocked_operation_id": blocked.operation_id,
+        "blocked_state": blocked.state,
+        "blocked_attention_reason": (
+            blocked.attention_reason.value
+            if blocked.attention_reason is not None
+            else None
+        ),
+    }
 
 
 def _review_recovery_kind(
@@ -703,6 +748,7 @@ def main(
     process_adapter = process_adapter or ProcessAdapter()
     cmux_adapter = cmux_adapter or CmuxAdapter()
     suppress_status_publish = False
+    cascade_truncated = False
     try:
         if args.command == "status":
             value = [
@@ -807,6 +853,7 @@ def main(
         else:
             operation_id = args.operation_id
             record = store.read(args.owner, operation_id)
+            value = None
             if args.command == "resume":
                 result = _resume(
                     store,
@@ -817,14 +864,17 @@ def main(
                     review_runtime_manager=review_runtime_manager,
                 )
             elif args.command in {"cancel", "close"}:
-                result = _cancel_or_close_subtree(
+                outcome = _cancel_or_close_subtree(
                     store,
                     args.owner,
                     operation_id,
                     process_adapter=process_adapter,
                     cmux_adapter=cmux_adapter,
                 )
-            value = to_dict(result)
+                cascade_truncated = not outcome.complete
+                value = _cascade_payload(outcome)
+            if value is None:
+                value = to_dict(result)
         _emit(value, json_mode=args.json)
         if (
             args.command in {"resume", "cancel", "close", "reconcile"}
@@ -837,7 +887,7 @@ def main(
                     operation_id if args.command != "reconcile" else ""
                 ),
             )
-        return 0
+        return CASCADE_PARTIAL_EXIT if cascade_truncated else 0
     except (ContractError, RuntimeSessionError, StoreError) as exc:
         _emit({"status": "error", "reason": str(exc)}, json_mode=True)
         return 2

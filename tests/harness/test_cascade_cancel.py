@@ -22,12 +22,14 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from harness.contracts import (  # noqa: E402
+    AttentionReason,
     OperationSpec,
     OwnedResources,
     RuntimeRoute,
 )
 from harness.state_machine import TERMINAL  # noqa: E402
-from harness.store import OperationStore  # noqa: E402
+from harness.store import OperationStore, StoreError  # noqa: E402
+from harness.supervisor import OperationSupervisor  # noqa: E402
 import harness.cli as harness_cli  # noqa: E402
 
 
@@ -174,18 +176,97 @@ SUBTREE = {
 OUTSIDE = {"op-sibling-root", "op-sibling-child"}
 
 
-def cancel_root(store, operation_id="op-root"):
+def cancel_root(
+    store,
+    operation_id="op-root",
+    *,
+    process_adapter=None,
+    cmux_adapter=None,
+):
     return harness_cli._cancel_or_close_subtree(
         store,
         OWNER,
         operation_id,
-        process_adapter=UnusedProcessAdapter(),
-        cmux_adapter=UnusedCmuxAdapter(),
+        process_adapter=process_adapter or UnusedProcessAdapter(),
+        cmux_adapter=cmux_adapter or UnusedCmuxAdapter(),
     )
 
 
 def states(store, owner=OWNER) -> dict[str, str]:
     return {record.spec.operation_id: record.state for record in store.list(owner)}
+
+
+class RecordingCmuxAdapter:
+    """Cmux adapter that records every probe and replays scripted surface states."""
+
+    def __init__(self, statuses) -> None:
+        self.statuses = list(statuses)
+        self.calls: list[tuple[str, str]] = []
+
+    def status(self, surface_id: str) -> str:
+        self.calls.append(("status", surface_id))
+        return self.statuses.pop(0) if len(self.statuses) > 1 else self.statuses[0]
+
+    def workspace_status(self, workspace_id: str, window_id: str) -> str:
+        self.calls.append(("workspace_status", workspace_id))
+        return "missing"
+
+
+class RecordingProcessAdapter:
+    """Process adapter that records every probe instead of raising."""
+
+    def __init__(self, status: str = "dead") -> None:
+        self.status_value = status
+        self.calls: list[tuple[str, object]] = []
+
+    def process_status(self, process_group: int, identity: str) -> str:
+        self.calls.append(("process_status", process_group))
+        return self.status_value
+
+    def supervisor_status(self, supervisor_pid: int, identity: str) -> str:
+        self.calls.append(("supervisor_status", supervisor_pid))
+        return self.status_value
+
+    def status(self, *args, **kwargs) -> str:
+        self.calls.append(("status", args))
+        return self.status_value
+
+
+def prepare_pending_effect(store) -> dict[str, object]:
+    """An unreconciled effect from a crash blocks the descendant on attention."""
+
+    store.begin_effect(OWNER, "op-verify", "request-exit")
+    return {
+        "process_adapter": RecordingProcessAdapter("dead"),
+        "cmux_adapter": RecordingCmuxAdapter(["missing"]),
+    }
+
+
+def prepare_live_surface(store) -> dict[str, object]:
+    """A live owned surface without a process group blocks on attention."""
+
+    bind_surface(store, "op-verify", "surface-verify")
+    return {
+        "process_adapter": RecordingProcessAdapter("dead"),
+        "cmux_adapter": RecordingCmuxAdapter(["alive"]),
+    }
+
+
+def corrupt_parent(store, operation_id, parent_operation_id) -> None:
+    """Write a corrupt parent chain directly, simulating durable-store damage."""
+
+    path = store.root / "owners" / OWNER / "operations" / f"{operation_id}.json"
+    value = json.loads(path.read_text(encoding="utf-8"))
+    value["spec"]["parent_operation_id"] = parent_operation_id
+    path.write_text(json.dumps(value), encoding="utf-8")
+
+
+def bind_surface(store, operation_id, surface_id):
+    """Bind one exact owned surface to an operation, as a live session would."""
+
+    return OperationSupervisor(store, OWNER, operation_id).bind_resources(
+        OwnedResources(surface_id=surface_id)
+    )
 
 
 def main() -> int:
@@ -271,8 +352,52 @@ def main() -> int:
             cascade_transitions,
         )
 
-        drift = store_error_for_unknown_root(root / "cascade-drift")
-        check("unknown root is rejected as identity drift", drift, drift)
+        drift_store = OperationStore(root / "cascade-drift")
+        build_incident_fixture(drift_store)
+        drift_before = states(drift_store)
+        try:
+            cancel_root(drift_store, "op-not-in-store")
+        except StoreError as exc:
+            drift = exc
+        else:
+            drift = None
+        check(
+            "unknown root is rejected as StoreError, not any exception",
+            isinstance(drift, StoreError),
+            type(drift).__name__,
+        )
+        check(
+            "rejected drift applies no transition",
+            states(drift_store) == drift_before,
+            states(drift_store),
+        )
+
+        # --- FIX1-CANCEL-E3: a corrupt parent cycle fails closed instead of looping.
+        cycle_store = OperationStore(root / "cascade-cycle")
+        build_incident_fixture(cycle_store)
+        cycle_before = states(cycle_store)
+        corrupt_parent(cycle_store, "op-root", "op-review")
+        try:
+            harness_cli._exact_cancel_subtree(cycle_store, OWNER, "op-root")
+        except StoreError as exc:
+            cycle = exc
+        else:
+            cycle = None
+        check(
+            "a corrupt parent cycle raises StoreError",
+            isinstance(cycle, StoreError),
+            type(cycle).__name__,
+        )
+        check(
+            "the cycle error names the repeated operation",
+            "op-root" in str(cycle),
+            str(cycle),
+        )
+        check(
+            "the cycle guard applies no transition",
+            states(cycle_store) == cycle_before,
+            states(cycle_store),
+        )
 
         # --- FIX1-CANCEL-E4: idempotency and no replay.
         repeat_store = ObservingStore(root / "cascade-repeat")
@@ -338,26 +463,213 @@ def main() -> int:
             {item: cli_after[item] for item in OUTSIDE},
         )
 
+        # --- FIX1-CANCEL-E2: the cascade really releases owned resources.
+        release_store = ObservingStore(root / "cascade-release")
+        build_incident_fixture(release_store)
+        bind_surface(release_store, "op-verify", "surface-verify")
+        bind_surface(release_store, "op-created", "surface-created")
+        bound_before = sorted(
+            record.spec.operation_id
+            for record in release_store.list(OWNER)
+            if record.resources != OwnedResources()
+        )
+        check(
+            "the release fixture actually binds resources first",
+            bound_before == ["op-created", "op-verify"],
+            bound_before,
+        )
+        release_cmux = RecordingCmuxAdapter(["missing"])
+        release_process = RecordingProcessAdapter("dead")
+        release_outcome = cancel_root(
+            release_store,
+            process_adapter=release_process,
+            cmux_adapter=release_cmux,
+        )
+        check(
+            "a resource-bearing subtree still cascades to completion",
+            release_outcome.complete,
+            release_outcome,
+        )
+        release_after = states(release_store)
+        check(
+            "every resource-bearing descendant reaches a terminal state",
+            all(
+                release_after[item] in TERMINAL
+                for item in ("op-verify", "op-created", "op-root")
+            ),
+            release_after,
+        )
+        still_bound = sorted(
+            record.spec.operation_id
+            for record in release_store.list(OWNER)
+            if record.spec.operation_id in SUBTREE
+            and record.resources != OwnedResources()
+        )
+        check(
+            "the cascade releases every exact owned surface",
+            still_bound == [],
+            still_bound,
+        )
+        probed = {surface for _call, surface in release_cmux.calls}
+        check(
+            "resource probes target only the exact owned surfaces",
+            probed <= {"surface-verify", "surface-created"} and probed,
+            release_cmux.calls,
+        )
+
+        # --- FIX1-CANCEL-E3: a reviewer descendant is never closed without proof.
+        reviewer_store = ObservingStore(root / "cascade-reviewer")
+        build_incident_fixture(reviewer_store)
+        bind_surface(reviewer_store, "op-review-round", "surface-round")
+        reviewer_cmux = RecordingCmuxAdapter(["missing"])
+        reviewer_outcome = cancel_root(
+            reviewer_store,
+            process_adapter=RecordingProcessAdapter("dead"),
+            cmux_adapter=reviewer_cmux,
+        )
+        check(
+            "an unprovable reviewer descendant truncates the cascade",
+            not reviewer_outcome.complete
+            and reviewer_outcome.blocked.operation_id == "op-review-round",
+            reviewer_outcome,
+        )
+        check(
+            "the unprovable reviewer descendant is held for cleanup attention",
+            reviewer_outcome.blocked.attention_reason
+            == AttentionReason.CLEANUP_INCOMPLETE,
+            reviewer_outcome.blocked,
+        )
+        check(
+            "no surface is closed without durable cleanup ownership",
+            reviewer_cmux.calls == [],
+            reviewer_cmux.calls,
+        )
+        check(
+            "the reviewer descendant keeps its owned surface",
+            reviewer_store.read(OWNER, "op-review-round").resources.surface_id
+            == "surface-round",
+            reviewer_store.read(OWNER, "op-review-round").resources,
+        )
+
+        # --- FIX1-CANCEL-E2/E4: a truncated cascade is never reported as success.
+        for label, prepare in (
+            ("pending effect", prepare_pending_effect),
+            ("live owned surface", prepare_live_surface),
+        ):
+            blocked_store = ObservingStore(root / f"cascade-blocked-{len(label)}")
+            build_incident_fixture(blocked_store)
+            adapters = prepare(blocked_store)
+            outcome = cancel_root(blocked_store, **adapters)
+            check(
+                f"{label}: the cascade reports itself truncated",
+                not outcome.complete,
+                outcome,
+            )
+            check(
+                f"{label}: the outcome names the requested root, not the blocker",
+                outcome.root_operation_id == "op-root",
+                outcome.root_operation_id,
+            )
+            check(
+                f"{label}: the blocking descendant is identified",
+                outcome.blocked is not None
+                and outcome.blocked.operation_id == "op-verify",
+                outcome.blocked,
+            )
+            payload = harness_cli._cascade_payload(outcome)
+            check(
+                f"{label}: the payload keys on the root and marks it partial",
+                payload["operation_id"] == "op-root"
+                and payload["status"] == "partial"
+                and payload["blocked_operation_id"] == "op-verify"
+                and payload["state"] not in TERMINAL,
+                payload,
+            )
+            check(
+                f"{label}: the root is left nonterminal, not falsely cancelled",
+                states(blocked_store)["op-root"] not in TERMINAL,
+                states(blocked_store)["op-root"],
+            )
+
+        # --- The public seam must not exit 0 on a truncated cascade.
+        blocked_root = root / "cascade-blocked-cli"
+        blocked_cli_store = OperationStore(blocked_root)
+        build_incident_fixture(blocked_cli_store)
+        blocked_cli_store.begin_effect(OWNER, "op-verify", "request-exit")
+        blocked_proc = subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / "scripts/harness-cli.py"),
+                "--store",
+                str(blocked_root),
+                "--owner",
+                OWNER,
+                "--json",
+                "cancel",
+                "op-root",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        check(
+            "public cancel does not exit 0 when the cascade is truncated",
+            blocked_proc.returncode == harness_cli.CASCADE_PARTIAL_EXIT,
+            (blocked_proc.returncode, blocked_proc.stdout, blocked_proc.stderr),
+        )
+        blocked_payload = json.loads(blocked_proc.stdout.strip().splitlines()[0])
+        check(
+            "the truncated payload names the requested root",
+            blocked_payload["operation_id"] == "op-root"
+            and blocked_payload["status"] == "partial"
+            and blocked_payload["blocked_operation_id"] == "op-verify",
+            blocked_payload,
+        )
+        check(
+            "the truncated cascade leaves the root nonterminal",
+            states(OperationStore(blocked_root))["op-root"] not in TERMINAL,
+            states(OperationStore(blocked_root)),
+        )
+
+        # --- FIX1-CANCEL-E4: a recoverable blocker makes forward progress on retry.
+        retry_store = ObservingStore(root / "cascade-retry")
+        build_incident_fixture(retry_store)
+        bind_surface(retry_store, "op-verify", "surface-verify")
+        retry_cmux = RecordingCmuxAdapter(["alive", "missing"])
+        retry_process = RecordingProcessAdapter("dead")
+        first_pass = cancel_root(
+            retry_store,
+            process_adapter=retry_process,
+            cmux_adapter=retry_cmux,
+        )
+        check(
+            "a live owned surface truncates the first cascade",
+            not first_pass.complete,
+            first_pass,
+        )
+        second_pass = cancel_root(
+            retry_store,
+            process_adapter=retry_process,
+            cmux_adapter=retry_cmux,
+        )
+        check(
+            "re-running the same command makes forward progress",
+            second_pass.complete,
+            second_pass,
+        )
+        retry_after = states(retry_store)
+        retry_nonterminal = sorted(
+            operation_id
+            for operation_id, state in retry_after.items()
+            if operation_id in SUBTREE and state not in TERMINAL
+        )
+        check(
+            "the retried cascade terminalizes the whole exact subtree",
+            retry_nonterminal == [],
+            retry_after,
+        )
+
     print("cascade cancellation regressions: ok")
     return 0
-
-
-def store_error_for_unknown_root(path: Path) -> str:
-    """Cancelling an id that is not in the store must fail closed."""
-
-    store = OperationStore(path)
-    build_incident_fixture(store)
-    try:
-        harness_cli._cancel_or_close_subtree(
-            store,
-            OWNER,
-            "op-not-in-store",
-            process_adapter=UnusedProcessAdapter(),
-            cmux_adapter=UnusedCmuxAdapter(),
-        )
-    except Exception as exc:  # StoreError / ContractError
-        return type(exc).__name__
-    return ""
 
 
 if __name__ == "__main__":
