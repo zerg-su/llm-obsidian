@@ -684,12 +684,64 @@ class RuntimeWorkerReviewBridgeMixin:
     ) -> None:
         encoded = json.dumps(packet, sort_keys=True, separators=(",", ":")).encode()
         packet_sha256 = hashlib.sha256(encoded).hexdigest()
+        drifted_head = ""
         if isinstance(notified, dict):
             if (
                 notified.get("packet_sha256") == packet_sha256
                 and notified.get("status") == "sent"
             ):
-                return
+                try:
+                    resolution = json.loads(
+                        resolution_path.read_text(encoding="utf-8")
+                    )
+                except (OSError, json.JSONDecodeError):
+                    resolution = None
+                resolved_head = (
+                    str(resolution.get("resolved_head_sha") or "")
+                    if isinstance(resolution, dict)
+                    else ""
+                )
+                if re.fullmatch("[0-9a-f]{40,64}", resolved_head):
+                    head_result = subprocess.run(
+                        ["git", "rev-parse", "HEAD"],
+                        cwd=self.spec["cwd"],
+                        text=True,
+                        capture_output=True,
+                        check=False,
+                    )
+                    current_head = head_result.stdout.strip()
+                    if (
+                        head_result.returncode == 0
+                        and re.fullmatch("[0-9a-f]{40,64}", current_head)
+                        and current_head != resolved_head
+                    ):
+                        drifted_head = current_head
+                if not drifted_head:
+                    return
+        if drifted_head:
+            message = (
+                "Coordinator-owned mechanism repair advanced the exact task HEAD "
+                f"to {drifted_head} after the current review resolution was written. "
+                "Keep the existing finding dispositions, inspect the intervening commits, "
+                "then refresh resolved_head_sha and .task-summary.json for this exact HEAD. "
+                "Do not relaunch review or replay verification/provider effects."
+            )
+            wake_id = hashlib.sha256(
+                f"{packet_sha256}:{drifted_head}".encode()
+            ).hexdigest()
+            wake_spec = {
+                "origin_surface": self.spec["surface_id"],
+                "callback_wake": message,
+            }
+            wake_root = self.spec_path.parent / "review-resolution-wake"
+            wake_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+            if not publish_callback_wake(
+                wake_spec, wake_root, wake_id, self.cmux_adapter
+            ):
+                raise RuntimeWorkerError(
+                    "review resolution rebind notification effect is uncertain"
+                )
+            return
         _atomic_json(
             notify_path,
             {

@@ -461,6 +461,93 @@ def assert_durable_review_packet_generation_can_advance(root: Path) -> None:
     print("OK   durable review packet generation advances exactly once")
 
 
+def assert_resolution_head_drift_wakes_once(root: Path) -> None:
+    """A coordinator repair after resolution gets one exact rebind wake."""
+
+    worktree = root / "resolution-head-drift-product"
+    worktree.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=worktree, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"],
+        cwd=worktree,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"], cwd=worktree, check=True
+    )
+    (worktree / "product.txt").write_text("resolved\n", encoding="utf-8")
+    subprocess.run(["git", "add", "product.txt"], cwd=worktree, check=True)
+    subprocess.run(
+        ["git", "commit", "-qm", "resolved"], cwd=worktree, check=True
+    )
+    resolved_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=worktree,
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout.strip()
+    (worktree / "repair.txt").write_text("repair\n", encoding="utf-8")
+    subprocess.run(["git", "add", "repair.txt"], cwd=worktree, check=True)
+    subprocess.run(
+        ["git", "commit", "-qm", "coordinator repair"],
+        cwd=worktree,
+        check=True,
+    )
+    current_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=worktree,
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout.strip()
+    resolution_path = worktree / ".task-review-resolution.json"
+    write_json(resolution_path, {"resolved_head_sha": resolved_head})
+    state = root / "resolution-head-drift-runtime"
+    state.mkdir()
+    packet = {"reviewed_head_sha": "a" * 40}
+    packet_sha256 = canonical_sha256(packet)
+    notify_path = state / "pipeline-review-resolution-notify.json"
+    notified = {
+        "schema_version": 1,
+        "operation_id": TASK,
+        "packet_sha256": packet_sha256,
+        "reviewed_head_sha": "a" * 40,
+        "status": "sent",
+    }
+    write_json(notify_path, notified)
+    cmux = FakeCmux()
+    worker = SimpleNamespace(
+        spec_path=state / "runtime.json",
+        spec={"operation_id": TASK, "surface_id": CHILD, "cwd": worktree},
+        digest="d" * 64,
+        cmux_adapter=cmux,
+    )
+    for _ in range(2):
+        RuntimeWorkerReviewBridgeMixin.send_review_resolution_notification(
+            worker,
+            packet=packet,
+            packet_path=worktree / ".task-review.json",
+            resolution_path=resolution_path,
+            notify_path=notify_path,
+            notified=notified,
+        )
+    wake = json.loads(
+        (state / "review-resolution-wake/callback-wake.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    check(
+        "resolution HEAD drift wakes the executor exactly once",
+        current_head != resolved_head
+        and len(cmux.sent) == 1
+        and cmux.keys == [(CHILD, "Enter")]
+        and wake["status"] == "sent"
+        and wake["callback_id"]
+        == hashlib.sha256(f"{packet_sha256}:{current_head}".encode()).hexdigest(),
+    )
+
+
 def write_json(path: Path, value: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, sort_keys=True) + "\n", encoding="utf-8")
@@ -1255,6 +1342,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
     assert_summary_refresh_notification_replays_without_effect(root)
     assert_review_resolution_notification_crashes_fail_closed(root)
     assert_durable_review_packet_generation_can_advance(root)
+    assert_resolution_head_drift_wakes_once(root)
     handoff = root / "resolution-handoff"
     handoff.mkdir()
     reviewed_head = "a" * 40

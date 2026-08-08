@@ -41,6 +41,7 @@ from .status_segment import live_inventory, publish as publish_status
 from .store import OperationStore, StoreError
 from .supervisor import OperationSupervisor
 from .runtime_sessions import RuntimeSessionError, RuntimeSessionManager
+from .review_finalization import _head as _review_worktree_head
 from .runtime_worker import _review_resolution_handoff_ready
 from .runtime_worker_review_bridge import publish_review_resolution_transport
 
@@ -642,8 +643,11 @@ def _review_findings_transport_required(
             resolution = None
         if isinstance(resolution, dict):
             candidate = resolution.get("resolved_head_sha")
-            if isinstance(candidate, str):
-                current_head = candidate
+            if isinstance(candidate, str) and candidate:
+                try:
+                    current_head = _review_worktree_head(worktree)
+                except (OSError, ValueError):
+                    current_head = ""
     return not _review_resolution_handoff_ready(
         worktree=worktree,
         operation_id=operation_id,
