@@ -99,7 +99,7 @@ OK   fake external adapters contain no process, network, or real cmux launch pri
 OK   conformance path reports measured zero real provider, model, cmux, and network effects
 
 All lifecycle provider-conformance tests passed.
-{"actions":25,"invariants":7,"scenarios":7,"schedules":8,"wall_seconds":0.188135}
+{"actions":25,"invariants":7,"scenarios":7,"schedules":8,"wall_seconds":0.174119}
 OK   stable JSON serialization
 OK   contracts are frozen
 OK   unknown runtime rejected
@@ -970,7 +970,7 @@ OK   review-inspect rejects unknown operations
 OK   all review inspection leaves worktree and Git metadata byte-stable
 
 All review-inspect tests passed.
-Initialized empty Git repository in /private/var/folders/w7/vtxrl9d178d9zsg47p1_1ls80000gn/T/plan-review-facade.0j7uwbhz/repo/.git/
+Initialized empty Git repository in /private/var/folders/w7/vtxrl9d178d9zsg47p1_1ls80000gn/T/plan-review-facade.mby9t0o5/repo/.git/
 OK   1 valid plan compiles four independent artifacts
 OK   2 design artifact replaces every protected region with its digest
 OK   3 missing Outcome heading fails closed
@@ -1424,7 +1424,7 @@ OK   owned-missing-gate stops after its active pointer and before its gate
 OK   active pointer without a gate retains any operation row fail closed
 OK   current release review binds one external artifact root
 OK   release callback wake is an idempotent active-review resume
-OK   current release review rejects checkout ancestor /var/folders/w7/vtxrl9d178d9zsg47p1_1ls80000gn/T/current-release-artifacts.sgp10382/valid
+OK   current release review rejects checkout ancestor /var/folders/w7/vtxrl9d178d9zsg47p1_1ls80000gn/T/current-release-artifacts.y5nnmwn_/valid
 OK   current release review rejects checkout ancestor /
 OK   current release review rejects artifact-root drift on resume
 OK   current release review rejects an out-of-root outcome artifact
@@ -2669,7 +2669,7 @@ WARN  scripts/reindex.py:139:write_outputs: 65 lines requires extraction review
 WARN  scripts/reindex.py:230:write_folder_indexes: 70 lines requires extraction review
 WARN  scripts/release-acceptance.py: 355 lines requires cohesion review
 WARN  scripts/release-acceptance.py:142:load_manifest: 82 lines requires extraction review
-WARN  scripts/release-secret-check.py:67:main: 77 lines requires extraction review
+WARN  scripts/release-secret-check.py:67:main: 79 lines requires extraction review
 WARN  scripts/research-isolation.py: 534 lines requires cohesion review
 WARN  scripts/research-isolation.py:323:cmd_start: 65 lines requires extraction review
 WARN  scripts/research_contract.py: 300 lines requires cohesion review
@@ -3989,7 +3989,7 @@ sessions:
 
 # Semantic Tiling Report
 
-- generated: 2026-08-08T07:48:19Z
+- generated: 2026-08-08T08:04:29Z
 - model: m
 - ollama_url: x
 - thresholds: error>=0.9, review=0.85-0.9
@@ -4454,7 +4454,7 @@ OK   no uncovered runtime keeps the verdict complete
 OK   unattributed agent activity blocks a complete verdict
 OK   an unattributed router hint is unverified evidence, not dead weight
 OK   unattributed activity without an agent op stays out of the verdict
-OK   stats exits 0 (pipeline-stats-codex.emkdr3vv)
+OK   stats exits 0 (pipeline-stats-codex.x0l32a9n)
 OK   report names the runtime coverage boundary
 OK   coverage table reports Codex as observed but unobservable
 OK   zero list is not presented as a proven dead-weight verdict
@@ -4463,22 +4463,22 @@ OK   a Codex-hinted skill is separated from removal candidates
 OK   a router hint is not rendered as proof of invocation
 OK   the coverage counts are not presented as comparable across runtimes
 OK   unhinted skills stay listed as removal candidates
-OK   stats exits 0 (pipeline-stats-claude.jp5ob_6y)
+OK   stats exits 0 (pipeline-stats-claude.bpsxnaga)
 OK   a Claude-only window with real usage reports a complete verdict
 OK   unused skills are candidates when nothing else was observed
 OK   the skill that was actually used is not a candidate
 OK   the report never claims a runtime tag means 'no model'
-OK   stats exits 0 (pipeline-stats-unattributed.9cwqqs40)
+OK   stats exits 0 (pipeline-stats-unattributed.bu1rz8z_)
 OK   unattributed orchestration blocks the complete dead-weight verdict
 OK   the unattributed boundary is named in the zero section
 OK   an unattributed router hint is reported as unverified, not removable
 OK   an unrecognized router tag does not become its own coverage row
 OK   the unattributed row states missing attribution, not missing capability
-OK   stats exits 0 (pipeline-stats-empty.l8bdaycj)
+OK   stats exits 0 (pipeline-stats-empty.5nn_rmz8)
 OK   an evidence-free window makes no dead-weight claim
 OK   an evidence-free window says so explicitly
 OK   no installed skill is listed for removal without evidence
-OK   stats exits 0 (pipeline-stats-small.rwa_egpr)
+OK   stats exits 0 (pipeline-stats-small.ln_oh6cn)
 OK   a healthy but empty window still makes no dead-weight claim
 OK   healthy Claude sources are not blamed for the empty window
 
@@ -4983,8 +4983,8 @@ verification-receipt: test-stability-bootstrap 3/3 clean-status
 verification-receipt: test-stability-bootstrap 1/3 mcp-sync-config
 verification-receipt: release-final 1/1 proof
 verification-receipt: release-final 1/1 failure
-task-sessions: skipped corrupt queued operation 177dfce4-f709-4375-9ded-10addbbbef04; the exact lane remains available
-task-sessions: skipped corrupt queued operation fcda0f68-feab-452e-9383-4cca889d4147; the exact lane remains available
+task-sessions: skipped corrupt queued operation f87abb31-f799-41e5-b40e-e28cfb5ddfd1; the exact lane remains available
+task-sessions: skipped corrupt queued operation 15ec1c76-9d52-420b-963f-84886b826bb5; the exact lane remains available
 live acceptance could not release every owned surface; recover the exact operations with harness-cli.py reconcile: live-aaaaaaaaaaaa-claude-lifecycle-1: attention-required (callback-invalid)
 live acceptance could not release every owned surface; recover the exact operations with harness-cli.py reconcile: live-aaaaaaaaaaaa-claude-lifecycle-1: attention-required (attention-required)
 live acceptance could not release every owned surface; recover the exact operations with harness-cli.py reconcile: live-aaaaaaaaaaaa-claude-lifecycle-1: terminal failed retained owned resources
@@ -4994,7 +4994,7 @@ ERR: cache read failed: Expecting value: line 1 column 1 (char 0)
 ERR: unknown cache version: 999
 refresh-only: scanned=2 cached=0 computed=2 orphans_pruned=0
 refresh-only: scanned=2 cached=2 computed=0 orphans_pruned=0
-report written: /private/var/folders/w7/vtxrl9d178d9zsg47p1_1ls80000gn/T/tmpm095w4_d/report.md
+report written: /private/var/folders/w7/vtxrl9d178d9zsg47p1_1ls80000gn/T/tmp0m3qvfy1/report.md
 refresh-only: scanned=2 cached=1 computed=1 orphans_pruned=0
 ollama not reachable at x; skipping tiling check
 reindex: 5 file(s) without frontmatter are INVISIBLE to indexes: wiki/concepts/_index.md, wiki/plans/_index.md, wiki/questions/_index.md, wiki/reindex-fixture/_index.md, wiki/sources/_index.md
