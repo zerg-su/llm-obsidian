@@ -18,6 +18,10 @@ SECRET_PATH = re.compile(
     r"(?i)(^|/)(?:\.env(?:\..*)?|secrets?\.env|runtime\.env|"
     r"credentials?(?:\..*)?|id_(?:rsa|ed25519)|.*\.(?:pem|key|p12|pfx))$"
 )
+SAFE_PYTHON_CREDENTIAL_REFERENCE = re.compile(
+    r"(?i)^\s*(?:token|api[_-]?key|secret|password|passwd)\s*=\s*"
+    r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*(?:\([^()\n]*\))?\s*$"
+)
 
 
 class SecretCheckError(RuntimeError):
@@ -87,11 +91,20 @@ def main() -> int:
                 "--",
             )
         )
-        added = [
-            line[1:]
-            for line in patch.splitlines()
-            if line.startswith("+") and not line.startswith("+++")
-        ]
+        added = []
+        current_path = ""
+        for line in patch.splitlines():
+            if line.startswith("+++ b/"):
+                current_path = line[6:]
+                continue
+            if not line.startswith("+") or line.startswith("+++"):
+                continue
+            value = line[1:]
+            if current_path.endswith(".py") and SAFE_PYTHON_CREDENTIAL_REFERENCE.fullmatch(
+                value
+            ):
+                continue
+            added.append(value)
         kinds = residual_credential_kinds("\n".join(added))
         raw_paths = git(
             root,

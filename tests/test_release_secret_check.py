@@ -51,6 +51,28 @@ with tempfile.TemporaryDirectory(prefix="release-secret-check.") as raw:
     safe_value = json.loads(safe.stdout)
     assert safe_value["status"] == "passed" and safe_value["added_lines"] == 1
 
+    (repo / "safe_assignments.py").write_text(
+        "token = raw.strip()\n"
+        'token = edge.replace(" ", "-")\n',
+        encoding="utf-8",
+    )
+    commit(repo, "safe credential-named Python references")
+    safe_assignments = check(repo)
+    assert safe_assignments.returncode == 0, safe_assignments.stdout
+    assert json.loads(safe_assignments.stdout)["status"] == "passed"
+
+    (repo / "literal_leak.py").write_text(
+        'token = "newcandidatevalue123456"\n', encoding="utf-8"
+    )
+    commit(repo, "candidate Python credential literal")
+    python_literal = check(repo)
+    assert python_literal.returncode == 1
+    assert json.loads(python_literal.stdout)["credential_kinds"] == [
+        "credential-assignment"
+    ]
+    git(repo, "rm", "literal_leak.py")
+    git(repo, "commit", "-q", "-m", "remove Python credential literal")
+
     (repo / "leak.txt").write_text(
         "token=" + "newcandidatevalue123456" + "\n", encoding="utf-8"
     )
