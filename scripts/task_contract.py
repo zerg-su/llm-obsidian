@@ -320,7 +320,16 @@ def _validate_review_policy(meta: dict[str, Any], version: int) -> dict[str, Any
 def _validate_review_topology(
     meta: dict[str, Any], version: int, review: dict[str, Any]
 ) -> dict[str, Any] | None:
-    """Validate the optional RC4 frozen topology without breaking old v4 tasks."""
+    """Validate the RC4 frozen topology, keeping pre-RC4 records readable.
+
+    Absence is tolerated *here* on purpose: ``normalize`` is the reader for every
+    task record ever written, including those created before the field existed,
+    and making it fail closed would strand them.  The binding is instead required
+    at the review launch boundary — see ``task_review_context``
+    ``_assert_frozen_topology`` — so an unbound record can still be inspected,
+    reaped, and reported, but cannot start a review lane.  RC4 evidence E1 is
+    worded to match that exact split.
+    """
 
     raw = meta.get("review_topology")
     if raw is None:

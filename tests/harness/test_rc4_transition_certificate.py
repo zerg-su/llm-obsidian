@@ -33,15 +33,22 @@ from harness.contracts import (  # noqa: E402
     RuntimeRoute,
     to_dict,
 )
+from harness.provider_events import EVENT_KINDS as PROVIDER_EVENT_KINDS  # noqa: E402
 from harness.state_machine import TERMINAL, TRANSITIONS, transition  # noqa: E402
 from harness.store import OperationStore  # noqa: E402
 
-from lifecycle_simulator import LifecycleWorld, SimulatedCrash  # noqa: E402
+from lifecycle_simulator import (  # noqa: E402
+    DeterministicEventSource,
+    LifecycleWorld,
+    SimulatedCrash,
+)
 from lifecycle_simulator_oracle import (  # noqa: E402
+    ACTIONS,
     InvariantViolation,
     assert_snapshot,
 )
 from lifecycle_transition_certificate import (  # noqa: E402
+    DENOMINATOR_SOURCE,
     EDGE_CLASSES,
     EVENT_GROUPS,
     MANIFEST_PATH,
@@ -137,6 +144,43 @@ check(
         for group in EVENT_GROUPS
     ),
 )
+# The denominator must come from production owners, not from this suite's
+# simulator.  Assert the link independently: the provider-event group is the
+# production contract, and the simulator is only allowed to model a subset of
+# it.  Any kind the simulator invents that production does not admit is a bug.
+check(
+    "the provider-event denominator is the production contract",
+    set(PRODUCTION_EVENTS["provider_event_kinds"]) == set(PROVIDER_EVENT_KINDS),
+    sorted(
+        set(PROVIDER_EVENT_KINDS)
+        ^ set(PRODUCTION_EVENTS["provider_event_kinds"])
+    ),
+)
+check(
+    "the simulator models a subset of the production provider events",
+    set(DeterministicEventSource.EVENT_KINDS) <= set(PROVIDER_EVENT_KINDS),
+    sorted(set(DeterministicEventSource.EVENT_KINDS) - set(PROVIDER_EVENT_KINDS)),
+)
+check(
+    "the simulator gap is declared rather than silently absent",
+    set(PROVIDER_EVENT_KINDS) - set(DeterministicEventSource.EVENT_KINDS)
+    == {"input-accepted", "provider-started"},
+    sorted(set(PROVIDER_EVENT_KINDS) - set(DeterministicEventSource.EVENT_KINDS)),
+)
+# The scenario verbs are simulator-owned, so the manifest declares them and this
+# suite — which may import the simulator — proves the declaration exact.
+check(
+    "the manifest declares the exact simulator scenario vocabulary",
+    set(MANIFEST["simulator_scenario_actions"]) == set(ACTIONS),
+    sorted(set(ACTIONS) ^ set(MANIFEST["simulator_scenario_actions"])),
+)
+check(
+    "no simulator verb leaks into the production event denominator",
+    all(
+        not (set(MANIFEST["events"][group]) & set(ACTIONS))
+        for group in EVENT_GROUPS
+    ),
+)
 check(
     "research is the only explicitly excluded callback transport",
     MANIFEST["excluded_transports"] == ["research"]
@@ -150,7 +194,7 @@ check(
     ),
 )
 check(
-    "the eight named lifecycle cases are declared exactly once each",
+    "the nine named lifecycle cases are declared exactly once each",
     sorted(str(case["case_id"]) for case in MANIFEST["cases"])
     == [
         "approval",
@@ -160,8 +204,14 @@ check(
         "crash-point",
         "finalization",
         "fix-loop",
-        "release-disposition",
+        "release-boundary",
+        "summary-disposition",
     ],
+)
+check(
+    "the summary witness is named for the contract it exercises",
+    {str(case["witness"]) for case in MANIFEST["cases"]}
+    >= {"summary-disposition-classification", "release-boundary-rejection"},
 )
 
 
@@ -195,12 +245,12 @@ with tempfile.TemporaryDirectory(prefix="rc4-certificate.") as raw:
     check(
         "certificate binds the exact head and the production denominator bytes",
         len(str(CERTIFICATE["exact_head_sha"])) == 40
-        and CERTIFICATE["denominator_source"] == "scripts/harness/state_machine.py"
+        and CERTIFICATE["denominator_source"] == DENOMINATOR_SOURCE
         and len(str(CERTIFICATE["denominator_source_sha256"])) == 64,
     )
     check(
         "every named case carries a passing bounded production witness",
-        len(CERTIFICATE["cases"]) == 8
+        len(CERTIFICATE["cases"]) == 9
         and all(
             case["passed"] and case["production_paths"] and case["edges_visited"]
             for case in CERTIFICATE["cases"]

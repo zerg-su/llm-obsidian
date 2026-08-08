@@ -178,65 +178,87 @@ def _explicit_weakening_lead_in(candidate: str) -> bool:
     return False
 
 
+def _split_blocks(lines: list[str]) -> list[tuple[int, list[str]]]:
+    """Group lines into blank-line separated blocks, keeping their start index."""
+
+    blocks: list[tuple[int, list[str]]] = []
+    current: list[str] = []
+    start = 0
+    for index, line in enumerate(lines):
+        if line.strip():
+            if not current:
+                start = index
+            current.append(line)
+            continue
+        if current:
+            blocks.append((start, current))
+            current = []
+    if current:
+        blocks.append((start, current))
+    return blocks
+
+
+def _split_items(block: list[str]) -> list[list[str]]:
+    """Split one block into Markdown list items, or a single prose item."""
+
+    if not any(MARKDOWN_LIST_ITEM.match(line) for line in block):
+        return [list(block)]
+    items: list[list[str]] = []
+    for line in block:
+        if MARKDOWN_LIST_ITEM.match(line) or not items:
+            items.append([line])
+        else:
+            items[-1].append(line)
+    return items
+
+
+def _is_list_block(block: list[str]) -> bool:
+    return any(MARKDOWN_LIST_ITEM.match(line) for line in block)
+
+
 def _engineering_discipline_is_weakened(text: str, offset: int) -> bool:
-    """Decide weakening from one bounded contract item and lead-in."""
+    """Decide weakening from the contract's own block, not from line positions.
+
+    The document is parsed into blank-line separated blocks and, inside a block,
+    into Markdown list items.  Exactly three things can weaken the contract:
+
+    1. its own item says so;
+    2. the sibling item immediately before it explicitly scopes the rule that
+       follows (a bare advisory sibling is not a weakening of this contract);
+    3. the block immediately before its block scopes it — a preceding list must
+       explicitly reference the following rule, while standalone prose weakens
+       on a bare weakening term.
+
+    Nothing here inspects indentation or walks line offsets, so reflowing the
+    surrounding Markdown cannot change the verdict.
+    """
 
     lines = text.splitlines()
     line_index = text.count("\n", 0, offset)
-    start = line_index
-    current_is_item = bool(MARKDOWN_LIST_ITEM.match(lines[start]))
-    if not current_is_item:
-        while (
-            start > 0
-            and lines[start - 1].strip()
-            and not MARKDOWN_LIST_ITEM.match(lines[start - 1])
-        ):
-            start -= 1
-    end = line_index + 1
-    while end < len(lines) and lines[end].strip():
-        if MARKDOWN_LIST_ITEM.match(lines[end]):
-            break
-        end += 1
-    item = "\n".join(lines[start:end])
-    if ENGINEERING_WEAKENING.search(item):
-        return True
-
-    # A contract may be either the next sibling or the lazy continuation of an
-    # immediately preceding item.  Include that item only when it explicitly
-    # scopes the following rule; generic advisory prose in a sibling is not a
-    # weakening of this contract.
-    prior_item_end = start
-    prior_item_start = prior_item_end - 1
-    while prior_item_start >= 0 and lines[prior_item_start].strip():
-        if MARKDOWN_LIST_ITEM.match(lines[prior_item_start]):
-            candidate = "\n".join(lines[prior_item_start:prior_item_end])
-            if _explicit_weakening_lead_in(candidate):
-                return True
-            break
-        prior_item_start -= 1
-
-    # A standalone lead-in can scope a complete list rather than only its
-    # first item, so inspect the prose block immediately before that list.
-    lead_anchor = start
-    if current_is_item:
-        while lead_anchor > 0 and lines[lead_anchor - 1].strip():
-            previous = lines[lead_anchor - 1]
-            if MARKDOWN_LIST_ITEM.match(previous) or previous[:1].isspace():
-                lead_anchor -= 1
-                continue
-            break
-    prior = lead_anchor - 1
-    while prior >= 0 and not lines[prior].strip():
-        prior -= 1
-    if prior < 0:
-        return False
-    prior_start = prior
-    while prior_start > 0 and lines[prior_start - 1].strip():
-        prior_start -= 1
-    candidate = "\n".join(lines[prior_start : prior + 1])
-    if any(MARKDOWN_LIST_ITEM.match(line) for line in candidate.splitlines()):
-        return _explicit_weakening_lead_in(candidate)
-    return bool(STANDALONE_ENGINEERING_WEAKENING.search(candidate))
+    blocks = _split_blocks(lines)
+    for position, (start, block) in enumerate(blocks):
+        if not start <= line_index < start + len(block):
+            continue
+        items = _split_items(block)
+        cursor = start
+        for item_position, item in enumerate(items):
+            if cursor <= line_index < cursor + len(item):
+                if ENGINEERING_WEAKENING.search("\n".join(item)):
+                    return True
+                if item_position and _explicit_weakening_lead_in(
+                    "\n".join(items[item_position - 1])
+                ):
+                    return True
+                break
+            cursor += len(item)
+        if not position:
+            return False
+        prior = blocks[position - 1][1]
+        candidate = "\n".join(prior)
+        if _is_list_block(prior):
+            return _explicit_weakening_lead_in(candidate)
+        return bool(STANDALONE_ENGINEERING_WEAKENING.search(candidate))
+    return False
 
 
 def engineering_discipline_issues(agents: str, claude: str) -> list[str]:

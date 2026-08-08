@@ -136,10 +136,32 @@ def _request(
 def _assert_frozen_topology(
     meta: Mapping[str, Any], request: ReviewOperationRequest
 ) -> None:
-    """Validate the frozen topology after finalization route selection."""
+    """Validate the frozen topology after finalization route selection.
+
+    This is the enforcement boundary for RC4 evidence E1.  A review-enabled v4
+    task must bind its compiled topology before any lane is launched; a missing
+    binding used to return silently here, which meant an unbound task launched
+    lanes with no digest to compare against.  Records that predate the field
+    stay readable everywhere else — ``task_contract`` still normalizes them —
+    but they may not start a review.
+    """
 
     frozen = meta.get("review_topology")
     if not isinstance(frozen, Mapping):
+        review = meta.get("review_policy")
+        mode = review.get("mode") if isinstance(review, Mapping) else None
+        # A current-checkout review synthesizes its own metadata at launch and
+        # has no dispatch record in which a topology could have been frozen, so
+        # the requirement applies to dispatched tasks only.
+        if (
+            meta.get("version") == 4
+            and mode in {"simple", "deep", "full"}
+            and meta.get("lifecycle") != "current-checkout"
+        ):
+            raise TaskReviewError(
+                "review-enabled v4 task metadata must bind review_topology "
+                "before a review lane is launched"
+            )
         return
     expected_sha256 = str(frozen.get("sha256") or "")
     expected_payload = frozen.get("payload")

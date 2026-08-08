@@ -49,15 +49,34 @@ from harness.ephemeral_provider import (  # noqa: E402
 )
 from harness.reconciliation import reconcile  # noqa: E402
 from harness.runtime_worker_summary import RuntimeWorkerSummaryMixin  # noqa: E402
+from harness.provider_events import EVENT_KINDS as PROVIDER_EVENT_KINDS  # noqa: E402
 from harness.state_machine import TERMINAL, TRANSITIONS, transition  # noqa: E402
 from harness.store import OperationStore, StoreError  # noqa: E402
+from rc3_release_disposition import (  # noqa: E402
+    DispositionError,
+    _bytes as _release_bytes,
+    _matches_boundary_pointer as _matches_release_pointer,
+    _sha256 as _release_sha256,
+)
 from review_contract import VERDICTS  # noqa: E402
 from wiki_summary_contract import WikiSummaryError, validate_summary  # noqa: E402
 
 
 MANIFEST_PATH = ROOT / "config/lifecycle-transition-v1.json"
 SCHEMA_PATH = ROOT / "schemas/lifecycle-transition-certificate-v1.schema.json"
-DENOMINATOR_SOURCE = "scripts/harness/state_machine.py"
+#: Every production module that owns part of the certified denominator.  States
+#: and edges come from the state machine; attention reasons from the contracts;
+#: callback kinds from the broker; provider event kinds from the provider-event
+#: contract; review verdicts from the review contract.  The certificate hashes
+#: all of them, so a change to any owner invalidates the published digest.
+DENOMINATOR_SOURCES = (
+    "scripts/harness/callbacks.py",
+    "scripts/harness/contracts.py",
+    "scripts/harness/provider_events.py",
+    "scripts/harness/state_machine.py",
+    "scripts/review_contract.py",
+)
+DENOMINATOR_SOURCE = ",".join(DENOMINATOR_SOURCES)
 MANIFEST_ID = "lifecycle-transition-v1"
 MAX_MANIFEST_BYTES = 262_144
 EDGE_CLASSES = frozenset(
@@ -73,10 +92,15 @@ EDGE_CLASSES = frozenset(
     }
 )
 STATE_ROLES = frozenset({"initial", "active", "attention", "terminal"})
+#: Event groups whose vocabulary is owned by a production module.  Each name
+#: maps to exactly one owner in DENOMINATOR_SOURCE; nothing here is read from
+#: tests.  The deterministic simulator's scenario verbs are deliberately NOT in
+#: this tuple: they are a fault-injection DSL that production does not own, so
+#: they are declared separately as `simulator_scenario_actions` and
+#: cross-checked against the simulator by the test suite.
 EVENT_GROUPS = (
     "attention_reasons",
     "callback_kinds",
-    "entry_point_actions",
     "provider_event_kinds",
     "review_verdicts",
 )
@@ -129,6 +153,7 @@ def load_manifest(path: Path) -> dict[str, Any]:
         "excluded_transports",
         "states",
         "events",
+        "simulator_scenario_actions",
         "supported_edges",
         "forbidden_edges",
         "cases",
@@ -145,6 +170,7 @@ def load_manifest(path: Path) -> dict[str, Any]:
         raise CertificateError("transition manifest edge classes are invalid")
     _validate_manifest_states(value["states"])
     _validate_manifest_events(value["events"])
+    _validate_scenario_actions(value["simulator_scenario_actions"])
     _validate_manifest_edges(value["supported_edges"], value["forbidden_edges"])
     _validate_manifest_cases(value["cases"])
     return value
@@ -161,6 +187,40 @@ def _validate_manifest_states(states: object) -> None:
         if item["role"] not in STATE_ROLES or state in seen:
             raise CertificateError(f"manifest state {state} is invalid or repeated")
         seen.add(state)
+
+
+def _denominator_digest(root: Path) -> str:
+    """Bind every denominator owner into one digest, in declared order."""
+
+    digest = hashlib.sha256()
+    for relative in DENOMINATOR_SOURCES:
+        digest.update(relative.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(bytes.fromhex(_tracked_sha256(root, relative)))
+    return digest.hexdigest()
+
+
+def _validate_scenario_actions(actions: object) -> None:
+    """Validate the declared simulator vocabulary without importing the simulator.
+
+    These verbs are owned by the deterministic simulator, not by production, so
+    the certificate only checks that the declaration is well formed.  Equality
+    with ``lifecycle_simulator_oracle.ACTIONS`` is asserted by the test suite,
+    which is allowed to import the simulator; keeping that cross-check out of
+    this module is what prevents a production script from depending on tests.
+    """
+
+    if (
+        not isinstance(actions, list)
+        or not actions
+        or len(set(actions)) != len(actions)
+        or sorted(actions) != list(actions)
+    ):
+        raise CertificateError(
+            "simulator scenario actions must be a sorted unique array"
+        )
+    for action in actions:
+        _identifier(action, "simulator scenario action")
 
 
 def _validate_manifest_events(events: object) -> None:
@@ -244,7 +304,6 @@ def production_events() -> dict[str, list[str]]:
     return {
         "attention_reasons": sorted(item.value for item in AttentionReason),
         "callback_kinds": sorted(_production_callback_kinds()),
-        "entry_point_actions": sorted(_entry_point_actions()),
         "provider_event_kinds": sorted(_production_provider_event_kinds()),
         "review_verdicts": sorted(VERDICTS),
     }
@@ -265,17 +324,9 @@ def _production_callback_kinds() -> set[str]:
 
 
 def _production_provider_event_kinds() -> set[str]:
-    sys.path.insert(0, str(ROOT / "tests" / "harness"))
-    from lifecycle_simulator import DeterministicEventSource  # noqa: PLC0415
+    """Read the kinds the production provider-event contract actually admits."""
 
-    return set(DeterministicEventSource.EVENT_KINDS)
-
-
-def _entry_point_actions() -> set[str]:
-    sys.path.insert(0, str(ROOT / "tests" / "harness"))
-    from lifecycle_simulator_oracle import ACTIONS  # noqa: PLC0415
-
-    return set(ACTIONS)
+    return set(PROVIDER_EVENT_KINDS)
 
 
 def _envelope(kind: str, payload: Mapping[str, object]) -> CallbackEnvelope:
@@ -495,7 +546,15 @@ def witness_summary_stability() -> tuple[tuple[str, ...], dict[str, Any]]:
     }
 
 
-def witness_release_disposition() -> tuple[tuple[str, ...], dict[str, Any]]:
+def witness_summary_disposition() -> tuple[tuple[str, ...], dict[str, Any]]:
+    """Prove the Wiki-summary contract classifies outcome dispositions exactly.
+
+    This witnesses the *summary* schema, not the release boundary: it varies
+    ``outcome_disposition`` against the declared evidence set and requires two
+    exact acceptances and two exact rejections.  The release boundary is
+    witnessed separately by ``witness_release_boundary``.
+    """
+
     declared = {"evidence-a", "evidence-b"}
     accepted = 0
     rejected = 0
@@ -522,10 +581,87 @@ def witness_release_disposition() -> tuple[tuple[str, ...], dict[str, Any]]:
         else:
             accepted += 1
     if accepted != 2 or rejected != 2:
-        raise CertificateError("release disposition classification is no longer exact")
+        raise CertificateError("summary disposition classification is no longer exact")
     return ("wiki_summary_contract.validate_summary",), {
         "accepted": accepted,
         "rejected": rejected,
+    }
+
+
+def witness_release_boundary(root: Path) -> tuple[tuple[str, ...], dict[str, Any]]:
+    """Prove the release boundary rejects its three declared escape edges.
+
+    RC4 evidence E5 and E7 claim the release boundary refuses a missing digest,
+    a byte substitution, and a symlink escape.  This witness exercises the exact
+    production predicates behind those claims — it does not restate them.
+    """
+
+    boundary = root / "release-boundary"
+    (boundary / "nested").mkdir(parents=True)
+    artifact = boundary / "nested" / "evidence.json"
+    payload = b'{"schema_version": 1, "evidence": "exact"}\n'
+    artifact.write_bytes(payload)
+    exact_digest = _release_sha256(payload)
+
+    # 1. Missing digest: the pointed-at artifact does not exist at all.
+    missing = boundary / "nested" / "absent.json"
+    try:
+        _release_bytes(missing, "release evidence")
+    except DispositionError:
+        missing_rejected = True
+    else:
+        missing_rejected = False
+
+    # 2. Byte substitution: one byte changes, so the recorded digest no longer
+    #    binds the artifact.
+    artifact.write_bytes(payload.replace(b"exact", b"other"))
+    substituted_digest = _release_sha256(_release_bytes(artifact, "release evidence"))
+    substitution_rejected = substituted_digest != exact_digest
+    artifact.write_bytes(payload)
+
+    # 3. Symlink escape: a symlinked path component must be refused even when it
+    #    resolves to a real file inside the root.
+    outside = root / "outside.json"
+    outside.write_bytes(payload)
+    link = boundary / "linked.json"
+    try:
+        link.symlink_to(outside)
+    except (OSError, NotImplementedError):
+        symlink_rejected = None
+    else:
+        symlink_rejected = not _matches_release_pointer(
+            boundary, link, "linked.json"
+        )
+
+    contained = _matches_release_pointer(
+        boundary, artifact, "nested/evidence.json"
+    )
+    traversal_rejected = not _matches_release_pointer(
+        boundary, artifact, "../outside.json"
+    )
+    absolute_rejected = not _matches_release_pointer(
+        boundary, artifact, str(artifact)
+    )
+
+    if not (
+        missing_rejected
+        and substitution_rejected
+        and symlink_rejected is not False
+        and contained
+        and traversal_rejected
+        and absolute_rejected
+    ):
+        raise CertificateError("the release boundary no longer rejects an escape")
+    return (
+        "rc3_release_disposition._bytes",
+        "rc3_release_disposition._matches_boundary_pointer",
+    ), {
+        "missing_digest_rejected": missing_rejected,
+        "byte_substitution_rejected": substitution_rejected,
+        "symlink_escape_rejected": symlink_rejected,
+        "parent_traversal_rejected": traversal_rejected,
+        "absolute_pointer_rejected": absolute_rejected,
+        "contained_pointer_accepted": contained,
     }
 
 
@@ -655,12 +791,19 @@ WITNESSES: dict[str, Callable[..., tuple[tuple[str, ...], dict[str, Any]]]] = {
     "review-changes-requested-route": witness_review_changes_requested,
     "review-blocked-attention-route": witness_review_blocked_fix_loop,
     "summary-two-read-stability": witness_summary_stability,
-    "release-disposition-classification": witness_release_disposition,
+    "summary-disposition-classification": witness_summary_disposition,
+    "release-boundary-rejection": witness_release_boundary,
     "callback-one-shot-order": witness_callback_order,
     "durable-transition-crash-point": witness_crash_point,
     "exact-surface-cleanup": witness_exact_cleanup,
 }
-ROOTED_WITNESSES = frozenset({"callback-one-shot-order", "durable-transition-crash-point"})
+ROOTED_WITNESSES = frozenset(
+    {
+        "callback-one-shot-order",
+        "durable-transition-crash-point",
+        "release-boundary-rejection",
+    }
+)
 
 
 def run_cases(
@@ -749,7 +892,7 @@ def compile_certificate(
         "manifest_id": MANIFEST_ID,
         "manifest_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
         "denominator_source": DENOMINATOR_SOURCE,
-        "denominator_source_sha256": _tracked_sha256(root, DENOMINATOR_SOURCE),
+        "denominator_source_sha256": _denominator_digest(root),
         "exact_head_sha": exact_head_sha(root),
         "excluded_transports": list(EXCLUDED_TRANSPORTS),
         "states": states,

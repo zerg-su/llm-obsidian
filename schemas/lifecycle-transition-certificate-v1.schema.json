@@ -31,7 +31,7 @@
     },
     "denominator_source": {
       "type": "string",
-      "const": "scripts/harness/state_machine.py"
+      "const": "scripts/harness/callbacks.py,scripts/harness/contracts.py,scripts/harness/provider_events.py,scripts/harness/state_machine.py,scripts/review_contract.py"
     },
     "denominator_source_sha256": {
       "type": "string"
@@ -43,7 +43,9 @@
       "type": "array",
       "items": {
         "type": "string",
-        "enum": ["research"]
+        "enum": [
+          "research"
+        ]
       }
     },
     "states": {
@@ -93,7 +95,12 @@
     "events": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["declared", "production", "missing", "extra"],
+      "required": [
+        "declared",
+        "production",
+        "missing",
+        "extra"
+      ],
       "properties": {
         "declared": {
           "type": "integer"
@@ -225,7 +232,8 @@
               "crash-point",
               "finalization",
               "fix-loop",
-              "release-disposition"
+              "release-boundary",
+              "summary-disposition"
             ]
           },
           "witness": {
@@ -252,7 +260,10 @@
     },
     "verdict": {
       "type": "string",
-      "enum": ["complete", "incomplete"]
+      "enum": [
+        "complete",
+        "incomplete"
+      ]
     }
   }
 }

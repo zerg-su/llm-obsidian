@@ -11,7 +11,7 @@ import subprocess
 import sys
 from collections import Counter
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -46,14 +46,26 @@ _INDEPENDENT_ROLE = _INDEPENDENT_ROUTE["model"]
 _REVIEW_PROFILE = load_profiles(ROOT / "config/verification-profiles.toml")[
     "scoped"
 ]
+_PRIMARY_ROUTE = _ROUTING.finalization_route("finalization-primary")
 ROLE_AXES = {
     _INDEPENDENT_ROLE: "anthropic-holistic",
     "independent-configured": "openai-holistic",
+    "holistic-primary": "anthropic-holistic",
 }
 ROLE_ROUTES = {
     _INDEPENDENT_ROLE: _INDEPENDENT_ROUTE,
     "independent-configured": _ROUTING.reviewer_default("codex", "simple"),
+    "holistic-primary": _PRIMARY_ROUTE,
 }
+#: The exact release review role set each release is allowed to bind.  RC3 ran
+#: two configured holistic roles; RC4's approved boundary is one Simple holistic
+#: session, so requiring two roles would make a valid RC4 disposition impossible.
+#: This is a release-scoped vocabulary, not a new lane, provider, or model.
+RELEASE_ROLE_SETS = {
+    "2.6.6-rc3": frozenset({_INDEPENDENT_ROLE, "independent-configured"}),
+    "2.6.6-rc4": frozenset({"holistic-primary"}),
+}
+DEFAULT_RELEASE = "2.6.6-rc3"
 SCHEMA_PATH = ROOT / "schemas/rc3-release-disposition-v1.schema.json"
 
 
@@ -324,16 +336,27 @@ def _review_bundle(
     }
 
 
+def _release_identity(spec: Mapping[str, Any]) -> str:
+    """Resolve which release vocabulary this manifest binds."""
+
+    release = spec.get("release", DEFAULT_RELEASE)
+    if release not in RELEASE_ROLE_SETS:
+        raise DispositionError("release identity is not a supported release")
+    return str(release)
+
+
 def _reviews(
     spec_path: Path, subject: str, boundary_input_sha256: str
-) -> list[dict[str, Any]]:
+) -> tuple[str, list[dict[str, Any]]]:
     spec, _raw = _json(spec_path, "release review manifest")
     rows = spec.get("reviews")
+    release = _release_identity(spec)
+    expected_roles = RELEASE_ROLE_SETS[release]
     if (
         spec.get("schema_version") != 1
         or spec.get("subject_head_sha") != subject
         or not isinstance(rows, list)
-        or len(rows) != 2
+        or len(rows) != len(expected_roles)
     ):
         raise DispositionError("release review manifest is invalid")
     base = spec_path.expanduser().resolve().parent
@@ -350,9 +373,11 @@ def _reviews(
                 boundary_input_sha256,
             )
         )
-    if {row["role"] for row in values} != set(ROLE_AXES):
-        raise DispositionError("both configured release review roles are required")
-    return sorted(values, key=lambda row: row["role"])
+    if {row["role"] for row in values} != set(expected_roles):
+        raise DispositionError(
+            f"{release} requires exactly its declared release review roles"
+        )
+    return release, sorted(values, key=lambda row: row["role"])
 
 
 def _finding_evidence(
@@ -460,7 +485,9 @@ def compile_disposition(
     )
     gate = _gate(gate_receipt_path, subject)
     attempts = _attempts(attempt_ledger_root, gate, subject)
-    reviews = _reviews(review_manifest_path, subject, boundary.input_sha256)
+    release, reviews = _reviews(
+        review_manifest_path, subject, boundary.input_sha256
+    )
     review_finding_ids = {
         finding_id for review in reviews for finding_id in review["finding_ids"]
     }
@@ -490,7 +517,7 @@ def compile_disposition(
     }
     result = {
         "schema_version": 1,
-        "release": "2.6.6-rc3",
+        "release": release,
         **inputs,
         "input_sha256": _canonical_payload_sha256(inputs),
         "outcome": "blocked" if blocked else "approved",

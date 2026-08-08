@@ -266,12 +266,9 @@ with tempfile.TemporaryDirectory(prefix="review-resolution-outbox.") as raw:
         gate=gate,
         run=run,
         ready=ready,
-        preset=preset,
-        context=context,
         worktree=base,
         vault=base,
         runtime_root=runtime_root,
-        exact_attempt=True,
     )
     changes_state = gate.read()
     callback_bytes = callback.read_bytes()
@@ -656,12 +653,9 @@ with tempfile.TemporaryDirectory(prefix="review-prefix-ingestion.") as raw:
         gate=gate,
         run=run,
         ready=first_ready,
-        preset=preset,
-        context=context,
         worktree=base,
         vault=base,
         runtime_root=runtime_root,
-        exact_attempt=True,
     )
     prefix_state = gate.read()
     check(
@@ -686,12 +680,9 @@ with tempfile.TemporaryDirectory(prefix="review-prefix-ingestion.") as raw:
         gate=gate,
         run=recovered,
         ready=final_ready,
-        preset=preset,
-        context=context,
         worktree=base,
         vault=base,
         runtime_root=runtime_root,
-        exact_attempt=True,
     )
     terminal_state = gate.read()
     check(
@@ -858,14 +849,9 @@ for mode, expected_lanes in (("simple", 1), ("deep", 2), ("full", 4)):
                 gate=gate,
                 run=recovered,
                 ready=ready,
-                preset=ReviewPreset.from_flags(
-                    deep=mode == "deep", full=mode == "full"
-                ),
-                context=context,
                 worktree=base,
                 vault=base,
                 runtime_root=runtime_root,
-                exact_attempt=True,
             )
             state = gate.read()
             terminal = prefix == expected_lanes
@@ -896,14 +882,9 @@ for mode, expected_lanes in (("simple", 1), ("deep", 2), ("full", 4)):
                 gate=gate,
                 run=recovered,
                 ready=duplicate_ready,
-                preset=ReviewPreset.from_flags(
-                    deep=mode == "deep", full=mode == "full"
-                ),
-                context=context,
                 worktree=base,
                 vault=base,
                 runtime_root=runtime_root,
-                exact_attempt=True,
             )
             check(
                 f"{mode} duplicate prefix {prefix} performs zero effects",

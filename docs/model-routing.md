@@ -21,7 +21,7 @@ runtime fails closed. There is no silent alias substitution or effort coercion.
 | Dispatch | Inherit the exact current runtime/model/effort. |
 | Daily | Inherit current runtime/model; use the configured daily effort. |
 | Simple review | One provider-prefixed holistic lane on the selected route. With no override it inherits the exact current route; `--cross-model` selects the opposite runtime's simple profile. |
-| Deep review | With no model/runtime override, independent `anthropic-holistic` and `openai-holistic` lanes use the configured deep routes. An explicit registered runtime/model override keeps both provider-prefixed intent and engineering lanes on that one model. |
+| Deep review | Standalone, with no model/runtime override, this compiles independent `anthropic-holistic` and `openai-holistic` lanes on the configured deep routes. Inside a finalization cycle the independent lane is gated: cycles 1–3 compile the primary route only, and cycles 4–5 add the independent route only against fresh provider availability evidence. An explicit registered runtime/model override keeps both provider-prefixed intent and engineering lanes on that one model. |
 | Full review | Explicit `--full` only: four specialist lanes form the `{anthropic, openai} × {intent, engineering}` grid. Runtime/model overrides fail before launch and recommend single-model Deep; Full is never inferred. |
 | Protected research | Stay Codex-isolated. From Codex inherit current model/effort; from Claude use the central Codex route. |
 | Unsafe research | After an explicit unsafe request, inherit the full current route and security context; warn once and do not run a second synthesis. |

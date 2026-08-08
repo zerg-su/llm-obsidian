@@ -200,6 +200,8 @@ test-docs:
 	@python3 tests/test_rc3_documentation.py
 	@echo "=== test_rc4_documentation.py ==="
 	@python3 tests/test_rc4_documentation.py
+	@echo "=== test_rc4_opus_findings.py ==="
+	@python3 tests/test_rc4_opus_findings.py
 
 eval-smoke:
 	@python3 scripts/agent-evals.py smoke

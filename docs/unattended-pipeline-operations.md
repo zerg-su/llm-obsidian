@@ -89,6 +89,67 @@ Completed worktrees already carrying the reap completion marker retain their
 existing finalization treatment. Live or uncertain 2.2.x state is never silently
 adopted.
 
+### The one same-HEAD review retry
+
+A terminated review attempt at an unchanged HEAD normally replays its stored
+receipt rather than starting again — that is what stops a review from being
+re-run until it returns a preferred verdict. There is exactly one exception, and
+it is deliberately narrow: an attempt that terminated *before* the provider was
+launched owns no durable effect, so it may be superseded at the same HEAD.
+
+The predicate lives in one place, `scripts/review_zero_effect.py`, and is used by
+every consumer (the current-review identity check, the harness recovery
+classifier, and the attempt retry). A gate is zero-effect only when all of the
+following hold:
+
+- `status` is `attention-required`;
+- `lanes` is empty — no reviewer lane was ever bound;
+- `round_results`, `final_results`, and `evidence` are all empty;
+- the attempt is `terminal` with result `attention-required` and no
+  `lane_results`.
+
+An absent mapping and an empty mapping count the same; any non-empty value is an
+effect. Owning no durable effect is necessary but not sufficient — the caller
+must additionally prove no operation row exists before superseding the lineage,
+and a zero-lane retry that finds any callback artifact fails closed. Because the
+predicate has one owner, no weaker same-HEAD admission path can be added beside
+it without changing that module.
+
+### Unconfirmed initial provider input
+
+Delivering the first prompt is two separate facts: the text was pasted, and the
+provider actually started a turn. A returned keystroke is transport, so the
+worker holds its reserved send until the provider crosses a semantic boundary —
+native Claude/Codex activity on screen, a typed artifact appearing at the
+callback pointer, or an exact session checkpoint. That wait is bounded by an
+observation budget (`initial_start_observation_limit`, threaded into
+`await_initial_start_acknowledged`); the worker polls a fixed number of times
+rather than waiting indefinitely, so a wedged surface fails fast instead of
+holding the lane.
+
+When the budget is exhausted without a semantic start, the worker contains the
+provider, marks the operation `attention-required`, and writes the exit status
+`input-unconfirmed` with exit code `2`. That status means exactly one thing: the
+prompt may or may not have been delivered, and the harness refuses to guess.
+Nothing is retried automatically, because a blind resend can double-deliver a
+prompt that did start a turn.
+
+Operator recovery, in order:
+
+1. Inspect the surface with `scripts/harness-cli.py inspect` and read the exit
+   record. `input-unconfirmed` never means the model produced output.
+2. Look at the provider surface itself. If a turn is visibly running, let it
+   finish and reconcile — do not resend.
+3. If no turn started, reconcile the operation
+   (`scripts/harness-cli.py reconcile`) so the reserved send is released, then
+   resume. Reconciliation is what makes the resend safe.
+4. If the surface is unusable, cancel the operation and dispatch again. The
+   callback pointer is idempotent, so a genuinely undelivered prompt loses
+   nothing.
+
+`input-unconfirmed` is a containment outcome, not a failure of the reviewed
+work; it never advances the review gate and never consumes a finalization cycle.
+
 ## Protected research shadow parity
 
 Protected research is the shadow-validation example for staged compiled

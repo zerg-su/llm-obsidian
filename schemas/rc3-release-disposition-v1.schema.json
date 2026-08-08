@@ -16,17 +16,40 @@
     "blocked_reasons"
   ],
   "properties": {
-    "schema_version": {"type": "integer", "const": 1},
-    "release": {"type": "string", "const": "2.6.6-rc3"},
-    "subject_head_sha": {"type": "string"},
-    "review_boundary_input_sha256": {"type": "string"},
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "release": {
+      "type": "string",
+      "enum": [
+        "2.6.6-rc3",
+        "2.6.6-rc4"
+      ]
+    },
+    "subject_head_sha": {
+      "type": "string"
+    },
+    "review_boundary_input_sha256": {
+      "type": "string"
+    },
     "gate": {
       "type": "object",
-      "required": ["attempt_id", "profile_sha256", "receipt_sha256"],
+      "required": [
+        "attempt_id",
+        "profile_sha256",
+        "receipt_sha256"
+      ],
       "properties": {
-        "attempt_id": {"type": "string"},
-        "profile_sha256": {"type": "string"},
-        "receipt_sha256": {"type": "string"}
+        "attempt_id": {
+          "type": "string"
+        },
+        "profile_sha256": {
+          "type": "string"
+        },
+        "receipt_sha256": {
+          "type": "string"
+        }
       },
       "additionalProperties": false
     },
@@ -41,18 +64,42 @@
         "classification_counts"
       ],
       "properties": {
-        "ledger_sha256": {"type": "string"},
-        "maximum_attempts": {"type": "integer"},
-        "attempts_consumed": {"type": "integer"},
-        "attempts_remaining": {"type": "integer"},
-        "state": {"type": "string", "enum": ["available", "exhausted"]},
+        "ledger_sha256": {
+          "type": "string"
+        },
+        "maximum_attempts": {
+          "type": "integer"
+        },
+        "attempts_consumed": {
+          "type": "integer"
+        },
+        "attempts_remaining": {
+          "type": "integer"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "available",
+            "exhausted"
+          ]
+        },
         "classification_counts": {
           "type": "object",
-          "required": ["published", "test-only", "unpublished"],
+          "required": [
+            "published",
+            "test-only",
+            "unpublished"
+          ],
           "properties": {
-            "published": {"type": "integer"},
-            "test-only": {"type": "integer"},
-            "unpublished": {"type": "integer"}
+            "published": {
+              "type": "integer"
+            },
+            "test-only": {
+              "type": "integer"
+            },
+            "unpublished": {
+              "type": "integer"
+            }
           },
           "additionalProperties": false
         }
@@ -78,36 +125,100 @@
           "finding_ids"
         ],
         "properties": {
-          "role": {"type": "string", "enum": ["fable", "independent-configured"]},
-          "axis": {"type": "string", "enum": ["anthropic-holistic", "openai-holistic"]},
-          "runtime": {"type": "string", "enum": ["claude", "codex"]},
-          "model": {"type": "string"},
-          "effort": {"type": "string"},
-          "review_id": {"type": "string"},
-          "callback_id": {"type": "string"},
-          "verdict": {"type": "string", "enum": ["approve", "changes-requested", "blocked"]},
-          "profile_sha256": {"type": "string"},
-          "review_boundary_input_sha256": {"type": "string"},
-          "receipt_sha256": {"type": "string"},
-          "finding_ids": {"type": "array", "items": {"type": "string"}}
+          "role": {
+            "type": "string",
+            "enum": [
+              "fable",
+              "holistic-primary",
+              "independent-configured"
+            ]
+          },
+          "axis": {
+            "type": "string",
+            "enum": [
+              "anthropic-holistic",
+              "openai-holistic"
+            ]
+          },
+          "runtime": {
+            "type": "string",
+            "enum": [
+              "claude",
+              "codex"
+            ]
+          },
+          "model": {
+            "type": "string"
+          },
+          "effort": {
+            "type": "string"
+          },
+          "review_id": {
+            "type": "string"
+          },
+          "callback_id": {
+            "type": "string"
+          },
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "approve",
+              "changes-requested",
+              "blocked"
+            ]
+          },
+          "profile_sha256": {
+            "type": "string"
+          },
+          "review_boundary_input_sha256": {
+            "type": "string"
+          },
+          "receipt_sha256": {
+            "type": "string"
+          },
+          "finding_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
         },
         "additionalProperties": false
       }
     },
     "finding_evidence": {
       "type": "object",
-      "required": ["receipt_sha256", "findings"],
+      "required": [
+        "receipt_sha256",
+        "findings"
+      ],
       "properties": {
-        "receipt_sha256": {"type": "string"},
+        "receipt_sha256": {
+          "type": "string"
+        },
         "findings": {
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["finding_id", "disposition", "evidence_sha256"],
+            "required": [
+              "finding_id",
+              "disposition",
+              "evidence_sha256"
+            ],
             "properties": {
-              "finding_id": {"type": "string"},
-              "disposition": {"type": "string", "enum": ["fixed", "accepted-deviation"]},
-              "evidence_sha256": {"type": "string"}
+              "finding_id": {
+                "type": "string"
+              },
+              "disposition": {
+                "type": "string",
+                "enum": [
+                  "fixed",
+                  "accepted-deviation"
+                ]
+              },
+              "evidence_sha256": {
+                "type": "string"
+              }
             },
             "additionalProperties": false
           }
@@ -117,16 +228,39 @@
     },
     "accepted_deviations": {
       "type": "object",
-      "required": ["receipt_sha256", "deviation_ids"],
+      "required": [
+        "receipt_sha256",
+        "deviation_ids"
+      ],
       "properties": {
-        "receipt_sha256": {"type": "string"},
-        "deviation_ids": {"type": "array", "items": {"type": "string"}}
+        "receipt_sha256": {
+          "type": "string"
+        },
+        "deviation_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
       },
       "additionalProperties": false
     },
-    "input_sha256": {"type": "string"},
-    "outcome": {"type": "string", "enum": ["approved", "blocked"]},
-    "blocked_reasons": {"type": "array", "items": {"type": "string"}}
+    "input_sha256": {
+      "type": "string"
+    },
+    "outcome": {
+      "type": "string",
+      "enum": [
+        "approved",
+        "blocked"
+      ]
+    },
+    "blocked_reasons": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
   },
   "additionalProperties": false
 }

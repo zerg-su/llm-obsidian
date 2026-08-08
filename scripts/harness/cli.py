@@ -10,6 +10,11 @@ from pathlib import Path
 from time import time
 from typing import Sequence
 
+from review_zero_effect import (
+    EXACT_HEAD_ATTEMPT_PROTOCOL,
+    zero_effect_gate_shape,
+)
+
 from .adapters.cmux import CmuxAdapter
 from .adapters.process import ProcessAdapter
 from .contracts import (
@@ -353,18 +358,8 @@ def _review_recovery_kind(
     ):
         return "accepted-exact-callbacks"
     terminal = attempt.get("terminal") if isinstance(attempt, dict) else None
-    if (
-        gate.get("status") == "attention-required"
-        and gate.get("execution_protocol") == "exact-head-attempt-v1"
-        and gate.get("lanes") == []
-        and gate.get("round_results") in ({}, None)
-        and gate.get("final_results") in ({}, None)
-        and gate.get("evidence") in ({}, None)
-        and isinstance(attempt, dict)
-        and attempt.get("status") == "terminal"
-        and isinstance(terminal, dict)
-        and terminal.get("result") == "attention-required"
-        and terminal.get("lane_results") == []
+    if zero_effect_gate_shape(
+        gate, execution_protocol=EXACT_HEAD_ATTEMPT_PROTOCOL
     ):
         return "zero-lane-preflight"
     if (

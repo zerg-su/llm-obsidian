@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "release": "2.6.6-rc4",
+  "purpose": "Bounded deviations accepted while dispositioning the fifteen findings of Opus release review review-3e2e0ab62748d463a7cf2d53. Each row records what was not done in the most direct form, why, and what risk remains. This artifact is distinct from every prior release's deviations file and from the disposition-input deviations record consumed by scripts/rc3_release_disposition.py.",
+  "deviations": [
+    {
+      "id": "D-266-RC4-01",
+      "status": "accepted",
+      "owner": "coordinator",
+      "scope": "orphaned-review-gate-method",
+      "finding_ids": ["rc4-complete-ready-results-dead-half"],
+      "authority": "minimal-fix-boundary",
+      "rationale": "The finding's scope is the production-dead half of _complete_ready_results, which now has one exact-HEAD completion path and no longer reaches ReviewGateController.defer_round_for_resolution. The gate method itself is retained rather than deleted: the awaiting-resolution state it writes is still produced by review_gate_decisions.py, and six scenarios in tests/harness/test_review_gate.py cover that machinery. Removing it would delete live coverage of reachable behavior for no correctness gain and would widen the change well past the finding.",
+      "residual_risk": "ReviewGateController exposes one method with no production caller. A future reader may mistake it for a live path. Mitigated by the regression assertion that the exact-HEAD completion path never references it, so it cannot silently return to production without failing tests.",
+      "remediation": "Audit the awaiting-resolution reader/writer set as a whole in a later release and retire the method together with any other unreachable resolution machinery, rather than piecemeal."
+    },
+    {
+      "id": "D-266-RC4-02",
+      "status": "accepted",
+      "owner": "coordinator",
+      "scope": "frozen-topology-enforcement-point",
+      "finding_ids": ["rc4-frozen-topology-optional-fail-open"],
+      "authority": "task-contract-read-only-metadata",
+      "rationale": "The finding permits either covering current-checkout behavior or narrowing E1 truthfully. The first option requires adding review_topology to .task-meta.json, which this task's contract designates read-only, so it is unavailable. Enforcement was instead moved to the point where the absence actually matters: task_review_context._assert_frozen_topology now fails closed for review-enabled v4 metadata, so an unbound record cannot launch a review lane. task_contract.normalize stays tolerant so records written before the field existed remain inspectable, reapable, and reportable. RC4-E1 is reworded to claim exactly that.",
+      "residual_risk": "A v4 review-enabled record with no topology still normalizes, so a reader of task metadata alone cannot tell whether a topology digest exists. The gap is bounded: such a record cannot start a review, which is the only operation the digest protects.",
+      "remediation": "When metadata is next writable in the same change, add review_topology to outstanding v4 records and require it in task_contract.normalize with an explicit legacy marker."
+    },
+    {
+      "id": "D-266-RC4-03",
+      "status": "accepted",
+      "owner": "coordinator",
+      "scope": "instruction-weakening-rule-shape",
+      "finding_ids": ["rc4-instruction-weakening-heuristic-brittle"],
+      "authority": "preserve-existing-regressions",
+      "rationale": "The finding allows a small structural rule or an exact-block rule. The exact-block variant would require declaring a marked contract block in both AGENTS.md and CLAUDE.md, and the existing weakening regressions in tests/test_instruction_lint.py exercise synthetic documents that carry no such markers; adopting markers would have meant rewriting those regressions, which the same finding requires preserving. The structural variant was chosen: the document is parsed into blank-line blocks and Markdown list items, and weakening is decided from the contract's own item, its immediately preceding sibling item, or the block before its block.",
+      "residual_risk": "Weakening is still decided from natural-language regex terms within a bounded structural neighbourhood, so novel phrasing that scopes the contract without using a known weakening term is not detected.",
+      "remediation": "If the vocabulary proves insufficient, introduce an explicit contract block marker in a change that also migrates the regression corpus."
+    },
+    {
+      "id": "D-266-RC4-04",
+      "status": "accepted",
+      "owner": "coordinator",
+      "scope": "simulator-scenario-vocabulary-ownership",
+      "finding_ids": ["rc4-certificate-events-derived-from-tests"],
+      "authority": "production-must-not-import-tests",
+      "rationale": "Four of the five certificate event groups had real production owners and are now read from them, including provider event kinds, which come from scripts/harness/provider_events.py and correctly count seven rather than the simulator's five. The fifth group, the simulator's scenario verbs, has no production owner: verbs such as crash-at, advance-clock, and resource-disappears are a fault-injection DSL that only the deterministic simulator implements. Rather than invent a production module to satisfy the rule, the vocabulary was moved out of the production denominator into a separately named manifest field, simulator_scenario_actions, and its equality with lifecycle_simulator_oracle.ACTIONS is asserted by the test suite, which may import the simulator.",
+      "residual_risk": "The scenario vocabulary is declared in configuration and verified only by the test layer, so a manifest edit paired with a simulator edit could drift without production noticing. Bounded by the certificate test, which also asserts that no simulator verb appears in any production event group.",
+      "remediation": "None planned. The split reflects real ownership; collapsing it would reintroduce a production dependency on tests."
+    }
+  ],
+  "open_questions": [
+    {
+      "id": "Q-266-RC4-01",
+      "scope": "plan-finding-count",
+      "question": "The approved plan's prose says 'fourteen findings' while its Required finding dispositions table contains fifteen distinct rows, none duplicated. All fifteen were reproduced and dispositioned.",
+      "requested_of": "coordinator",
+      "residual_risk": "If the intended scope really was fourteen, one finding was fixed that the operator did not ask for; every such change is additive and regression-backed, so the risk is scope rather than correctness."
+    },
+    {
+      "id": "Q-266-RC4-02",
+      "scope": "release-review-effort",
+      "question": "docs/acceptance/v2.6.6-rc4-release-readiness.md states RC4 reviews run at effort xhigh, while the approved plan's Exact review boundary and .task-meta.json review_policy.effort both state high. The documents were left as they are because which value is authoritative is an operator decision, not a code fact.",
+      "requested_of": "coordinator",
+      "residual_risk": "The release review may run at a different effort than the readiness document advertises."
+    }
+  ]
+}

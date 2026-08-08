@@ -261,6 +261,8 @@ def _callback_wake(
         "Typed current-review callback is ready. Run this exact command: "
         + shlex.join(wake_argv)
     )
+
+
 def _collect_ready_results(
     run: ReviewGateRun,
     runtime_root: Path,

@@ -15,7 +15,6 @@ from harness.review_attempt import (
     LEGACY_CROSS_HEAD_RESUME_DISABLED,
     ReviewAttempt,
     ReviewAttemptError,
-    ReviewAttemptTerminalResult,
 )
 from harness.runtime_sessions import RuntimeSessionManager
 from harness.store import OperationStore, StoreError
@@ -35,8 +34,8 @@ from harness.workflows.review_gate import (
 from harness.workflows.review_gate_attempt import (
     compile_review_attempt_identity,
 )
-from review_resolution import MATERIAL_SEVERITIES
 from review_telemetry import emit_review_event
+from review_zero_effect import zero_effect_terminal_attempt
 from task_review_context import (
     _assert_frozen_topology,
     _callback_path,
@@ -343,10 +342,6 @@ def _start_exact_head_review(
 
 
 
-def _requires_lane_barrier(preset: ReviewPreset) -> bool:
-    return preset.depth in {"deep", "full"}
-
-
 def _ready_result_is_recorded(
     gate: ReviewGateController,
     state: Mapping[str, Any],
@@ -376,64 +371,36 @@ def _ready_result_is_recorded(
     )
 
 
-def _should_defer_ready_results(
-    preset: ReviewPreset,
-    *,
-    purpose: str,
-    has_material: bool,
-    already_awaiting: bool = False,
-) -> bool:
-    return _requires_lane_barrier(preset) and (
-        already_awaiting or (purpose != "release" and has_material)
-    )
-
-
 def _complete_ready_results(
     *,
     gate: ReviewGateController,
     run: ReviewGateRun,
     ready: list[tuple[object, ReviewRound, ReviewResult]],
-    preset: ReviewPreset,
-    context: ReviewContext,
     worktree: Path,
     vault: Path,
     runtime_root: Path,
-    already_awaiting: bool = False, exact_attempt: bool = False,
 ) -> tuple[str, ...]:
-    has_material = any(
-        result.verdict == "changes-requested"
-        and any(
-            finding.severity in MATERIAL_SEVERITIES
-            for finding in result.findings
-        )
-        for _lane, _round, result in ready
-    )
-    defer_resolution = _should_defer_ready_results(
-        preset,
-        purpose=context.purpose,
-        has_material=has_material,
-        already_awaiting=already_awaiting,
-    )
-    ordered = (
-        ready
-        if exact_attempt or defer_resolution or context.purpose != "release"
-        else sorted(ready, key=lambda item: item[2].verdict != "approve")
-    )
+    """Ingest each ready exact-HEAD callback exactly once, in arrival order.
+
+    The exact-HEAD attempt is the only production completion path, so there is
+    one branch here rather than a mode flag.  Results already recorded in the
+    gate are skipped, but their telemetry is still completed: the durable gate
+    transition happens before the events are emitted, so a crash in between
+    would otherwise drop them permanently.  ``_record_accepted_result`` is
+    idempotent — ``_emit_round_telemetry`` keeps a durable marker per event key
+    and returns early once an event has been emitted — so re-running it after a
+    resumed attempt closes that window without duplicating events.
+    """
+
     actions: list[str] = []
-    for lane, round_, result in ordered:
-        if exact_attempt and _ready_result_is_recorded(gate, gate.read(), result):
+    for lane, round_, result in ready:
+        if _ready_result_is_recorded(gate, gate.read(), result):
+            _record_accepted_result(worktree, vault, runtime_root, round_, result)
             continue
-        decision = (
-            gate.complete_attempt_round(run, lane, round_, result)
-            if exact_attempt
-            else gate.defer_round_for_resolution(run, lane, round_, result)
-            if defer_resolution
-            else gate.complete_round(run, lane, round_, result)
-        )
+        decision = gate.complete_attempt_round(run, lane, round_, result)
         _record_accepted_result(worktree, vault, runtime_root, round_, result)
         actions.append(decision.action)
-        if (decision.action != "awaiting-axes" if exact_attempt
-                else decision.action == "attention-required"):
+        if decision.action != "awaiting-axes":
             break
     return tuple(actions)
 
@@ -628,15 +595,15 @@ def _run_exact_head_review(
                 attempt_id=prior_attempt.identity.attempt_id,
                 terminal_result=prior_attempt.terminal.result.value,
             )
-            zero_lane_preflight = (
-                prior_attempt.terminal.result
-                == ReviewAttemptTerminalResult.ATTENTION_REQUIRED
-                and not prior_attempt.terminal.lane_results
-                and prior_state.get("status") == "attention-required"
-                and prior_state.get("lanes") == []
-                and prior_state.get("round_results") in ({}, None)
-                and prior_state.get("final_results") in ({}, None)
-                and prior_state.get("evidence") in ({}, None)
+            # The one narrow same-HEAD relaxation: an attempt that terminated
+            # before the provider launched owns no durable effect, so it may be
+            # superseded at an unchanged HEAD instead of replayed as a receipt.
+            # The predicate lives in review_zero_effect so no weaker same-HEAD
+            # admission path can be introduced beside it.
+            zero_lane_preflight = zero_effect_terminal_attempt(
+                prior_state,
+                prior_attempt.terminal.result.value,
+                prior_attempt.terminal.lane_results,
             )
             if (
                 context.head_sha == prior_attempt.identity.exact_head_sha
@@ -726,12 +693,9 @@ def _run_exact_head_review(
         gate=gate,
         run=run,
         ready=ready,
-        preset=preset,
-        context=context,
         worktree=worktree,
         vault=vault,
         runtime_root=runtime_root,
-        exact_attempt=True,
     )
     next_state = gate.read()
     next_status = str(next_state.get("status") or "")

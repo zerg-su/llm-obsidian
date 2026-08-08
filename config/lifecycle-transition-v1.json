@@ -314,7 +314,7 @@
       "witness": "review-blocked-attention-route"
     },
     {
-      "case_id": "release-disposition",
+      "case_id": "release-boundary",
       "paths": [
         [
           "created",
@@ -341,10 +341,40 @@
           "failed"
         ]
       ],
-      "witness": "release-disposition-classification"
+      "witness": "release-boundary-rejection"
+    },
+    {
+      "case_id": "summary-disposition",
+      "paths": [
+        [
+          "created",
+          "preflight",
+          "starting",
+          "running",
+          "awaiting-callback",
+          "verifying",
+          "finalizing",
+          "exiting",
+          "complete"
+        ],
+        [
+          "created",
+          "cancelling",
+          "exiting",
+          "cancelled"
+        ],
+        [
+          "created",
+          "preflight",
+          "starting",
+          "running",
+          "failed"
+        ]
+      ],
+      "witness": "summary-disposition-classification"
     }
   ],
-  "denominator_source": "scripts/harness/state_machine.py",
+  "denominator_source": "scripts/harness/callbacks.py,scripts/harness/contracts.py,scripts/harness/provider_events.py,scripts/harness/state_machine.py,scripts/review_contract.py",
   "edge_classes": [
     "admission",
     "attention",
@@ -379,31 +409,11 @@
       "review",
       "wiki-summary"
     ],
-    "entry_point_actions": [
-      "advance-clock",
-      "close",
-      "crash-at",
-      "publish-callback",
-      "publish-error-latch",
-      "publish-liveness",
-      "publish-provider-event",
-      "publish-resolution",
-      "publish-summary",
-      "queue-callback",
-      "rearm-review-drive",
-      "rearm-worker-tick",
-      "reconcile",
-      "reject-cross-head-continuation",
-      "reserve-effect",
-      "resolve-effect",
-      "resource-disappears",
-      "restart-worker",
-      "start-worker",
-      "worker-tick"
-    ],
     "provider_event_kinds": [
       "event-gap",
+      "input-accepted",
       "process-exited",
+      "provider-started",
       "resource-closed",
       "result-published",
       "turn-stopped"
@@ -501,6 +511,28 @@
   ],
   "manifest_id": "lifecycle-transition-v1",
   "schema_version": 1,
+  "simulator_scenario_actions": [
+    "advance-clock",
+    "close",
+    "crash-at",
+    "publish-callback",
+    "publish-error-latch",
+    "publish-liveness",
+    "publish-provider-event",
+    "publish-resolution",
+    "publish-summary",
+    "queue-callback",
+    "rearm-review-drive",
+    "rearm-worker-tick",
+    "reconcile",
+    "reject-cross-head-continuation",
+    "reserve-effect",
+    "resolve-effect",
+    "resource-disappears",
+    "restart-worker",
+    "start-worker",
+    "worker-tick"
+  ],
   "states": [
     {
       "role": "attention",

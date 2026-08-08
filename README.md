@@ -80,7 +80,7 @@ The canonical state is ordinary Markdown, JSON/TOML contracts, Git history, and 
 3. **Split when explicitly approved.** `$split` is a zero-effect manifest preview. `$split --dispatch` activates only an approved bounded DAG, launches dependency-ready workspace children through the existing dispatch adapter, and joins exact approved resource-free receipts in manifest order.
 4. **Dispatch.** The restartable harness captures project/task/session IDs, the exact model route, approved plan hash, permission domain, worktree, and caller cmux surface. It opens the task to the right of the correct coordinator instead of whichever tab happens to be selected later.
 5. **Execute.** Claude or Codex works in an isolated Git worktree. Same-model bounded work normally uses an internal agent; an explicit separate window creates a durable visible lane.
-6. **Review.** Simple review uses one selected read-only holistic lane. Default Deep review runs independent Anthropic and OpenAI holistic lanes; each checks both intent/outcome and engineering quality. Explicit single-model Deep instead splits that model into intent and engineering lanes. Full review is explicit-only and runs the four provider-by-responsibility lanes. Verification resumes the exact lane and surface.
+6. **Review.** Simple review uses one selected read-only holistic lane. A standalone Deep review compiles independent Anthropic and OpenAI holistic lanes; each checks both intent/outcome and engineering quality. Within a finalization cycle, cycles 1–3 use the primary route alone and the independent holistic lane joins in cycles 4–5 only against fresh availability evidence. Explicit single-model Deep instead splits that model into intent and engineering lanes. Full review is explicit-only and runs the four provider-by-responsibility lanes. Verification resumes the exact lane and surface.
 7. **Reap.** A typed final summary, approved review archive, plan hash, result path, and session provenance are validated. One vault transaction writes the result and closes the plan.
 8. **Exit safely.** `/exit` is armed only after the lifecycle is complete. The lifecycle wrapper requests graceful agent exit and closes that exact surface only after the process exits; it never guesses another tab.
 
@@ -103,7 +103,7 @@ In Codex, use the explicit `$llm-obsidian:<skill>` name.
 | Read cmux progress | Look at the thin workspace progress line while a pipeline is active. | It counts only live harness steps owned by the current coordinator workspace. It clears at idle and deliberately does not report project-backlog tasks, model limits, or history from missing surfaces. |
 | Fix a reproducible defect | “Dispatch this approved plan with `engineering/fix`.” | The built-in bounded loop runs reproduce → root cause → regression → minimal fix and stops on architecture or budget boundaries. |
 | Use a custom pipeline | “No built-in fits; propose the smallest bounded custom pipeline.” | The model may author the typed DSL only after proving the semantic gap; the harness validates allowed steps, loops, hashes, and budgets before approval. |
-| Review implementation | “Run Deep review,” “use only Opus/Sol,” or explicitly “Run Full review.” | Simple is one selected holistic reviewer. Default Deep is two provider-independent holistic reviews; single-model Deep is separate intent and engineering reviews. Full is the explicit-only four-lane provider/responsibility grid. |
+| Review implementation | “Run Deep review,” “use only Opus/Sol,” or explicitly “Run Full review.” | Simple is one selected holistic reviewer. Standalone Deep is two provider-independent holistic reviews, but in a finalization cycle the independent lane only joins in cycles 4–5 against fresh availability; single-model Deep is separate intent and engineering reviews. Full is the explicit-only four-lane provider/responsibility grid. |
 | Finish or leave | “Reap the approved task,” or “save and close this session.” | `reap` archives the result and closes the plan; `close` saves and exits only the current agent process without guessing another cmux surface. |
 
 Pipeline choice is frozen during clarification. `lifecycle/default` handles a
@@ -133,10 +133,14 @@ This division is deliberate. Requirements, interpretation, synthesis, code revie
 
 ## Unified review
 
-`review` starts one selected holistic reviewer. Default `review --deep` starts
-independent Anthropic and OpenAI holistic reviewers; each checks the complete
-outcome and engineering denominator. Explicit single-model Deep uses separate
-intent and engineering sessions on that model. Explicit-only `--full` starts
+`review` starts one selected holistic reviewer. A standalone `review --deep`
+compiles independent Anthropic and OpenAI holistic lanes; each checks the
+complete outcome and engineering denominator. Inside a finalization cycle that
+topology is gated twice: cycles 1–3 run the primary route only (its
+provider-prefixed intent and engineering lanes), and the independent holistic
+lane is added in cycles 4–5 only when fresh provider availability evidence
+admits it — otherwise those cycles also stay primary-only. Explicit
+single-model Deep uses separate intent and engineering sessions on that model. Explicit-only `--full` starts
 the four provider/responsibility lanes (`anthropic-intent`,
 `anthropic-engineering`, `openai-intent`, `openai-engineering`) and is never
 chosen by heuristics or risk policy. A registered model alias may override an

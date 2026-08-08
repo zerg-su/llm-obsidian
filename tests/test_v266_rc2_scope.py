@@ -6,6 +6,7 @@ from __future__ import annotations
 import ast
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -134,16 +135,22 @@ for relative in (*CLASSIC, CONDITIONAL):
     removed_lines += len(shown.stdout.splitlines())
 assert removed_lines == 2217
 
-rc2_scripts = subprocess.run(
+# Historical evidence only: these are the sizes of the released RC2 commit, kept
+# so the RC2 record stays verifiable.  They are NOT the scope ratchet — measuring
+# a frozen commit can never fail, which is exactly how the live ratchet came to
+# be neutered.  The ratchet that constrains this candidate lives in
+# tests/rc4_scope_ratchet.py and measures the working tree.
+rc2_snapshot_scripts = subprocess.run(
     ["git", "ls-tree", "-r", "--name-only", RC2_SHA, "scripts"],
     cwd=ROOT,
     text=True,
     capture_output=True,
     check=True,
 ).stdout.splitlines()
-rc2_scripts = [path for path in rc2_scripts if path.endswith(".py")]
-assert len(rc2_scripts) < 259
-rc2_lines = sum(
+rc2_snapshot_scripts = [
+    path for path in rc2_snapshot_scripts if path.endswith(".py")
+]
+rc2_snapshot_lines = sum(
     len(
         subprocess.run(
             ["git", "show", f"{RC2_SHA}:{relative}"],
@@ -153,9 +160,18 @@ rc2_lines = sum(
             check=True,
         ).stdout.splitlines()
     )
-    for relative in rc2_scripts
+    for relative in rc2_snapshot_scripts
 )
-assert rc2_lines < 85431
+assert (len(rc2_snapshot_scripts), rc2_snapshot_lines) == (253, 83676), (
+    len(rc2_snapshot_scripts),
+    rc2_snapshot_lines,
+)
+
+# The live ratchet for the current candidate.
+sys.path.insert(0, str(ROOT / "tests"))
+from rc4_scope_ratchet import assert_within_ceilings  # noqa: E402
+
+assert_within_ceilings(ROOT / "scripts")
 
 tdd_verdict = json.loads(
     (ROOT / "docs/acceptance/v2.6.6-rc2-tdd-verdict.json").read_text(

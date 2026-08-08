@@ -169,7 +169,8 @@ class ReviewGateAttemptMixin:
             "product_root": str(product_root),
             "active_review_operation_id": request.policy.operation_id,
             "context": self._context(request.context),
-            "topology": request.topology.payload(), "topology_sha256": request.topology_sha256,
+            "topology": request.topology.payload(),
+            "topology_sha256": request.topology_sha256,
             "lanes": [],
             "round_results": {},
             "final_results": {},
@@ -281,7 +282,8 @@ class ReviewGateAttemptMixin:
                     "product_root",
                     "active_review_operation_id",
                     "context",
-                    "topology", "topology_sha256",
+                    "topology",
+                    "topology_sha256",
                 ):
                     if current.get(field) != initial[field]:
                         raise ReviewAttemptError(
