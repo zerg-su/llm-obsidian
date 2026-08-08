@@ -1536,6 +1536,16 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
         "attention-required",
         reason=AttentionReason.ATTENTION_REQUIRED,
     )
+    create_cli_operation(
+        "op-findings-live-review-cli", state="awaiting-callback"
+    )
+    bind_owned_resources("op-findings-live-review-cli")
+    store.transition(
+        "owner-cli",
+        "op-findings-live-review-cli",
+        "attention-required",
+        reason=AttentionReason.CALLBACK_INVALID,
+    )
     check(
         "terminal exact approval selects callback-free recovery",
         harness_cli._review_recovery_kind(
@@ -1580,7 +1590,11 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
         recovery_calls.append(operation_id)
         assert runtime_manager is None
         assert cmux_adapter is not None
-        return "approved"
+        return (
+            "changes-requested"
+            if operation_id == "op-findings-live-review-cli"
+            else "approved"
+        )
 
     harness_cli._recover_finalizing_review_if_present = accepted_review_recovery
     try:
@@ -1605,6 +1619,13 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
             process_adapter=FakeProcess("alive"),
             cmux_adapter=FakeCmux("alive"),
         )
+        resumed_findings_executor = harness_cli._resume(
+            store,
+            "owner-cli",
+            "op-findings-live-review-cli",
+            process_adapter=FakeProcess("alive"),
+            cmux_adapter=FakeCmux("alive"),
+        )
         second_finalizing = harness_cli._resume(
             store,
             "owner-cli",
@@ -1625,6 +1646,9 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
         and resumed_live_executor.state == "awaiting-callback"
         and resumed_live_executor.changed
         and resumed_live_executor.attention_reason is None
+        and resumed_findings_executor.state == "awaiting-callback"
+        and resumed_findings_executor.changed
+        and resumed_findings_executor.attention_reason is None
         and store.read(
             "owner-cli", "op-approved-live-review-cli"
         ).resources
@@ -1635,6 +1659,7 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
             "op-finalizing-review-cli",
             "op-approved-finalizing-review-cli",
             "op-approved-live-review-cli",
+            "op-findings-live-review-cli",
         ],
     )
 
