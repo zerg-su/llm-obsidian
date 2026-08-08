@@ -175,7 +175,7 @@ OUTSIDE = {"op-sibling-root", "op-sibling-child"}
 
 
 def cancel_root(store, operation_id="op-root"):
-    return harness_cli._cancel_or_close(
+    return harness_cli._cancel_or_close_subtree(
         store,
         OWNER,
         operation_id,
@@ -203,7 +203,9 @@ def main() -> int:
             before,
         )
 
+        fixture_transitions = len(store.transitions)
         cancel_root(store)
+        cascade_transitions = store.transitions[fixture_transitions:]
         after = states(store)
         nonterminal = sorted(
             operation_id
@@ -261,9 +263,12 @@ def main() -> int:
             states(store, FOREIGN_OWNER),
         )
         check(
-            "no transition was ever applied to a foreign owner",
-            all(owner == OWNER for owner, _op, _state in store.transitions),
-            store.transitions,
+            "the cascade transitions no foreign owner and nothing outside the subtree",
+            all(
+                owner == OWNER and operation_id in SUBTREE
+                for owner, operation_id, _state in cascade_transitions
+            ),
+            cascade_transitions,
         )
 
         drift = store_error_for_unknown_root(root / "cascade-drift")
@@ -343,7 +348,7 @@ def store_error_for_unknown_root(path: Path) -> str:
     store = OperationStore(path)
     build_incident_fixture(store)
     try:
-        harness_cli._cancel_or_close(
+        harness_cli._cancel_or_close_subtree(
             store,
             OWNER,
             "op-not-in-store",

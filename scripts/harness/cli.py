@@ -342,6 +342,72 @@ def _cancel_or_close(
     return store.transition(owner, operation_id, terminal_state)
 
 
+def _exact_cancel_subtree(
+    store: OperationStore,
+    owner: str,
+    root_operation_id: str,
+) -> list[str]:
+    """Order one root's exact owned lineage child-first, deepest child first.
+
+    Membership is exact: only records under the same durable ``owner`` whose
+    ``parent_operation_id`` chain reaches ``root_operation_id`` are included.
+    Unknown roots fail closed through ``store.read``; a corrupt parent cycle
+    fails closed rather than looping.
+    """
+
+    root = store.read(owner, root_operation_id)
+    children: dict[str, list[str]] = {}
+    for record in store.list(owner):
+        parent = record.spec.parent_operation_id
+        if parent:
+            children.setdefault(parent, []).append(record.spec.operation_id)
+
+    order: list[str] = []
+    seen: set[str] = set()
+
+    def walk(operation_id: str) -> None:
+        if operation_id in seen:
+            raise StoreError(f"operation lineage cycles at {operation_id}")
+        seen.add(operation_id)
+        for child in children.get(operation_id, ()):
+            walk(child)
+        order.append(operation_id)
+
+    walk(root.spec.operation_id)
+    return order
+
+
+def _cancel_or_close_subtree(
+    store: OperationStore,
+    owner: str,
+    root_operation_id: str,
+    *,
+    process_adapter: object,
+    cmux_adapter: object,
+) -> TransitionResult:
+    """Apply the supported per-operation cancellation child-first, then the root.
+
+    Each per-operation call is its own durable boundary, so repeating the
+    request is harmless and a crash mid-cascade resumes from the same command.
+    A descendant that cannot reach a terminal state stops the cascade before the
+    root, keeping the root honest about its still-live subtree.
+    """
+
+    order = _exact_cancel_subtree(store, owner, root_operation_id)
+    result = None
+    for operation_id in order:
+        result = _cancel_or_close(
+            store,
+            owner,
+            operation_id,
+            process_adapter=process_adapter,
+            cmux_adapter=cmux_adapter,
+        )
+        if result.state not in TERMINAL and operation_id != root_operation_id:
+            return result
+    return result
+
+
 def _review_recovery_kind(
     gate: object, response_path: Path
 ) -> str:
@@ -751,7 +817,7 @@ def main(
                     review_runtime_manager=review_runtime_manager,
                 )
             elif args.command in {"cancel", "close"}:
-                result = _cancel_or_close(
+                result = _cancel_or_close_subtree(
                     store,
                     args.owner,
                     operation_id,
