@@ -31,12 +31,18 @@
 - Добавлены bounded skill-quality evidence и exact release-boundary fixtures.
 - Добавлены committed exact-HEAD gate bundle и отдельный RC4
   accepted-deviations artifact.
+- Добавлен `harness-cli.py dashboard`: read-only английский терминальный вид,
+  который проецирует реальный compiled pipeline, параллельные lanes, loop
+  visits, один bounded cmux surface probe и ограниченный список свежих issues.
+  Он не имеет lifecycle-авторитета и всё, что не резолвится точно, помечает как
+  `request-coordinator-classification`, а не как прогресс.
 
 ### Исправлено
 
 - Восстановлен живой scope ratchet для `scripts/`: он снова измеряет рабочее
   дерево, а не замороженный исторический коммит, с явными RC4-потолками в
-  `tests/rc4_scope_ratchet.py` (262 файла, 88 600 строк). Числа RC2 остаются в
+  `tests/rc4_scope_ratchet.py` (264 файла, 89 200 строк — подняты ровно на два
+  read-only dashboard-модуля). Числа RC2 остаются в
   `tests/test_v266_rc2_scope.py` только как историческое свидетельство и больше
   не подменяют собой ratchet.
 - Accepted review callbacks возобновляются инкрементально и ровно один раз

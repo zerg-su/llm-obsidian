@@ -87,6 +87,10 @@ This runner requires an approved plan and fails before launch otherwise.
 
 Use `scripts/harness-cli.py status|inspect|resume|reconcile|cancel|close|doctor`
 for lifecycle operations; do not orchestrate cmux/model commands manually.
+`scripts/harness-cli.py dashboard` is read-only: it projects the compiled
+pipeline, parallel lanes, loop visits, and bounded recent issues for one owner,
+and holds no lifecycle authority. Anything it cannot resolve exactly is
+classified `request-coordinator-classification` rather than guessed.
 Unknown ownership, prompt, callback, or upgrade state becomes
 `attention-required`.
 

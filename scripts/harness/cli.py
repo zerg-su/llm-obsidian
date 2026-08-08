@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,6 +27,8 @@ from .contracts import (
     TransitionResult,
     to_dict,
 )
+from .dashboard_projection import DashboardProjection, project
+from .dashboard_view import render as render_dashboard
 from .diagnostics import observe as observe_diagnostics
 from .reconciliation import (
     ReconcileDecision,
@@ -33,7 +36,7 @@ from .reconciliation import (
     reconcile,
 )
 from .state_machine import TERMINAL
-from .status_segment import publish as publish_status
+from .status_segment import live_inventory, publish as publish_status
 from .store import OperationStore, StoreError
 from .supervisor import OperationSupervisor
 from .runtime_sessions import RuntimeSessionError, RuntimeSessionManager
@@ -57,6 +60,7 @@ def parser() -> argparse.ArgumentParser:
     close.add_argument("operation_id")
     commands.add_parser("doctor")
     commands.add_parser("diagnose")
+    commands.add_parser("dashboard")
     return result
 
 
@@ -736,12 +740,46 @@ def _resume(
     )
 
 
+def _dashboard(
+    store_root: Path,
+    owner: str,
+    *,
+    inventory_probe: object | None = None,
+) -> DashboardProjection:
+    """Project one owner read-only, annotated by one bounded cmux tree probe.
+
+    The probe is best effort by design. A tree that cannot be read leaves every
+    recorded surface `unknown` instead of claiming it is gone, because this
+    command owns no lifecycle authority and must never imply cleanup.
+    """
+
+    binary = os.environ.get("CMUX_BUNDLED_CLI_PATH") or "cmux"
+    try:
+        if inventory_probe is not None:
+            inventory = inventory_probe(binary=binary)
+        elif shutil.which(binary):
+            inventory = live_inventory(binary=binary)
+        else:
+            inventory = None
+    except Exception:
+        # A diagnostics view degrades to "unknown"; it must not turn a broken
+        # probe into a failed command that hides the durable ledger too.
+        inventory = None
+    return project(
+        store_root,
+        owner,
+        inventory=inventory,
+        surface_probe="observed" if inventory is not None else "unavailable",
+    )
+
+
 def main(
     argv: Sequence[str] | None = None,
     *,
     process_adapter: object | None = None,
     cmux_adapter: object | None = None,
     review_runtime_manager: object | None = None,
+    inventory_probe: object | None = None,
 ) -> int:
     args = parser().parse_args(argv)
     store = OperationStore(args.store)
@@ -773,6 +811,17 @@ def main(
             }
         elif args.command == "diagnose":
             value = observe_diagnostics(args.store, args.owner)
+        elif args.command == "dashboard":
+            projection = _dashboard(
+                args.store,
+                args.owner,
+                inventory_probe=inventory_probe,
+            )
+            value = (
+                to_dict(projection)
+                if args.json
+                else render_dashboard(projection).rstrip("\n")
+            )
         elif args.command == "reconcile":
             value = []
             for row in store.list(args.owner):

@@ -96,6 +96,7 @@ test-harness:
 	@python3 tests/harness/test_release_blocker_runtime.py
 	@python3 tests/harness/test_status_segment.py
 	@python3 tests/harness/test_diagnostics.py
+	@python3 tests/harness/test_harness_dashboard.py
 	@python3 tests/harness/test_suite_registration.py
 
 test-harness-coverage:

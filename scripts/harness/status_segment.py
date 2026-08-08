@@ -79,11 +79,13 @@ class CollectionResult:
     unscoped_uncertainty: bool = False
 
 
-def _live_inventory(
+def live_inventory(
     *,
-    runner: Runner | None,
-    binary: str,
+    runner: Runner | None = None,
+    binary: str = "cmux",
 ) -> LiveInventory | None:
+    """One bounded read-only cmux tree probe; None when the tree is unknown."""
+
     try:
         result = run_cmux(
             ["--id-format", "both", "tree", "--all", "--json"],
@@ -200,7 +202,7 @@ def _research_origin(
     )
 
 
-def _record_controller(
+def record_controller(
     record: OperationRecord,
     controllers: list[OperationRecord],
 ) -> OperationRecord | None:
@@ -316,7 +318,7 @@ def _collect(
             record for record in records if record.spec.kind in CONTROLLER_KINDS
         ]
         bindings = {
-            record.spec.operation_id: _record_controller(record, all_controllers)
+            record.spec.operation_id: record_controller(record, all_controllers)
             for record in records
         }
         controllers: list[tuple[OperationRecord, list[OperationRecord]]] = []
@@ -425,7 +427,7 @@ def publish(
         or os.environ.get("CMUX_BUNDLED_CLI_PATH")
         or "cmux"
     )
-    inventory = _live_inventory(runner=runner, binary=cmux_binary)
+    inventory = live_inventory(runner=runner, binary=cmux_binary)
     if inventory is None:
         return False
     collection = _collect(

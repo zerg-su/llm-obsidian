@@ -23,6 +23,12 @@ number: the point of a ratchet is that the next unplanned script or the next
 few hundred unplanned lines fails the build and has to be argued for.  Raise
 them only together with a written reason, in the same commit as the growth.
 
+RC4 Fix2 then added the read-only harness dashboard the plan authorized:
+``harness/dashboard_projection.py`` and ``harness/dashboard_view.py``.  They are
+two files rather than one on purpose — projection decides what is true and the
+view may only shorten it — so the ceiling moves by exactly two files and by the
+lines those two modules cost.  Nothing else grew.
+
 The historical RC2 snapshot is retained separately in
 ``tests/test_v266_rc2_scope.py``; it is evidence about a released commit, not a
 constraint on this one.
@@ -34,10 +40,10 @@ from pathlib import Path
 
 
 #: Maximum tracked Python files under ``scripts/`` for the RC4 candidate.
-SCRIPT_FILE_CEILING = 262
+SCRIPT_FILE_CEILING = 264
 
 #: Maximum total lines across those files for the RC4 candidate.
-SCRIPT_LINE_CEILING = 88_600
+SCRIPT_LINE_CEILING = 89_200
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

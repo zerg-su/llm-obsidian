@@ -18,7 +18,17 @@ reconcile
 cancel <operation-id>
 close <operation-id>
 doctor
+dashboard
 ```
+
+`dashboard` is the read-only English terminal view of one owner. It projects the
+real compiled pipeline bound to the operation contract, its durable step and
+loop-visit evidence, the parallel operation lanes plus any declared review axes,
+one bounded cmux surface probe, and a bounded list of recent issues. It owns no
+lifecycle authority and never writes: a state it cannot resolve exactly is
+classified `request-coordinator-classification` instead of being rendered as
+progress, so an unreadable cmux tree leaves surfaces `unknown` rather than
+implying that cleanup is due.
 
 The cmux adapter is the only production perimeter for open/send/read/status/
 close. Runtime drivers pin model, effort, permission profile, cwd, and callback

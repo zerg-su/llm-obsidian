@@ -25,12 +25,18 @@ deterministic without adding another orchestrator or provider route.
 - Added bounded skill-quality evidence and exact release-boundary fixtures.
 - Added a committed exact-HEAD gate bundle and a distinct RC4
   accepted-deviations artifact.
+- Added `harness-cli.py dashboard`: a read-only English terminal view that
+  projects the real compiled pipeline, parallel lanes, loop visits, one bounded
+  cmux surface probe, and bounded recent issues. It holds no lifecycle
+  authority and classifies anything it cannot resolve exactly as
+  `request-coordinator-classification` instead of rendering it as progress.
 
 ### Fixed
 
 - Restored the live `scripts/` scope ratchet: it measures the working tree again
   instead of a frozen historical commit, under explicit RC4 ceilings declared in
-  `tests/rc4_scope_ratchet.py` (262 files, 88,600 lines). The RC2 numbers are
+  `tests/rc4_scope_ratchet.py` (264 files, 89,200 lines — raised by exactly the
+  two read-only dashboard modules). The RC2 numbers are
   retained in `tests/test_v266_rc2_scope.py` as historical evidence only and no
   longer stand in for the ratchet.
 - Resume accepted review callbacks incrementally and exactly once across crash
