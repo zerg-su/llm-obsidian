@@ -19,8 +19,9 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from harness.cli import main as cli_main
+from harness import dashboard_receipts
 from harness.adapters.cmux import CmuxAdapter
-from harness.contracts import OperationSpec, OwnedResources, RuntimeRoute
+from harness.contracts import OperationSpec, OwnedResources, RuntimeRoute, VerificationEvidence, to_dict
 from harness.dashboard_projection import (
     ATTENTION,
     COORDINATOR,
@@ -46,6 +47,8 @@ from harness.pipelines import (
 from harness.status_segment import LiveInventory
 from harness.store import OperationStore
 from harness.supervisor import OperationSupervisor
+from harness.workflows.engineering_fix import FixStepReceipt
+from harness.workflows.engineering_fix_model import PHASE_SCHEMAS
 
 
 OWNER = "dashboard-owner"
@@ -124,6 +127,110 @@ def _receipt(path: Path) -> None:
     path.write_text('{"schema_version":1}\n', encoding="utf-8")
 
 
+def _fix_receipt(
+    store: OperationStore,
+    parent: str,
+    runtime: Path,
+    definition: str,
+    step_id: str,
+    iteration: int,
+) -> None:
+    operation_id = f"{parent}-{step_id}-{iteration}"
+    lane_id = "lane-primary"
+    run_id = f"fix-run-{step_id}-{iteration}"
+    _create(
+        store,
+        operation_id,
+        "pipeline-model-step",
+        lane_id=lane_id,
+        contract_sha256=definition,
+        parent=parent,
+    )
+    input_schema, output_schema = PHASE_SCHEMAS[step_id]
+    receipt = FixStepReceipt(
+        callback_id=f"callback-{step_id}-{iteration}",
+        operation_id=operation_id,
+        parent_operation_id=parent,
+        lane_id=lane_id,
+        run_id=f"{operation_id}-run",
+        definition_sha256=definition,
+        step_id=step_id,
+        iteration=iteration,
+        input_schema=input_schema,
+        input_sha256="1" * 64,
+        input_head_sha="2" * 40,
+        prior_receipt_sha256="" if iteration == 0 else "3" * 64,
+        verification_sha256="" if iteration == 0 else "4" * 64,
+        output_schema=output_schema,
+        output_pointer=f"results/{step_id}-{iteration}.json",
+        output_sha256="5" * 64,
+        head_sha="2" * 40,
+        status="complete",
+    )
+    path = runtime / "pipeline-fix" / f"pass-{iteration}" / step_id / "receipt.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(receipt.to_dict(), sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _verification_receipt(
+    store: OperationStore,
+    parent: str,
+    runtime: Path,
+    definition: str,
+    *,
+    status: str = "complete",
+    input_char: str = "6",
+) -> str:
+    parent_record = store.read(OWNER, parent)
+    input_sha = input_char * 64
+    operation_id, lane_id, run_id, effect_id = dashboard_receipts.verification_identity(
+        parent_record.spec, definition, input_sha, 0
+    )
+    store.create(
+        OperationSpec(
+            operation_id,
+            f"{operation_id}-key",
+            "pipeline-verify",
+            OWNER,
+            _route(),
+            "packets/task.json",
+            "scoped",
+            contract_sha256=definition,
+            parent_operation_id=parent,
+        ),
+        lane_id=lane_id,
+        run_id=run_id,
+    )
+    output = runtime / "verification-output.log"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_bytes(b"ok\n")
+    evidence = VerificationEvidence(
+        "scoped", "7" * 64, "8" * 40, "scoped-1", ".",
+        0 if status == "complete" else 1, "1", "2",
+        "verification-output.log", hashlib.sha256(b"ok\n").hexdigest(), 3, 2,
+    )
+    payload = {
+        "schema_version": 1,
+        "parent_operation_id": parent,
+        "definition_sha256": definition,
+        "step_id": "verify",
+        "profile": "scoped",
+        "profile_sha256": "7" * 64,
+        "head_sha": "8" * 40,
+        "status": status,
+        "operation_id": operation_id,
+        "lane_id": lane_id,
+        "run_id": run_id,
+        "effect_id": effect_id,
+        "input_sha256": input_sha,
+        "evidence": [to_dict(evidence)],
+    }
+    path = runtime / "pipeline-verification" / operation_id / "receipt.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
+    return operation_id
+
+
 def _write_gate(store: OperationStore, status: str, *, subject: str) -> None:
     gate_root = store.root / "review-data" / OWNER / OWNER
     gate_root.mkdir(parents=True, exist_ok=True)
@@ -178,25 +285,21 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard.") as raw:
         OwnedResources(surface_id=SURFACE)
     )
     runtime = store_root / "owners" / OWNER / "runtime" / DISPATCH
-    _receipt(runtime / "pipeline-fix" / "pass-0" / "reproduce" / "receipt.json")
+    _fix_receipt(store, DISPATCH, runtime, compiled.definition_sha256, "reproduce", 0)
     for pass_index in (0, 1):
         for step_id in FIX_STEPS:
-            _receipt(
-                runtime
-                / "pipeline-fix"
-                / f"pass-{pass_index}"
-                / step_id
-                / "receipt.json"
+            _fix_receipt(
+                store,
+                DISPATCH,
+                runtime,
+                compiled.definition_sha256,
+                step_id,
+                pass_index,
             )
-    _receipt(runtime / "pipeline-verification" / "verify-child" / "receipt.json")
-    _create(
-        store,
-        "dashboard-child",
-        "verification",
-        lane_id="lane-secondary",
-        parent=DISPATCH,
+    verification_child = _verification_receipt(
+        store, DISPATCH, runtime, compiled.definition_sha256
     )
-    _advance(store, "dashboard-child", "preflight", "starting", "running")
+    _advance(store, verification_child, "preflight", "starting", "running")
     _write_gate(store, "reviewing", subject=DISPATCH)
 
     inventory = LiveInventory({SURFACE.casefold(): "workspace-1"})
@@ -239,7 +342,7 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard.") as raw:
         "parallel operation lanes and review axes are both projected",
         lanes["lane-primary"].scope == "operation"
         and lanes["lane-primary"].status == "active"
-        and lanes["lane-secondary"].members == ("dashboard-child",)
+        and any(verification_child in lane.members for lane in lanes.values())
         and lanes["openai-holistic"].scope == "review-axis"
         and lanes["claude-spec"].status == "active",
     )
@@ -335,6 +438,21 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard.") as raw:
         and payload["surface_probe"] == "unavailable"
         and payload["programs"][0]["pipeline"] == "engineering/fix@1.0.0",
     )
+    broken_fix = (
+        runtime / "pipeline-fix" / "pass-1" / "minimal-fix" / "receipt.json"
+    )
+    broken_fix.write_text('{"schema_version":1}\n', encoding="utf-8")
+    invalid_fix = project(store_root, OWNER, inventory=inventory)
+    check(
+        "malformed fix evidence is attention and never a completed visit",
+        any(issue.code == "fix-receipt-invalid" for issue in invalid_fix.issues)
+        and next(
+            step
+            for step in invalid_fix.programs[0].steps
+            if step.step_id == "minimal-fix"
+        ).status
+        == "attention",
+    )
 
 with tempfile.TemporaryDirectory(prefix="harness-dashboard-unknown.") as raw:
     store_root = Path(raw) / "harness"
@@ -372,10 +490,11 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-unknown.") as raw:
         )
     projection = project(store_root, OWNER, inventory=LiveInventory({}))
     check(
-        "recent issues stay bounded while the classification still escalates",
+        "all active programs remain visible while issues stay bounded",
         len(projection.issues) == MAX_ISSUES == 5
         and projection.truncated["issues"] > 0
-        and projection.truncated["programs"] > 0
+        and projection.truncated["programs"] == 0
+        and len(projection.programs) == max(MAX_ISSUES, MAX_PROGRAMS) + 2
         and projection.classification == COORDINATOR
         and "+" in render(projection),
     )
@@ -410,6 +529,74 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-unknown.") as raw:
             for issue in projection.issues
         )
         and projection.classification == COORDINATOR,
+    )
+
+with tempfile.TemporaryDirectory(prefix="harness-dashboard-receipts.") as raw:
+    store_root = Path(raw) / "harness"
+    store = OperationStore(store_root)
+    compiled = compiled_builtin("engineering/change")
+    _create(
+        store,
+        DISPATCH,
+        "dispatch",
+        lane_id="lane-primary",
+        contract_sha256=compiled.definition_sha256,
+    )
+    _advance(store, DISPATCH, "preflight", "starting", "running")
+    runtime = store_root / "owners" / OWNER / "runtime" / DISPATCH
+    first = _verification_receipt(
+        store, DISPATCH, runtime, compiled.definition_sha256, input_char="6"
+    )
+    _verification_receipt(
+        store, DISPATCH, runtime, compiled.definition_sha256, input_char="9"
+    )
+    projection = project(store_root, OWNER, inventory=LiveInventory({}))
+    verify = next(step for step in projection.programs[0].steps if step.step_id == "verify")
+    check(
+        "accepted complete verification receipts count without inventing a loop",
+        verify.status == "complete"
+        and verify.visits == 2
+        and projection.programs[0].loop_passes == 0
+        and projection.programs[0].loop_limit == 0,
+    )
+
+    receipt_path = runtime / "pipeline-verification" / first / "receipt.json"
+    payload = json.loads(receipt_path.read_text(encoding="utf-8"))
+    payload["status"] = "failed"
+    payload["evidence"][0]["exit_code"] = 7
+    receipt_path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+    failed = project(store_root, OWNER, inventory=LiveInventory({}))
+    check(
+        "valid failed verification evidence becomes bounded attention",
+        any(issue.code == "verification-receipt-failed" for issue in failed.issues)
+        and next(step for step in failed.programs[0].steps if step.step_id == "verify").status
+        == "attention",
+    )
+
+    payload["parent_operation_id"] = "wrong-parent"
+    receipt_path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+    wrong = project(store_root, OWNER, inventory=LiveInventory({}))
+    check(
+        "wrong-identity verification evidence is invalid, never complete",
+        any(issue.code == "verification-receipt-invalid" for issue in wrong.issues),
+    )
+    receipt_path.write_text("{partial", encoding="utf-8")
+    malformed = project(store_root, OWNER, inventory=LiveInventory({}))
+    check(
+        "malformed verification evidence is contained as one bounded issue",
+        sum(
+            issue.code == "verification-receipt-invalid"
+            for issue in malformed.issues
+        )
+        == 1,
+    )
+    receipt_path.unlink()
+    check(
+        "a receipt disappearing during a read is invalid rather than passed",
+        dashboard_receipts.verification_receipt_status(
+            store, store.read(OWNER, DISPATCH), runtime, receipt_path
+        )
+        == "invalid",
     )
 
 with tempfile.TemporaryDirectory(prefix="harness-dashboard-tree.") as raw:
@@ -501,6 +688,10 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-tree.") as raw:
         and steps["verify"].status == "running"
         and steps["review"].status == "pending"
         and program.executor_status == "awaiting-transition",
+    )
+    check(
+        "pipelines without bounded-loop control report no loop counter",
+        program.loop_passes == 0 and program.loop_limit == 0,
     )
     check(
         "each step shows the frozen route of the record that executes it",
@@ -614,6 +805,10 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-closed.") as raw:
         and program.next_action == "reap-ready"
         and program.classification != ATTENTION
         and projection.issues == (),
+    )
+    check(
+        "cancelled nested operations render with the explicit stopped marker",
+        "[-]" in render(projection) and "cancelled" in render(projection),
     )
 
 with tempfile.TemporaryDirectory(prefix="harness-dashboard-unknown-route.") as raw:
@@ -878,6 +1073,7 @@ class FakeCmuxRunner:
         self.dashboard = dashboard
         self.workspace = workspace
         self.created = False
+        self.fail_once = ""
         self.calls: list[list[str]] = []
 
     def __call__(self, argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
@@ -902,6 +1098,9 @@ class FakeCmuxRunner:
             }
             return subprocess.CompletedProcess(argv, 0, json.dumps(payload), "")
         if "new-split" in args:
+            if self.fail_once == "open":
+                self.fail_once = ""
+                return subprocess.CompletedProcess(argv, 7, "", "open failed")
             self.created = True
             return subprocess.CompletedProcess(
                 argv,
@@ -914,6 +1113,14 @@ class FakeCmuxRunner:
                 ),
                 "",
             )
+        if args[:1] == ["send"] and self.fail_once == "send":
+            self.fail_once = ""
+            return subprocess.CompletedProcess(argv, 7, "", "send failed")
+        if args[:1] == ["send-key"] and self.fail_once == "enter":
+            self.fail_once = ""
+            return subprocess.CompletedProcess(argv, 7, "", "enter failed")
+        if args[:1] == ["close-surface"]:
+            self.created = False
         return subprocess.CompletedProcess(argv, 0, "", "")
 
 
@@ -960,6 +1167,14 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-open.") as raw:
         adapter=adapter,
         marker_root=marker_root,
     )
+    fake.created = False
+    replacement = dashboard_script.open_dashboard(
+        vault=vault,
+        store=store_root,
+        caller_surface=caller,
+        adapter=adapter,
+        marker_root=marker_root,
+    )
     create_calls = [call for call in fake.calls if "new-split" in call]
     send_calls = [call for call in fake.calls if "send" in call]
     enter_calls = [call for call in fake.calls if "send-key" in call]
@@ -969,6 +1184,8 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-open.") as raw:
         and not first.reused
         and second.surface_id == dashboard
         and second.reused
+        and replacement.surface_id == dashboard
+        and not replacement.reused
         and create_calls
         == [[
             "cmux",
@@ -981,13 +1198,89 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-open.") as raw:
             "--focus",
             "false",
             "--json",
-        ]]
-        and len(send_calls) == 1
+        ]] * 2
+        and len(send_calls) == 2
         and send_calls[0][2:4] == ["--surface", dashboard]
         and "harness-dashboard.py" in send_calls[0][-1]
-        and enter_calls == [["cmux", "send-key", "--surface", dashboard, "Enter"]]
+        and enter_calls
+        == [["cmux", "send-key", "--surface", dashboard, "Enter"]] * 2
         and not any("focus" in call and "new-split" not in call for call in fake.calls)
         and _tree_bytes(store_root) == baseline,
+    )
+    for failure in ("open", "send", "enter"):
+        failed_fake = FakeCmuxRunner(caller, dashboard, workspace)
+        failed_fake.fail_once = failure
+        failed_adapter = CmuxAdapter(runner=failed_fake, binary="cmux")
+        failed_markers = root / f"{failure}-markers"
+        try:
+            dashboard_script.open_dashboard(
+                vault=vault,
+                store=store_root,
+                caller_surface=caller,
+                adapter=failed_adapter,
+                marker_root=failed_markers,
+            )
+        except Exception:
+            pass
+        else:
+            raise AssertionError(f"{failure} failure was accepted")
+        recovered = dashboard_script.open_dashboard(
+            vault=vault,
+            store=store_root,
+            caller_surface=caller,
+            adapter=failed_adapter,
+            marker_root=failed_markers,
+        )
+        check(
+            f"the external launcher recovers after {failure} failure",
+            recovered.surface_id == dashboard
+            and not recovered.reused
+            and failed_fake.created,
+        )
+
+    reserved_fake = FakeCmuxRunner(caller, dashboard, workspace)
+    reserved_fake.fail_once = "open"
+    reserved_adapter = CmuxAdapter(runner=reserved_fake, binary="cmux")
+    reserved_markers = root / "reserved-markers"
+    try:
+        dashboard_script.open_dashboard(
+            vault=vault,
+            store=store_root,
+            caller_surface=caller,
+            adapter=reserved_adapter,
+            marker_root=reserved_markers,
+            clock=lambda: 100.0,
+        )
+    except Exception:
+        pass
+    marker_path = next(reserved_markers.glob("*.json"))
+    reservation = json.loads(marker_path.read_text(encoding="ascii"))
+    reservation.update(state="reserved", reserved_at=100.0, surface_id="")
+    marker_path.write_text(json.dumps(reservation), encoding="ascii")
+    try:
+        dashboard_script.open_dashboard(
+            vault=vault,
+            store=store_root,
+            caller_surface=caller,
+            adapter=reserved_adapter,
+            marker_root=reserved_markers,
+            clock=lambda: 100.0,
+        )
+    except Exception as exc:
+        concurrent_rejected = "concurrently" in str(exc)
+    else:
+        concurrent_rejected = False
+    stale = dashboard_script.open_dashboard(
+        vault=vault,
+        store=store_root,
+        caller_surface=caller,
+        adapter=reserved_adapter,
+        marker_root=reserved_markers,
+        clock=lambda: 131.0,
+    )
+    check(
+        "fresh reservations reject concurrency while stale reservations recover once",
+        concurrent_rejected and stale.surface_id == dashboard and reserved_fake.created,
     )
     ambiguous = AmbiguousCmux(caller)
     try:

@@ -29,6 +29,7 @@ STEP_MARKERS = {
     "running": "[>]",
     "pending": "[ ]",
     "attention": "[!]",
+    "stopped": "[-]",
     "unknown": "[?]",
 }
 NEXT_ACTION_TEXT = {

@@ -38,6 +38,7 @@ MIN_INTERVAL = 0.1
 MAX_INTERVAL = 60.0
 RECENT_CHOICES = (2, 3)
 CLEAR = "\x1b[2J\x1b[H"
+RESERVATION_STALE_SECONDS = 30.0
 
 
 @dataclass(frozen=True)
@@ -216,6 +217,7 @@ def open_dashboard(
     caller_surface: str,
     adapter: CmuxAdapter | None = None,
     marker_root: Path | None = None,
+    clock: Callable[[], float] = time.time,
 ) -> OpenResult:
     """Open at most one external observer split for one vault/workspace pair."""
 
@@ -244,43 +246,84 @@ def open_dashboard(
     markers.mkdir(parents=True, exist_ok=True, mode=0o700)
     marker = markers / f"{marker_key}.json"
     expected = {
-        "schema_version": 1,
+        "schema_version": 2,
         "marker_key": marker_key,
         "vault_sha256": vault_digest,
         "store_sha256": store_digest,
         "workspace_id": workspace_id,
     }
-    if marker.exists():
+    marker_exists = marker.exists()
+    if marker_exists:
         value = _read_marker(marker)
         if any(value.get(key) != item for key, item in expected.items()):
             raise CmuxError("dashboard marker identity does not match the caller")
+        state = str(value.get("state") or "")
         surface_id = str(value.get("surface_id") or "")
-        if value.get("state") != "ready" or not UUID_RE.fullmatch(surface_id):
-            raise CmuxError("dashboard marker is reserved but not ready")
         surface_key = surface_id.casefold()
-        if (
-            surface_key in inventory.ambiguous_surfaces
-            or inventory.surface_workspaces.get(surface_key, "").casefold()
-            != workspace_id.casefold()
-        ):
-            raise CmuxError("dashboard surface identity is missing or ambiguous")
-        return OpenResult(surface_id, workspace_id, True)
+        live = (
+            UUID_RE.fullmatch(surface_id) is not None
+            and surface_key not in inventory.ambiguous_surfaces
+            and inventory.surface_workspaces.get(surface_key, "").casefold()
+            == workspace_id.casefold()
+        )
+        if state == "ready" and live:
+            return OpenResult(surface_id, workspace_id, True)
+        if state == "starting" and live:
+            raise CmuxError("dashboard startup is incomplete on a live exact surface")
+        if state == "reserved":
+            reserved_at = value.get("reserved_at")
+            if (
+                not isinstance(reserved_at, (int, float))
+                or isinstance(reserved_at, bool)
+                or clock() - float(reserved_at) < RESERVATION_STALE_SECONDS
+            ):
+                raise CmuxError("dashboard marker was reserved concurrently")
+        elif state not in {"ready", "starting", "retryable"}:
+            raise CmuxError("dashboard marker state is invalid")
 
-    reservation = {**expected, "state": "reserved", "surface_id": ""}
+    reservation = {
+        **expected,
+        "state": "reserved",
+        "surface_id": "",
+        "reserved_at": clock(),
+    }
     try:
-        _write_marker(marker, reservation, exclusive=True)
+        _write_marker(marker, reservation, exclusive=not marker_exists)
     except FileExistsError:
         raise CmuxError("dashboard marker was reserved concurrently") from None
 
-    surface = cmux.open_split(caller_surface)
+    try:
+        surface = cmux.open_split(caller_surface)
+    except Exception:
+        _write_marker(
+            marker,
+            {**expected, "state": "retryable", "surface_id": "", "reserved_at": 0},
+            exclusive=False,
+        )
+        raise
     if (
         not UUID_RE.fullmatch(surface.surface_id)
         or surface.workspace_id.casefold() != workspace_id.casefold()
     ):
+        if UUID_RE.fullmatch(surface.surface_id):
+            try:
+                cmux.close_exact(surface.surface_id)
+            except CmuxError:
+                pass
+        _write_marker(
+            marker,
+            {**expected, "state": "retryable", "surface_id": "", "reserved_at": 0},
+            exclusive=False,
+        )
         raise CmuxError("dashboard split returned an invalid placement")
     _write_marker(
         marker,
-        {**expected, "state": "ready", "surface_id": surface.surface_id},
+        {
+            **expected,
+            "state": "starting",
+            "surface_id": surface.surface_id,
+            "reserved_at": 0,
+        },
         exclusive=False,
     )
     command = shlex.join(
@@ -295,8 +338,34 @@ def open_dashboard(
             "3",
         ]
     )
-    cmux.send(surface.surface_id, command)
-    cmux.send_key(surface.surface_id, "Enter")
+    try:
+        cmux.send(surface.surface_id, command)
+        cmux.send_key(surface.surface_id, "Enter")
+    except Exception:
+        try:
+            cmux.close_exact(surface.surface_id)
+        finally:
+            _write_marker(
+                marker,
+                {
+                    **expected,
+                    "state": "retryable",
+                    "surface_id": "",
+                    "reserved_at": 0,
+                },
+                exclusive=False,
+            )
+        raise
+    _write_marker(
+        marker,
+        {
+            **expected,
+            "state": "ready",
+            "surface_id": surface.surface_id,
+            "reserved_at": 0,
+        },
+        exclusive=False,
+    )
     return OpenResult(surface.surface_id, workspace_id, False)
 
 

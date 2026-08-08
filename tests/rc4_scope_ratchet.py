@@ -41,6 +41,13 @@ external cmux launcher in ``harness-dashboard.py``.  The existing file ceiling
 already had room for that one script; the line ceiling moves by exactly its
 bounded implementation cost.
 
+The final typed review then required authoritative read-only receipt checks,
+recoverable external-launch reservations, uncapped active roots, exact bounded
+loop counts, and a stopped marker.  The receipt authority is extracted into
+``harness/dashboard_receipts.py`` so projection remains under the per-file
+quality ceiling.  The file ceiling moves by one and the line ceiling by the
+review correction's measured 312-line cost.
+
 The historical RC2 snapshot is retained separately in
 ``tests/test_v266_rc2_scope.py``; it is evidence about a released commit, not a
 constraint on this one.
@@ -52,10 +59,10 @@ from pathlib import Path
 
 
 #: Maximum tracked Python files under ``scripts/`` for the RC4 candidate.
-SCRIPT_FILE_CEILING = 264
+SCRIPT_FILE_CEILING = 265
 
 #: Maximum total lines across those files for the RC4 candidate.
-SCRIPT_LINE_CEILING = 90_020
+SCRIPT_LINE_CEILING = 90_332
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

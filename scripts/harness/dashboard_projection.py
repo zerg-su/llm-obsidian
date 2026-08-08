@@ -26,6 +26,7 @@ from .pipelines import CompiledPipeline, reconcile_pipeline
 from .state_machine import TERMINAL
 from .status_segment import CONTROLLER_KINDS, LiveInventory
 from .store import OperationStore, StoreError
+from .dashboard_receipts import fix_receipt_visits, verification_receipt_visits
 
 
 MAX_ISSUES = 5
@@ -110,6 +111,7 @@ class StepView:
     visits: int
     route: RouteView = UNKNOWN_ROUTE
     children: tuple[ChildView, ...] = ()
+    evidence_issue: str = ""
 
 
 @dataclass(frozen=True)
@@ -212,29 +214,6 @@ def _compiled(record: OperationRecord) -> tuple[str, CompiledPipeline | None]:
     except ValueError:
         return "", None
     return name, compiled
-
-
-def _fix_visits(runtime: Path, step_id: str) -> tuple[int, ...]:
-    """Return the bounded loop passes that durably receipted one fix step."""
-
-    root = runtime / "pipeline-fix"
-    if not root.is_dir():
-        return ()
-    visits: list[int] = []
-    for path in sorted(root.glob("pass-*")):
-        suffix = path.name.removeprefix("pass-")
-        if not suffix.isdigit():
-            continue
-        if (path / step_id / "receipt.json").is_file():
-            visits.append(int(suffix))
-    return tuple(visits[:MAX_VISITS])
-
-
-def _verification_visits(runtime: Path) -> tuple[int, ...]:
-    root = runtime / "pipeline-verification"
-    if not root.is_dir():
-        return ()
-    return tuple(range(len(sorted(root.glob("*/receipt.json"))[:MAX_VISITS])))
 
 
 def _parent_id(record: OperationRecord) -> str:
@@ -450,6 +429,7 @@ def _step_view(
     step: Any,
     identity: str,
     *,
+    store: OperationStore,
     record: OperationRecord,
     runtime: Path,
     gate: Mapping[str, Any] | None,
@@ -466,6 +446,7 @@ def _step_view(
     """
 
     child_statuses = tuple(child.status for child in children)
+    issue = ""
     if step.primitive_id == "review":
         visits: tuple[int, ...] = ()
         if gate is not None:
@@ -473,17 +454,21 @@ def _step_view(
         else:
             evidence, status = bool(children), _aggregate(child_statuses)
     elif step.primitive_id == "verify":
-        visits = _verification_visits(runtime)
-        if visits:
+        visits, issue = verification_receipt_visits(store, record, runtime)
+        if issue:
+            evidence, status = True, "attention"
+        elif visits:
             evidence, status = True, "complete"
         elif children:
             evidence, status = True, _aggregate(child_statuses)
         else:
             evidence, status = False, _model_step_status(record)
     else:
-        visits = _fix_visits(runtime, step.step_id)
-        evidence = bool(visits)
-        status = "complete" if visits else _model_step_status(record)
+        visits, issue = fix_receipt_visits(store, record, runtime, step.step_id)
+        evidence = bool(visits) or bool(issue)
+        status = "attention" if issue else (
+            "complete" if visits else _model_step_status(record)
+        )
     return (
         StepView(
             step.step_id,
@@ -493,12 +478,14 @@ def _step_view(
             len(visits),
             _step_route(step, record, children),
             children,
+            issue,
         ),
         evidence,
     )
 
 
 def _steps(
+    store: OperationStore,
     record: OperationRecord,
     compiled: CompiledPipeline,
     runtime: Path,
@@ -511,6 +498,7 @@ def _steps(
         _step_view(
             step,
             identity,
+            store=store,
             record=record,
             runtime=runtime,
             gate=gate,
@@ -560,7 +548,7 @@ def _loop_limit(compiled: CompiledPipeline) -> int:
         identity.split("@", 1)[0]
         for identity in compiled.resolved_control_primitives
     }:
-        return 1
+        return 0
     return max(
         item.total_pass_limit
         for item in compiled.definition.completion_policies
@@ -721,7 +709,7 @@ def _program(
     by_step, loose = _bind_children(direct, compiled)
     if compiled is None:
         return _uncompiled_program(record, lanes, surface, loose)
-    steps, next_action = _steps(record, compiled, runtime, gate, by_step)
+    steps, next_action = _steps(store, record, compiled, runtime, gate, by_step)
     definition = compiled.definition
     return ProgramView(
         record.spec.operation_id,
@@ -734,7 +722,18 @@ def _program(
         steps,
         lanes,
         next_action,
-        max((view.visits for view in steps), default=0),
+        (
+            max(
+                (
+                    view.visits
+                    for view in steps
+                    if view.primitive.split("@", 1)[0] == "model_step"
+                ),
+                default=0,
+            )
+            if _loop_limit(compiled)
+            else 0
+        ),
         _loop_limit(compiled),
         surface,
         _program_classification(
@@ -775,6 +774,16 @@ def _diagnostic_issues(store_root: Path | str, owner_id: str) -> list[IssueView]
 def _program_issues(programs: tuple[ProgramView, ...]) -> list[IssueView]:
     issues: list[IssueView] = []
     for program in programs:
+        for step in program.steps:
+            if step.evidence_issue:
+                issues.append(
+                    IssueView(
+                        step.evidence_issue,
+                        program.operation_id,
+                        f"{step.step_id} durable evidence is not accepted",
+                        ATTENTION,
+                    )
+                )
         if program.pipeline == "unresolved":
             issues.append(
                 IssueView(
@@ -883,7 +892,7 @@ def _programs(
             inventory=inventory,
             tree=tree,
         )
-        for controller in controllers[:MAX_PROGRAMS]
+        for controller in controllers
     )
     return controllers, programs
 
@@ -929,7 +938,7 @@ def project(
         programs,
         tuple(bounded[:MAX_ISSUES]),
         {
-            "programs": max(len(controllers) - MAX_PROGRAMS, 0),
+            "programs": 0,
             "issues": max(len(bounded) - MAX_ISSUES, 0),
         },
     )
