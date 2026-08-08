@@ -409,6 +409,58 @@ def assert_review_resolution_notification_crashes_fail_closed(root: Path) -> Non
     print("OK   review resolution cmux crash windows never replay effects")
 
 
+def assert_durable_review_packet_generation_can_advance(root: Path) -> None:
+    """A durably notified review packet may advance to one later cycle."""
+
+    packet_path = root / "review-packet-generation.json"
+    prior = {
+        "schema_version": 1,
+        "operation_id": TASK,
+        "review_operation_id": "review-cycle-1",
+        "reviewed_head_sha": "a" * 40,
+        "review_callbacks": [{"callback_id": "callback-cycle-1"}],
+    }
+    packet_path.write_text(
+        json.dumps(prior, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    prior_sha256 = canonical_sha256(prior)
+    notified = {
+        "schema_version": 1,
+        "operation_id": TASK,
+        "packet_sha256": prior_sha256,
+        "reviewed_head_sha": prior["reviewed_head_sha"],
+        "status": "sent",
+    }
+    next_packet = {
+        "schema_version": 1,
+        "operation_id": TASK,
+        "review_operation_id": "review-cycle-2",
+        "reviewed_head_sha": "b" * 40,
+        "review_callbacks": [{"callback_id": "callback-cycle-2"}],
+    }
+    worker = SimpleNamespace(spec={"operation_id": TASK})
+
+    RuntimeWorkerReviewBridgeMixin.validate_existing_review_packet(
+        worker, packet_path, notified, next_packet
+    )
+
+    for invalid_notification in (
+        None,
+        {**notified, "packet_sha256": "c" * 64},
+    ):
+        try:
+            RuntimeWorkerReviewBridgeMixin.validate_existing_review_packet(
+                worker, packet_path, invalid_notification, next_packet
+            )
+        except Exception as exc:
+            assert "identity changed" in str(exc), exc
+        else:
+            raise AssertionError(
+                "an unproven prior review packet must block generation advance"
+            )
+    print("OK   durable review packet generation advances exactly once")
+
+
 def write_json(path: Path, value: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, sort_keys=True) + "\n", encoding="utf-8")
@@ -1202,6 +1254,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
     assert_review_drive_failure_receipt_is_content_free()
     assert_summary_refresh_notification_replays_without_effect(root)
     assert_review_resolution_notification_crashes_fail_closed(root)
+    assert_durable_review_packet_generation_can_advance(root)
     handoff = root / "resolution-handoff"
     handoff.mkdir()
     reviewed_head = "a" * 40

@@ -584,11 +584,15 @@ class RuntimeWorkerReviewBridgeMixin:
         if not packet_path.exists():
             return
         current = json.loads(packet_path.read_text(encoding="utf-8"))
-        stable_identity = (
+        stable_task_identity = (
             isinstance(current, dict)
             and current.get("schema_version") == 1
             and current.get("operation_id") == self.spec["operation_id"]
-            and current.get("review_operation_id") == packet["review_operation_id"]
+        )
+        review_generation_changed = (
+            isinstance(current, dict)
+            and current.get("review_operation_id")
+            != packet["review_operation_id"]
         )
         callbacks_changed = (
             isinstance(current, dict)
@@ -600,14 +604,15 @@ class RuntimeWorkerReviewBridgeMixin:
                 json.dumps(current, sort_keys=True, separators=(",", ":")).encode()
             ).hexdigest()
         prior_generation_is_durable = (
-            callbacks_changed
+            (callbacks_changed or review_generation_changed)
             and isinstance(notified, dict)
             and notified.get("status") == "sent"
             and notified.get("packet_sha256") == prior_packet_sha256
             and notified.get("reviewed_head_sha") == current.get("reviewed_head_sha")
         )
-        if not stable_identity or (
-            callbacks_changed and not prior_generation_is_durable
+        if not stable_task_identity or (
+            (callbacks_changed or review_generation_changed)
+            and not prior_generation_is_durable
         ):
             raise RuntimeWorkerError("review decision packet identity changed")
 
