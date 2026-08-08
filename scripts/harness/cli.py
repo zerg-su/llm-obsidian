@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
@@ -40,6 +41,7 @@ from .status_segment import live_inventory, publish as publish_status
 from .store import OperationStore, StoreError
 from .supervisor import OperationSupervisor
 from .runtime_sessions import RuntimeSessionError, RuntimeSessionManager
+from .runtime_worker_review_bridge import publish_review_resolution_transport
 
 
 def parser() -> argparse.ArgumentParser:
@@ -503,6 +505,7 @@ def _recover_finalizing_review_if_present(
     operation_id: str,
     *,
     runtime_manager: object | None = None,
+    cmux_adapter: object,
 ) -> str:
     """Recover one exact accepted review callback without starting a model."""
 
@@ -594,7 +597,78 @@ def _recover_finalizing_review_if_present(
         raise RuntimeSessionError(
             "dispatch finalizing review recovery did not make bounded progress"
         )
+    if receipt.get("status") == "changes-requested":
+        try:
+            recovered_gate = json.loads(gate_path.read_text(encoding="utf-8"))
+            _publish_recovered_review_resolution(
+                store_root=store_root,
+                owner=owner,
+                operation_id=operation_id,
+                worktree=worktree,
+                gate_path=gate_path,
+                gate_state=recovered_gate,
+                cmux_adapter=cmux_adapter,
+            )
+        except Exception as exc:
+            raise RuntimeSessionError(
+                "dispatch review resolution transport recovery failed"
+            ) from exc
     return str(receipt["status"])
+
+
+def _publish_recovered_review_resolution(
+    *,
+    store_root: Path,
+    owner: str,
+    operation_id: str,
+    worktree: Path,
+    gate_path: Path,
+    gate_state: object,
+    cmux_adapter: object,
+) -> None:
+    """Republish one terminal review generation without replaying review."""
+
+    runtime_root = store_root / "owners" / owner / "runtime" / operation_id
+    launch_path = runtime_root / "launch.json"
+    summary_path = worktree / ".task-summary.json"
+    if (
+        not isinstance(gate_state, dict)
+        or gate_state.get("status") != "changes-requested"
+        or gate_path.name != "review-gate.json"
+        or gate_path.parent.parent.parent.parent.resolve() != store_root.resolve()
+        or launch_path.is_symlink()
+        or not launch_path.is_file()
+        or summary_path.is_symlink()
+        or not summary_path.is_file()
+    ):
+        raise RuntimeSessionError(
+            "dispatch review resolution transport identity is invalid"
+        )
+    launch = json.loads(launch_path.read_text(encoding="utf-8"))
+    if (
+        not isinstance(launch, dict)
+        or launch.get("schema_version") != 1
+        or launch.get("owner_id") != owner
+        or launch.get("operation_id") != operation_id
+        or Path(str(launch.get("cwd") or "")).expanduser().resolve()
+        != worktree.resolve()
+        or not isinstance(launch.get("surface_id"), str)
+        or not launch["surface_id"]
+    ):
+        raise RuntimeSessionError(
+            "dispatch review resolution launch identity is invalid"
+        )
+    summary_sha256 = hashlib.sha256(summary_path.read_bytes()).hexdigest()
+    publish_review_resolution_transport(
+        gate_state=gate_state,
+        gate_root=gate_path.parent,
+        worktree=worktree,
+        operation_id=operation_id,
+        surface_id=str(launch["surface_id"]),
+        summary_sha256=summary_sha256,
+        runtime_spec_path=launch_path,
+        cmux_adapter=cmux_adapter,
+    )
 
 
 def _resume(
@@ -626,6 +700,7 @@ def _resume(
             owner,
             operation_id,
             runtime_manager=review_runtime_manager,
+            cmux_adapter=cmux_adapter,
         )
         if recovery_status == "approved":
             current = store.read(owner, operation_id)

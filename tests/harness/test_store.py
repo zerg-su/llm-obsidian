@@ -1560,9 +1560,11 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
         operation_id: str,
         *,
         runtime_manager: object | None = None,
+        cmux_adapter: object | None = None,
     ) -> str:
         recovery_calls.append(operation_id)
         assert runtime_manager is None
+        assert cmux_adapter is not None
         return "approved"
 
     harness_cli._recover_finalizing_review_if_present = accepted_review_recovery
@@ -1619,4 +1621,84 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
             "op-approved-finalizing-review-cli",
             "op-approved-live-review-cli",
         ],
+    )
+
+
+with tempfile.TemporaryDirectory(prefix="review-resolution-recovery.") as raw:
+    recovery_vault = Path(raw).resolve() / "vault"
+    recovery_store_root = recovery_vault / ".vault-meta/harness"
+    recovery_owner = "review-resolution-owner"
+    recovery_operation = "review-resolution-operation"
+    recovery_surface = "509DF5B5-B499-4FB9-A206-BC99134C9093"
+    recovery_worktree = Path(raw).resolve() / "product"
+    recovery_worktree.mkdir(parents=True)
+    recovery_runtime_root = (
+        recovery_store_root
+        / "owners"
+        / recovery_owner
+        / "runtime"
+        / recovery_operation
+    )
+    recovery_runtime_root.mkdir(parents=True)
+    recovery_summary = b'{"schema_version":1}\n'
+    (recovery_worktree / ".task-summary.json").write_bytes(recovery_summary)
+    (recovery_runtime_root / "launch.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "owner_id": recovery_owner,
+                "operation_id": recovery_operation,
+                "cwd": str(recovery_worktree),
+                "surface_id": recovery_surface,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    recovery_gate_root = (
+        recovery_store_root
+        / "review-data"
+        / recovery_operation
+        / recovery_operation
+    )
+    recovery_gate_root.mkdir(parents=True)
+    recovery_gate_path = recovery_gate_root / "review-gate.json"
+    recovery_gate = {
+        "schema_version": 1,
+        "status": "changes-requested",
+    }
+    recovery_gate_path.write_text(
+        json.dumps(recovery_gate) + "\n", encoding="utf-8"
+    )
+    recovery_transport_calls: list[dict[str, object]] = []
+    original_transport = harness_cli.publish_review_resolution_transport
+
+    def capture_recovered_transport(**kwargs: object) -> None:
+        recovery_transport_calls.append(kwargs)
+
+    harness_cli.publish_review_resolution_transport = capture_recovered_transport
+    try:
+        harness_cli._publish_recovered_review_resolution(
+            store_root=recovery_store_root,
+            owner=recovery_owner,
+            operation_id=recovery_operation,
+            worktree=recovery_worktree,
+            gate_path=recovery_gate_path,
+            gate_state=recovery_gate,
+            cmux_adapter=FakeCmux("alive"),
+        )
+    finally:
+        harness_cli.publish_review_resolution_transport = original_transport
+    check(
+        "changes-requested recovery republishes the exact review generation",
+        len(recovery_transport_calls) == 1
+        and recovery_transport_calls[0]["gate_state"] == recovery_gate
+        and recovery_transport_calls[0]["gate_root"] == recovery_gate_root
+        and recovery_transport_calls[0]["worktree"] == recovery_worktree
+        and recovery_transport_calls[0]["operation_id"] == recovery_operation
+        and recovery_transport_calls[0]["surface_id"] == recovery_surface
+        and recovery_transport_calls[0]["summary_sha256"]
+        == hashlib.sha256(recovery_summary).hexdigest()
+        and recovery_transport_calls[0]["runtime_spec_path"]
+        == recovery_runtime_root / "launch.json",
     )
