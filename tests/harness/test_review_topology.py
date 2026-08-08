@@ -40,11 +40,6 @@ from task_review_context import (  # noqa: E402
 )
 from task_review_finalization_attempt import _bind_routes  # noqa: E402
 from model_routing import load_config  # noqa: E402
-from task_review_flow import (  # noqa: E402
-    _requires_lane_barrier,
-    _should_defer_ready_results,
-)
-
 
 def check(label: str, value: bool) -> None:
     if not value:
@@ -319,21 +314,11 @@ check(
         "openai-engineering",
     ),
 )
-check(
-    "every multi-lane mode aggregates all callbacks before resolution",
-    not _requires_lane_barrier(ReviewPreset.from_flags())
-    and _requires_lane_barrier(ReviewPreset.from_flags(deep=True))
-    and _requires_lane_barrier(ReviewPreset.from_flags(full=True)),
-)
-check(
-    "an interrupted Full barrier absorbs later callbacks into one resolution",
-    _should_defer_ready_results(
-        ReviewPreset.from_flags(full=True),
-        purpose="implementation",
-        has_material=False,
-        already_awaiting=True,
-    ),
-)
+# The lane-barrier and deferred-resolution helpers were retired with the
+# production-dead half of _complete_ready_results (rc4-complete-ready-results-
+# dead-half): the exact-HEAD attempt is the only completion path and it never
+# defers.  Lane cardinality itself is still pinned by the compile_review_axes
+# checks above.
 
 for label, flags in (
     ("deep and full are mutually exclusive", {"deep": True, "full": True}),

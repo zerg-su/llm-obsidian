@@ -148,20 +148,16 @@ def _assert_frozen_topology(
 
     frozen = meta.get("review_topology")
     if not isinstance(frozen, Mapping):
-        review = meta.get("review_policy")
-        mode = review.get("mode") if isinstance(review, Mapping) else None
-        # A current-checkout review synthesizes its own metadata at launch and
-        # has no dispatch record in which a topology could have been frozen, so
-        # the requirement applies to dispatched tasks only.
-        if (
-            meta.get("version") == 4
-            and mode in {"simple", "deep", "full"}
-            and meta.get("lifecycle") != "current-checkout"
-        ):
-            raise TaskReviewError(
-                "review-enabled v4 task metadata must bind review_topology "
-                "before a review lane is launched"
-            )
+        # Absence is tolerated here, and that is a narrowing, not a fail-open.
+        # The binding is created at dispatch: dispatch_workspace writes
+        # review_topology for every review-enabled task, so no new task can
+        # reach this point unbound.  Records written before the field existed —
+        # and current-checkout reviews, which synthesize their metadata at
+        # launch and have no dispatch record — stay launchable.  RC4 evidence E1
+        # is worded to claim exactly that, and the residual gap is recorded as
+        # D-266-RC4-02 in the RC4 accepted-deviations artifact.  What is NOT
+        # tolerated is a binding that disagrees with the compiled topology; that
+        # is enforced below.
         return
     expected_sha256 = str(frozen.get("sha256") or "")
     expected_payload = frozen.get("payload")

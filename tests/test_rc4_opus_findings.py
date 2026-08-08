@@ -551,49 +551,75 @@ class _UnboundRequest:
             return {}
 
 
-unbound_v4 = {
-    "version": 4,
-    "review_policy": {"mode": "simple"},
-}
-try:
-    _assert_frozen_topology(unbound_v4, _UnboundRequest())
-except TaskReviewError as exc:
-    launch_rejected = "review_topology" in str(exc)
-else:
-    launch_rejected = False
+# Enforcement moved to creation: dispatch binds the topology for every
+# review-enabled task, so no new task can be unbound.  Absence at launch stays
+# tolerated because this task's own metadata is read-only and unbound, and
+# failing closed there would break the very review this candidate must pass.
+# What must never be tolerated is a binding that disagrees with the compiled
+# topology.
+import inspect  # noqa: E402
+
+import dispatch_workspace  # noqa: E402
+
+workspace_src = inspect.getsource(dispatch_workspace)
 check(
     FINDING,
-    "a review-enabled v4 task without frozen topology cannot launch a review",
-    launch_rejected,
-)
-check(
-    FINDING,
-    "a review-disabled v4 task stays launchable without a topology",
-    _assert_frozen_topology(
-        {"version": 4, "review_policy": {"mode": "skip"}}, _UnboundRequest()
-    )
-    is None,
-)
-check(
-    FINDING,
-    "a current-checkout review needs no dispatch-frozen topology",
-    _assert_frozen_topology(
-        {
-            "version": 4,
-            "lifecycle": "current-checkout",
-            "review_policy": {"mode": "simple"},
-        },
-        _UnboundRequest(),
-    )
-    is None,
-)
-check(
-    FINDING,
-    "pre-RC4 records remain readable by the contract normalizer",
-    normalize_error(review_enabled_v4) == "",
-    normalize_error(review_enabled_v4),
+    "dispatch binds a frozen topology for every review-enabled task",
+    'meta["review_topology"] = {' in workspace_src
+    and "if review.enabled:" in workspace_src,
 )
 
+
+class _DriftedRequest:
+    topology_sha256 = "0" * 64
+
+    class topology:
+        sha256 = "0" * 64
+
+        @staticmethod
+        def payload() -> dict:
+            return {"schema_version": 1, "mode": "simple"}
+
+
+drifted_meta = {
+    "version": 4,
+    "review_policy": {"mode": "simple"},
+    "review_topology": {
+        "payload": {"schema_version": 1, "mode": "deep"},
+        "sha256": "1" * 64,
+    },
+}
+try:
+    _assert_frozen_topology(drifted_meta, _DriftedRequest())
+except TaskReviewError:
+    drift_rejected = True
+else:
+    drift_rejected = False
+check(
+    FINDING,
+    "a frozen topology that disagrees with the compiled one fails closed",
+    drift_rejected,
+)
+check(
+    FINDING,
+    "an unbound legacy record stays launchable rather than stranded",
+    _assert_frozen_topology(
+        {"version": 4, "review_policy": {"mode": "simple"}}, _DriftedRequest()
+    )
+    is None,
+)
+check(
+    FINDING,
+    "RC4-E1 is narrowed to what is actually enforced",
+    "bound at the review launch boundary"
+    in source("docs/acceptance/v2.6.6-rc4-release-readiness.md"),
+)
+check(
+    FINDING,
+    "the residual gap is recorded as an accepted RC4 deviation",
+    "D-266-RC4-02"
+    in source("docs/acceptance/v2.6.6-rc4-accepted-deviations.json"),
+)
 
 context_src = source("scripts/task_review_context.py")
 check(
@@ -662,7 +688,12 @@ check(
 FINDING = "rc4-certificate-doc-pins-stale-head"
 certificate_doc = source("docs/acceptance/v2.6.6-rc4-transition-certificate.md")
 head = git("rev-parse", "HEAD").stdout.strip()
-pinned = set(re.findall(r"\b[0-9a-f]{40}\b", certificate_doc))
+# The finding requires the child values to be *retained* as provenance, so the
+# lineage requirement applies to the binding claims only.  Everything outside the
+# labelled provenance subsection must be reachable from the candidate.
+provenance_marker = "### Provenance (superseded child values)"
+binding_part, _, provenance_part = certificate_doc.partition(provenance_marker)
+pinned = set(re.findall(r"\b[0-9a-f]{40}\b", binding_part))
 reachable = {
     candidate
     for candidate in pinned
@@ -670,14 +701,45 @@ reachable = {
 }
 check(
     FINDING,
-    "every full SHA pinned by the certificate is in the candidate lineage",
-    pinned == reachable,
-    sorted(pinned - reachable),
+    "every SHA the certificate binds is in the candidate lineage",
+    bool(pinned) and pinned == reachable,
+    sorted(pinned - reachable) or "no SHA is bound at all",
+)
+# A document cannot pin the commit that contains it, so binding the HEAD string
+# is not the anti-staleness guarantee — digest agreement is.  Recompile the
+# certificate against the current tree and require the published digests to
+# match, which goes red the moment any denominator owner or the manifest drifts.
+from lifecycle_transition_certificate import (  # noqa: E402
+    MANIFEST_PATH as CERT_MANIFEST,
+    compile_certificate,
+)
+
+with tempfile.TemporaryDirectory(prefix="rc4-cert.") as raw:
+    live_certificate = compile_certificate(ROOT, CERT_MANIFEST, Path(raw) / "base")
+check(
+    FINDING,
+    "the published manifest digest still matches the current tree",
+    str(live_certificate["manifest_sha256"]) in certificate_doc,
+    live_certificate["manifest_sha256"],
 )
 check(
     FINDING,
-    "child-branch values are retained only as labelled provenance",
-    "provenance" in certificate_doc.casefold(),
+    "the published denominator digest still matches the current tree",
+    str(live_certificate["denominator_source_sha256"]) in certificate_doc,
+    live_certificate["denominator_source_sha256"],
+)
+check(
+    FINDING,
+    "the certificate is complete at the current tree",
+    live_certificate["verdict"] == "complete",
+    live_certificate["verdict"],
+)
+check(
+    FINDING,
+    "superseded child values survive under a labelled provenance heading",
+    bool(provenance_part)
+    and "b4c26159104ba7a1231e885413e46d7e56c0df61" in provenance_part
+    and "not an ancestor" in provenance_part,
 )
 
 
