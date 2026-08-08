@@ -136,6 +136,27 @@ check(
     "an exact-HEAD RC4 gate bundle is committed",
     evidence_root.is_dir() and any(evidence_root.iterdir()),
 )
+# The receipt is compiled by scripts/rc4_gate_bundle.py from a real run, and its
+# own verifier re-checks release, verdict, lineage, and log digest.
+from rc4_gate_bundle import GateBundleError, verify as verify_gate_bundle  # noqa: E402
+
+try:
+    gate_receipt = verify_gate_bundle()
+except GateBundleError as exc:
+    check(FINDING, "the committed gate receipt verifies", False, exc)
+else:
+    check(FINDING, "the committed gate receipt verifies", True)
+    check(
+        FINDING,
+        "the recorded gate ran the full suite, not a subset",
+        gate_receipt["command"] == ["make", "test"],
+        gate_receipt["command"],
+    )
+    check(
+        FINDING,
+        "the gate ran against a clean worktree",
+        gate_receipt["worktree_clean_at_run"] is True,
+    )
 
 disposition_schemas = sorted(
     path
