@@ -8,10 +8,18 @@ unknown state into a confident one.
 
 from __future__ import annotations
 
-from .dashboard_projection import DashboardProjection, ProgramView
+from .dashboard_projection import (
+    ChildView,
+    DashboardProjection,
+    ProgramView,
+    RouteView,
+)
 
 MAX_LINE = 96
 SHORT_ID = 8
+# A nested operation is identified by its own id, so it keeps more of it than a
+# lane label: eight characters cannot tell two children of one step apart.
+CHILD_ID = 24
 STEP_MARKERS = {
     "complete": "[x]",
     "running": "[>]",
@@ -37,6 +45,29 @@ def _clip(value: str) -> str:
     return value if len(value) <= MAX_LINE else value[: MAX_LINE - 1] + "…"
 
 
+def _route(route: RouteView) -> str:
+    return (
+        f"{route.runtime}/{route.model}/{route.effort}  preset {route.preset}"
+    )
+
+
+def _child_lines(children: tuple[ChildView, ...], indent: int) -> list[str]:
+    """Render one nested operation subtree under the step that runs it."""
+
+    pad = " " * indent
+    lines: list[str] = []
+    for child in children:
+        marker = STEP_MARKERS.get(child.status, STEP_MARKERS["unknown"])
+        identity = child.operation_id[:CHILD_ID]
+        lines.append(
+            f"{pad}{marker} {identity:<{CHILD_ID}} {child.kind:<22} "
+            f"{child.state}"
+        )
+        lines.append(f"{pad}    route {_route(child.route)}")
+        lines.extend(_child_lines(child.children, indent + 4))
+    return lines
+
+
 def _step_lines(program: ProgramView) -> list[str]:
     if not program.steps:
         return ["  steps    none projected"]
@@ -47,6 +78,8 @@ def _step_lines(program: ProgramView) -> list[str]:
             f"    {marker} {step.step_id:<16} {step.primitive:<18} "
             f"{step.session_mode:<13} visits {step.visits}"
         )
+        lines.append(f"        route {_route(step.route)}")
+        lines.extend(_child_lines(step.children, 8))
     return lines
 
 
@@ -55,14 +88,15 @@ def _lane_lines(program: ProgramView) -> list[str]:
         return ["  lanes    none projected"]
     lines = ["  lanes"]
     for lane in program.lanes:
-        state = "active" if lane.active else "idle"
         if lane.scope == "operation":
             label, members = _short(lane.lane_id), f"{len(lane.members)} operation(s)"
         else:
             label, members = lane.lane_id, "review axis"
-        lines.append(f"    {lane.scope:<11} {label:<18} {state:<7} {members}")
+        lines.append(
+            f"    {lane.scope:<11} {label:<18} {lane.status:<9} {members}"
+        )
     if len(program.lanes) > 1:
-        active = sum(1 for lane in program.lanes if lane.active)
+        active = sum(1 for lane in program.lanes if lane.status == "active")
         lines.append(
             f"    parallel lanes: {len(program.lanes)} ({active} active)"
         )
@@ -87,8 +121,12 @@ def _program_lines(program: ProgramView) -> list[str]:
         f"  loop     {loop}",
         f"  next     {NEXT_ACTION_TEXT.get(program.next_action, program.next_action)}",
         f"  surface  {program.surface}",
+        f"  executor {_route(program.executor)}  {program.executor_status}",
     ]
     lines.extend(_step_lines(program))
+    if program.children:
+        lines.append("  children with no exact step lineage")
+        lines.extend(_child_lines(program.children, 4))
     lines.extend(_lane_lines(program))
     lines.append(f"  status   {program.classification}")
     return lines

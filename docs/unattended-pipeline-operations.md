@@ -30,6 +30,14 @@ classified `request-coordinator-classification` instead of being rendered as
 progress, so an unreadable cmux tree leaves surfaces `unknown` rather than
 implying that cleanup is due.
 
+One dispatch renders as one tree. Verification children, review parents, and
+review rounds are nested under the compiled step that executes them, resolved
+from exact durable lineage (`parent_operation_id`, and `owner_id` for a review
+parent), so an operation is top-level only when it really has no owning root.
+Each step reports the frozen runtime, model, effort, and preset of the record
+that executes it, and prints `unknown` where that metadata is absent rather
+than inferring it.
+
 The cmux adapter is the only production perimeter for open/send/read/status/
 close. Runtime drivers pin model, effort, permission profile, cwd, and callback
 transport. Unknown prompts, ownership, callbacks, or resource state become

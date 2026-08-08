@@ -29,6 +29,13 @@ two files rather than one on purpose — projection decides what is true and the
 view may only shorten it — so the ceiling moves by exactly two files and by the
 lines those two modules cost.  Nothing else grew.
 
+RC4 Fix2 Slice F then corrected that dashboard after dogfooding it: exact
+operation lineage so one dispatch renders as one tree, frozen route metadata on
+the step that consumes it, verification-aware step status, and resource-free
+nonterminal records reported as unresolved rather than live.  That cost lines
+inside the same two modules and added no script, so the file ceiling is
+unchanged and only the line ceiling moves.
+
 The historical RC2 snapshot is retained separately in
 ``tests/test_v266_rc2_scope.py``; it is evidence about a released commit, not a
 constraint on this one.
@@ -43,7 +50,7 @@ from pathlib import Path
 SCRIPT_FILE_CEILING = 264
 
 #: Maximum total lines across those files for the RC4 candidate.
-SCRIPT_LINE_CEILING = 89_200
+SCRIPT_LINE_CEILING = 89_650
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

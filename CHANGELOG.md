@@ -33,10 +33,18 @@ deterministic without adding another orchestrator or provider route.
 
 ### Fixed
 
+- The harness dashboard now renders one dispatch as one tree. Verification
+  children, review parents, and review rounds nest under the compiled step that
+  executes them instead of appearing as unrelated top-level programs, each step
+  shows the frozen runtime/model/effort and preset of the record that runs it
+  (`unknown` when the metadata is absent), an active verification no longer
+  leaves the finished implementation highlighted, and a nonterminal operation
+  owning no runtime resource is reported as unresolved rather than live.
 - Restored the live `scripts/` scope ratchet: it measures the working tree again
   instead of a frozen historical commit, under explicit RC4 ceilings declared in
-  `tests/rc4_scope_ratchet.py` (264 files, 89,200 lines — raised by exactly the
-  two read-only dashboard modules). The RC2 numbers are
+  `tests/rc4_scope_ratchet.py` (264 files, 89,650 lines — raised by exactly the
+  two read-only dashboard modules and the lineage/route correction inside
+  them). The RC2 numbers are
   retained in `tests/test_v266_rc2_scope.py` as historical evidence only and no
   longer stand in for the ratchet.
 - Resume accepted review callbacks incrementally and exactly once across crash

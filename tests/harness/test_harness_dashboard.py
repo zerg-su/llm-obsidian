@@ -37,6 +37,11 @@ OWNER = "dashboard-owner"
 DISPATCH = "dashboard-dispatch"
 SURFACE = "8C1A5B60-1111-4A00-9E00-0F0F0F0F0F0F"
 FIX_STEPS = ("root-cause", "regression-test", "minimal-fix")
+ROOT = "dashboard-root"
+ROOT_SURFACE = "9D2B6C71-2222-4B11-8F11-1A1A1A1A1A1A"
+VERIFY_CHILD = "dashboard-root-verify-0"
+REVIEW_PARENT = "dashboard-root-review-holistic"
+REVIEW_ROUND = "dashboard-root-review-round-0"
 
 
 def check(label: str, condition: bool) -> None:
@@ -45,8 +50,19 @@ def check(label: str, condition: bool) -> None:
     print(f"OK   {label}")
 
 
+def _route_of(view: object) -> tuple[str, str, str, str]:
+    route = view.route
+    return (route.runtime, route.model, route.effort, route.preset)
+
+
 def _route() -> RuntimeRoute:
     return RuntimeRoute("claude", "claude-opus-5", "medium", "executor", "a" * 64)
+
+
+def _reviewer_route() -> RuntimeRoute:
+    return RuntimeRoute(
+        "claude", "claude-opus-5", "high", "reviewer-callback", "b" * 64
+    )
 
 
 def _create(
@@ -57,16 +73,19 @@ def _create(
     lane_id: str,
     contract_sha256: str = "",
     parent: str = "",
+    owner: str = OWNER,
+    route: RuntimeRoute | None = None,
+    verification_profile: str = "scoped",
 ) -> None:
     store.create(
         OperationSpec(
             operation_id,
             f"{operation_id}-key",
             kind,
-            OWNER,
-            _route(),
+            owner,
+            route or _route(),
             "packets/task.json",
-            "scoped",
+            verification_profile,
             contract_sha256=contract_sha256,
             parent_operation_id=parent,
         ),
@@ -75,9 +94,14 @@ def _create(
     )
 
 
-def _advance(store: OperationStore, operation_id: str, *states: str) -> None:
+def _advance(
+    store: OperationStore,
+    operation_id: str,
+    *states: str,
+    owner: str = OWNER,
+) -> None:
     for state in states:
-        store.transition(OWNER, operation_id, state)
+        store.transition(owner, operation_id, state)
 
 
 def _receipt(path: Path) -> None:
@@ -199,10 +223,10 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard.") as raw:
     check(
         "parallel operation lanes and review axes are both projected",
         lanes["lane-primary"].scope == "operation"
-        and lanes["lane-primary"].active
+        and lanes["lane-primary"].status == "active"
         and lanes["lane-secondary"].members == ("dashboard-child",)
         and lanes["openai-holistic"].scope == "review-axis"
-        and lanes["claude-spec"].active,
+        and lanes["claude-spec"].status == "active",
     )
     check(
         "a live recorded surface is proven against the bounded cmux probe",
@@ -315,7 +339,7 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-unknown.") as raw:
         and projection.programs[0].steps == ()
         and projection.classification == COORDINATOR
         and [issue.code for issue in projection.issues]
-        == ["pipeline-contract-unresolved"],
+        == ["pipeline-contract-unresolved", "operation-resources-absent"],
     )
 
     for index in range(MAX_ISSUES + 1):
@@ -351,6 +375,244 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-unknown.") as raw:
             for issue in projection.issues
         )
         and projection.classification == COORDINATOR,
+    )
+
+with tempfile.TemporaryDirectory(prefix="harness-dashboard-tree.") as raw:
+    # The production shape: the dispatch operation id is the owner id, the
+    # verification child carries an exact parent, and the review parent carries
+    # only its owner. All three belong to one dispatch, not three programs.
+    store_root = Path(raw) / "harness"
+    store = OperationStore(store_root)
+    compiled = compiled_builtin("engineering/change")
+    _create(
+        store,
+        ROOT,
+        "dispatch",
+        lane_id="lane-root",
+        contract_sha256=compiled.definition_sha256,
+        owner=ROOT,
+    )
+    _advance(store, ROOT, "preflight", "starting", "running", owner=ROOT)
+    OperationSupervisor(store, ROOT, ROOT).bind_resources(
+        OwnedResources(surface_id=ROOT_SURFACE)
+    )
+    _create(
+        store,
+        VERIFY_CHILD,
+        "pipeline-verify",
+        lane_id="lane-verify",
+        contract_sha256=compiled.definition_sha256,
+        parent=ROOT,
+        owner=ROOT,
+    )
+    _advance(
+        store,
+        VERIFY_CHILD,
+        "preflight",
+        "starting",
+        "running",
+        "verifying",
+        owner=ROOT,
+    )
+    _create(
+        store,
+        REVIEW_PARENT,
+        "simple-review-holistic",
+        lane_id="lane-review",
+        owner=ROOT,
+        route=_reviewer_route(),
+    )
+    _advance(store, REVIEW_PARENT, "preflight", owner=ROOT)
+    _create(
+        store,
+        REVIEW_ROUND,
+        "review-round",
+        lane_id="lane-review",
+        parent=REVIEW_PARENT,
+        owner=ROOT,
+        route=_reviewer_route(),
+    )
+    _advance(store, REVIEW_ROUND, "preflight", owner=ROOT)
+
+    projection = project(
+        store_root,
+        ROOT,
+        inventory=LiveInventory({ROOT_SURFACE.casefold(): "workspace-9"}),
+        surface_probe="observed",
+    )
+    check(
+        "one dispatch renders as exactly one root program, not three",
+        len(projection.programs) == 1
+        and projection.programs[0].operation_id == ROOT,
+    )
+    program = projection.programs[0]
+    steps = {step.step_id: step for step in program.steps}
+    check(
+        "verification and review children nest under their owning pipeline step",
+        tuple(child.operation_id for child in steps["verify"].children)
+        == (VERIFY_CHILD,)
+        and tuple(child.operation_id for child in steps["review"].children)
+        == (REVIEW_PARENT,)
+        and tuple(
+            child.operation_id
+            for child in steps["review"].children[0].children
+        )
+        == (REVIEW_ROUND,)
+        and program.children == (),
+    )
+    check(
+        "active verification never leaves the finished implementation highlighted",
+        steps["tdd-slices"].status == "complete"
+        and steps["verify"].status == "running"
+        and steps["review"].status == "pending"
+        and program.executor_status == "awaiting-transition",
+    )
+    check(
+        "each step shows the frozen route of the record that executes it",
+        _route_of(steps["tdd-slices"])
+        == ("claude", "claude-opus-5", "medium", "executor")
+        and _route_of(steps["verify"])
+        == ("claude", "claude-opus-5", "medium", "scoped")
+        and _route_of(steps["review"])
+        == ("claude", "claude-opus-5", "high", "reviewer-callback"),
+    )
+
+    text = render(projection)
+    check(
+        "the rendered tree shows one program with nested route-annotated steps",
+        all(len(line) <= MAX_LINE for line in text.splitlines())
+        and "Programs: 1" in text
+        and "route claude/claude-opus-5/high  preset reviewer-callback" in text
+        and "review-round" in text
+        and "executor claude/claude-opus-5/medium" in text
+        and "awaiting-transition" in text,
+    )
+
+with tempfile.TemporaryDirectory(prefix="harness-dashboard-closed.") as raw:
+    # The harness closes a review by cancelling the parent and retaining the
+    # completed round. That is the normal terminal shape, not an alarm.
+    store_root = Path(raw) / "harness"
+    store = OperationStore(store_root)
+    compiled = compiled_builtin("engineering/change")
+    _create(
+        store,
+        ROOT,
+        "dispatch",
+        lane_id="lane-root",
+        contract_sha256=compiled.definition_sha256,
+        owner=ROOT,
+    )
+    _advance(store, ROOT, "preflight", "starting", "running", "finalizing", owner=ROOT)
+    OperationSupervisor(store, ROOT, ROOT).bind_resources(
+        OwnedResources(surface_id=ROOT_SURFACE)
+    )
+    _create(
+        store,
+        VERIFY_CHILD,
+        "pipeline-verify",
+        lane_id="lane-verify",
+        parent=ROOT,
+        owner=ROOT,
+    )
+    _advance(
+        store,
+        VERIFY_CHILD,
+        "preflight",
+        "starting",
+        "running",
+        "verifying",
+        "finalizing",
+        "exiting",
+        "complete",
+        owner=ROOT,
+    )
+    _create(
+        store,
+        REVIEW_PARENT,
+        "simple-review-holistic",
+        lane_id="lane-review",
+        owner=ROOT,
+        route=_reviewer_route(),
+    )
+    _advance(
+        store,
+        REVIEW_PARENT,
+        "preflight",
+        "starting",
+        "cancelling",
+        "exiting",
+        "cancelled",
+        owner=ROOT,
+    )
+    _create(
+        store,
+        REVIEW_ROUND,
+        "review-round",
+        lane_id="lane-review",
+        parent=REVIEW_PARENT,
+        owner=ROOT,
+        route=_reviewer_route(),
+    )
+    _advance(
+        store,
+        REVIEW_ROUND,
+        "preflight",
+        "starting",
+        "running",
+        "verifying",
+        "finalizing",
+        "exiting",
+        "complete",
+        owner=ROOT,
+    )
+    projection = project(
+        store_root,
+        ROOT,
+        inventory=LiveInventory({ROOT_SURFACE.casefold(): "workspace-9"}),
+    )
+    program = projection.programs[0]
+    steps = {step.step_id: step for step in program.steps}
+    check(
+        "a cancelled review parent with a complete round is finished, not attention",
+        steps["verify"].status == "complete"
+        and steps["review"].status == "complete"
+        and program.next_action == "reap-ready"
+        and program.classification != ATTENTION
+        and projection.issues == (),
+    )
+
+with tempfile.TemporaryDirectory(prefix="harness-dashboard-unknown-route.") as raw:
+    store_root = Path(raw) / "harness"
+    store = OperationStore(store_root)
+    compiled = compiled_builtin("engineering/change")
+    _create(
+        store,
+        ROOT,
+        "dispatch",
+        lane_id="lane-root",
+        contract_sha256=compiled.definition_sha256,
+        owner=ROOT,
+    )
+    _advance(store, ROOT, "preflight", "starting", "running", owner=ROOT)
+    projection = project(store_root, ROOT, inventory=LiveInventory({}))
+    program = projection.programs[0]
+    steps = {step.step_id: step for step in program.steps}
+    check(
+        "absent step metadata is labeled unknown rather than inferred",
+        _route_of(steps["review"])
+        == ("unknown", "unknown", "unknown", "unknown")
+        and _route_of(steps["verify"])
+        == ("unknown", "unknown", "unknown", "scoped"),
+    )
+    check(
+        "a running record owning no runtime resource is unresolved, not live",
+        program.surface == "unbound"
+        and program.classification == ATTENTION
+        and any(
+            issue.code == "operation-resources-absent"
+            for issue in projection.issues
+        )
+        and projection.programs[0].lanes[0].status == "attention",
     )
 
 print("harness dashboard tests passed")
