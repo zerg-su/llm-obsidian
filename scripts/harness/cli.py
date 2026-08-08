@@ -514,6 +514,26 @@ def _resume(
         )
         if recovery_status == "approved":
             current = store.read(owner, operation_id)
+            if _has_owned_resources(current):
+                if (
+                    current.state != "attention-required"
+                    or current.resume_state != "awaiting-callback"
+                    or current.pending_effect
+                ):
+                    raise RuntimeSessionError(
+                        "approved review recovery cannot resume dispatch ownership"
+                    )
+                resumed = store.transition(
+                    owner, operation_id, current.resume_state
+                )
+                return TransitionResult(
+                    operation_id,
+                    initial.state,
+                    resumed.state,
+                    resumed.revision,
+                    True,
+                    resumed.attention_reason,
+                )
             if (
                 current.state not in {"attention-required", "finalizing"}
                 or (

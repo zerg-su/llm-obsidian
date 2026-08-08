@@ -1526,6 +1526,16 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
     store.transition(
         "owner-cli", "op-approved-finalizing-review-cli", "finalizing"
     )
+    create_cli_operation(
+        "op-approved-live-review-cli", state="awaiting-callback"
+    )
+    bind_owned_resources("op-approved-live-review-cli")
+    store.transition(
+        "owner-cli",
+        "op-approved-live-review-cli",
+        "attention-required",
+        reason=AttentionReason.ATTENTION_REQUIRED,
+    )
     check(
         "terminal exact approval selects callback-free recovery",
         harness_cli._review_recovery_kind(
@@ -1571,6 +1581,13 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
             process_adapter=FakeProcess("dead"),
             cmux_adapter=FakeCmux("missing"),
         )
+        resumed_live_executor = harness_cli._resume(
+            store,
+            "owner-cli",
+            "op-approved-live-review-cli",
+            process_adapter=FakeProcess("alive"),
+            cmux_adapter=FakeCmux("alive"),
+        )
         second_finalizing = harness_cli._resume(
             store,
             "owner-cli",
@@ -1588,7 +1605,18 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
         first_finalizing.state == "complete"
         and second_finalizing.state == "complete"
         and resumed_durable_finalizing.state == "complete"
+        and resumed_live_executor.state == "awaiting-callback"
+        and resumed_live_executor.changed
+        and resumed_live_executor.attention_reason is None
+        and store.read(
+            "owner-cli", "op-approved-live-review-cli"
+        ).resources
+        != OwnedResources()
         and finalizing_record.state == "complete"
         and recovery_calls
-        == ["op-finalizing-review-cli", "op-approved-finalizing-review-cli"],
+        == [
+            "op-finalizing-review-cli",
+            "op-approved-finalizing-review-cli",
+            "op-approved-live-review-cli",
+        ],
     )
