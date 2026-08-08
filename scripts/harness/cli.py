@@ -480,12 +480,12 @@ def _review_recovery_kind(
     ):
         return "zero-lane-preflight"
     if (
-        gate.get("status") == "approved"
+        gate.get("status") in {"approved", "changes-requested"}
         and gate.get("execution_protocol") == "exact-head-attempt-v1"
         and isinstance(attempt, dict)
         and attempt.get("status") == "terminal"
         and isinstance(terminal, dict)
-        and terminal.get("result") == "approved"
+        and terminal.get("result") == gate.get("status")
     ):
         return "accepted-exact-callbacks"
     if not response_path.is_file():

@@ -1551,6 +1551,21 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
         )
         == "accepted-exact-callbacks",
     )
+    check(
+        "terminal exact findings select callback-free transport recovery",
+        harness_cli._review_recovery_kind(
+            {
+                "status": "changes-requested",
+                "execution_protocol": "exact-head-attempt-v1",
+                "attempt": {
+                    "status": "terminal",
+                    "terminal": {"result": "changes-requested"},
+                },
+            },
+            ROOT / "missing-verification-response.json",
+        )
+        == "accepted-exact-callbacks",
+    )
     recovery_calls: list[str] = []
     original_recovery = harness_cli._recover_finalizing_review_if_present
 
