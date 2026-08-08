@@ -105,6 +105,19 @@ def test_fold():
         assert_eq("content hash length", 64, len(entries[0].id))
         assert_eq("fold operation excluded", 9, len([item for item in entries if item.operation != "fold"]))
 
+        link_boundary = "x" * 205 + " [[A valid but long wikilink target]] trailing text"
+        folded_summary = module.summary_of(link_boundary)
+        assert_true(
+            "summary truncation cannot create wikilinks",
+            "[[" not in folded_summary and "]]" not in folded_summary,
+            folded_summary,
+        )
+        assert_true(
+            "summary retains readable link label",
+            "A valid" in folded_summary,
+            folded_summary,
+        )
+
         result = run_cli(root, "status", "--k", "2", "--json")
         assert_eq("status exit 0", 0, result.returncode)
         status = json.loads(result.stdout)

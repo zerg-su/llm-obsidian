@@ -44,6 +44,11 @@ def summary_of(body: str) -> str:
     for line in body.splitlines():
         clean = re.sub(r"^\s*(?:[-*+] |\d+[.)]\s+|>\s*)", "", line).strip()
         if clean:
+            clean = re.sub(
+                r"\[\[([^\]|]+)(?:\|([^\]]+))?\]\]",
+                lambda match: (match.group(2) or match.group(1)).strip(),
+                clean,
+            )
             clean = re.sub(r"\s+", " ", clean).replace("|", r"\|")
             return clean[:217].rstrip() + ("…" if len(clean) > 217 else "")
     return "—"
