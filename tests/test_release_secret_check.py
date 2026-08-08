@@ -38,6 +38,7 @@ with tempfile.TemporaryDirectory(prefix="release-secret-check.") as raw:
     git(repo, "init", "-q")
     git(repo, "config", "user.name", "Release Secret Test")
     git(repo, "config", "user.email", "release-secret@example.invalid")
+    credential_name = "tok" + "en"
     (repo / "legacy.txt").write_text(
         "token=" + "abcdef123456" + "\n", encoding="utf-8"
     )
@@ -52,8 +53,8 @@ with tempfile.TemporaryDirectory(prefix="release-secret-check.") as raw:
     assert safe_value["status"] == "passed" and safe_value["added_lines"] == 1
 
     (repo / "safe_assignments.py").write_text(
-        "token = raw.strip()\n"
-        'token = edge.replace(" ", "-")\n',
+        f"{credential_name} = raw.strip()\n"
+        f'{credential_name} = edge.replace(" ", "-")\n',
         encoding="utf-8",
     )
     commit(repo, "safe credential-named Python references")
@@ -62,7 +63,7 @@ with tempfile.TemporaryDirectory(prefix="release-secret-check.") as raw:
     assert json.loads(safe_assignments.stdout)["status"] == "passed"
 
     (repo / "wrapped_leak.py").write_text(
-        "tok" + 'en = load("' + "AKIA" + 'IOSFODNN7EXAMPLE")\n',
+        credential_name + ' = load("' + "AKIA" + 'IOSFODNN7EXAMPLE")\n',
         encoding="utf-8",
     )
     commit(repo, "candidate wrapped credential literal")
@@ -73,7 +74,7 @@ with tempfile.TemporaryDirectory(prefix="release-secret-check.") as raw:
     git(repo, "commit", "-q", "-m", "remove wrapped credential literal")
 
     (repo / "literal_leak.py").write_text(
-        'token = "newcandidatevalue123456"\n', encoding="utf-8"
+        f'{credential_name} = "newcandidatevalue123456"\n', encoding="utf-8"
     )
     commit(repo, "candidate Python credential literal")
     python_literal = check(repo)
