@@ -3692,9 +3692,9 @@ codex_callback = CodexDriver(Path("/usr/bin/codex")).command(
     session_root=scratch.parent,
 )
 check(
-    "review callback profile edits and writes only isolated scratch transport",
-    f"Write(/{review_input})" in claude_callback
-    and f"Edit(/{review_input})" in claude_callback
+    "review callback profile uses Edit path permissions for isolated scratch transport",
+    f"Edit(/{review_input})" in claude_callback
+    and f"Write(/{review_input})" not in claude_callback
     and f"Write(/{callback})" not in claude_callback
     and f"Edit(/{callback})" not in claude_callback
     and f"Write({callback})" not in claude_callback
@@ -3703,8 +3703,8 @@ check(
     and f"Edit({review_input})" not in claude_callback
     and "Write(owned-review-scratch/callback.json)" not in claude_callback
     and "Edit(owned-review-scratch/callback.json)" not in claude_callback
-    and "Write(owned-review-scratch/.review-input.json)" in claude_callback
     and "Edit(owned-review-scratch/.review-input.json)" in claude_callback
+    and "Write(owned-review-scratch/.review-input.json)" not in claude_callback
     and str(callback) in callback_instruction
     and "absolute path verbatim" in callback_instruction
     and "input file's exact session-relative alias" in callback_instruction
@@ -3746,9 +3746,7 @@ check(
         and item
         not in {
             f"Edit(/{review_input})",
-            f"Write(/{review_input})",
             "Edit(owned-review-scratch/.review-input.json)",
-            "Write(owned-review-scratch/.review-input.json)",
         }
         for item in claude_callback
     )

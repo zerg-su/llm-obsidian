@@ -291,14 +291,13 @@ def validate_reviewer_sandbox_command(
         "Glob",
         "Grep",
         f"Edit({_absolute_permission_path(input_pointer)})",
-        f"Write({_absolute_permission_path(input_pointer)})",
     ]
     try:
         relative_input = input_pointer.relative_to(session_root).as_posix()
     except ValueError:
         pass
     else:
-        allowed.extend((f"Edit({relative_input})", f"Write({relative_input})"))
+        allowed.append(f"Edit({relative_input})")
     allowed.append("Bash")
     if tuple(argv[allowed_index + 1 : settings_index]) != tuple(allowed):
         raise ClaudeDriverError("review sandbox tool surface drifted")
@@ -373,7 +372,7 @@ class ClaudeDriver:
                         (
                             "Write the final review-round JSON only to this "
                             f"exact input file: {input_pointer}. Pass this "
-                            "absolute path verbatim to Edit or Write, then "
+                            "absolute path verbatim to Edit, then "
                             "run the exact review_submit.py command. Never "
                             f"hand-write the generated callback: {callback_pointer}"
                             + (
@@ -393,17 +392,11 @@ class ClaudeDriver:
             if callback_pointer is not None:
                 input_rule = _absolute_permission_path(input_pointer)
                 args.extend(
-                    (
-                        f"Edit({input_rule})",
-                        f"Write({input_rule})",
-                    )
+                    (f"Edit({input_rule})",)
                 )
                 if relative_callback:
                     args.extend(
-                        (
-                            f"Edit({relative_input})",
-                            f"Write({relative_input})",
-                        )
+                        (f"Edit({relative_input})",)
                     )
             if product_root is not None:
                 if not product_root.is_absolute():
@@ -475,7 +468,7 @@ class ClaudeDriver:
             )
             return (
                 f"Edit({input_rule})" in command
-                and f"Write({input_rule})" in command
+                and f"Write({input_rule})" not in command
             )
         return route.profile in {"executor", "prototype"}
 
