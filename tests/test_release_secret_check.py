@@ -61,6 +61,16 @@ with tempfile.TemporaryDirectory(prefix="release-secret-check.") as raw:
     assert safe_assignments.returncode == 0, safe_assignments.stdout
     assert json.loads(safe_assignments.stdout)["status"] == "passed"
 
+    (repo / "wrapped_leak.py").write_text(
+        'token = load("AKIAIOSFODNN7EXAMPLE")\n', encoding="utf-8"
+    )
+    commit(repo, "candidate wrapped credential literal")
+    wrapped_leak = check(repo)
+    assert wrapped_leak.returncode == 1, wrapped_leak.stdout
+    assert "aws-access-key" in json.loads(wrapped_leak.stdout)["credential_kinds"]
+    git(repo, "rm", "wrapped_leak.py")
+    git(repo, "commit", "-q", "-m", "remove wrapped credential literal")
+
     (repo / "literal_leak.py").write_text(
         'token = "newcandidatevalue123456"\n', encoding="utf-8"
     )

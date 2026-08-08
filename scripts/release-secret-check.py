@@ -100,8 +100,10 @@ def main() -> int:
             if not line.startswith("+") or line.startswith("+++"):
                 continue
             value = line[1:]
-            if current_path.endswith(".py") and SAFE_PYTHON_CREDENTIAL_REFERENCE.fullmatch(
-                value
+            if (
+                current_path.endswith(".py")
+                and SAFE_PYTHON_CREDENTIAL_REFERENCE.fullmatch(value)
+                and residual_credential_kinds(value) == ["credential-assignment"]
             ):
                 continue
             added.append(value)
