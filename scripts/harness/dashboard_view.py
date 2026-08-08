@@ -18,8 +18,11 @@ from .dashboard_projection import (
 MAX_LINE = 96
 SHORT_ID = 8
 # A nested operation is identified by its own id, so it keeps more of it than a
-# lane label: eight characters cannot tell two children of one step apart.
-CHILD_ID = 24
+# lane label.  Real ids share a long leading UUID and differ only in a derived
+# suffix, so a leading slice renders a review parent and its round identically:
+# what distinguishes them has to survive, which means eliding the middle.
+CHILD_ID = 28
+CHILD_ID_HEAD = 8
 STEP_MARKERS = {
     "complete": "[x]",
     "running": "[>]",
@@ -41,6 +44,15 @@ def _short(value: str) -> str:
     return value[:SHORT_ID] if len(value) > SHORT_ID else value
 
 
+def _identity(value: str) -> str:
+    """Shorten one operation id while keeping the part that identifies it."""
+
+    if len(value) <= CHILD_ID:
+        return value
+    tail = CHILD_ID - CHILD_ID_HEAD - 1
+    return f"{value[:CHILD_ID_HEAD]}…{value[-tail:]}"
+
+
 def _clip(value: str) -> str:
     return value if len(value) <= MAX_LINE else value[: MAX_LINE - 1] + "…"
 
@@ -58,7 +70,7 @@ def _child_lines(children: tuple[ChildView, ...], indent: int) -> list[str]:
     lines: list[str] = []
     for child in children:
         marker = STEP_MARKERS.get(child.status, STEP_MARKERS["unknown"])
-        identity = child.operation_id[:CHILD_ID]
+        identity = _identity(child.operation_id)
         lines.append(
             f"{pad}{marker} {identity:<{CHILD_ID}} {child.kind:<22} "
             f"{child.state}"

@@ -22,12 +22,20 @@ from harness.dashboard_projection import (
     COORDINATOR,
     HEALTHY,
     MAX_ISSUES,
+    UNKNOWN_ROUTE,
     WAITING,
+    ChildView,
+    _bind_children,
     escalate,
     project,
 )
 from harness.dashboard_view import MAX_LINE, render
-from harness.pipeline_builtins import compiled_builtin
+from harness.pipeline_builtins import builtin_registry, compiled_builtin
+from harness.pipelines import (
+    PipelineDefinition,
+    PipelineStep,
+    compile_pipeline,
+)
 from harness.status_segment import LiveInventory
 from harness.store import OperationStore
 from harness.supervisor import OperationSupervisor
@@ -37,7 +45,7 @@ OWNER = "dashboard-owner"
 DISPATCH = "dashboard-dispatch"
 SURFACE = "8C1A5B60-1111-4A00-9E00-0F0F0F0F0F0F"
 FIX_STEPS = ("root-cause", "regression-test", "minimal-fix")
-ROOT = "dashboard-root"
+TREE_ROOT = "dashboard-root"
 ROOT_SURFACE = "9D2B6C71-2222-4B11-8F11-1A1A1A1A1A1A"
 VERIFY_CHILD = "dashboard-root-verify-0"
 REVIEW_PARENT = "dashboard-root-review-holistic"
@@ -386,14 +394,14 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-tree.") as raw:
     compiled = compiled_builtin("engineering/change")
     _create(
         store,
-        ROOT,
+        TREE_ROOT,
         "dispatch",
         lane_id="lane-root",
         contract_sha256=compiled.definition_sha256,
-        owner=ROOT,
+        owner=TREE_ROOT,
     )
-    _advance(store, ROOT, "preflight", "starting", "running", owner=ROOT)
-    OperationSupervisor(store, ROOT, ROOT).bind_resources(
+    _advance(store, TREE_ROOT, "preflight", "starting", "running", owner=TREE_ROOT)
+    OperationSupervisor(store, TREE_ROOT, TREE_ROOT).bind_resources(
         OwnedResources(surface_id=ROOT_SURFACE)
     )
     _create(
@@ -402,8 +410,8 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-tree.") as raw:
         "pipeline-verify",
         lane_id="lane-verify",
         contract_sha256=compiled.definition_sha256,
-        parent=ROOT,
-        owner=ROOT,
+        parent=TREE_ROOT,
+        owner=TREE_ROOT,
     )
     _advance(
         store,
@@ -412,38 +420,38 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-tree.") as raw:
         "starting",
         "running",
         "verifying",
-        owner=ROOT,
+        owner=TREE_ROOT,
     )
     _create(
         store,
         REVIEW_PARENT,
         "simple-review-holistic",
         lane_id="lane-review",
-        owner=ROOT,
+        owner=TREE_ROOT,
         route=_reviewer_route(),
     )
-    _advance(store, REVIEW_PARENT, "preflight", owner=ROOT)
+    _advance(store, REVIEW_PARENT, "preflight", owner=TREE_ROOT)
     _create(
         store,
         REVIEW_ROUND,
         "review-round",
         lane_id="lane-review",
         parent=REVIEW_PARENT,
-        owner=ROOT,
+        owner=TREE_ROOT,
         route=_reviewer_route(),
     )
-    _advance(store, REVIEW_ROUND, "preflight", owner=ROOT)
+    _advance(store, REVIEW_ROUND, "preflight", owner=TREE_ROOT)
 
     projection = project(
         store_root,
-        ROOT,
+        TREE_ROOT,
         inventory=LiveInventory({ROOT_SURFACE.casefold(): "workspace-9"}),
         surface_probe="observed",
     )
     check(
         "one dispatch renders as exactly one root program, not three",
         len(projection.programs) == 1
-        and projection.programs[0].operation_id == ROOT,
+        and projection.programs[0].operation_id == TREE_ROOT,
     )
     program = projection.programs[0]
     steps = {step.step_id: step for step in program.steps}
@@ -496,14 +504,14 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-closed.") as raw:
     compiled = compiled_builtin("engineering/change")
     _create(
         store,
-        ROOT,
+        TREE_ROOT,
         "dispatch",
         lane_id="lane-root",
         contract_sha256=compiled.definition_sha256,
-        owner=ROOT,
+        owner=TREE_ROOT,
     )
-    _advance(store, ROOT, "preflight", "starting", "running", "finalizing", owner=ROOT)
-    OperationSupervisor(store, ROOT, ROOT).bind_resources(
+    _advance(store, TREE_ROOT, "preflight", "starting", "running", "finalizing", owner=TREE_ROOT)
+    OperationSupervisor(store, TREE_ROOT, TREE_ROOT).bind_resources(
         OwnedResources(surface_id=ROOT_SURFACE)
     )
     _create(
@@ -511,8 +519,8 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-closed.") as raw:
         VERIFY_CHILD,
         "pipeline-verify",
         lane_id="lane-verify",
-        parent=ROOT,
-        owner=ROOT,
+        parent=TREE_ROOT,
+        owner=TREE_ROOT,
     )
     _advance(
         store,
@@ -524,14 +532,14 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-closed.") as raw:
         "finalizing",
         "exiting",
         "complete",
-        owner=ROOT,
+        owner=TREE_ROOT,
     )
     _create(
         store,
         REVIEW_PARENT,
         "simple-review-holistic",
         lane_id="lane-review",
-        owner=ROOT,
+        owner=TREE_ROOT,
         route=_reviewer_route(),
     )
     _advance(
@@ -542,7 +550,7 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-closed.") as raw:
         "cancelling",
         "exiting",
         "cancelled",
-        owner=ROOT,
+        owner=TREE_ROOT,
     )
     _create(
         store,
@@ -550,7 +558,7 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-closed.") as raw:
         "review-round",
         lane_id="lane-review",
         parent=REVIEW_PARENT,
-        owner=ROOT,
+        owner=TREE_ROOT,
         route=_reviewer_route(),
     )
     _advance(
@@ -563,11 +571,11 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-closed.") as raw:
         "finalizing",
         "exiting",
         "complete",
-        owner=ROOT,
+        owner=TREE_ROOT,
     )
     projection = project(
         store_root,
-        ROOT,
+        TREE_ROOT,
         inventory=LiveInventory({ROOT_SURFACE.casefold(): "workspace-9"}),
     )
     program = projection.programs[0]
@@ -587,14 +595,14 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-unknown-route.") as r
     compiled = compiled_builtin("engineering/change")
     _create(
         store,
-        ROOT,
+        TREE_ROOT,
         "dispatch",
         lane_id="lane-root",
         contract_sha256=compiled.definition_sha256,
-        owner=ROOT,
+        owner=TREE_ROOT,
     )
-    _advance(store, ROOT, "preflight", "starting", "running", owner=ROOT)
-    projection = project(store_root, ROOT, inventory=LiveInventory({}))
+    _advance(store, TREE_ROOT, "preflight", "starting", "running", owner=TREE_ROOT)
+    projection = project(store_root, TREE_ROOT, inventory=LiveInventory({}))
     program = projection.programs[0]
     steps = {step.step_id: step for step in program.steps}
     check(
@@ -614,5 +622,103 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-unknown-route.") as r
         )
         and projection.programs[0].lanes[0].status == "attention",
     )
+
+with tempfile.TemporaryDirectory(prefix="harness-dashboard-identity.") as raw:
+    # Production ids share a long UUID prefix and differ only in a derived
+    # suffix, so a leading slice would render parent and round identically.
+    store_root = Path(raw) / "harness"
+    store = OperationStore(store_root)
+    compiled = compiled_builtin("engineering/change")
+    parent_id = "16d0cef4-59f0-5625-98c9-1ed8934c0d2c-holistic-99908aeb"
+    round_id = f"{parent_id}-round-799f0261"
+    _create(
+        store,
+        TREE_ROOT,
+        "dispatch",
+        lane_id="lane-root",
+        contract_sha256=compiled.definition_sha256,
+        owner=TREE_ROOT,
+    )
+    _advance(store, TREE_ROOT, "preflight", "starting", "running", owner=TREE_ROOT)
+    OperationSupervisor(store, TREE_ROOT, TREE_ROOT).bind_resources(
+        OwnedResources(surface_id=ROOT_SURFACE)
+    )
+    _create(
+        store,
+        parent_id,
+        "simple-review-holistic",
+        lane_id="lane-review",
+        owner=TREE_ROOT,
+        route=_reviewer_route(),
+    )
+    _advance(store, parent_id, "preflight", "starting", "running", owner=TREE_ROOT)
+    _create(
+        store,
+        round_id,
+        "review-round",
+        lane_id="lane-review",
+        parent=parent_id,
+        owner=TREE_ROOT,
+        route=_reviewer_route(),
+    )
+    _advance(store, round_id, "preflight", "starting", "running", owner=TREE_ROOT)
+    text = render(
+        project(
+            store_root,
+            TREE_ROOT,
+            inventory=LiveInventory({ROOT_SURFACE.casefold(): "workspace-9"}),
+        )
+    )
+    rendered = [line.strip() for line in text.splitlines() if "…" in line]
+    check(
+        "nested operations stay distinguishable on production-shaped ids",
+        len(rendered) == 2
+        and rendered[0].split()[1] != rendered[1].split()[1]
+        and all(len(line) <= MAX_LINE for line in text.splitlines()),
+    )
+
+# A durable child records the pipeline it belongs to, not which step of that
+# pipeline ran it. A custom definition may declare two steps of one primitive,
+# which makes that binding ambiguous — and an ambiguous binding is not a guess.
+# Only built-in contracts resolve through compiled_executable_for_contract, so
+# the guard is pinned directly on the pure binder rather than through a store.
+_ambiguous = PipelineDefinition(
+    pipeline_id="dashboard",
+    version="1.0.0",
+    profile="twoverify",
+    input_schema="approved-plan/v1",
+    output_schema="reap-ready/v1",
+    steps=(
+        PipelineStep(
+            "build", "model_step", "1.0.0",
+            "approved-plan/v1", "change/v1", "worktree",
+        ),
+        PipelineStep(
+            "verify-early", "verify", "1.0.0",
+            "change/v1", "change/v1", "verification",
+        ),
+        PipelineStep(
+            "verify-late", "verify", "1.0.0",
+            "change/v1", "reap-ready/v1", "verification",
+        ),
+    ),
+)
+_compiled_ambiguous = compile_pipeline(
+    _ambiguous, builtin_registry(), capabilities=("route:resolved",)
+)
+_verify_child = ChildView(
+    VERIFY_CHILD, "pipeline-verify", "running", "running", UNKNOWN_ROUTE
+)
+_by_step, _loose = _bind_children((_verify_child,), _compiled_ambiguous)
+_single_step, _single_loose = _bind_children(
+    (_verify_child,), compiled_builtin("engineering/change")
+)
+check(
+    "an ambiguous step binding stays at the program level, never guessed",
+    _by_step == {}
+    and _loose == (_verify_child,)
+    and _single_step == {"verify": [_verify_child]}
+    and _single_loose == (),
+)
 
 print("harness dashboard tests passed")

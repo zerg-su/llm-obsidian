@@ -376,23 +376,27 @@ def _bind_children(
     children: tuple[ChildView, ...],
     compiled: CompiledPipeline | None,
 ) -> tuple[dict[str, list[ChildView]], tuple[ChildView, ...]]:
-    """Bind each direct child to the compiled step whose primitive executes it."""
+    """Bind each direct child to the compiled step whose primitive executes it.
+
+    A durable child records the pipeline it belongs to, not which step of that
+    pipeline ran it.  When a definition declares two steps of the same
+    primitive — expressible in a custom pipeline — that identity is genuinely
+    ambiguous, so the child stays at the program level instead of being
+    collapsed onto whichever matching step happens to come first.
+    """
 
     steps = compiled.definition.steps if compiled is not None else ()
     by_step: dict[str, list[ChildView]] = {}
     loose: list[ChildView] = []
     for child in children:
-        step_id = next(
-            (
-                step.step_id
-                for step in steps
-                if child.kind
-                in STEP_PRIMITIVE_KINDS.get(step.primitive_id, frozenset())
-            ),
-            "",
-        )
-        if step_id:
-            by_step.setdefault(step_id, []).append(child)
+        matches = [
+            step.step_id
+            for step in steps
+            if child.kind
+            in STEP_PRIMITIVE_KINDS.get(step.primitive_id, frozenset())
+        ]
+        if len(matches) == 1:
+            by_step.setdefault(matches[0], []).append(child)
         else:
             loose.append(child)
     return by_step, tuple(loose)

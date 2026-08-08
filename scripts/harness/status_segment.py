@@ -202,7 +202,7 @@ def _research_origin(
     )
 
 
-def record_controller(
+def _record_controller(
     record: OperationRecord,
     controllers: list[OperationRecord],
 ) -> OperationRecord | None:
@@ -318,7 +318,7 @@ def _collect(
             record for record in records if record.spec.kind in CONTROLLER_KINDS
         ]
         bindings = {
-            record.spec.operation_id: record_controller(record, all_controllers)
+            record.spec.operation_id: _record_controller(record, all_controllers)
             for record in records
         }
         controllers: list[tuple[OperationRecord, list[OperationRecord]]] = []
