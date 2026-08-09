@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import inspect
 import io
 import json
 import os
@@ -26,7 +27,7 @@ from harness.cli import main as cli_main
 from harness.callbacks import CallbackBroker
 from harness import dashboard_receipts
 from harness.adapters.cmux import CmuxAdapter, Surface, SurfaceWorkspaceIndex
-from harness.contracts import CallbackEnvelope, OperationSpec, OwnedResources, RuntimeRoute, VerificationEvidence, to_dict
+from harness.contracts import AttentionReason, CallbackEnvelope, OperationSpec, OwnedResources, RuntimeRoute, VerificationEvidence, to_dict
 from harness.dashboard_projection import (
     ACTIVE,
     ATTENTION,
@@ -1559,6 +1560,87 @@ def _load_dashboard_script() -> object:
 
 
 dashboard_script = _load_dashboard_script()
+
+with tempfile.TemporaryDirectory(prefix="harness-dashboard-viewport.") as raw:
+    store_root = Path(raw) / "harness"
+    store = OperationStore(store_root)
+    compiled = compiled_builtin("engineering/change")
+    attention_owners = tuple(
+        f"dashboard-a-old-attention-{index}" for index in range(3)
+    )
+    for index, owner in enumerate(attention_owners):
+        _create(
+            store,
+            owner,
+            "dispatch",
+            lane_id=f"lane-old-attention-{index}",
+            contract_sha256=compiled.definition_sha256,
+            owner=owner,
+        )
+        _advance(store, owner, "preflight", "starting", owner=owner)
+        store.transition(
+            owner,
+            owner,
+            "attention-required",
+            reason=AttentionReason.ATTENTION_REQUIRED,
+        )
+        record_path = store_root / "owners" / owner / "operations" / f"{owner}.json"
+        os.utime(record_path, (100 + index, 100 + index))
+
+    live_owner = "dashboard-z-new-live"
+    live_surface = "7A2B6C71-3333-4C22-8A22-2B2B2B2B2B2B"
+    _create(
+        store,
+        live_owner,
+        "dispatch",
+        lane_id="lane-new-live",
+        contract_sha256=compiled.definition_sha256,
+        owner=live_owner,
+    )
+    _advance(store, live_owner, "preflight", "starting", "running", owner=live_owner)
+    OperationSupervisor(store, live_owner, live_owner).bind_resources(
+        OwnedResources(surface_id=live_surface)
+    )
+    live_path = (
+        store_root / "owners" / live_owner / "operations" / f"{live_owner}.json"
+    )
+    os.utime(live_path, (200, 200))
+
+    viewport_rows = 36
+    projection = dashboard_script.snapshot(
+        store_root,
+        recent=3,
+        inventory=LiveInventory({live_surface.casefold(): "workspace-live"}),
+    )
+    supports_rows = "rows" in inspect.signature(render).parameters
+    frame = (
+        render(projection, rows=viewport_rows)
+        if supports_rows
+        else render(projection)
+    )
+    frame_lines = frame.splitlines()
+    live_line = next(
+        (index for index, line in enumerate(frame_lines) if live_owner in line),
+        len(frame_lines),
+    )
+    attention_lines = [
+        next(
+            (index for index, line in enumerate(frame_lines) if owner in line),
+            len(frame_lines),
+        )
+        for owner in attention_owners
+    ]
+    regression_check(
+        "a bounded redraw keeps the newest live program above compact old attention summaries",
+        supports_rows
+        and len(frame_lines) <= viewport_rows
+        and live_line < min(attention_lines)
+        and max(
+            later - earlier
+            for earlier, later in zip(attention_lines, attention_lines[1:])
+        )
+        <= 2,
+    )
 
 with tempfile.TemporaryDirectory(prefix="harness-dashboard-cli.") as raw:
     store_root = Path(raw) / "harness"
