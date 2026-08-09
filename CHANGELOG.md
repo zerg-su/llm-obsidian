@@ -10,6 +10,32 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.6.6-rc4-fix2] - 2026-08-09
+
+This bounded RC4 patch adds an external read-only Harness dashboard and closes
+the exact lifecycle and evidence gaps found while dogfooding it. It does not
+change pipeline DSL authority, provider routing, review topology, or durable
+Harness ownership.
+
+### Added
+
+- Added an idempotent companion dashboard that projects real compiled
+  pipelines, routes, steps, loops, review lanes, terminal history, and bounded
+  recent issues without owning lifecycle state.
+- Added restrained semantic terminal colors with byte-stable `--no-color`,
+  non-TTY, JSON, and one-shot plain output.
+
+### Fixed
+
+- Keep the newest genuinely running pipeline visible inside continuously
+  redrawn terminal panes while compacting old attention-only programs and
+  reporting truthful hidden counts.
+- Bind missing exact-HEAD verification to the current durable attempt, prevent
+  stale children from hiding missing evidence, and make caller-alias marker
+  recovery signal-safe.
+- Restore the dashboard's leaf dependency boundary, exact tracked-tree gate
+  provenance, and declared code-quality release gate.
+
 ## [2.6.6-rc4-fix1] - 2026-08-08
 
 This bounded RC4 dogfood patch repairs seven observed dispatch, review,

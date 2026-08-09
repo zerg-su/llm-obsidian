@@ -16,6 +16,32 @@
 внутренними контрольными точками и вошли в следующие публичные релизы; тегов и
 пакетов с этими номерами не выпускалось.
 
+## [2.6.6-rc4-fix2] — 2026-08-09
+
+Этот ограниченный RC4-патч добавляет внешний read-only Harness dashboard и
+закрывает точные lifecycle/evidence-разрывы, найденные при его dogfooding. Он не
+меняет authority pipeline DSL, provider routing, review topology или durable
+Harness ownership.
+
+### Добавлено
+
+- Добавлен идемпотентный companion dashboard, который проецирует реальные
+  compiled pipelines, routes, steps, loops, review lanes, terminal history и
+  ограниченные recent issues, не владея lifecycle state.
+- Добавлены сдержанные semantic terminal colors с byte-stable plain output для
+  `--no-color`, non-TTY, JSON и one-shot режимов.
+
+### Исправлено
+
+- Новейший реально выполняемый pipeline остаётся видимым в непрерывно
+  перерисовываемом terminal pane; старые attention-only программы компактны, а
+  hidden counts остаются честными.
+- Missing exact-HEAD verification привязан к текущей durable attempt, stale
+  children не скрывают missing evidence, caller-alias marker recovery не
+  посылает опасных signals.
+- Восстановлены leaf dependency boundary dashboard, exact tracked-tree gate
+  provenance и объявленный code-quality release gate.
+
 ## [2.6.6-rc4-fix1] — 2026-08-08
 
 Этот ограниченный dogfood-патч RC4 исправляет семь наблюдавшихся сбоев
