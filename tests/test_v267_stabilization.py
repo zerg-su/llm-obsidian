@@ -18,6 +18,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts/v267_stabilization.py"
 CONFIG_PATH = ROOT / "config/v267-stabilization-subject.json"
+MANIFEST_PATH = ROOT / "config/acceptance-cells.toml"
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import v267_stabilization as stab
@@ -75,19 +76,39 @@ def _commit(root: Path, relative: str, content: str) -> None:
     _git(root, "commit", "-qm", f"edit {relative}")
 
 
+def _material(sequence: int) -> dict[str, str]:
+    prefix = f"docs/acceptance/evidence/v2.6.7/rc1-run-{sequence}"
+    return {
+        "findings_artifact": f"{prefix}-findings.json",
+        "fix_head": "f" * 40,
+        "refreshed_summary_artifact": f"{prefix}-refreshed-summary.json",
+        "second_verification_artifact": f"{prefix}-verify-2.json",
+        "re_review_artifact": f"{prefix}-re-review.json",
+    }
+
+
 def _receipt(sequence: int, digest: str, **overrides: object) -> dict[str, object]:
     value: dict[str, object] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "run_id": f"rc1-run-{sequence}",
         "sequence": sequence,
+        "cell_id": f"rc1-corridor-run-{sequence}",
+        "corridor": "engineering/change",
         "lifecycle_subject_sha256": digest,
         "request_id": f"request-{sequence}",
         "owner_id": f"owner-{sequence}",
         "store_id": f"store-{sequence}",
         "worktree_id": f"worktree-{sequence}",
         "provider_session_ids": [f"session-{sequence}"],
+        "executor_route": {"runtime": "claude", "model": "fable", "effort": "high"},
+        "review_route": {
+            "mode": "simple",
+            "runtime": "claude",
+            "model": "fable",
+            "effort": "high",
+        },
         "result": "success",
-        "material_finding_cycle": sequence == 2,
+        "material_cycle": _material(sequence) if sequence == 2 else None,
         "resource_free": True,
         "coordinator_recovery": False,
     }
@@ -286,8 +307,16 @@ with tempfile.TemporaryDirectory() as raw:
 
 # --- Streak validation -----------------------------------------------------
 
+gate = stab.load_rc1_gate(MANIFEST_PATH)
+check(
+    "gate streak target matches the stabilization denominator",
+    gate.streak_target == config.streak_target,
+)
+
 good = [_receipt(1, DIGEST_A), _receipt(2, DIGEST_A), _receipt(3, DIGEST_A)]
-verdict = stab.validate_streak(good, expected_digest=DIGEST_A, config=config)
+verdict = stab.validate_streak(
+    good, expected_digest=DIGEST_A, config=config, gate=gate
+)
 check("three fresh successes complete the streak", verdict["complete"] is True)
 check("complete streak counts three runs", verdict["streak"] == 3)
 check(
@@ -295,12 +324,20 @@ check(
     verdict["material_finding_cycle"] is True,
 )
 
-reset = [_receipt(1, DIGEST_A), _receipt(2, DIGEST_A), _receipt(3, DIGEST_B, material_finding_cycle=True)]
-verdict = stab.validate_streak(reset, expected_digest=DIGEST_B, config=config)
+reset = [
+    _receipt(1, DIGEST_A),
+    _receipt(2, DIGEST_A),
+    _receipt(3, DIGEST_B, material_cycle=_material(3)),
+]
+verdict = stab.validate_streak(
+    reset, expected_digest=DIGEST_B, config=config, gate=gate
+)
 check("behavioral digest change resets the streak", verdict["streak"] == 1)
 check("streak after digest change is incomplete", verdict["complete"] is False)
 
-stale = stab.validate_streak(good, expected_digest=DIGEST_B, config=config)
+stale = stab.validate_streak(
+    good, expected_digest=DIGEST_B, config=config, gate=gate
+)
 check(
     "streak on a superseded digest counts zero",
     stale["streak"] == 0 and stale["complete"] is False,
@@ -309,33 +346,41 @@ check(
 failed_middle = [
     _receipt(1, DIGEST_A),
     _receipt(2, DIGEST_A, result="failed"),
-    _receipt(3, DIGEST_A, material_finding_cycle=True),
+    _receipt(3, DIGEST_A, material_cycle=_material(3)),
 ]
-verdict = stab.validate_streak(failed_middle, expected_digest=DIGEST_A, config=config)
+verdict = stab.validate_streak(
+    failed_middle, expected_digest=DIGEST_A, config=config, gate=gate
+)
 check("failed run resets the consecutive count", verdict["streak"] == 1)
 
 recovered = [
     _receipt(1, DIGEST_A),
     _receipt(2, DIGEST_A, coordinator_recovery=True),
-    _receipt(3, DIGEST_A, material_finding_cycle=True),
+    _receipt(3, DIGEST_A, material_cycle=_material(3)),
 ]
-verdict = stab.validate_streak(recovered, expected_digest=DIGEST_A, config=config)
+verdict = stab.validate_streak(
+    recovered, expected_digest=DIGEST_A, config=config, gate=gate
+)
 check("coordinator recovery invalidates the run", verdict["streak"] == 1)
 
 leaked = [
     _receipt(1, DIGEST_A),
     _receipt(2, DIGEST_A, resource_free=False),
-    _receipt(3, DIGEST_A, material_finding_cycle=True),
+    _receipt(3, DIGEST_A, material_cycle=_material(3)),
 ]
-verdict = stab.validate_streak(leaked, expected_digest=DIGEST_A, config=config)
+verdict = stab.validate_streak(
+    leaked, expected_digest=DIGEST_A, config=config, gate=gate
+)
 check("non-resource-free run invalidates the run", verdict["streak"] == 1)
 
 no_material = [
-    _receipt(1, DIGEST_A, material_finding_cycle=False),
-    _receipt(2, DIGEST_A, material_finding_cycle=False),
-    _receipt(3, DIGEST_A, material_finding_cycle=False),
+    _receipt(1, DIGEST_A),
+    _receipt(2, DIGEST_A, material_cycle=None),
+    _receipt(3, DIGEST_A),
 ]
-verdict = stab.validate_streak(no_material, expected_digest=DIGEST_A, config=config)
+verdict = stab.validate_streak(
+    no_material, expected_digest=DIGEST_A, config=config, gate=gate
+)
 check(
     "streak without a material finding cycle is incomplete",
     verdict["streak"] == 3 and verdict["complete"] is False,
@@ -344,12 +389,14 @@ check(
 for field in ("request_id", "owner_id", "store_id", "worktree_id"):
     repeated = [
         _receipt(1, DIGEST_A),
-        _receipt(2, DIGEST_A, **{field: f"{field.split('_')[0]}-1"}),
+        _receipt(2, DIGEST_A),
         _receipt(3, DIGEST_A),
     ]
     repeated[1][field] = repeated[0][field]
     try:
-        stab.validate_streak(repeated, expected_digest=DIGEST_A, config=config)
+        stab.validate_streak(
+            repeated, expected_digest=DIGEST_A, config=config, gate=gate
+        )
     except stab.StabilizationError:
         print(f"OK   repeated {field} across runs fails closed")
     else:
@@ -361,7 +408,9 @@ shared_session = [
     _receipt(3, DIGEST_A),
 ]
 try:
-    stab.validate_streak(shared_session, expected_digest=DIGEST_A, config=config)
+    stab.validate_streak(
+        shared_session, expected_digest=DIGEST_A, config=config, gate=gate
+    )
 except stab.StabilizationError:
     print("OK   repeated provider session across runs fails closed")
 else:
@@ -369,7 +418,9 @@ else:
 
 unordered = [_receipt(2, DIGEST_A), _receipt(1, DIGEST_A), _receipt(3, DIGEST_A)]
 try:
-    stab.validate_streak(unordered, expected_digest=DIGEST_A, config=config)
+    stab.validate_streak(
+        unordered, expected_digest=DIGEST_A, config=config, gate=gate
+    )
 except stab.StabilizationError:
     print("OK   out-of-order receipts fail closed")
 else:
@@ -377,7 +428,9 @@ else:
 
 malformed = [_receipt(1, "not-a-digest")]
 try:
-    stab.validate_streak(malformed, expected_digest=DIGEST_A, config=config)
+    stab.validate_streak(
+        malformed, expected_digest=DIGEST_A, config=config, gate=gate
+    )
 except stab.StabilizationError:
     print("OK   malformed digest in a receipt fails closed")
 else:

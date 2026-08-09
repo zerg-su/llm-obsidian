@@ -16,25 +16,56 @@ import hashlib
 import json
 import subprocess
 import sys
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = ROOT / "config/v267-stabilization-subject.json"
+DEFAULT_MANIFEST = ROOT / "config/acceptance-cells.toml"
 HEX_DIGITS = set("0123456789abcdef")
 
 RECEIPT_IDENTITY_FIELDS = ("request_id", "owner_id", "store_id", "worktree_id")
-RECEIPT_REQUIRED_FIELDS = RECEIPT_IDENTITY_FIELDS + (
+RECEIPT_ROUTE_FIELDS = ("executor_route", "review_route")
+RECEIPT_REQUIRED_FIELDS = RECEIPT_IDENTITY_FIELDS + RECEIPT_ROUTE_FIELDS + (
     "schema_version",
     "run_id",
     "sequence",
+    "cell_id",
+    "corridor",
     "lifecycle_subject_sha256",
     "provider_session_ids",
     "result",
-    "material_finding_cycle",
+    "material_cycle",
     "resource_free",
     "coordinator_recovery",
+)
+MATERIAL_CYCLE_ARTIFACT_FIELDS = (
+    "findings_artifact",
+    "fix_head",
+    "refreshed_summary_artifact",
+    "second_verification_artifact",
+    "re_review_artifact",
+)
+EXECUTOR_ROUTE_KEYS = ("runtime", "model", "effort")
+REVIEW_ROUTE_KEYS = ("mode", "runtime", "model", "effort")
+RC1_CELL_KIND = "engineering-change-corridor"
+#: The one supported corridor, including the complete material-cycle branch
+#: (findings publication, fix, refreshed summary, second scoped verification,
+#: approving re-review) between the first review and reap.
+RC1_FULL_CORRIDOR_TRACE = (
+    "dispatch",
+    "summary",
+    "scoped-verify",
+    "simple-review",
+    "findings",
+    "fix",
+    "refreshed-summary",
+    "scoped-verify-2",
+    "re-review-approve",
+    "reap",
+    "cleanup",
 )
 DEFECT_REQUIRED_FIELDS = (
     "defect_id",
@@ -200,16 +231,187 @@ def lifecycle_subject_sha256(root: Path, config: SubjectConfig) -> str:
     return digest.hexdigest()
 
 
-def _validate_receipt(receipt: object, position: int) -> dict[str, object]:
+@dataclass(frozen=True)
+class RC1GateCell:
+    cell_id: str
+    sequence: int
+    executor: tuple[tuple[str, str], ...]
+    review: tuple[tuple[str, str], ...]
+    expected: tuple[str, ...]
+
+    @property
+    def executor_route(self) -> dict[str, str]:
+        return dict(self.executor)
+
+    @property
+    def review_route(self) -> dict[str, str]:
+        return dict(self.review)
+
+
+@dataclass(frozen=True)
+class RC1Gate:
+    schema_version: int
+    corridor: str
+    streak_target: int
+    required_material_cycle_runs: int
+    subject_config: str
+    evidence_root: str
+    cells: tuple[RC1GateCell, ...]
+
+    def cell_by_id(self, cell_id: str) -> RC1GateCell:
+        for cell in self.cells:
+            if cell.cell_id == cell_id:
+                return cell
+        raise StabilizationError(f"unknown RC1 cell {cell_id}")
+
+
+def _route_items(
+    cell_id: str, role: str, value: object, keys: tuple[str, ...]
+) -> tuple[tuple[str, str], ...]:
+    if (
+        not isinstance(value, dict)
+        or sorted(value) != sorted(keys)
+        or not all(isinstance(value[key], str) and value[key] for key in keys)
+    ):
+        raise StabilizationError(
+            f"RC1 cell {cell_id} {role} route requires exactly {'/'.join(keys)}"
+        )
+    return tuple((key, value[key]) for key in keys)
+
+
+def load_rc1_gate(manifest_path: Path = DEFAULT_MANIFEST) -> RC1Gate:
+    """Load and validate the typed RC1 gate declaration from the manifest."""
+
+    try:
+        manifest = tomllib.loads(Path(manifest_path).read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        raise StabilizationError(f"cannot load acceptance manifest: {exc}") from exc
+    rc1 = manifest.get("rc1")
+    if not isinstance(rc1, dict):
+        raise StabilizationError("acceptance manifest declares no [rc1] gate")
+    if rc1.get("schema_version") != 1:
+        raise StabilizationError("RC1 gate schema_version must be 1")
+    for key in ("corridor", "subject_config", "evidence_root"):
+        if not isinstance(rc1.get(key), str) or not rc1[key]:
+            raise StabilizationError(f"RC1 gate requires string {key}")
+    for key in ("streak_target", "required_material_cycle_runs"):
+        if type(rc1.get(key)) is not int or rc1[key] < 1:
+            raise StabilizationError(f"RC1 gate requires positive {key}")
+    if rc1["required_material_cycle_runs"] > rc1["streak_target"]:
+        raise StabilizationError(
+            "RC1 gate cannot require more material runs than its streak target"
+        )
+    raw_cells = rc1.get("cells")
+    if not isinstance(raw_cells, dict) or not raw_cells:
+        raise StabilizationError("RC1 gate requires a cells table")
+    cells: list[RC1GateCell] = []
+    for cell_id, cell in raw_cells.items():
+        if not isinstance(cell, dict):
+            raise StabilizationError(f"RC1 cell {cell_id} is not a table")
+        if cell.get("kind") != RC1_CELL_KIND:
+            raise StabilizationError(
+                f"RC1 cell {cell_id} must be kind {RC1_CELL_KIND}"
+            )
+        if type(cell.get("sequence")) is not int or cell["sequence"] < 1:
+            raise StabilizationError(
+                f"RC1 cell {cell_id} requires a positive sequence"
+            )
+        if tuple(cell.get("expected", ())) != RC1_FULL_CORRIDOR_TRACE:
+            raise StabilizationError(
+                f"RC1 cell {cell_id} must declare the complete supported "
+                "corridor trace including the material-cycle branch"
+            )
+        cells.append(
+            RC1GateCell(
+                cell_id=cell_id,
+                sequence=cell["sequence"],
+                executor=_route_items(
+                    cell_id, "executor", cell.get("executor"), EXECUTOR_ROUTE_KEYS
+                ),
+                review=_route_items(
+                    cell_id, "review", cell.get("review"), REVIEW_ROUTE_KEYS
+                ),
+                expected=RC1_FULL_CORRIDOR_TRACE,
+            )
+        )
+    cells.sort(key=lambda cell: cell.sequence)
+    if [cell.sequence for cell in cells] != list(range(1, len(cells) + 1)):
+        raise StabilizationError("RC1 cell sequences must be contiguous from 1")
+    if len(cells) != rc1["streak_target"]:
+        raise StabilizationError(
+            "RC1 gate must declare exactly one cell per streak run"
+        )
+    return RC1Gate(
+        schema_version=1,
+        corridor=rc1["corridor"],
+        streak_target=rc1["streak_target"],
+        required_material_cycle_runs=rc1["required_material_cycle_runs"],
+        subject_config=rc1["subject_config"],
+        evidence_root=rc1["evidence_root"],
+        cells=tuple(cells),
+    )
+
+
+def _validate_material_cycle(value: object, position: int) -> bool:
+    """True when the receipt proves a complete material-finding cycle."""
+
+    if value is None:
+        return False
+    if not isinstance(value, dict):
+        raise StabilizationError(
+            f"receipt {position} material_cycle must be null or an artifact "
+            "object; self-asserted flags are rejected"
+        )
+    if sorted(value) != sorted(MATERIAL_CYCLE_ARTIFACT_FIELDS):
+        raise StabilizationError(
+            f"receipt {position} material_cycle requires exactly the durable "
+            "artifacts: " + ", ".join(MATERIAL_CYCLE_ARTIFACT_FIELDS)
+        )
+    for field in MATERIAL_CYCLE_ARTIFACT_FIELDS:
+        if not isinstance(value[field], str) or not value[field]:
+            raise StabilizationError(
+                f"receipt {position} material_cycle requires string {field}"
+            )
+    return True
+
+
+def _validate_receipt(
+    receipt: object, position: int, cell: RC1GateCell, gate: RC1Gate
+) -> dict[str, object]:
     if not isinstance(receipt, dict):
         raise StabilizationError(f"receipt {position} is not an object")
     for field in RECEIPT_REQUIRED_FIELDS:
         if field not in receipt:
             raise StabilizationError(f"receipt {position} is missing {field}")
-    if receipt["schema_version"] != 1:
-        raise StabilizationError(f"receipt {position} schema_version must be 1")
-    if type(receipt["sequence"]) is not int or receipt["sequence"] < 1:
-        raise StabilizationError(f"receipt {position} requires a positive sequence")
+    if receipt["schema_version"] != 2:
+        raise StabilizationError(
+            f"receipt {position} schema_version must be 2; unbound legacy "
+            "receipts are rejected"
+        )
+    if receipt["cell_id"] != cell.cell_id:
+        raise StabilizationError(
+            f"receipt {position} must bind configured cell {cell.cell_id}, "
+            f"not {receipt['cell_id']}"
+        )
+    if receipt["sequence"] != cell.sequence:
+        raise StabilizationError(
+            f"receipt {position} sequence must equal configured sequence "
+            f"{cell.sequence}"
+        )
+    if receipt["corridor"] != gate.corridor:
+        raise StabilizationError(
+            f"receipt {position} must bind the {gate.corridor} corridor"
+        )
+    if receipt["executor_route"] != cell.executor_route:
+        raise StabilizationError(
+            f"receipt {position} executor route drifts from the configured "
+            f"{cell.cell_id} route"
+        )
+    if receipt["review_route"] != cell.review_route:
+        raise StabilizationError(
+            f"receipt {position} review route drifts from the configured "
+            f"{cell.cell_id} route"
+        )
     digest = receipt["lifecycle_subject_sha256"]
     if (
         not isinstance(digest, str)
@@ -221,15 +423,17 @@ def _validate_receipt(receipt: object, position: int) -> dict[str, object]:
         if not isinstance(receipt[field], str) or not receipt[field]:
             raise StabilizationError(f"receipt {position} requires string {field}")
     sessions = receipt["provider_session_ids"]
-    if not isinstance(sessions, list) or not all(
-        isinstance(item, str) and item for item in sessions
+    if (
+        not isinstance(sessions, list)
+        or not sessions
+        or not all(isinstance(item, str) and item for item in sessions)
     ):
         raise StabilizationError(
-            f"receipt {position} requires provider_session_ids strings"
+            f"receipt {position} requires non-empty provider_session_ids"
         )
     if receipt["result"] not in {"success", "failed", "invalidated"}:
         raise StabilizationError(f"receipt {position} has an unknown result")
-    for field in ("material_finding_cycle", "resource_free", "coordinator_recovery"):
+    for field in ("resource_free", "coordinator_recovery"):
         if not isinstance(receipt[field], bool):
             raise StabilizationError(f"receipt {position} requires boolean {field}")
     return receipt
@@ -240,8 +444,9 @@ def validate_streak(
     *,
     expected_digest: str,
     config: SubjectConfig,
+    gate: RC1Gate,
 ) -> dict[str, object]:
-    """Fold ordered run receipts into the current RC1 streak verdict."""
+    """Fold gate-bound run receipts into the current RC1 streak verdict."""
 
     if (
         not isinstance(expected_digest, str)
@@ -249,14 +454,20 @@ def validate_streak(
         or not set(expected_digest) <= HEX_DIGITS
     ):
         raise StabilizationError("expected digest must be 64 hex characters")
+    if gate.streak_target != config.streak_target:
+        raise StabilizationError(
+            "RC1 gate streak target disagrees with the stabilization denominator"
+        )
+    if len(receipts) > len(gate.cells):
+        raise StabilizationError(
+            "more receipts than configured RC1 cells"
+        )
     seen_identities: dict[str, str] = {}
-    previous_sequence = 0
     validated: list[dict[str, object]] = []
     for position, raw in enumerate(receipts, start=1):
-        receipt = _validate_receipt(raw, position)
-        if int(receipt["sequence"]) <= previous_sequence:
-            raise StabilizationError("receipts must be strictly sequence ordered")
-        previous_sequence = int(receipt["sequence"])
+        # Receipts bind positionally to the configured cells, so a skipped,
+        # reordered, or repeated cell is a hard error, never a silent reset.
+        receipt = _validate_receipt(raw, position, gate.cells[position - 1], gate)
         identities = [(field, str(receipt[field])) for field in RECEIPT_IDENTITY_FIELDS]
         identities.extend(
             ("provider_session_id", session)
@@ -274,7 +485,8 @@ def validate_streak(
 
     streak = 0
     window: list[dict[str, object]] = []
-    for receipt in validated:
+    for position, receipt in enumerate(validated, start=1):
+        material = _validate_material_cycle(receipt["material_cycle"], position)
         fresh_success = (
             receipt["result"] == "success"
             and receipt["resource_free"] is True
@@ -285,17 +497,18 @@ def validate_streak(
             window = []
             continue
         streak += 1
-        window.append(receipt)
+        window.append(material)
     window = window[-config.streak_target :]
-    material = any(receipt["material_finding_cycle"] for receipt in window)
-    complete = streak >= config.streak_target and material
+    material_runs = sum(1 for flag in window if flag)
+    material_met = material_runs >= gate.required_material_cycle_runs
+    complete = streak >= config.streak_target and material_met
     return {
         "schema_version": 1,
         "release": config.release,
         "expected_digest": expected_digest,
         "streak": streak,
         "streak_target": config.streak_target,
-        "material_finding_cycle": material,
+        "material_finding_cycle": material_met,
         "complete": complete,
     }
 
@@ -391,6 +604,7 @@ def main() -> int:
     )
     streak.add_argument("--receipts", type=Path, required=True)
     streak.add_argument("--expected-digest", required=True)
+    streak.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
     ledger = sub.add_parser(
         "ledger", parents=[shared], help="apply the release stop rule"
     )
@@ -428,6 +642,7 @@ def main() -> int:
                 receipts,
                 expected_digest=args.expected_digest,
                 config=config,
+                gate=load_rc1_gate(args.manifest),
             )
             print(json.dumps(verdict, ensure_ascii=False, sort_keys=True))
             return 0 if verdict["complete"] else 1

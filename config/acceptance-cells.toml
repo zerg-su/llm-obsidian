@@ -44,9 +44,10 @@ preflight_schema = 1
 failed_cell_classifications = ["runtime-contract", "mechanism-failure"]
 
 # 2.6.7 RC1 live streak: three strictly sequential fresh runs of the one
-# supported engineering/change corridor. Identities and routes only; run
-# receipts bind to lifecycle_subject_sha256 via scripts/v267_stabilization.py
-# (streak subcommand), never to raw Git HEAD. Each run must use new
+# supported engineering/change corridor, consumed in production by
+# scripts/live_acceptance_rc1_gate.py (preflight facade) with receipts bound
+# to lifecycle_subject_sha256 via scripts/v267_stabilization.py (streak
+# subcommand), never to raw Git HEAD. Each run must use new
 # request/owner/store/worktree/provider-session identities, at least one run
 # must complete the real material-finding/fix/re-review path, and the three
 # live cells are coordinator-authorized one at a time.
@@ -63,21 +64,33 @@ kind = "engineering-change-corridor"
 sequence = 1
 executor = { runtime = "claude", model = "fable", effort = "high" }
 review = { mode = "simple", runtime = "claude", model = "fable", effort = "high" }
-expected = ["dispatch", "summary", "scoped-verify", "simple-review", "reap", "cleanup"]
+expected = [
+  "dispatch", "summary", "scoped-verify", "simple-review",
+  "findings", "fix", "refreshed-summary", "scoped-verify-2", "re-review-approve",
+  "reap", "cleanup",
+]
 
 [rc1.cells.rc1-corridor-run-2]
 kind = "engineering-change-corridor"
 sequence = 2
 executor = { runtime = "claude", model = "fable", effort = "high" }
 review = { mode = "simple", runtime = "claude", model = "fable", effort = "high" }
-expected = ["dispatch", "summary", "scoped-verify", "simple-review", "reap", "cleanup"]
+expected = [
+  "dispatch", "summary", "scoped-verify", "simple-review",
+  "findings", "fix", "refreshed-summary", "scoped-verify-2", "re-review-approve",
+  "reap", "cleanup",
+]
 
 [rc1.cells.rc1-corridor-run-3]
 kind = "engineering-change-corridor"
 sequence = 3
 executor = { runtime = "claude", model = "fable", effort = "high" }
 review = { mode = "simple", runtime = "claude", model = "fable", effort = "high" }
-expected = ["dispatch", "summary", "scoped-verify", "simple-review", "reap", "cleanup"]
+expected = [
+  "dispatch", "summary", "scoped-verify", "simple-review",
+  "findings", "fix", "refreshed-summary", "scoped-verify-2", "re-review-approve",
+  "reap", "cleanup",
+]
 
 [cells.claude-lifecycle]
 kind = "runtime-lifecycle"

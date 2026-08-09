@@ -69,8 +69,7 @@ for name, cell in sorted(cells.items()):
     sequences.append(int(cell.get("sequence", 0)))
     check(
         f"{name} declares the full supported corridor trace",
-        cell.get("expected")
-        == ["dispatch", "summary", "scoped-verify", "simple-review", "reap", "cleanup"],
+        tuple(cell.get("expected", ())) == stab.RC1_FULL_CORRIDOR_TRACE,
     )
     for role in ("executor", "review"):
         route = cell.get(role)
