@@ -205,6 +205,31 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     )
     config = runner.load_dispatch_config(vault, target)
     session, effective = runner.resolved_routes(request, persist=False)
+    target_dispatch = target / ".codex" / "dispatch-env.toml"
+    target_dispatch.parent.mkdir(parents=True, exist_ok=True)
+    target_dispatch.write_text(
+        '[codex_dispatch]\nprofile = "target-mcp"\n',
+        encoding="utf-8",
+    )
+    target_config = runner.load_dispatch_config(vault, target)
+    with mock.patch("dispatch_workspace.run_command") as sync_command:
+        runner.sync_codex_profile(
+            request,
+            target_config,
+            {"runtime": "codex"},
+        )
+    target_gateway = target / "scripts" / "mcp-gateway" / "mcp-gateway.sh"
+    check(
+        "target-local dispatch profile sync uses the target gateway root",
+        len(sync_command.call_args_list) == 2
+        and all(
+            Path(call.args[0][0]).resolve() == target_gateway.resolve()
+            and Path(call.kwargs["cwd"]).resolve() == target.resolve()
+            for call in sync_command.call_args_list
+        ),
+        str(sync_command.call_args_list),
+    )
+    target_dispatch.unlink()
     alias_raw = json.loads(json.dumps(raw_request))
     alias_raw["wiki_context"][0]["title"] = "Human display title"
     alias_raw["wiki_context"][0]["context_path"] = (

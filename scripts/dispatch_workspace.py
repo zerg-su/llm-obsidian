@@ -126,8 +126,18 @@ def initialize_task(request: dict[str, Any]) -> dict[str, str]:
 def sync_codex_profile(request: dict[str, Any], config: dict[str, Any], effective: dict[str, Any]) -> None:
     if effective["runtime"] != "codex":
         return
-    gateway = request["vault_root"] / "scripts" / "mcp-gateway" / "mcp-gateway.sh"
-    run_command([str(gateway), "sync-config", "--apply"], cwd=request["vault_root"], label="MCP config sync")
+    target_root = request["target_repo"]
+    profile_root = (
+        target_root
+        if (target_root / ".codex" / "dispatch-env.toml").is_file()
+        else request["vault_root"]
+    )
+    gateway = profile_root / "scripts" / "mcp-gateway" / "mcp-gateway.sh"
+    run_command(
+        [str(gateway), "sync-config", "--apply"],
+        cwd=profile_root,
+        label="MCP config sync",
+    )
     profile = str(config.get("profile") or "").strip()
     if not profile:
         return
@@ -136,7 +146,7 @@ def sync_codex_profile(request: dict[str, Any], config: dict[str, Any], effectiv
         env["CODEX_HOME"] = str(config["codex_home"])
     run_command(
         [str(gateway), "codex-sync", "--apply", "--only-profile", profile],
-        cwd=request["vault_root"],
+        cwd=profile_root,
         env=env,
         label="Codex dispatch profile sync",
     )
