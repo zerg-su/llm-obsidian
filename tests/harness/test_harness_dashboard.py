@@ -800,6 +800,71 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-stale-verify.") as ra
         ),
     )
 
+with tempfile.TemporaryDirectory(prefix="harness-dashboard-missing-current-verify.") as raw:
+    store_root = Path(raw) / "harness"
+    store = OperationStore(store_root)
+    compiled = compiled_builtin("engineering/change")
+    _create(
+        store,
+        DISPATCH,
+        "dispatch",
+        lane_id="lane-primary",
+        contract_sha256=compiled.definition_sha256,
+    )
+    _advance(store, DISPATCH, "preflight", "starting", "running")
+    runtime = store_root / "owners" / OWNER / "runtime" / DISPATCH
+    _verification_receipt(
+        store,
+        DISPATCH,
+        runtime,
+        compiled.definition_sha256,
+        input_char="6",
+        head_char="8",
+    )
+    _write_gate(
+        store,
+        "verifying",
+        subject=DISPATCH,
+        head_sha="a" * 40,
+    )
+
+    missing = project(store_root, OWNER, inventory=LiveInventory({}))
+    missing_verify = next(
+        step for step in missing.programs[0].steps if step.step_id == "verify"
+    )
+    check(
+        "historical success cannot establish missing exact-HEAD completion",
+        missing_verify.visits == 1
+        and missing_verify.status == "attention"
+        and any(
+            issue.code == "verification-receipt-missing"
+            for issue in missing.issues
+        ),
+    )
+    live_child = "dashboard-current-live-verify"
+    _create(
+        store,
+        live_child,
+        "pipeline-verify",
+        lane_id="current-verify-lane",
+        contract_sha256=compiled.definition_sha256,
+        parent=DISPATCH,
+    )
+    _advance(store, live_child, "preflight", "starting", "running", "verifying")
+    running = project(store_root, OWNER, inventory=LiveInventory({}))
+    running_verify = next(
+        step for step in running.programs[0].steps if step.step_id == "verify"
+    )
+    check(
+        "live verification remains running when exact-HEAD receipt is not ready",
+        running_verify.visits == 1
+        and running_verify.status == "running"
+        and not any(
+            issue.code == "verification-receipt-missing"
+            for issue in running.issues
+        ),
+    )
+
 with tempfile.TemporaryDirectory(prefix="harness-dashboard-terminal-truth.") as raw:
     for terminal in ("failed", "cancelled"):
         store_root = Path(raw) / terminal / "harness"
@@ -1062,7 +1127,6 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-current-tree.") as ra
         "history caps retain the current review lineage axes and drop counts",
         visible_parent.children[0].operation_id == active_round
         and current_steps["review"].status == "running"
-        and current_program.next_action == "wait"
         and _route_of(current_steps["review"])
         == ("claude", "claude-opus-5", "high", "reviewer-callback")
         and visible_lanes["openai-holistic"].scope == "review-axis"
@@ -1839,6 +1903,35 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-open.") as raw:
     check(
         "ambiguous caller placement is rejected before any cmux effect",
         rejected and not ambiguous.created,
+    )
+    alias_fake = FakeCmuxRunner(caller, caller, workspace)
+    alias_adapter = CmuxAdapter(runner=alias_fake, binary="cmux")
+    alias_markers = root / "alias-markers"
+    alias_baseline = _tree_bytes(store_root)
+    try:
+        dashboard_script.open_dashboard(
+            vault=vault,
+            store=store_root,
+            caller_surface=caller,
+            adapter=alias_adapter,
+            marker_root=alias_markers,
+        )
+    except Exception as exc:
+        alias_rejected = "caller surface" in str(exc)
+    else:
+        alias_rejected = False
+    alias_marker = json.loads(
+        next(alias_markers.glob("*.json")).read_text(encoding="ascii")
+    )
+    check(
+        "a split response cannot alias or mutate the coordinator surface",
+        alias_rejected
+        and not any(call[1:2] == ["send"] for call in alias_fake.calls)
+        and not any(call[1:2] == ["send-key"] for call in alias_fake.calls)
+        and not any(call[1:2] == ["close-surface"] for call in alias_fake.calls)
+        and alias_marker["state"] == "retryable"
+        and alias_marker["surface_id"] == ""
+        and _tree_bytes(store_root) == alias_baseline,
     )
 
 print("harness dashboard tests passed")

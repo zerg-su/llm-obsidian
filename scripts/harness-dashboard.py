@@ -312,11 +312,13 @@ def _open_dashboard_unlocked(
             {**expected, "state": "retryable", "surface_id": "", "reserved_at": 0},
         )
         raise
-    if (
+    caller_alias = surface.surface_id.casefold() == caller_surface.casefold()
+    invalid_placement = (
         not UUID_RE.fullmatch(surface.surface_id)
         or surface.workspace_id.casefold() != workspace_id.casefold()
-    ):
-        if UUID_RE.fullmatch(surface.surface_id):
+    )
+    if caller_alias or invalid_placement:
+        if UUID_RE.fullmatch(surface.surface_id) and not caller_alias:
             try:
                 cmux.close_exact(surface.surface_id)
             except CmuxError:
@@ -325,7 +327,11 @@ def _open_dashboard_unlocked(
             marker,
             {**expected, "state": "retryable", "surface_id": "", "reserved_at": 0},
         )
-        raise CmuxError("dashboard split returned an invalid placement")
+        raise CmuxError(
+            "dashboard split returned the caller surface"
+            if caller_alias
+            else "dashboard split returned an invalid placement"
+        )
     _write_marker(
         marker,
         {

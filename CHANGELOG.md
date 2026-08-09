@@ -42,7 +42,7 @@ deterministic without adding another orchestrator or provider route.
   owning no runtime resource is reported as unresolved rather than live.
 - Restored the live `scripts/` scope ratchet: it measures the working tree again
   instead of a frozen historical commit, under explicit RC4 ceilings declared in
-  `tests/rc4_scope_ratchet.py` (265 files, 90,858 lines). The dashboard surface
+  `tests/rc4_scope_ratchet.py` (265 files, 90,871 lines). The dashboard surface
   now includes the extracted read-only receipt validator; its review corrections
   bind fix visits to accepted callbacks, serialize marker recovery with atomic
   writes, resolve exact frozen custom pipelines, recover bounded stale startup
@@ -52,6 +52,8 @@ deterministic without adding another orchestrator or provider route.
   ContextPackets. Accumulated history now retains the active review lineage and
   axes under every display cap, reports dropped child/lane counts, and cannot
   let a failed verification from an old HEAD poison current accepted evidence.
+  Missing current-HEAD evidence no longer falls back to historical success, and
+  a split response can never alias, receive input through, or close the caller.
   The RC2 numbers are
   retained in `tests/test_v266_rc2_scope.py` as historical evidence only and no
   longer stand in for the ratchet.

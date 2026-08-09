@@ -69,6 +69,11 @@ their dropped counts, and separates exact-HEAD verification truth from bounded
 historical visits.  It adds no production file and moves the line ceiling by
 the measured 141-line correction.
 
+The fifth typed review makes missing exact-HEAD verification evidence explicit
+without hiding a running verification child, and rejects a split response that
+aliases the coordinator surface.  It adds no production file and moves the line
+ceiling by the measured 13-line correction.
+
 The historical RC2 snapshot is retained separately in
 ``tests/test_v266_rc2_scope.py``; it is evidence about a released commit, not a
 constraint on this one.
@@ -83,7 +88,7 @@ from pathlib import Path
 SCRIPT_FILE_CEILING = 265
 
 #: Maximum total lines across those files for the RC4 candidate.
-SCRIPT_LINE_CEILING = 90_858
+SCRIPT_LINE_CEILING = 90_871
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

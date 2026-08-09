@@ -48,7 +48,7 @@
   без собственного runtime-ресурса помечается как unresolved, а не как живая.
 - Восстановлен живой scope ratchet для `scripts/`: он снова измеряет рабочее
   дерево, а не замороженный исторический коммит, с явными RC4-потолками в
-  `tests/rc4_scope_ratchet.py` (265 файлов, 90 858 строк). В dashboard теперь
+  `tests/rc4_scope_ratchet.py` (265 файлов, 90 871 строк). В dashboard теперь
   входит отдельный read-only валидатор receipts; review-коррекции привязывают
   fix visits к принятым callbacks, сериализуют recovery marker через atomic
   writes, резолвят exact frozen custom pipelines, восстанавливают bounded stale
@@ -57,7 +57,9 @@
   chain и входят в review ContextPacket с привязкой record identity и digest.
   Накопленная история сохраняет active review lineage и axes под всеми display
   caps, показывает dropped child/lane counts и не позволяет failed verification
-  со старого HEAD отравлять текущие accepted evidence. Числа RC2
+  со старого HEAD отравлять текущие accepted evidence. Отсутствующий current-HEAD
+  receipt больше не подменяется историческим успехом, а split response не может
+  alias, получить input через или закрыть caller surface. Числа RC2
   остаются в
   `tests/test_v266_rc2_scope.py` только как историческое свидетельство и больше
   не подменяют собой ratchet.

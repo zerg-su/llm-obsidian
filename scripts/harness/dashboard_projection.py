@@ -528,7 +528,11 @@ def _step_view(
             runtime,
             exact_head_sha=_review_head(gate),
         )
-        if issue:
+        if issue == "verification-receipt-missing" and any(
+            child.status == "running" for child in children
+        ):
+            evidence, status, issue = True, _aggregate(child_statuses), ""
+        elif issue:
             evidence, status = True, "attention"
         elif visits:
             evidence, status = True, "complete"

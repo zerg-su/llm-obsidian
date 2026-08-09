@@ -244,7 +244,10 @@ def verification_receipt_visits(
 
     root = runtime / "pipeline-verification"
     if not root.is_dir():
-        return (), ""
+        return (
+            (),
+            "verification-receipt-missing" if exact_head_sha else "",
+        )
     observations: list[tuple[VerificationAttempt | None, str, str]] = []
     for path in sorted(root.glob("*/receipt.json")):
         value = _read_object(path)
@@ -272,7 +275,7 @@ def verification_receipt_visits(
             if item[2] == exact_head_sha
         )
         if not exact:
-            return visits, ""
+            return visits, "verification-receipt-missing"
         valid_attempts = tuple(item[0] for item in exact if item[0] is not None)
         if not valid_attempts:
             current = exact
