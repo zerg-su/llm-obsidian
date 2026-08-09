@@ -78,6 +78,34 @@ class RuntimeWorkerExecution(
                 self.sleeper(observation_interval_seconds)
         return False
 
+    def _await_own_start_committed(
+        self,
+        *,
+        observation_limit: int = 160,
+        observation_interval_seconds: float = 0.05,
+    ) -> bool:
+        """Wait until the manager durably committed this start-provider effect.
+
+        Provider input must not race the manager's start commit, but only the
+        launch window owns that hazard: a restarted generation begins with no
+        pending start effect and crosses this seam immediately, leaving every
+        later recovery state with its existing owner.
+        """
+
+        for observation in range(observation_limit):
+            record = self.store.read(
+                self.spec["owner_id"], self.spec["operation_id"]
+            )
+            starting = (
+                record.state == "starting"
+                or record.pending_effect == "start-provider"
+            )
+            if not starting:
+                return True
+            if observation + 1 < observation_limit:
+                self.sleeper(observation_interval_seconds)
+        return False
+
     def _workspace_id(self) -> str:
         path = self.spec_path.parent / "session.json"
         try:
@@ -421,12 +449,11 @@ class RuntimeWorkerExecution(
                 {"schema_version": 1, "status": "start-failed", "exit_code": 127},
             )
             return 127
-        reviewer_ready_first = expected_reviewer
-        if (
-            not reviewer_ready_first
-            and not self._submit_initial_input(initial_start_observation_limit)
-        ):
-            return 2
+        # The ready handshake carries only process/supervisor ownership, so
+        # every session publishes it before semantic input acknowledgement:
+        # a real executor's start acknowledgement can outlast the manager's
+        # bounded start budget, and input acceptance stays a separate, later
+        # boundary that fails closed through the worker/operation path.
         _atomic_json(
             self.ready,
             {
@@ -439,7 +466,12 @@ class RuntimeWorkerExecution(
                 "supervisor_identity": self.supervisor_identity,
             },
         )
-        if reviewer_ready_first and not self._await_parent_start_committed():
+        start_committed = (
+            self._await_parent_start_committed()
+            if expected_reviewer
+            else self._await_own_start_committed()
+        )
+        if not start_committed:
             self.contain_provider_start_failure(self.process, self.handle)
             _atomic_json(
                 self.exit_path,
@@ -450,10 +482,7 @@ class RuntimeWorkerExecution(
                 },
             )
             return 2
-        if (
-            reviewer_ready_first
-            and not self._submit_initial_input(initial_start_observation_limit)
-        ):
+        if not self._submit_initial_input(initial_start_observation_limit):
             return 2
         self.checkpoint_probe = self.checkpoint_probe or CmuxAdapter().resume_checkpoint
         self.checkpoint = ""

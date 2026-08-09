@@ -4903,6 +4903,104 @@ def check_worker_handshakes_before_semantic_initial_ack() -> None:
         )
 
 
+class HeldSemanticFailureCmux(InitialStartWorkerCmux):
+    """Hold the first post-submit read, then never acknowledge the start."""
+
+    def __init__(self) -> None:
+        super().__init__([STUCK_CLAUDE_SCREEN])
+        self.ack_started = threading.Event()
+        self.release_ack = threading.Event()
+
+    def read(self, surface_id: str) -> str:
+        if self.sent and self.submit_count > self.submits_at_last_send:
+            self.ack_started.set()
+            if not self.release_ack.wait(timeout=5):
+                raise AssertionError(
+                    "executor acknowledgement fixture was not released"
+                )
+        return super().read(surface_id)
+
+
+def check_executor_handshake_precedes_semantic_ack_and_failure_stays_typed() -> None:
+    """Executor process ownership must not inherit the input-ack budget.
+
+    The live RC3 reproducer: a real executor needs longer than the manager's
+    8s start budget to prove its semantic start, so the ready handshake must
+    carry only process/supervisor ownership and be published before the
+    acknowledgement window, exactly like the reviewer boundary.  A later
+    semantic failure must stay typed attention without input replay.
+    """
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        cmux = HeldSemanticFailureCmux()
+        observed: list[ProcessHandle] = []
+        pre_release_kinds: list[list[str]] = []
+
+        def observe_handshake(launch: SurfaceLaunch) -> None:
+            try:
+                observed.append(
+                    ProcessAdapter().await_surface_handle(
+                        launch, timeout_seconds=2.0
+                    )
+                )
+                check(
+                    "executor worker reached the held semantic window",
+                    cmux.ack_started.wait(timeout=2),
+                )
+                generation = (
+                    launch.spec_path.parent / "provider-events" / "generation-1"
+                )
+                pre_release_kinds.append(
+                    [
+                        json.loads(path.read_text(encoding="utf-8"))["kind"]
+                        for path in sorted((generation / "events").glob("*.json"))
+                    ]
+                )
+            finally:
+                cmux.release_ack.set()
+
+        code, launch, store, callback = _initial_start_worker(
+            root,
+            "executor-ready",
+            cmux,
+            before_join=observe_handshake,
+        )
+        kinds, delivery = _initial_start_delivery(launch)
+        exit_record = json.loads(launch.exit_path.read_text(encoding="utf-8"))
+        ready_record = json.loads(launch.ready_path.read_text(encoding="utf-8"))
+        record = store.read("owner-executor-ready", "executor-ready-op")
+        check(
+            "an executor publishes exact process ownership before input acknowledgement",
+            len(observed) == 1
+            and observed[0].process_group > 1
+            and observed[0].process_identity,
+            observed,
+        )
+        check(
+            "the early executor handshake does not synthesize input-accepted",
+            pre_release_kinds == [["provider-started"]],
+            pre_release_kinds,
+        )
+        check(
+            "a later semantic failure stays typed attention without replay",
+            code == 2
+            and exit_record["status"] == "input-unconfirmed"
+            and record.state == "attention-required"
+            and "input-accepted" not in kinds
+            and delivery["send_status"] == "ambiguous"
+            and len(cmux.sent) == 1
+            and cmux.submit_count == 1
+            and not callback.is_file(),
+            (code, exit_record, record.state, kinds, delivery),
+        )
+        check(
+            "a failed semantic start rewrites the ready handshake fail-closed",
+            ready_record.get("status") == "failed",
+            ready_record,
+        )
+
+
 def check_late_ready_review_recovery_is_exact_and_replay_free() -> None:
     """Adopt one late worker handshake without replaying provider input."""
 
@@ -5126,6 +5224,7 @@ _INITIAL_START_FIXTURES = (
     check_worker_contains_unconfirmed_initial_start,
     check_worker_accepts_acknowledged_initial_start,
     check_worker_handshakes_before_semantic_initial_ack,
+    check_executor_handshake_precedes_semantic_ack_and_failure_stays_typed,
     check_late_ready_review_recovery_is_exact_and_replay_free,
     check_worker_handles_recognized_post_submit_prompt,
     check_worker_crash_after_enter_stays_replay_free,
