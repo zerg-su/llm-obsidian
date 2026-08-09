@@ -122,7 +122,12 @@ else:
 # the repository keeps in EN/RU parity.
 for changelog in ("CHANGELOG.md", "CHANGELOG.ru.md"):
     text = source(changelog)
-    rc4_section = text.partition("2.6.6-rc4")[2].partition("\n## [")[0]
+    header = (
+        "## [2.6.6-rc4] - 2026-08-08"
+        if changelog == "CHANGELOG.md"
+        else "## [2.6.6-rc4] — 2026-08-08"
+    )
+    rc4_section = text.partition(header)[2].partition("\n## [")[0]
     check(
         FINDING,
         f"{changelog} records the restored live scope ratchet under 2.6.6-rc4",
