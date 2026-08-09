@@ -237,6 +237,8 @@ test-release-acceptance:
 test-v267-stabilization:
 	@echo "=== test_v267_stabilization.py ==="
 	@python3 tests/test_v267_stabilization.py
+	@echo "=== test_rc1_gate_preflight.py ==="
+	@python3 tests/test_rc1_gate_preflight.py
 
 test-live-acceptance-runner:
 	@echo "=== test_live_acceptance_runner.py ==="

@@ -43,6 +43,42 @@ state_schema = 3
 preflight_schema = 1
 failed_cell_classifications = ["runtime-contract", "mechanism-failure"]
 
+# 2.6.7 RC1 live streak: three strictly sequential fresh runs of the one
+# supported engineering/change corridor. Identities and routes only; run
+# receipts bind to lifecycle_subject_sha256 via scripts/v267_stabilization.py
+# (streak subcommand), never to raw Git HEAD. Each run must use new
+# request/owner/store/worktree/provider-session identities, at least one run
+# must complete the real material-finding/fix/re-review path, and the three
+# live cells are coordinator-authorized one at a time.
+[rc1]
+schema_version = 1
+streak_target = 3
+corridor = "engineering/change"
+subject_config = "config/v267-stabilization-subject.json"
+evidence_root = "docs/acceptance/evidence/v2.6.7"
+required_material_cycle_runs = 1
+
+[rc1.cells.rc1-corridor-run-1]
+kind = "engineering-change-corridor"
+sequence = 1
+executor = { runtime = "claude", model = "fable", effort = "high" }
+review = { mode = "simple", runtime = "claude", model = "fable", effort = "high" }
+expected = ["dispatch", "summary", "scoped-verify", "simple-review", "reap", "cleanup"]
+
+[rc1.cells.rc1-corridor-run-2]
+kind = "engineering-change-corridor"
+sequence = 2
+executor = { runtime = "claude", model = "fable", effort = "high" }
+review = { mode = "simple", runtime = "claude", model = "fable", effort = "high" }
+expected = ["dispatch", "summary", "scoped-verify", "simple-review", "reap", "cleanup"]
+
+[rc1.cells.rc1-corridor-run-3]
+kind = "engineering-change-corridor"
+sequence = 3
+executor = { runtime = "claude", model = "fable", effort = "high" }
+review = { mode = "simple", runtime = "claude", model = "fable", effort = "high" }
+expected = ["dispatch", "summary", "scoped-verify", "simple-review", "reap", "cleanup"]
+
 [cells.claude-lifecycle]
 kind = "runtime-lifecycle"
 runtimes = ["claude"]
