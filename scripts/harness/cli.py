@@ -729,7 +729,7 @@ def _resume(
                 current.state not in {"attention-required", "finalizing"}
                 or (
                     current.state == "attention-required"
-                    and current.resume_state != "finalizing"
+                    and current.resume_state not in {"finalizing", "exiting"}
                 )
                 or current.pending_effect
                 or _has_owned_resources(current)
@@ -738,8 +738,10 @@ def _resume(
                     "approved review recovery cannot terminalize dispatch ownership"
                 )
             if current.state == "attention-required":
-                store.transition(owner, operation_id, "finalizing")
-            store.transition(owner, operation_id, "exiting")
+                store.transition(owner, operation_id, current.resume_state)
+                current = store.read(owner, operation_id)
+            if current.state == "finalizing":
+                store.transition(owner, operation_id, "exiting")
             completed = store.transition(owner, operation_id, "complete")
             return TransitionResult(
                 operation_id,

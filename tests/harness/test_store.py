@@ -1526,6 +1526,13 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
     store.transition(
         "owner-cli", "op-approved-finalizing-review-cli", "finalizing"
     )
+    create_cli_operation("op-approved-exiting-review-cli", state="exiting")
+    store.transition(
+        "owner-cli",
+        "op-approved-exiting-review-cli",
+        "attention-required",
+        reason=AttentionReason.ATTENTION_REQUIRED,
+    )
     create_cli_operation(
         "op-approved-live-review-cli", state="awaiting-callback"
     )
@@ -1612,6 +1619,13 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
             process_adapter=FakeProcess("dead"),
             cmux_adapter=FakeCmux("missing"),
         )
+        resumed_durable_exiting = harness_cli._resume(
+            store,
+            "owner-cli",
+            "op-approved-exiting-review-cli",
+            process_adapter=FakeProcess("dead"),
+            cmux_adapter=FakeCmux("missing"),
+        )
         resumed_live_executor = harness_cli._resume(
             store,
             "owner-cli",
@@ -1643,6 +1657,7 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
         first_finalizing.state == "complete"
         and second_finalizing.state == "complete"
         and resumed_durable_finalizing.state == "complete"
+        and resumed_durable_exiting.state == "complete"
         and resumed_live_executor.state == "awaiting-callback"
         and resumed_live_executor.changed
         and resumed_live_executor.attention_reason is None
@@ -1658,6 +1673,7 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
         == [
             "op-finalizing-review-cli",
             "op-approved-finalizing-review-cli",
+            "op-approved-exiting-review-cli",
             "op-approved-live-review-cli",
             "op-findings-live-review-cli",
         ],
