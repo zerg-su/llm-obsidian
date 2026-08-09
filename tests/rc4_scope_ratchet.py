@@ -92,6 +92,10 @@ runtime into the dependency-free verification-attempt value module, restoring
 the read-only projection boundary. Expanded explicit imports add exactly three
 lines and move the ceiling to 91,300 without adding a file.
 
+RC4 Fix3 binds Codex profile synchronization to a target repository that owns
+its own dispatch profile, while retaining the vault as the explicit fallback.
+The focused repair adds exactly ten production lines and no production file.
+
 The historical RC2 snapshot is retained separately in
 ``tests/test_v266_rc2_scope.py``; it is evidence about a released commit, not a
 constraint on this one.
@@ -106,7 +110,7 @@ from pathlib import Path
 SCRIPT_FILE_CEILING = 268
 
 #: Maximum total lines across those files for the RC4 candidate.
-SCRIPT_LINE_CEILING = 91_300
+SCRIPT_LINE_CEILING = 91_310
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

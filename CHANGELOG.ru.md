@@ -16,6 +16,18 @@
 внутренними контрольными точками и вошли в следующие публичные релизы; тегов и
 пакетов с этими номерами не выпускалось.
 
+## [2.6.6-rc4-fix3] — 2026-08-09
+
+Этот ограниченный reconciliation-патч выполняет синхронизацию Codex dispatch
+profile внутри target repository, когда этот репозиторий содержит собственный
+dispatch profile. Патч не добавляет dashboard или Harness lifecycle behavior.
+
+### Исправлено
+
+- MCP configuration sync и Codex profile sync используют gateway и рабочий
+  каталог target repository при наличии `.codex/dispatch-env.toml`, сохраняя
+  существующий vault-local fallback.
+
 ## [2.6.6-rc4-fix2] — 2026-08-09
 
 Этот ограниченный RC4-патч добавляет внешний read-only Harness dashboard и

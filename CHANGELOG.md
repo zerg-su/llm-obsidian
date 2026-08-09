@@ -10,6 +10,18 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.6.6-rc4-fix3] - 2026-08-09
+
+This bounded reconciliation patch keeps Codex dispatch profile synchronization
+inside a target repository when that repository owns its own dispatch profile.
+It adds no dashboard or Harness lifecycle behavior.
+
+### Fixed
+
+- Run both MCP configuration sync and Codex profile sync through the target
+  repository gateway and working directory when `.codex/dispatch-env.toml` is
+  present, while preserving the existing vault-local fallback.
+
 ## [2.6.6-rc4-fix2] - 2026-08-09
 
 This bounded RC4 patch adds an external read-only Harness dashboard and closes

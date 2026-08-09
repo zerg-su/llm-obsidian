@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Executable documentation and version contract for v2.6.6 RC4-fix2."""
+"""Executable documentation and version contract for v2.6.6 RC4-fix3."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "2.6.6-rc4-fix2"
+VERSION = "2.6.6-rc4-fix3"
 
 
 def text(relative: str) -> str:
@@ -23,12 +23,12 @@ assert codex["version"] == VERSION
 assert marketplace["metadata"]["version"] == VERSION
 assert marketplace["plugins"][0]["version"] == VERSION
 
-assert "## [2.6.6-rc4-fix2] - 2026-08-09" in text("CHANGELOG.md")
-assert "## [2.6.6-rc4-fix2] — 2026-08-09" in text("CHANGELOG.ru.md")
+assert "## [2.6.6-rc4-fix3] - 2026-08-09" in text("CHANGELOG.md")
+assert "## [2.6.6-rc4-fix3] — 2026-08-09" in text("CHANGELOG.ru.md")
 for relative in ("README.md", "README.ru.md"):
-    assert "docs/releases/v2.6.6-rc4-fix2.md" in text(relative)
+    assert "docs/releases/v2.6.6-rc4-fix3.md" in text(relative)
 
-notes = text("docs/releases/v2.6.6-rc4-fix2.md")
+notes = text("docs/releases/v2.6.6-rc4-fix3.md")
 normalized_notes = " ".join(notes.split()).lower()
 readiness = text("docs/acceptance/v2.6.6-rc4-release-readiness.md")
 for evidence_number in range(1, 11):
@@ -41,9 +41,9 @@ for required in (
 ):
     assert required in readiness
 assert "single holistic Opus" in readiness
-assert "external read-only harness dashboard" in normalized_notes
-assert "newest genuinely running pipeline" in normalized_notes
-assert "one independent opus high review" in normalized_notes
+assert "target-local codex dispatch profile" in normalized_notes
+assert "existing vault-local fallback" in normalized_notes
+assert "no dashboard or lifecycle behavior" in normalized_notes
 assert "does not push, tag, publish, install, or merge" in normalized_notes
 
 makefile = text("Makefile")

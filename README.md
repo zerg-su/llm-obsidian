@@ -394,6 +394,7 @@ There is no speculative roadmap in this README. The repository describes what is
 
 | Topic | Document |
 |---|---|
+| v2.6.6 RC4-fix3 target-local Codex dispatch repair | [v2.6.6 RC4-fix3 release notes](docs/releases/v2.6.6-rc4-fix3.md) |
 | v2.6.6 RC4-fix2 live Harness dashboard | [v2.6.6 RC4-fix2 release notes](docs/releases/v2.6.6-rc4-fix2.md) |
 | v2.6.6 RC4-fix1 bounded dogfood repairs | [v2.6.6 RC4-fix1 release notes](docs/releases/v2.6.6-rc4-fix1.md) |
 | v2.6.6 RC4 deterministic review control plane | [v2.6.6 RC4 release notes](docs/releases/v2.6.6-rc4.md) |
