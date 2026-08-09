@@ -24,7 +24,11 @@ def dashboard(
     *,
     inventory_probe: object | None = None,
 ) -> DashboardProjection:
-    """Project one owner, annotated by one bounded best-effort cmux probe."""
+    """Project one owner, annotated by one bounded best-effort cmux probe.
+
+    A diagnostics view degrades a broken probe to unknown. It must not turn a
+    probe failure into a failed command that hides the durable ledger too.
+    """
 
     binary = os.environ.get("CMUX_BUNDLED_CLI_PATH") or "cmux"
     try:
@@ -35,6 +39,8 @@ def dashboard(
         else:
             inventory = None
     except Exception:
+        # The probe is advisory and external; durable Harness state remains the
+        # authoritative result even when cmux cannot be observed.
         inventory = None
     return project(
         store_root,

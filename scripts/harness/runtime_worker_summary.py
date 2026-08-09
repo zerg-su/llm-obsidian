@@ -10,6 +10,7 @@ from .runtime_worker import (
     _pipeline_verify_effect_id,
     _pipeline_verify_identity,
     _review_resolution_handoff_ready,
+    verification_input_sha256,
 )
 
 
@@ -119,18 +120,12 @@ class RuntimeWorkerSummaryMixin:
             exact_head_sha=self.verification_head,
             attempt_index=attempt_index,
         )
-        self.verification_input_sha256 = hashlib.sha256(
-            json.dumps(
-                {
-                    "definition_sha256": self.pipeline.definition_sha256,
-                    "head_sha": self.verification_head,
-                    "profile_sha256": self.profile.sha256,
-                    "schema_version": self.verification_step_schema_version,
-                },
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode()
-        ).hexdigest()
+        self.verification_input_sha256 = verification_input_sha256(
+            self.pipeline.definition_sha256,
+            self.verification_head,
+            self.profile.sha256,
+            self.verification_step_schema_version,
+        )
         self.verification_effect_id = _pipeline_verify_effect_id(
             self.verification_input_sha256, attempt_index
         )

@@ -81,6 +81,12 @@ three.  Semantic colors, exact-attempt truth, caller-safe marker recovery, and
 height-bounded live rendering bring the measured tree to 91,177 lines; the line
 ceiling is pinned to that exact candidate with no blanket headroom.
 
+The holistic Fix2 review then reserved a live-program floor ahead of bounded
+history/issues, centralized the verification input identity at its production
+owner, and made stale exact-HEAD gate evidence fail closed. Together with the
+single-pass ANSI matcher and restored extraction rationale, this moves only the
+line ceiling, by the exact measured 120 lines, to 91,297.
+
 The historical RC2 snapshot is retained separately in
 ``tests/test_v266_rc2_scope.py``; it is evidence about a released commit, not a
 constraint on this one.
@@ -95,7 +101,7 @@ from pathlib import Path
 SCRIPT_FILE_CEILING = 268
 
 #: Maximum total lines across those files for the RC4 candidate.
-SCRIPT_LINE_CEILING = 91_177
+SCRIPT_LINE_CEILING = 91_297
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

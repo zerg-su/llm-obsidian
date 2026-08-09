@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from .contracts import OperationRecord
 from .dashboard_receipts import verification_identity
+from .runtime_worker import verification_input_sha256
 from .state_machine import TERMINAL
 from .status_segment import CONTROLLER_KINDS
 from .verification_attempt import MAX_SAME_HEAD_ATTEMPT_INDEX
@@ -29,6 +28,9 @@ COORDINATOR = "request-coordinator-classification"
 CLASSIFICATION_ORDER = (HEALTHY, ACTIVE, WAITING, ATTENTION, COORDINATOR)
 SURFACE_BOUND_STATES = frozenset({"running", "awaiting-callback"})
 
+# Keep this vocabulary aligned with the review observations produced by
+# RuntimeWorkerSummaryMixin.advance_compiled_pipeline. Unknown values fail
+# closed through the caller instead of being optimistically reinterpreted.
 REVIEW_OBSERVATIONS = {
     "approved": "complete",
     "skipped": "complete",
@@ -138,7 +140,12 @@ class DashboardProjection:
 
 
 def record_activity(record: OperationRecord) -> str:
-    """Classify one durable record without inventing unowned live work."""
+    """Classify one durable record without inventing unowned live work.
+
+    Only controller kinds are held to the surface-resource rule: leaf work can
+    be durably pending without owning a cmux surface. A pending effect is also
+    deliberately left to program policy instead of becoming attention here.
+    """
 
     if record.state == "attention-required":
         return "attention"
@@ -158,7 +165,11 @@ def record_activity(record: OperationRecord) -> str:
 
 
 def aggregate(statuses: tuple[str, ...]) -> str:
-    """Fold child activity into the status consumed by pipeline policy."""
+    """Fold child activity into the status consumed by pipeline policy.
+
+    Stopped children count as finished work because Harness closes a completed
+    review parent by cancelling its now-unneeded provider operation.
+    """
 
     if not statuses:
         return "pending"
@@ -212,18 +223,12 @@ def current_verification_ids(
         )
     ):
         return frozenset()
-    input_sha256 = hashlib.sha256(
-        json.dumps(
-            {
-                "definition_sha256": record.spec.contract_sha256,
-                "head_sha": head_sha,
-                "profile_sha256": profile_sha256,
-                "schema_version": step.schema_version,
-            },
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode()
-    ).hexdigest()
+    input_sha256 = verification_input_sha256(
+        record.spec.contract_sha256,
+        head_sha,
+        profile_sha256,
+        step.schema_version,
+    )
     return frozenset(
         verification_identity(
             record.spec,
@@ -267,7 +272,12 @@ def program_classification(
 
 
 def executor_status(record: OperationRecord, steps: tuple[StepView, ...]) -> str:
-    """Classify the executor separately from downstream pipeline work."""
+    """Classify the executor separately from downstream pipeline work.
+
+    Once a downstream step owns the frontier, the root executor is waiting for
+    that transition; absence of its old runtime resource is not a live-work
+    failure and must not eclipse the downstream operation.
+    """
 
     if record.state == "attention-required" or record.pending_effect:
         return "attention"

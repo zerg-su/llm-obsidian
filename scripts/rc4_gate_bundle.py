@@ -189,6 +189,16 @@ def verify() -> dict[str, object]:
         raise GateBundleError(
             "RC4 gate receipt binds a commit outside the candidate lineage"
         )
+    current_tree = _tracked_tree_digest(
+        exclude=(
+            str(RECEIPT_PATH.relative_to(ROOT)),
+            str(LOG_PATH.relative_to(ROOT)),
+        )
+    )
+    if receipt.get("tracked_tree_sha256") != current_tree:
+        raise GateBundleError(
+            "RC4 gate receipt is stale for the current tracked candidate tree"
+        )
     if not LOG_PATH.is_file():
         raise GateBundleError("RC4 gate log is missing")
     if hashlib.sha256(LOG_PATH.read_bytes()).hexdigest() != receipt["log_sha256"]:

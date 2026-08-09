@@ -50,7 +50,7 @@ deterministic without adding another orchestrator or provider route.
   owning no runtime resource is reported as unresolved rather than live.
 - Restored the live `scripts/` scope ratchet: it measures the working tree again
   instead of a frozen historical commit, under explicit RC4 ceilings declared in
-  `tests/rc4_scope_ratchet.py` (268 files, 91,177 lines). The dashboard surface
+  `tests/rc4_scope_ratchet.py` (268 files, 91,297 lines). The dashboard surface
   now includes the extracted read-only receipt validator; its review corrections
   bind fix visits to accepted callbacks, serialize marker recovery with atomic
   writes, resolve exact frozen custom pipelines, recover bounded stale startup
@@ -62,6 +62,10 @@ deterministic without adding another orchestrator or provider route.
   let a failed verification from an old HEAD poison current accepted evidence.
   Missing current-HEAD evidence no longer falls back to historical success, and
   a split response can never alias, receive input through, or close the caller.
+  Tight panes reserve the newest live identity before terminal history and
+  issues, verification input identity has one production owner, ANSI tokens are
+  matched once without substring collisions, and stale exact-HEAD gate evidence
+  fails closed when the current candidate tree differs.
   The RC2 numbers are
   retained in `tests/test_v266_rc2_scope.py` as historical evidence only and no
   longer stand in for the ratchet.

@@ -320,6 +320,28 @@ def _pipeline_verify_identity(
     return child, lane_id, run_id
 
 
+def verification_input_sha256(
+    definition_sha256: str,
+    head_sha: str,
+    profile_sha256: str,
+    schema_version: int,
+) -> str:
+    """Bind the canonical immutable input consumed by one verification run."""
+
+    return hashlib.sha256(
+        json.dumps(
+            {
+                "definition_sha256": definition_sha256,
+                "head_sha": head_sha,
+                "profile_sha256": profile_sha256,
+                "schema_version": schema_version,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+
+
 def _pipeline_verify_effect_id(input_sha256: str, attempt_index: int = 0) -> str:
     """Keep attempt-zero compatibility while separating the one retry effect."""
 

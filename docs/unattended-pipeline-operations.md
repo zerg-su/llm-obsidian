@@ -34,7 +34,9 @@ Continuous TTY mode re-reads the terminal height on every refresh. Newest
 genuinely running programs render before attention-only records; running work
 keeps bounded detail, older attention records collapse to one-line summaries,
 and any presentation omission is counted without changing the complete
-projection or JSON state. TTY output uses a small semantic ANSI palette.
+projection or JSON state. Tight panes reserve the highest-priority live identity
+before terminal history and issues; those footer sections shrink with explicit
+hidden counts. TTY output uses a small semantic ANSI palette.
 `--no-color`, non-TTY output, and `--once` stay plain; one-shot output is not
 screen-height truncated.
 

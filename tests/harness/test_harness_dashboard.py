@@ -46,7 +46,7 @@ from harness.dashboard_projection import (
     escalate,
     project,
 )
-from harness.dashboard_view import MAX_LINE, render
+from harness.dashboard_view import MAX_LINE, _colorize, render
 from harness.custom_pipelines import (
     CustomPipelinePolicy,
     ExplicitPipelineApproval,
@@ -65,7 +65,10 @@ from harness.pipelines import (
 from harness.status_segment import LiveInventory
 from harness.store import OperationStore
 from harness.supervisor import OperationSupervisor
-from harness.runtime_worker import _pipeline_verify_identity
+from harness.runtime_worker import (
+    _pipeline_verify_identity,
+    verification_input_sha256,
+)
 from harness.verification_attempt import VerificationAttempt
 from harness.workflows.engineering_fix import FixStepReceipt
 from harness.workflows.engineering_fix_model import PHASE_SCHEMAS
@@ -326,18 +329,12 @@ def _running_current_verification(
     verify_step = next(
         step for step in compiled.definition.steps if step.primitive_id == "verify"
     )
-    input_sha256 = hashlib.sha256(
-        json.dumps(
-            {
-                "definition_sha256": compiled.definition_sha256,
-                "head_sha": head_sha,
-                "profile_sha256": profile_sha256,
-                "schema_version": verify_step.schema_version,
-            },
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode()
-    ).hexdigest()
+    input_sha256 = verification_input_sha256(
+        compiled.definition_sha256,
+        head_sha,
+        profile_sha256,
+        verify_step.schema_version,
+    )
     child, lane_id, run_id = _pipeline_verify_identity(
         parent_record.spec,
         definition_sha256=compiled.definition_sha256,
@@ -560,6 +557,10 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard.") as raw:
         in retry_colored
         and "\x1b[31mattention-required\x1b[0m" in attention_colored
         and "\x1b[35mclaude-opus-5\x1b[0m" in colored
+        and _colorize("awaiting-transition", color=True)
+        == "\x1b[33mawaiting-transition\x1b[0m"
+        and _colorize("awaiting-callback", color=True)
+        == "\x1b[33mawaiting-callback\x1b[0m"
         and ansi.sub("", colored) == text
         and ansi.sub("", attention_colored) == render(attention_projection)
         and ansi.sub("", retry_colored) == render(retry_projection),
@@ -1689,6 +1690,45 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-viewport.") as raw:
         and live_owner in multiple
         and len(attention_only.splitlines()) <= 12
         and all(owner in attention_only for owner in attention_owners),
+    )
+
+    terminal_history = tuple(
+        replace(
+            live_program,
+            operation_id=f"dashboard-terminal-{index}",
+            state="complete",
+            classification=HEALTHY,
+        )
+        for index in range(3)
+    )
+    full_footer_projection = replace(
+        live_projection,
+        programs=(live_program, *terminal_history),
+        issues=tuple(
+            IssueView(
+                f"dashboard-issue-{index}",
+                f"dashboard-terminal-{index % 3}",
+                "bounded issue detail",
+                ATTENTION,
+            )
+            for index in range(MAX_ISSUES)
+        ),
+    )
+    tight_frames = {
+        rows: render(full_footer_projection, recent=3, rows=rows)
+        for rows in range(16, 21)
+    }
+    check(
+        "small full-footer viewports retain the newest live program before old evidence",
+        all(len(frame.splitlines()) <= rows for rows, frame in tight_frames.items())
+        and all(live_owner in frame for frame in tight_frames.values())
+        and all(
+            "hidden" in frame
+            or "more" in frame
+            or "viewport details truncated" in frame
+            or "details compacted" in frame
+            for frame in tight_frames.values()
+        ),
     )
 
     rendered_frames: list[str] = []

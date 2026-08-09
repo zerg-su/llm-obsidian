@@ -55,6 +55,28 @@ SEMANTIC_COLORS = {
     "model": "\x1b[35m",
 }
 MODEL_TOKEN = re.compile(r"(?<=/)[A-Za-z0-9][A-Za-z0-9._-]*(?=/)")
+SEMANTIC_TOKENS = {
+    "verification-receipt-failed": "retry",
+    "fix-receipt-failed": "retry",
+    "attention-required": "attention",
+    "awaiting-transition": "waiting",
+    "awaiting-callback": "waiting",
+    "in-progress": "running",
+    "reviewing": "waiting",
+    "waiting": "waiting",
+    "healthy": "complete",
+    "[!]": "attention",
+    "[>]": "running",
+    "[x]": "complete",
+}
+SEMANTIC_TOKEN = re.compile(
+    r"(?<![A-Za-z0-9_-])(?:"
+    + "|".join(
+        re.escape(token)
+        for token in sorted(SEMANTIC_TOKENS, key=len, reverse=True)
+    )
+    + r")(?![A-Za-z0-9_-])"
+)
 
 
 def _short(value: str) -> str:
@@ -189,24 +211,13 @@ def _colorize(line: str, *, color: bool) -> str:
         lambda match: f"{SEMANTIC_COLORS['model']}{match.group()}{RESET}",
         line,
     )
-    tokens = (
-        ("verification-receipt-failed", "retry"),
-        ("fix-receipt-failed", "retry"),
-        ("attention-required", "attention"),
-        ("in-progress", "running"),
-        ("awaiting-transition", "waiting"),
-        ("reviewing", "waiting"),
-        ("waiting", "waiting"),
-        ("healthy", "complete"),
-        ("[!]", "attention"),
-        ("[>]", "running"),
-        ("[x]", "complete"),
+    return SEMANTIC_TOKEN.sub(
+        lambda match: (
+            f"{SEMANTIC_COLORS[SEMANTIC_TOKENS[match.group()]]}"
+            f"{match.group()}{RESET}"
+        ),
+        rendered,
     )
-    for token, role in tokens:
-        rendered = rendered.replace(
-            token, f"{SEMANTIC_COLORS[role]}{token}{RESET}"
-        )
-    return rendered
 
 
 def _history_line(program: ProgramView) -> str:
@@ -294,6 +305,70 @@ def _bounded_program_lines(
     return [line for group in groups for line in group]
 
 
+def _footer_lines(
+    terminal: tuple[ProgramView, ...],
+    projection: DashboardProjection,
+) -> list[str]:
+    lines = [f"Terminal history: {len(terminal)}"]
+    lines.extend(_history_line(program) for program in terminal)
+    lines.append("")
+    lines.extend(_issue_lines(projection))
+    return lines
+
+
+def _bounded_footer_lines(
+    terminal: tuple[ProgramView, ...],
+    projection: DashboardProjection,
+    budget: int,
+) -> list[str]:
+    """Shrink history before issues while publishing every omitted count."""
+
+    full = _footer_lines(terminal, projection)
+    if len(full) <= budget:
+        return full
+    dropped_issues = int(projection.truncated.get("issues", 0))
+    total_issues = len(projection.issues) + dropped_issues
+    if budget <= 0:
+        return []
+    if budget == 1:
+        return [
+            f"Footer compacted: history {len(terminal)}, issues {total_issues}"
+        ]
+
+    # Both section headers are retained. Detail slots go to issues first, so
+    # completed history absorbs the first shortfall and live failures remain
+    # diagnosable. Any further issue loss is included in the header count.
+    detail_budget = budget - 2
+    shown_issues = min(len(projection.issues), detail_budget)
+    detail_budget -= shown_issues
+    shown_history = min(len(terminal), detail_budget)
+    hidden_history = len(terminal) - shown_history
+    hidden_issues = total_issues - shown_issues
+    history_suffix = f" (+{hidden_history} hidden)" if hidden_history else ""
+    issue_suffix = f" (+{hidden_issues} more)" if hidden_issues else ""
+    lines = [f"Terminal history: {shown_history}{history_suffix}"]
+    lines.extend(_history_line(program) for program in terminal[:shown_history])
+    lines.append(f"Recent issues: {shown_issues}{issue_suffix}")
+    for issue in projection.issues[:shown_issues]:
+        detail = issue.detail if issue.detail.isascii() else ""
+        suffix = f"  {detail}" if detail else ""
+        lines.append(
+            f"  - {issue.code}  {_short(issue.operation_id)}  "
+            f"{issue.classification}{suffix}"
+        )
+    return lines[:budget]
+
+
+def _program_floor(programs: tuple[ProgramView, ...]) -> int:
+    """Reserve the newest highest-priority identity and its omission count."""
+
+    if not programs:
+        return 0
+    first = min(programs, key=_presentation_priority)
+    identity_rows = 2 if _presentation_priority(first) < 2 else 1
+    return identity_rows + (1 if len(programs) > 1 else 0)
+
+
 def render(
     projection: DashboardProjection,
     *,
@@ -319,10 +394,7 @@ def render(
         f"Active pipelines: {len(active)}",
         "",
     ]
-    footer = [f"Terminal history: {len(terminal)}"]
-    footer.extend(_history_line(program) for program in terminal)
-    footer.append("")
-    footer.extend(_issue_lines(projection))
+    footer = _footer_lines(terminal, projection)
     lines = list(header)
     if not projection.programs:
         lines.append("No program is bound to this owner.")
@@ -332,8 +404,14 @@ def render(
             lines.extend(_program_lines(program))
             lines.append("")
     else:
+        available = max(rows - len(header), 0)
+        footer = _bounded_footer_lines(
+            terminal,
+            projection,
+            max(available - _program_floor(active), 0),
+        )
         lines.extend(
-            _bounded_program_lines(active, max(rows - len(header) - len(footer), 0))
+            _bounded_program_lines(active, max(available - len(footer), 0))
         )
     lines.extend(footer)
     if rows is not None and len(lines) > rows:

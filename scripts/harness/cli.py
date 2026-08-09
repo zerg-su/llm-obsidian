@@ -27,7 +27,6 @@ from .contracts import (
 )
 from .cli_io import emit as _emit, parser
 from .cli_readonly import COMMANDS as READ_ONLY_COMMANDS
-from .cli_readonly import dashboard as _dashboard
 from .cli_readonly import execute as execute_read_only
 from .reconciliation import (
     ReconcileDecision,
