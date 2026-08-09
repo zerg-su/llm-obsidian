@@ -54,6 +54,28 @@ def run_command(
     return result
 
 
+def observer_command(vault_root: Path, request_id: str) -> list[str]:
+    """Exact root-scoped observer open argv for one approved request identity.
+
+    The caller appends its own exact coordinator surface. The observer stays
+    outside Harness ownership and carries no lifecycle authority, so this
+    argv can neither reorder validate/start nor block an approved pipeline.
+    """
+
+    root = Path(vault_root)
+    return [
+        sys.executable,
+        str(root / "scripts" / "harness-dashboard.py"),
+        "open",
+        "--vault",
+        str(root),
+        "--store",
+        str(root / ".vault-meta" / "harness"),
+        "--root",
+        request_id,
+    ]
+
+
 def ensure_task_git_excludes(worktree: Path) -> None:
     """Keep dispatch-owned runtime bindings out of product Git status."""
 

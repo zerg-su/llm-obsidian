@@ -129,6 +129,7 @@ from dispatch_workspace import (  # noqa: E402
     dispatch_log,
     ensure_task_git_excludes,
     initialize_task,
+    observer_command,
     run_command,
     sync_codex_profile,
     write_task_files,
@@ -313,6 +314,12 @@ def main() -> int:
                 "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
                 "session_source": session["source"],
                 "placement": request["placement"],
+                "observer": {
+                    "root": request["request_id"],
+                    "argv": observer_command(
+                        request["vault_root"], request["request_id"]
+                    ),
+                },
                 "pipeline": lifecycle_contract_for_request(request, review),
                 "review": {
                     "mode": review.mode,

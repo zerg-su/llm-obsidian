@@ -191,6 +191,47 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     )
 
     request = runner.validate_request(raw_request)
+
+    observer_argv = runner.observer_command(request["vault_root"], request_id)
+    resolved_vault = Path(request["vault_root"])
+    builtin_spec = tmp / f"{request_id}.json"
+    builtin_spec.write_text(json.dumps(raw_request, sort_keys=True), encoding="utf-8")
+    builtin_validate = subprocess.run(
+        [sys.executable, str(SCRIPT), "validate", "--spec", str(builtin_spec)],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    validate_payload = (
+        json.loads(builtin_validate.stdout)
+        if builtin_validate.returncode == 0
+        else {}
+    )
+    observer_echo = validate_payload.get("observer") or {}
+    check(
+        "validate exposes the exact root-scoped observer command without new identity",
+        builtin_validate.returncode == 0
+        and observer_echo.get("root") == request_id
+        and observer_echo.get("argv") == observer_argv
+        and observer_argv[observer_argv.index("--root") + 1] == request_id
+        and observer_argv[observer_argv.index("--vault") + 1]
+        == str(resolved_vault)
+        and observer_argv[observer_argv.index("--store") + 1]
+        == str(resolved_vault / ".vault-meta" / "harness")
+        and str(resolved_vault / "scripts" / "harness-dashboard.py")
+        in observer_argv
+        and "open" in observer_argv
+        and "--surface" not in observer_argv
+        and "--all" not in observer_argv,
+        builtin_validate.stderr,
+    )
+    check(
+        "exposing the observer command has no provider, store, or worktree effect",
+        not worktree.exists()
+        and not (vault / ".vault-meta" / "harness").exists(),
+    )
+
     missing_outcome = json.loads(json.dumps(raw_request))
     missing_plan = vault / "wiki" / "plans" / "missing-outcome.md"
     missing_plan.write_text(

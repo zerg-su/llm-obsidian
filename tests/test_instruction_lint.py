@@ -238,6 +238,8 @@ assert 'origin_surface=request["origin_surface"]' in dispatch_execution
 assert "identify --surface \"$CMUX_SURFACE_ID\" --no-caller" not in dispatch
 assert "never inspects the globally focused surface" in dispatch
 assert "harness-dashboard.py open" in dispatch
+assert '--root "<request-id>"' in dispatch
+assert "exact approved request UUID" in dispatch
 assert "contained display failure" in dispatch
 assert "external to Harness ownership" in dispatch
 assert "awk '/^\\*/" not in dispatch

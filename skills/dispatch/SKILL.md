@@ -65,8 +65,11 @@ step may instead use the compiled ephemeral profile below.
    It never inspects the globally focused surface.
    Before built-in validate/start, when cmux is available, idempotently run
    `python3 <vault-root>/scripts/harness-dashboard.py open --vault <vault-root>
-   --store <vault-root>/.vault-meta/harness --surface "$CMUX_SURFACE_ID"`;
-   continue after a contained display failure because this observer remains
+   --store <vault-root>/.vault-meta/harness --surface "$CMUX_SURFACE_ID"
+   --root "<request-id>"` with the exact approved request UUID as the root, so
+   the split observes only that request and its descendants; validate echoes
+   the same command as `observer.argv`. Continue after a
+   contained display failure because this observer remains
    external to Harness ownership.
 6. Run `python3 <vault-root>/scripts/dispatch-runner.py validate --spec
    <request.json>` and show its typed route/hash echo-confirm block. Include the

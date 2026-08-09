@@ -142,6 +142,14 @@ required ``--root`` with an explicit ``--all`` diagnostic mode, and root-bound
 split marker identity) inside the three existing dashboard files.  No
 production script is added; the line ceiling is pinned to the measured
 93,916-line candidate with no blanket headroom.
+
+RC2 Slice 6 then binds dispatch to that pre-known root observer: one pure
+``observer_command`` builder in ``dispatch_workspace.py`` composes the exact
+root-scoped open argv from the already-approved request identity, and
+``dispatch-runner.py`` validate echoes it as ``observer`` without creating a
+new identifier, moving provider start, or granting the observer any lifecycle
+authority.  No production script is added; the line ceiling moves by the
+measured 29-line cost to the exact 93,945-line candidate.
 """
 
 from __future__ import annotations
@@ -153,7 +161,7 @@ from pathlib import Path
 SCRIPT_FILE_CEILING = 272
 
 #: Maximum total lines across those files for the 2.6.7 RC2 candidate.
-SCRIPT_LINE_CEILING = 93_916
+SCRIPT_LINE_CEILING = 93_945
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:
