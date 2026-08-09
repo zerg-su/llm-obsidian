@@ -1,6 +1,17 @@
 {
   "schema_version": 1,
-  "hotspots": {},
+  "hotspots": {
+    "file-lines:scripts/harness/runtime_session_launch.py": {
+      "max_value": 1144,
+      "owner": "v2.6.7 review startup recovery",
+      "evidence": "bounded reviewer readiness recovery with focused replay tests"
+    },
+    "function-branches:scripts/harness/workflows/review_gate_attempt.py:recover_late_started_attempt": {
+      "max_value": 80,
+      "owner": "v2.6.7 review startup recovery",
+      "evidence": "exact identity late-start recovery with zero-effect regression coverage"
+    }
+  },
   "rc1_active_authority": {
     "baseline_subject_sha": "e5a8577742d6add41521b2394b56091c0e36dfa5",
     "baseline_production_loc": 9326,
@@ -12,7 +23,7 @@
       "operation-uuid": 27,
       "operator-local-path": 2
     },
-    "final_max_production_loc": 4014,
+    "final_max_production_loc": 4022,
     "final_max_writable_authorities": 0,
     "final_max_incident_literals": 0,
     "evidence": "docs/acceptance/v2.6.6-rc1-active-authority-baseline.md"

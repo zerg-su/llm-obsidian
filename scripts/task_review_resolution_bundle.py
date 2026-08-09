@@ -13,6 +13,7 @@ from harness.review_attempt import (
     ReviewAttemptError,
     ReviewAttemptTerminalResult,
 )
+from harness.store import OperationStore, StoreError
 from review_resolution import (
     MATERIAL_SEVERITIES,
     MAX_FIX_DELTA_CANONICAL_BYTES,
@@ -165,6 +166,96 @@ def _archive_resolution_callbacks(
             raise ReviewAttemptError(
                 "review resolution callback bytes are unavailable"
             )
+
+
+def _archive_prior_terminal_callbacks(
+    runtime_root: Path,
+    gate_root: Path,
+    state: Mapping[str, Any],
+    store: OperationStore,
+) -> None:
+    """Free callbacks proved accepted by an earlier terminal attempt."""
+
+    current = ReviewAttempt.from_mapping(state["attempt"])
+    callbacks = {
+        lane.axis: _callback_path(runtime_root, lane.axis)
+        for lane in current.identity.lanes
+    }
+    present = {axis: path for axis, path in callbacks.items() if path.is_file()}
+    if not present:
+        return
+    if any(path.is_symlink() for path in callbacks.values()):
+        raise ReviewAttemptError("prior review callback path is invalid")
+
+    archives: list[ReviewAttempt] = []
+    for cycle in range(current.identity.cycle - 1, 0, -1):
+        pointer = gate_root / "attempts" / f"cycle-{cycle}.json"
+        if not pointer.is_file() or pointer.is_symlink():
+            raise ReviewAttemptError("prior review attempt archive is unavailable")
+        attempt = ReviewAttempt.from_mapping(
+            _read_json(pointer, "prior review attempt archive").get("attempt")
+        )
+        if (
+            attempt.identity.cycle != cycle
+            or attempt.identity.finalization_lineage_id
+            != current.identity.finalization_lineage_id
+            or attempt.identity.plan_sha256 != current.identity.plan_sha256
+            or attempt.identity.outcome_sha256 != current.identity.outcome_sha256
+            or attempt.identity.policy != current.identity.policy
+            or attempt.status != "terminal"
+            or attempt.terminal is None
+        ):
+            raise ReviewAttemptError("prior review attempt identity drifted")
+        archives.append(attempt)
+
+    boundaries: dict[str, dict[str, str]] = {}
+    for axis, callback in present.items():
+        envelope = _read_json(callback, "prior review callback")
+        if (
+            envelope.get("kind") != "review"
+            or not isinstance(envelope.get("payload"), dict)
+            or envelope["payload"].get("axis") != axis
+        ):
+            raise ReviewAttemptError("prior review callback identity drifted")
+
+        matches = 0
+        for attempt in archives:
+            lane = next(
+                (lane for lane in attempt.identity.lanes if lane.axis == axis),
+                None,
+            )
+            if lane is None:
+                continue
+            try:
+                record = store.read(lane.owner_id, envelope.get("operation_id"))
+            except StoreError:
+                continue
+            if (
+                record.spec.kind == "review-round"
+                and record.spec.parent_operation_id == lane.operation_id
+                and record.lane_id == lane.lane_id
+                and record.run_id == envelope.get("run_id")
+                and record.state == "complete"
+                and record.accepted_callback_kind == "review"
+                and record.accepted_callback_id == envelope.get("callback_id")
+                and record.accepted_callback_sha256
+                == envelope.get("payload_sha256")
+                and envelope["payload"].get("parent_session_operation_id")
+                == lane.operation_id
+            ):
+                matches += 1
+        if matches != 1:
+            raise ReviewAttemptError("prior review callback ownership is ambiguous")
+        boundaries[axis] = {
+            "callback_id": str(envelope.get("callback_id") or ""),
+            "callback_sha256": str(envelope.get("payload_sha256") or ""),
+            "round_operation_id": str(envelope.get("operation_id") or ""),
+            "round_run_id": str(envelope.get("run_id") or ""),
+        }
+    _archive_resolution_callbacks(
+        runtime_root,
+        {"review_notification_evidence": boundaries},
+    )
 
 
 def _load_persisted_resolution_evidence(

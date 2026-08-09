@@ -23,6 +23,7 @@ from harness.contracts import (  # noqa: E402
     to_dict,
 )
 from harness.store import OperationStore  # noqa: E402
+from harness.review_attempt import ReviewAttemptError  # noqa: E402
 from harness.workflows.review import (  # noqa: E402
     ReviewContext,
     ReviewFinding,
@@ -35,6 +36,7 @@ from harness.workflows.review_gate import (  # noqa: E402
     ReviewPreset,
 )
 from task_review_flow import (  # noqa: E402
+    _archive_prior_terminal_callbacks,
     _archive_resolution_callbacks,
     _complete_ready_results,
     _ready_result_is_recorded,
@@ -305,6 +307,41 @@ with tempfile.TemporaryDirectory(prefix="review-resolution-outbox.") as raw:
     check(
         "zero-lane restart recovers the preceding exact finding boundary",
         _resolution_source_state(gate.root, zero_lane) == changes_state,
+    )
+    archive.replace(callback)
+    _archive_prior_terminal_callbacks(
+        runtime_root,
+        gate.root,
+        zero_lane,
+        store,
+    )
+    check(
+        "zero-lane retry archives the exact callback from a prior terminal cycle",
+        not callback.exists()
+        and archive.is_file()
+        and archive.read_bytes() == callback_bytes,
+    )
+    archive.replace(callback)
+    foreign = json.loads(callback.read_text(encoding="utf-8"))
+    foreign["callback_id"] = "review-foreign-callback"
+    callback.write_text(
+        json.dumps(foreign, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    try:
+        _archive_prior_terminal_callbacks(
+            runtime_root,
+            gate.root,
+            zero_lane,
+            store,
+        )
+    except ReviewAttemptError as exc:
+        rejected = "ownership is ambiguous" in str(exc)
+    else:
+        rejected = False
+    check(
+        "zero-lane retry preserves and rejects an unowned callback",
+        rejected and callback.is_file() and not archive.exists(),
     )
 
 

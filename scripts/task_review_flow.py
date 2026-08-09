@@ -53,6 +53,7 @@ from task_review_finalization_attempt import (
     reserve_exact_head_attempt,
 )
 from task_review_resolution_bundle import (
+    _archive_prior_terminal_callbacks,
     _archive_resolution_callbacks,
     _resolution_bundle,
     _resolution_source_state,
@@ -625,6 +626,13 @@ def _run_exact_head_review(
                     runtime_root=runtime_root,
                     context_manifest=context_manifest,
                     run=None,
+                )
+            if zero_lane_preflight:
+                _archive_prior_terminal_callbacks(
+                    runtime_root,
+                    gate_root,
+                    prior_state,
+                    store,
                 )
             if zero_lane_preflight and any(
                 path.exists() or path.is_symlink()
