@@ -95,7 +95,7 @@ tags:
 
 - Base tag and commit: `v2.6.6-rc4-fix3` at `5ac90ef94029371507320d900f32c4c0b254d790`.
 - Product repository: canonical `LLM Obsidian`; Swarm is dogfood/integration only and receives the release after canonical evidence is terminal.
-- Execution topology: one long Harness dispatch with a Fable High executor. RC1, RC2, and RC3 are durable checkpoints in that one task, not independent implementation dispatches.
+- Execution topology: three strictly sequential Harness dispatches with Fable High executors. RC1 must reach terminal approval and publish one accepted exact checkpoint HEAD before RC2 starts; RC2 must do the same before RC3 starts. The three release dispatches are never simultaneous.
 - Plan review topology: one independent fresh Fable X-High intent review before any implementation effect.
 - Ordinary product cycles 1–3: fresh-context Fable High executor and Fable High reviewer.
 - Pivot boundary: after exactly three complete product cycles ending in material findings, one read-only Sol X-High analysis consumes the bounded pivot packet. It performs no product mutation.
@@ -119,10 +119,10 @@ The sole required RC1 corridor is:
 
 - Use TDD slices and run focused tests before any broad suite.
 - Keep fake adapters only at slow, privileged, nondeterministic, or external boundaries; use real policy, store, FSM, worker, callbacks, ledgers, and projections.
-- Commit each green slice separately inside the single long execution dispatch.
-- Do not start RC2 until RC1 deterministic evidence and the three-run live streak are terminal. Do not start RC3 until RC2 root-scoped observer acceptance is terminal.
-- After each RC checkpoint, run one fresh Fable High implementation review against that checkpoint and resolve findings inside the same bounded product-cycle lineage.
-- If RC1 reaches the three-class release stop rule, stop the dispatch with preserved evidence; do not continue to RC2.
+- Commit each green slice separately inside its owning RC dispatch. RC1 owns Slices 0–4 and its live gate; RC2 owns Slices 5–6 and its observer gate; RC3 owns only final sequential/parallel acceptance and release evidence.
+- Do not start RC2 until RC1 deterministic evidence, three-run live streak, review resolution, cleanup, and accepted exact checkpoint HEAD are terminal. Do not start RC3 until the equivalent RC2 root-scoped observer boundary is terminal.
+- Each RC dispatch publishes its own summary, verification, and fresh Fable High implementation review. Findings remain in that dispatch and bounded product-cycle lineage; the next RC consumes only the accepted exact checkpoint HEAD.
+- If RC1 reaches the three-class release stop rule, stop the RC1 dispatch with preserved evidence; do not create an RC2 dispatch.
 
 ## Slice 0 — Freeze the Stabilization Denominator
 
@@ -537,6 +537,8 @@ Every success claim must cite the exact artifact or command output at the review
 1. Validate this plan and Outcome Contract from the exact Fix3 base.
 2. Run one independent Fable X-High intent review through the code-owned plan-review facade.
 3. Amend design artifacts only through the protected plan amendment/review boundary until Fable approves; do not start implementation on a material unresolved finding.
-4. Start one long Fable High Harness execution dispatch for the approved plan.
-5. Keep RC1, RC2, and RC3 as checkpoints in that dispatch. Use typed escalations for coordinator-owned live/provider/store actions and return to the same task after resolution.
-6. Do not push, tag, publish, or update Swarm until the canonical release evidence and final approval are terminal.
+4. Start the RC1 Fable High `engineering/change` dispatch from the exact approved plan commit. It owns Slices 0–4 and the RC1 gate, and reaps with `plan_mode=shared` so the plan remains pending.
+5. Only after RC1 terminal approval and cleanup, start a new RC2 Fable High dispatch from the accepted exact RC1 checkpoint HEAD. It owns Slices 5–6 and the RC2 gate, and also reaps with `plan_mode=shared`.
+6. Only after RC2 terminal approval and cleanup, start a new RC3 Fable High dispatch from the accepted exact RC2 checkpoint HEAD. It owns sequential then parallel dogfood, final release evidence, and closes the plan with `plan_mode=final`.
+7. Typed escalations return to the currently active RC dispatch. No two release-stage dispatches may be active at the same time.
+8. Do not push, tag, publish, or update Swarm until the canonical release evidence and final approval are terminal.
