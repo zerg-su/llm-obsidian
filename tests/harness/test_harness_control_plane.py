@@ -347,22 +347,16 @@ sys.path.insert(0, str(ROOT / "tests" / "harness"))
 from harness.finalization_ledger import FinalizationLedger  # noqa: E402
 from harness.workflows.reap import run_reap  # noqa: E402
 from lifecycle_simulator_world import (  # noqa: E402
+    MATERIAL_CORRIDOR_FINDING,
     ORIGIN_SURFACE,
+    REFRESHED_SUMMARY_BODY,
     TASK_SURFACE,
     build_corridor_world,
     passing_verification_runner,
 )
 
 CORRIDOR_TASK = "cccc0267-0267-4267-8267-000000000001"
-MATERIAL_FINDING = {
-    "finding_id": "F-corridor-material",
-    "severity": "important",
-    "file": "product.txt",
-    "line": 1,
-    "summary": "Material corridor finding",
-    "evidence": "The original content is incomplete.",
-    "recommendation": "Commit the exact correction.",
-}
+MATERIAL_FINDING = MATERIAL_CORRIDOR_FINDING
 
 
 with tempfile.TemporaryDirectory(prefix="golden-corridor.") as raw:
@@ -402,10 +396,7 @@ with tempfile.TemporaryDirectory(prefix="golden-corridor.") as raw:
                 world.state_root / "pipeline-summary-refresh-notify.json"
             ).is_file(),
         )
-        world.publish_summary(
-            "The corridor evidence is established.\n\n"
-            "Resolved the material review finding at the final HEAD."
-        )
+        world.publish_summary(REFRESHED_SUMMARY_BODY)
         corridor_trace.append("summary-refreshed")
         # Reviewer turn 2: approve the re-reviewed resolved HEAD.
         world.await_condition(

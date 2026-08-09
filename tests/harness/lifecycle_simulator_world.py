@@ -101,14 +101,59 @@ def git(worktree: Path, *args: str) -> str:
     return result.stdout.strip()
 
 
+class SimulatedWorkerCrash(RuntimeError):
+    """The volatile worker process stopped at one armed durable boundary."""
+
+
+class CrashPlan:
+    """Arm one seam occurrence; consuming it kills the worker generation."""
+
+    def __init__(self) -> None:
+        self.seam = ""
+        self.occurrence = 0
+        self.observed: dict[str, int] = {}
+
+    def arm(self, seam: str, *, occurrence: int = 1) -> None:
+        if self.seam:
+            raise RuntimeError("a corridor failpoint is already armed")
+        if not seam or occurrence < 1:
+            raise ValueError("corridor failpoint identity is invalid")
+        self.seam = seam
+        self.occurrence = occurrence
+
+    def observe(self, seam: str) -> None:
+        count = self.observed.get(seam, 0) + 1
+        self.observed[seam] = count
+        if seam == self.seam and count == self.occurrence:
+            self.seam = ""
+            self.occurrence = 0
+            raise SimulatedWorkerCrash(seam)
+
+    def assert_consumed(self) -> None:
+        if self.seam:
+            raise AssertionError(f"unconsumed corridor failpoint: {self.seam}")
+
+
 class TranscriptCmux:
     """Fake cmux port: records worker wake transport instead of sending it."""
 
-    def __init__(self) -> None:
+    def __init__(self, crashes: CrashPlan | None = None) -> None:
         self.sent: list[tuple[str, str]] = []
         self.keys: list[tuple[str, str]] = []
+        self.crashes = crashes
+
+    def _observe(self, text: str) -> None:
+        if self.crashes is None:
+            return
+        if "Typed review findings are ready" in text:
+            self.crashes.observe("findings-notification-send")
+        elif "Refresh .task-summary.json" in text:
+            self.crashes.observe("refresh-notification-send")
+        elif "reap-runner.py" in text:
+            self.crashes.observe("reap-notification-send")
 
     def send(self, surface_id: str, text: str) -> None:
+        self._observe(text)
         self.sent.append((surface_id, text))
 
     def send_key(self, surface_id: str, key: str) -> None:
@@ -125,12 +170,20 @@ class FakeReviewSessionResult:
 class CorridorReviewRuntime:
     """Deterministic review provider port; the real gate owns all transitions."""
 
-    def __init__(self, store: OperationStore, owner_id: str) -> None:
+    def __init__(
+        self,
+        store: OperationStore,
+        owner_id: str,
+        crashes: CrashPlan | None = None,
+    ) -> None:
         self.store = store
         self.owner_id = owner_id
+        self.crashes = crashes
         self.started = 0
 
     def start(self, request: object, *, on_surface_opened=None):
+        if self.crashes is not None:
+            self.crashes.observe("review-session-start")
         self.started += 1
         record = self.store.create(
             request.spec, lane_id=request.lane_id, run_id=request.run_id
@@ -164,7 +217,12 @@ class CorridorReviewRuntime:
         return None
 
     def accept_callback(self, envelope: object) -> object:
-        return CallbackBroker(self.store, self.owner_id).accept(envelope)
+        if self.crashes is not None:
+            self.crashes.observe("review-callback-acceptance:before")
+        acceptance = CallbackBroker(self.store, self.owner_id).accept(envelope)
+        if self.crashes is not None:
+            self.crashes.observe("review-callback-acceptance")
+        return acceptance
 
     def request_exit(self, owner_id: str, operation_id: str) -> object:
         record = self.store.read(owner_id, operation_id)
@@ -221,8 +279,13 @@ class CorridorWorld:
     summary_path: Path
     cmux: TranscriptCmux
     review_runtime: CorridorReviewRuntime
+    crashes: CrashPlan = field(default_factory=CrashPlan)
     worker_generations: int = 0
     worker_faults: list[BaseException] = field(default_factory=list)
+    _worker_thread: threading.Thread | None = None
+
+    def worker_alive(self) -> bool:
+        return self._worker_thread is not None and self._worker_thread.is_alive()
 
     @property
     def gate_root(self) -> Path:
@@ -399,13 +462,15 @@ class CorridorWorld:
             except BaseException as exc:  # crash boundary evidence
                 faults.append(exc)
 
-        thread = threading.Thread(target=target)
+        thread = threading.Thread(target=target, daemon=True)
+        self._worker_thread = thread
         thread.start()
         try:
             if during is not None:
                 during(self)
         finally:
             thread.join(timeout=timeout)
+            self._worker_thread = None
         self.worker_faults.extend(faults)
         if thread.is_alive():
             return None
@@ -428,7 +493,10 @@ class CorridorWorld:
         raise AssertionError(f"corridor condition timed out: {label}")
 
 
-def passing_verification_runner(calls: list[tuple[str, ...]]):
+def passing_verification_runner(
+    calls: list[tuple[str, ...]],
+    crashes: CrashPlan | None = None,
+):
     def runner(argv: list[str], **kwargs: object):
         if argv == ["git", "rev-parse", "HEAD"]:
             return subprocess.run(
@@ -438,10 +506,118 @@ def passing_verification_runner(calls: list[tuple[str, ...]]):
                 capture_output=True,
                 check=False,
             )
+        if crashes is not None:
+            crashes.observe("verification-command")
         calls.append(tuple(argv))
         return subprocess.CompletedProcess(argv, 0, "ok\n", "")
 
     return runner
+
+
+MATERIAL_CORRIDOR_FINDING = {
+    "finding_id": "F-corridor-material",
+    "severity": "important",
+    "file": "product.txt",
+    "line": 1,
+    "summary": "Material corridor finding",
+    "evidence": "The original content is incomplete.",
+    "recommendation": "Commit the exact correction.",
+}
+REFRESHED_SUMMARY_BODY = (
+    "The corridor evidence is established.\n\n"
+    "Resolved the material review finding at the final HEAD."
+)
+
+
+def corridor_autopilot(
+    world: CorridorWorld,
+    *,
+    initial_head: str,
+    timeout: float = 60.0,
+) -> None:
+    """Perform the next pending model turn from durable state only.
+
+    The autopilot is restart-safe: it derives every decision from the same
+    durable artifacts a real executor or reviewer session would read, so a
+    crashed worker generation can be resumed by running it again.
+    """
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not world.worker_alive():
+            return
+        record = world.record()
+        # attention-required is not terminal here: a restarted worker may
+        # recover it from its durable latch; a latched worker exits on its
+        # own and ends the loop through worker_alive instead.
+        if record.accepted_callback_kind == "wiki-summary" or record.state in {
+            "complete",
+            "failed",
+            "cancelled",
+        }:
+            return
+        state = world.gate_state()
+        attempt = state.get("attempt") if isinstance(state, dict) else None
+        packet_path = world.worktree / ".task-review.json"
+        resolution_path = world.worktree / ".task-review-resolution.json"
+        refresh_marker = world.state_root / "pipeline-summary-refresh-notify.json"
+        resolution_pending = False
+        if packet_path.is_file():
+            if not resolution_path.is_file():
+                resolution_pending = True
+            else:
+                # The worker materializes an unresolved template beside the
+                # findings packet; only a committed resolved HEAD counts as
+                # the executor's completed fix turn.
+                resolution = json.loads(
+                    resolution_path.read_text(encoding="utf-8")
+                )
+                resolved = str(resolution.get("resolved_head_sha") or "")
+                resolution_pending = not resolved or resolved == str(
+                    resolution.get("reviewed_head_sha") or ""
+                )
+        if resolution_pending:
+            world.resolve_findings(commit_message="resolve corridor finding")
+        elif (
+            refresh_marker.is_file()
+            and json.loads(world.summary_path.read_text(encoding="utf-8")).get(
+                "body"
+            )
+            != REFRESHED_SUMMARY_BODY
+        ):
+            world.publish_summary(REFRESHED_SUMMARY_BODY)
+        elif (
+            isinstance(attempt, dict)
+            and attempt.get("status") == "awaiting-callback"
+            and state.get("status") == "reviewing"
+        ):
+            identity = attempt.get("identity") or {}
+            reviewed_head = str(identity.get("exact_head_sha") or "")
+            axis_lanes = state.get("lanes", [])
+            live_callback = any(
+                (
+                    world.review_runtime_root
+                    / "callbacks"
+                    / str(lane.get("axis"))
+                    / ".review-callback.json"
+                ).is_file()
+                for lane in axis_lanes
+            )
+            if not live_callback:
+                if reviewed_head == initial_head:
+                    world.publish_review_callback(
+                        verdict="changes-requested",
+                        findings=(MATERIAL_CORRIDOR_FINDING,),
+                        verification_iteration=0,
+                    )
+                else:
+                    world.publish_review_callback(
+                        verdict="approve",
+                        findings=(),
+                        verification_iteration=0,
+                    )
+        time.sleep(0.02)
+    raise AssertionError("corridor autopilot timed out")
 
 
 def build_corridor_world(
@@ -619,6 +795,7 @@ def build_corridor_world(
         task_summary_pointer=summary_path,
         origin_surface=ORIGIN_SURFACE,
     )
+    crashes = CrashPlan()
     return CorridorWorld(
         root=root,
         vault=vault,
@@ -631,6 +808,7 @@ def build_corridor_world(
         spec_path=launch.spec_path,
         state_root=launch.spec_path.parent,
         summary_path=summary_path,
-        cmux=TranscriptCmux(),
-        review_runtime=CorridorReviewRuntime(store, task_id),
+        cmux=TranscriptCmux(crashes),
+        review_runtime=CorridorReviewRuntime(store, task_id, crashes),
+        crashes=crashes,
     )

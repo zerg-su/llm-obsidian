@@ -267,4 +267,193 @@ with tempfile.TemporaryDirectory(prefix="lifecycle-crash-audit.") as raw:
         == {"provider": 0, "model": 0, "cmux": 0, "network": 0},
     )
 
+
+# --- Corridor durable-boundary crash matrix (E267.RC1.CRASH_MATRIX) ---------
+#
+# Named before/after crash points across the supported engineering/change
+# corridor: verification receipt, review callback acceptance, findings
+# publication, refreshed-summary notification, approval acceptance, and
+# reap-finalize.  Every crash kills one worker generation at the armed seam;
+# the restarted generation must converge the complete corridor without a
+# coordinator resume, a duplicated provider identity, or an extra ledger
+# cycle.
+
+import json  # noqa: E402
+
+from harness.finalization_ledger import FinalizationLedger  # noqa: E402
+from harness.supervisor import OperationSupervisor  # noqa: E402
+from harness.workflows.reap import run_reap  # noqa: E402
+from lifecycle_simulator_world import (  # noqa: E402
+    SimulatedWorkerCrash,
+    build_corridor_world,
+    corridor_autopilot,
+    passing_verification_runner,
+)
+
+
+CORRIDOR_BOUNDARIES = (
+    ("summary-consumed-before-verification", "verification-command", 1),
+    ("verification-receipt-published", "review-session-start", 1),
+    ("review-callback-accepted-before", "review-callback-acceptance:before", 1),
+    ("review-callback-accepted-after", "review-callback-acceptance", 1),
+    ("findings-notification-sent", "findings-notification-send", 1),
+    ("resolution-reverification", "verification-command", 4),
+    ("refresh-notification-sent", "refresh-notification-send", 1),
+    ("approval-callback-accepted", "review-callback-acceptance", 2),
+    ("reap-notification-sent", "reap-notification-send", 1),
+)
+
+
+def corridor_case(index: int) -> str:
+    return f"cccc0267-0267-4267-8267-00000000c{index:03d}"
+
+
+def run_generation(world, calls, *, expect_crash_at: str = "") -> int | None:
+    try:
+        return world.run_worker_generation(
+            verification_runner=passing_verification_runner(
+                calls, world.crashes
+            ),
+            during=lambda w: corridor_autopilot(
+                w, initial_head=world.initial_head, timeout=120.0
+            ),
+            timeout=150.0,
+        )
+    except SimulatedWorkerCrash as crash:
+        if str(crash) != expect_crash_at:
+            raise
+        return None
+
+
+for index, (boundary, seam, occurrence) in enumerate(CORRIDOR_BOUNDARIES, 1):
+    with tempfile.TemporaryDirectory(
+        prefix=f"corridor-crash-{boundary}."
+    ) as raw:
+        root = Path(raw)
+        world = build_corridor_world(root, corridor_case(index))
+        world.initial_head = world.head()
+        calls: list[tuple[str, ...]] = []
+        world.crashes.arm(seam, occurrence=occurrence)
+        run_generation(world, calls, expect_crash_at=seam)
+        world.crashes.assert_consumed()
+        crashed = True
+        check(
+            f"crash at {boundary} kills the worker generation at its seam",
+            crashed and not world.worker_alive(),
+            {"observed": world.crashes.observed},
+        )
+        # Restart: a fresh worker generation and the durable world alone
+        # must converge the complete corridor.
+        exit_code = run_generation(world, calls)
+        record = world.record()
+        check(
+            f"restart after {boundary} converges to the accepted wiki summary",
+            exit_code == 0
+            and record.state == "finalizing"
+            and record.accepted_callback_kind == "wiki-summary",
+            {
+                "exit_code": exit_code,
+                "state": record.state,
+                "attention": (
+                    record.attention_reason.value
+                    if record.attention_reason
+                    else None
+                ),
+                "gate": world.gate_state().get("status"),
+                "faults": [repr(fault) for fault in world.worker_faults],
+            },
+        )
+        gate_state = world.gate_state()
+        ledger = FinalizationLedger(
+            world.vault / ".vault-meta" / "harness" / "finalization-ledger",
+            lineage_id=world.task_id,
+            origin_task_id=world.task_id,
+            plan_sha256=str(world.meta["approved_plan_sha256"]),
+            outcome_contract_sha256=str(
+                world.meta["outcome_contract_sha256"]
+            ),
+        )
+        lineage = ledger.snapshot()
+        round_records = [
+            row
+            for row in world.store.list(world.task_id)
+            if row.spec.kind == "review-round"
+        ]
+        accepted_ids = [
+            row.accepted_callback_id
+            for row in round_records
+            if row.accepted_callback_id
+        ]
+        check(
+            f"restart after {boundary} duplicates no callback or ledger effect",
+            gate_state.get("status") == "approved"
+            and [cycle["terminal_result"] for cycle in lineage["cycles"]]
+            == ["changes-requested", "approved"]
+            and lineage["terminal_disposition"] == "approved"
+            and len(accepted_ids) == len(set(accepted_ids))
+            and len(round_records) == 2,
+            {
+                "gate": gate_state.get("status"),
+                "cycles": [
+                    cycle["terminal_result"] for cycle in lineage["cycles"]
+                ],
+                "rounds": len(round_records),
+            },
+        )
+
+
+# Reap-finalize crash: the pending effect must survive the crash and resume
+# exactly once without a second accepted summary callback.
+with tempfile.TemporaryDirectory(prefix="corridor-crash-reap.") as raw:
+    root = Path(raw)
+    world = build_corridor_world(root, corridor_case(900))
+    world.initial_head = world.head()
+    calls: list[tuple[str, ...]] = []
+    exit_code = run_generation(world, calls)
+    record = world.record()
+    check(
+        "reap crash precondition reaches the accepted wiki summary",
+        exit_code == 0 and record.state == "finalizing",
+        {"exit_code": exit_code, "state": record.state},
+    )
+    summary = json.loads(world.summary_path.read_text(encoding="utf-8"))
+
+    def crashing_finalize(_record):
+        raise SimulatedWorkerCrash("reap-finalize")
+
+    try:
+        run_reap(
+            world.store,
+            owner_id=world.owner_id,
+            operation_id=world.task_id,
+            summary=summary,
+            finalize=crashing_finalize,
+        )
+    except SimulatedWorkerCrash:
+        pass
+    else:
+        raise AssertionError("reap finalize crash did not propagate")
+    pending = world.record()
+    check(
+        "reap-finalize crash leaves one durable pending effect",
+        pending.pending_effect == "reap-finalize"
+        and pending.accepted_callback_kind == "wiki-summary",
+        pending,
+    )
+    resumed = run_reap(
+        world.store,
+        owner_id=world.owner_id,
+        operation_id=world.task_id,
+        summary=summary,
+        finalize=lambda _record: {"schema_version": 1, "status": "filed"},
+    )
+    final = world.record()
+    check(
+        "reap restart resumes the exact pending effect once",
+        resumed.result == {"schema_version": 1, "status": "filed"}
+        and not final.pending_effect
+        and final.accepted_callback_sha256 == pending.accepted_callback_sha256,
+        final,
+    )
+
 print("\nAll lifecycle crash-matrix tests passed.")
