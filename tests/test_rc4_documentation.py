@@ -43,6 +43,7 @@ for required in (
 assert "single holistic Opus" in readiness
 assert "target-local codex dispatch profile" in normalized_notes
 assert "existing vault-local fallback" in normalized_notes
+assert "fork-stable engineering evidence" in normalized_notes
 assert "no dashboard or lifecycle behavior" in normalized_notes
 assert "does not push, tag, publish, install, or merge" in normalized_notes
 

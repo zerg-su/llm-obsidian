@@ -64,6 +64,25 @@ RC4_SOURCE_SHA256 = {
     "AGENTS.md": "ada22d9cb058b16e55ebf8ee19c330a697b21ad1728b548b158a7459a01a34f3",
     "CLAUDE.md": "2f8aa275adc95fb1d575a96d659adcd082e80308d32b669904fcfdbedf731600",
 }
+RC4_SOURCE_BRANDING_ALIASES = {
+    "AGENTS.md": (
+        (
+            b"codex plugin add llm-obsidian-swarm@llm-obsidian-swarm-codex",
+            b"codex plugin add llm-obsidian@llm-obsidian-codex",
+        ),
+    ),
+    "CLAUDE.md": (
+        (b"# llm-obsidian-swarm \xe2\x80\x94", b"# llm-obsidian \xe2\x80\x94"),
+        (
+            b"**Plugin name:** `llm-obsidian-swarm`",
+            b"**Plugin name:** `llm-obsidian`",
+        ),
+        (
+            b"codex plugin add llm-obsidian-swarm@llm-obsidian-swarm-codex",
+            b"codex plugin add llm-obsidian@llm-obsidian-codex",
+        ),
+    ),
+}
 APP_SERVER_EPERM = (
     "failed to initialize in-process app-server client: "
     "Operation not permitted (os error 1)"
@@ -80,6 +99,15 @@ class TransportInitializationFailure(RunnerError):
     def __init__(self, record: dict[str, Any]):
         self.record = record
         super().__init__(json.dumps(record, sort_keys=True))
+
+
+def normalized_governing_source(relative: str, raw: bytes) -> bytes:
+    """Project registered fork branding onto the canonical contract bytes."""
+
+    normalized = raw
+    for alias, canonical in RC4_SOURCE_BRANDING_ALIASES.get(relative, ()):
+        normalized = normalized.replace(alias, canonical)
+    return normalized
 
 
 def transport_failure_record(
@@ -327,7 +355,9 @@ def validate_aggregate_sources(
     if set(snapshot) != set(RC4_SOURCE_SHA256):
         raise RunnerError("RC4 aggregate governing source snapshot is incomplete")
     actual = {
-        relative: hashlib.sha256(snapshot[relative]).hexdigest()
+        relative: hashlib.sha256(
+            normalized_governing_source(relative, snapshot[relative])
+        ).hexdigest()
         for relative in RC4_SOURCE_SHA256
     }
     if actual != RC4_SOURCE_SHA256:
@@ -398,7 +428,7 @@ def source_bundle(
                     f"governing source snapshot is missing {relative}"
                 ) from exc
         try:
-            text = raw.decode("utf-8")
+            text = normalized_governing_source(relative, raw).decode("utf-8")
         except UnicodeDecodeError as exc:
             raise RunnerError(f"governing source {relative} is not UTF-8") from exc
         sections.append(f"## {relative}\n\n{text.strip()}")

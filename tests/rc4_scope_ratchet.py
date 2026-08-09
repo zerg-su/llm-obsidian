@@ -96,6 +96,11 @@ RC4 Fix3 binds Codex profile synchronization to a target repository that owns
 its own dispatch profile, while retaining the vault as the explicit fallback.
 The focused repair adds exactly ten production lines and no production file.
 
+Fix3 also makes the frozen RC4 engineering eval portable across the registered
+Swarm fork without weakening its source contract. Three exact branding aliases
+normalize to the canonical prompt bytes; every other source mutation still
+fails closed. The projection adds exactly thirty production lines and no file.
+
 The historical RC2 snapshot is retained separately in
 ``tests/test_v266_rc2_scope.py``; it is evidence about a released commit, not a
 constraint on this one.
@@ -110,7 +115,7 @@ from pathlib import Path
 SCRIPT_FILE_CEILING = 268
 
 #: Maximum total lines across those files for the RC4 candidate.
-SCRIPT_LINE_CEILING = 91_310
+SCRIPT_LINE_CEILING = 91_340
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

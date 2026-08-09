@@ -128,6 +128,46 @@ check(
 )
 module.validate_aggregate_cases(cases)
 
+canonical_sources = {
+    relative: (ROOT / relative).read_bytes()
+    for relative in module.RC4_SOURCE_SHA256
+}
+fork_sources = dict(canonical_sources)
+fork_sources["AGENTS.md"] = fork_sources["AGENTS.md"].replace(
+    b"codex plugin add llm-obsidian@llm-obsidian-codex",
+    b"codex plugin add llm-obsidian-swarm@llm-obsidian-swarm-codex",
+)
+fork_sources["CLAUDE.md"] = (
+    fork_sources["CLAUDE.md"]
+    .replace(b"# llm-obsidian \xe2\x80\x94", b"# llm-obsidian-swarm \xe2\x80\x94")
+    .replace(
+        b"**Plugin name:** `llm-obsidian`",
+        b"**Plugin name:** `llm-obsidian-swarm`",
+    )
+    .replace(
+        b"codex plugin add llm-obsidian@llm-obsidian-codex",
+        b"codex plugin add llm-obsidian-swarm@llm-obsidian-swarm-codex",
+    )
+)
+module.validate_aggregate_sources(fork_sources)
+check(
+    "RC4 governing-source projection permits only the registered fork branding",
+    all(
+        module.prompt_for(case, source_snapshot=canonical_sources)
+        == module.prompt_for(case, source_snapshot=fork_sources)
+        for case in cases
+    ),
+)
+drifted_sources = dict(fork_sources)
+drifted_sources["AGENTS.md"] += b"\nUnreviewed authority expansion.\n"
+try:
+    module.validate_aggregate_sources(drifted_sources)
+except module.RunnerError:
+    pass
+else:
+    raise AssertionError("non-branding governing-source drift was accepted")
+check("RC4 governing-source projection rejects non-branding drift", True)
+
 live_evidence_path = (
     ROOT
     / "docs"

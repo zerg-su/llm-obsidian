@@ -21,6 +21,9 @@ It adds no dashboard or Harness lifecycle behavior.
 - Run both MCP configuration sync and Codex profile sync through the target
   repository gateway and working directory when `.codex/dispatch-env.toml` is
   present, while preserving the existing vault-local fallback.
+- Normalize only the registered Swarm branding aliases in the frozen RC4
+  engineering-eval source projection, preserving byte-identical prompts while
+  every non-branding contract change still fails closed.
 
 ## [2.6.6-rc4-fix2] - 2026-08-09
 

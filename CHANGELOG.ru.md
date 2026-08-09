@@ -27,6 +27,9 @@ dispatch profile. Патч не добавляет dashboard или Harness life
 - MCP configuration sync и Codex profile sync используют gateway и рабочий
   каталог target repository при наличии `.codex/dispatch-env.toml`, сохраняя
   существующий vault-local fallback.
+- В frozen RC4 engineering-eval source projection нормализуются только
+  зарегистрированные branding aliases Swarm: prompt остаётся byte-identical,
+  а любое изменение контракта вне branding по-прежнему закрывается fail-closed.
 
 ## [2.6.6-rc4-fix2] — 2026-08-09
 
