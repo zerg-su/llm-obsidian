@@ -12,7 +12,9 @@ session identities.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -74,14 +76,33 @@ FABLE_REVIEW = {
 }
 
 
-def _material_artifacts(sequence: int) -> dict[str, str]:
+EVIDENCE_TMP = Path(tempfile.mkdtemp(prefix="rc1-streak-evidence-"))
+
+
+def _evidence_file(relative: str, content: str) -> dict[str, str]:
+    path = EVIDENCE_TMP / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = content.encode("utf-8")
+    path.write_bytes(payload)
+    return {"path": relative, "sha256": hashlib.sha256(payload).hexdigest()}
+
+
+def _material_artifacts(sequence: int) -> dict[str, object]:
     prefix = f"docs/acceptance/evidence/v2.6.7/rc1-run-{sequence}"
     return {
-        "findings_artifact": f"{prefix}-findings.json",
+        "findings_artifact": _evidence_file(
+            f"{prefix}-findings.json", '{"findings": 1}'
+        ),
         "fix_head": "f" * 40,
-        "refreshed_summary_artifact": f"{prefix}-refreshed-summary.json",
-        "second_verification_artifact": f"{prefix}-verify-2.json",
-        "re_review_artifact": f"{prefix}-re-review.json",
+        "refreshed_summary_artifact": _evidence_file(
+            f"{prefix}-refreshed-summary.json", '{"summary": "refreshed"}'
+        ),
+        "second_verification_artifact": _evidence_file(
+            f"{prefix}-verify-2.json", '{"verify": 2}'
+        ),
+        "re_review_artifact": _evidence_file(
+            f"{prefix}-re-review.json", '{"review": "approve"}'
+        ),
     }
 
 
@@ -177,7 +198,7 @@ good = [
     _bound_receipt(3, DIGEST_A),
 ]
 verdict = stab.validate_streak(
-    good, expected_digest=DIGEST_A, config=config, gate=gate
+    good, expected_digest=DIGEST_A, config=config, gate=gate, root=EVIDENCE_TMP
 )
 check(
     "three bound fresh successes complete the streak",
@@ -196,6 +217,7 @@ check_rejects(
         expected_digest=DIGEST_A,
         config=config,
         gate=gate,
+        root=EVIDENCE_TMP,
     ),
 )
 check_rejects(
@@ -205,6 +227,7 @@ check_rejects(
         expected_digest=DIGEST_A,
         config=config,
         gate=gate,
+        root=EVIDENCE_TMP,
     ),
 )
 for missing in (
@@ -227,6 +250,7 @@ for missing in (
             expected_digest=DIGEST_A,
             config=config,
             gate=gate,
+            root=EVIDENCE_TMP,
         ),
     )
 
@@ -236,7 +260,7 @@ first_pass_only = [
     _bound_receipt(3, DIGEST_A),
 ]
 verdict = stab.validate_streak(
-    first_pass_only, expected_digest=DIGEST_A, config=config, gate=gate
+    first_pass_only, expected_digest=DIGEST_A, config=config, gate=gate, root=EVIDENCE_TMP
 )
 check(
     "a streak of first-pass approvals is incomplete without a material cycle",
@@ -253,6 +277,7 @@ check_rejects(
         expected_digest=DIGEST_A,
         config=config,
         gate=gate,
+        root=EVIDENCE_TMP,
     ),
 )
 check_rejects(
@@ -262,6 +287,7 @@ check_rejects(
         expected_digest=DIGEST_A,
         config=config,
         gate=gate,
+        root=EVIDENCE_TMP,
     ),
 )
 check_rejects(
@@ -271,6 +297,7 @@ check_rejects(
         expected_digest=DIGEST_A,
         config=config,
         gate=gate,
+        root=EVIDENCE_TMP,
     ),
 )
 check_rejects(
@@ -280,6 +307,7 @@ check_rejects(
         expected_digest=DIGEST_A,
         config=config,
         gate=gate,
+        root=EVIDENCE_TMP,
     ),
 )
 check_rejects(
@@ -289,6 +317,7 @@ check_rejects(
         expected_digest=DIGEST_A,
         config=config,
         gate=gate,
+        root=EVIDENCE_TMP,
     ),
 )
 check_rejects(
@@ -298,6 +327,7 @@ check_rejects(
         expected_digest=DIGEST_A,
         config=config,
         gate=gate,
+        root=EVIDENCE_TMP,
     ),
 )
 check_rejects(
@@ -317,6 +347,7 @@ check_rejects(
         expected_digest=DIGEST_A,
         config=config,
         gate=gate,
+        root=EVIDENCE_TMP,
     ),
 )
 check_rejects(
@@ -337,6 +368,7 @@ check_rejects(
         expected_digest=DIGEST_A,
         config=config,
         gate=gate,
+        root=EVIDENCE_TMP,
     ),
 )
 check_rejects(
@@ -352,8 +384,90 @@ check_rejects(
         expected_digest=DIGEST_A,
         config=config,
         gate=gate,
+        root=EVIDENCE_TMP,
     ),
 )
+
+# Material-cycle evidence must be real, contained, and content-bound.
+GOOD_SHA = "0" * 64
+
+
+def _forged_material(**overrides: object) -> dict[str, object]:
+    value = _material_artifacts(1)
+    value.update(overrides)
+    return value
+
+
+for label, forged in (
+    (
+        "a nonexistent findings artifact fails closed",
+        _forged_material(
+            findings_artifact={
+                "path": "docs/acceptance/evidence/v2.6.7/does-not-exist.json",
+                "sha256": GOOD_SHA,
+            }
+        ),
+    ),
+    (
+        "a traversal artifact path fails closed",
+        _forged_material(
+            findings_artifact={
+                "path": "docs/acceptance/evidence/v2.6.7/../../../escape.json",
+                "sha256": GOOD_SHA,
+            }
+        ),
+    ),
+    (
+        "an absolute artifact path fails closed",
+        _forged_material(
+            findings_artifact={"path": "/etc/passwd", "sha256": GOOD_SHA}
+        ),
+    ),
+    (
+        "an artifact outside the evidence root fails closed",
+        _forged_material(
+            findings_artifact=_evidence_file("docs/other/outside.json", "{}")
+            | {"path": "docs/other/outside.json"}
+        ),
+    ),
+    (
+        "a tampered artifact content hash fails closed",
+        _forged_material(
+            findings_artifact=_evidence_file(
+                "docs/acceptance/evidence/v2.6.7/tampered.json", '{"a": 1}'
+            )
+            | {"sha256": GOOD_SHA}
+        ),
+    ),
+    (
+        "a malformed fix_head object id fails closed",
+        _forged_material(fix_head="not-a-git-oid"),
+    ),
+    (
+        "a legacy bare-string artifact reference fails closed",
+        _forged_material(
+            findings_artifact="docs/acceptance/evidence/v2.6.7/rc1-run-1-findings.json"
+        ),
+    ),
+    (
+        "an empty artifact file fails closed",
+        _forged_material(
+            findings_artifact=_evidence_file(
+                "docs/acceptance/evidence/v2.6.7/empty.json", ""
+            )
+        ),
+    ),
+):
+    check_rejects(
+        label,
+        lambda forged=forged: stab.validate_streak(
+            [_bound_receipt(1, DIGEST_A, material_cycle=forged)],
+            expected_digest=DIGEST_A,
+            config=config,
+            gate=gate,
+            root=EVIDENCE_TMP,
+        ),
+    )
 
 # --- CLI: the streak subcommand enforces the binding -------------------------
 
@@ -411,6 +525,8 @@ with tempfile.TemporaryDirectory() as raw:
             str(CONFIG_PATH),
             "--manifest",
             str(MANIFEST_PATH),
+            "--root",
+            str(EVIDENCE_TMP),
         ],
         text=True,
         capture_output=True,
@@ -420,5 +536,49 @@ with tempfile.TemporaryDirectory() as raw:
         "streak CLI accepts a fully bound complete streak",
         result.returncode == 0 and json.loads(result.stdout)["complete"] is True,
     )
+
+
+# --- Operator contract doc stays bound to the published schema --------------
+
+DOC = ROOT / "docs/acceptance/v2.6.7-stabilization-contract.md"
+doc_text = DOC.read_text(encoding="utf-8")
+fences = re.findall(r"```json\n(.*?)```", doc_text, flags=re.DOTALL)
+documented = next(
+    (
+        json.loads(block)
+        for block in fences
+        if '"schema_version": 2' in block and '"cell_id"' in block
+    ),
+    None,
+)
+check("the operator contract documents a schema-2 receipt example", documented is not None)
+check(
+    "the documented receipt carries exactly the required fields",
+    sorted(documented) == sorted(stab.RECEIPT_REQUIRED_FIELDS),
+)
+check(
+    "the documented material cycle names exactly the durable artifacts",
+    sorted(documented["material_cycle"])
+    == sorted(stab.MATERIAL_CYCLE_ARTIFACT_FIELDS),
+)
+check(
+    "the operator contract no longer documents schema-1 streak receipts",
+    "schema_version` 1): `run_id`" not in doc_text
+    and "material_finding_cycle" not in doc_text,
+)
+for command_ref in (
+    "scripts/live_acceptance_rc1_gate.py preflight",
+    "scripts/live_acceptance_rc1_gate.py run",
+    "scripts/live_acceptance_rc1_gate.py record",
+    "--manifest config/acceptance-cells.toml",
+):
+    check(
+        f"the operator contract documents `{command_ref}`",
+        command_ref in doc_text,
+    )
+check(
+    "the documented gate facade exists",
+    (ROOT / "scripts/live_acceptance_rc1_gate.py").is_file(),
+)
 
 print("rc1 streak binding regression tests passed")

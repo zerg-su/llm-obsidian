@@ -8,6 +8,7 @@ ordering/freshness, and the three-class release stop rule.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -76,14 +77,33 @@ def _commit(root: Path, relative: str, content: str) -> None:
     _git(root, "commit", "-qm", f"edit {relative}")
 
 
-def _material(sequence: int) -> dict[str, str]:
+EVID_TMP = Path(tempfile.mkdtemp(prefix="v267-evidence-"))
+
+
+def _evidence_file(relative: str, content: str) -> dict[str, str]:
+    path = EVID_TMP / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = content.encode("utf-8")
+    path.write_bytes(payload)
+    return {"path": relative, "sha256": hashlib.sha256(payload).hexdigest()}
+
+
+def _material(sequence: int) -> dict[str, object]:
     prefix = f"docs/acceptance/evidence/v2.6.7/rc1-run-{sequence}"
     return {
-        "findings_artifact": f"{prefix}-findings.json",
+        "findings_artifact": _evidence_file(
+            f"{prefix}-findings.json", '{"findings": 1}'
+        ),
         "fix_head": "f" * 40,
-        "refreshed_summary_artifact": f"{prefix}-refreshed-summary.json",
-        "second_verification_artifact": f"{prefix}-verify-2.json",
-        "re_review_artifact": f"{prefix}-re-review.json",
+        "refreshed_summary_artifact": _evidence_file(
+            f"{prefix}-refreshed-summary.json", '{"summary": "refreshed"}'
+        ),
+        "second_verification_artifact": _evidence_file(
+            f"{prefix}-verify-2.json", '{"verify": 2}'
+        ),
+        "re_review_artifact": _evidence_file(
+            f"{prefix}-re-review.json", '{"review": "approve"}'
+        ),
     }
 
 
@@ -315,7 +335,7 @@ check(
 
 good = [_receipt(1, DIGEST_A), _receipt(2, DIGEST_A), _receipt(3, DIGEST_A)]
 verdict = stab.validate_streak(
-    good, expected_digest=DIGEST_A, config=config, gate=gate
+    good, expected_digest=DIGEST_A, config=config, gate=gate, root=EVID_TMP
 )
 check("three fresh successes complete the streak", verdict["complete"] is True)
 check("complete streak counts three runs", verdict["streak"] == 3)
@@ -330,13 +350,13 @@ reset = [
     _receipt(3, DIGEST_B, material_cycle=_material(3)),
 ]
 verdict = stab.validate_streak(
-    reset, expected_digest=DIGEST_B, config=config, gate=gate
+    reset, expected_digest=DIGEST_B, config=config, gate=gate, root=EVID_TMP
 )
 check("behavioral digest change resets the streak", verdict["streak"] == 1)
 check("streak after digest change is incomplete", verdict["complete"] is False)
 
 stale = stab.validate_streak(
-    good, expected_digest=DIGEST_B, config=config, gate=gate
+    good, expected_digest=DIGEST_B, config=config, gate=gate, root=EVID_TMP
 )
 check(
     "streak on a superseded digest counts zero",
@@ -349,7 +369,7 @@ failed_middle = [
     _receipt(3, DIGEST_A, material_cycle=_material(3)),
 ]
 verdict = stab.validate_streak(
-    failed_middle, expected_digest=DIGEST_A, config=config, gate=gate
+    failed_middle, expected_digest=DIGEST_A, config=config, gate=gate, root=EVID_TMP
 )
 check("failed run resets the consecutive count", verdict["streak"] == 1)
 
@@ -359,7 +379,7 @@ recovered = [
     _receipt(3, DIGEST_A, material_cycle=_material(3)),
 ]
 verdict = stab.validate_streak(
-    recovered, expected_digest=DIGEST_A, config=config, gate=gate
+    recovered, expected_digest=DIGEST_A, config=config, gate=gate, root=EVID_TMP
 )
 check("coordinator recovery invalidates the run", verdict["streak"] == 1)
 
@@ -369,7 +389,7 @@ leaked = [
     _receipt(3, DIGEST_A, material_cycle=_material(3)),
 ]
 verdict = stab.validate_streak(
-    leaked, expected_digest=DIGEST_A, config=config, gate=gate
+    leaked, expected_digest=DIGEST_A, config=config, gate=gate, root=EVID_TMP
 )
 check("non-resource-free run invalidates the run", verdict["streak"] == 1)
 
@@ -379,7 +399,7 @@ no_material = [
     _receipt(3, DIGEST_A),
 ]
 verdict = stab.validate_streak(
-    no_material, expected_digest=DIGEST_A, config=config, gate=gate
+    no_material, expected_digest=DIGEST_A, config=config, gate=gate, root=EVID_TMP
 )
 check(
     "streak without a material finding cycle is incomplete",
@@ -395,7 +415,7 @@ for field in ("request_id", "owner_id", "store_id", "worktree_id"):
     repeated[1][field] = repeated[0][field]
     try:
         stab.validate_streak(
-            repeated, expected_digest=DIGEST_A, config=config, gate=gate
+            repeated, expected_digest=DIGEST_A, config=config, gate=gate, root=EVID_TMP
         )
     except stab.StabilizationError:
         print(f"OK   repeated {field} across runs fails closed")
@@ -409,7 +429,7 @@ shared_session = [
 ]
 try:
     stab.validate_streak(
-        shared_session, expected_digest=DIGEST_A, config=config, gate=gate
+        shared_session, expected_digest=DIGEST_A, config=config, gate=gate, root=EVID_TMP
     )
 except stab.StabilizationError:
     print("OK   repeated provider session across runs fails closed")
@@ -419,7 +439,7 @@ else:
 unordered = [_receipt(2, DIGEST_A), _receipt(1, DIGEST_A), _receipt(3, DIGEST_A)]
 try:
     stab.validate_streak(
-        unordered, expected_digest=DIGEST_A, config=config, gate=gate
+        unordered, expected_digest=DIGEST_A, config=config, gate=gate, root=EVID_TMP
     )
 except stab.StabilizationError:
     print("OK   out-of-order receipts fail closed")
@@ -429,7 +449,7 @@ else:
 malformed = [_receipt(1, "not-a-digest")]
 try:
     stab.validate_streak(
-        malformed, expected_digest=DIGEST_A, config=config, gate=gate
+        malformed, expected_digest=DIGEST_A, config=config, gate=gate, root=EVID_TMP
     )
 except stab.StabilizationError:
     print("OK   malformed digest in a receipt fails closed")
@@ -534,6 +554,8 @@ with tempfile.TemporaryDirectory() as raw:
             DIGEST_A,
             "--config",
             str(CONFIG_PATH),
+            "--root",
+            str(EVID_TMP),
         ],
         text=True,
         capture_output=True,
@@ -555,6 +577,8 @@ with tempfile.TemporaryDirectory() as raw:
             DIGEST_B,
             "--config",
             str(CONFIG_PATH),
+            "--root",
+            str(EVID_TMP),
         ],
         text=True,
         capture_output=True,

@@ -115,11 +115,15 @@ accounting inside existing files; the ceilings move just above that
 candidate so the next unplanned script still fails the build.
 
 The accepted RC1 Sol High finding rc1-gate-unreachable then required one
-additional production script, ``live_acceptance_rc1_gate.py``: the read-only
-preflight facade that consumes the three configured RC1 gate cells and emits
-streak-consumable receipts.  Together with the gate-binding growth inside
-``v267_stabilization.py`` it stays under the existing ceilings, so they do
-not move.
+additional production script, ``live_acceptance_rc1_gate.py``: the
+preflight facade that consumes the three configured RC1 gate cells and
+emits streak-consumable receipts.  The subsequent Sol implementation
+review (rc1-gate-production-path-missing, rc1-streak-evidence-unverified)
+grew exactly two owners: the facade gained the reserve/launch/record
+execution boundary wired to the existing dispatch owner, and
+``v267_stabilization.py`` gained durable-artifact evidence validation
+(containment, existence, content hashes, fix OID).  The line ceiling moves
+just above that reviewed candidate; the file ceiling does not move.
 """
 
 from __future__ import annotations
@@ -131,7 +135,7 @@ from pathlib import Path
 SCRIPT_FILE_CEILING = 272
 
 #: Maximum total lines across those files for the 2.6.7 RC1 candidate.
-SCRIPT_LINE_CEILING = 93_000
+SCRIPT_LINE_CEILING = 93_100
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

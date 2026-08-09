@@ -48,6 +48,10 @@ MATERIAL_CYCLE_ARTIFACT_FIELDS = (
     "second_verification_artifact",
     "re_review_artifact",
 )
+MATERIAL_CYCLE_FILE_FIELDS = tuple(
+    field for field in MATERIAL_CYCLE_ARTIFACT_FIELDS if field != "fix_head"
+)
+GIT_OID = set("0123456789abcdef")
 EXECUTOR_ROUTE_KEYS = ("runtime", "model", "effort")
 REVIEW_ROUTE_KEYS = ("mode", "runtime", "model", "effort")
 RC1_CELL_KIND = "engineering-change-corridor"
@@ -352,8 +356,74 @@ def load_rc1_gate(manifest_path: Path = DEFAULT_MANIFEST) -> RC1Gate:
     )
 
 
-def _validate_material_cycle(value: object, position: int) -> bool:
-    """True when the receipt proves a complete material-finding cycle."""
+def _validate_evidence_file(
+    reference: object, position: int, field: str, *, gate: RC1Gate, root: Path
+) -> None:
+    """The artifact must exist under the evidence root with matching bytes."""
+
+    if (
+        not isinstance(reference, dict)
+        or sorted(reference) != ["path", "sha256"]
+        or not isinstance(reference.get("path"), str)
+        or not reference["path"]
+        or not isinstance(reference.get("sha256"), str)
+    ):
+        raise StabilizationError(
+            f"receipt {position} material_cycle {field} requires "
+            "{path, sha256}"
+        )
+    declared = reference["sha256"]
+    if len(declared) != 64 or not set(declared) <= HEX_DIGITS:
+        raise StabilizationError(
+            f"receipt {position} material_cycle {field} sha256 is malformed"
+        )
+    relative = reference["path"]
+    parts = Path(relative).parts
+    prefix = gate.evidence_root.rstrip("/") + "/"
+    if (
+        Path(relative).is_absolute()
+        or ".." in parts
+        or not Path(relative).as_posix().startswith(prefix)
+    ):
+        raise StabilizationError(
+            f"receipt {position} material_cycle {field} must be a relative "
+            f"path under {gate.evidence_root}"
+        )
+    resolved = (Path(root) / relative).resolve()
+    evidence_dir = (Path(root) / gate.evidence_root).resolve()
+    if not resolved.is_relative_to(evidence_dir):
+        raise StabilizationError(
+            f"receipt {position} material_cycle {field} escapes the "
+            "evidence root"
+        )
+    if not resolved.is_file() or resolved.is_symlink():
+        raise StabilizationError(
+            f"receipt {position} material_cycle {field} does not exist as "
+            "a durable evidence file"
+        )
+    payload = resolved.read_bytes()
+    if not payload:
+        raise StabilizationError(
+            f"receipt {position} material_cycle {field} is empty"
+        )
+    if hashlib.sha256(payload).hexdigest() != declared:
+        raise StabilizationError(
+            f"receipt {position} material_cycle {field} content does not "
+            "match its declared sha256"
+        )
+
+
+def _validate_material_cycle(
+    value: object, position: int, *, gate: RC1Gate, root: Path
+) -> bool:
+    """True when the receipt proves a complete material-finding cycle.
+
+    Evidence is validated, not just named: each artifact must exist as a
+    non-empty file contained under the configured evidence root and match
+    its declared content hash, and the fix HEAD must be a full Git object
+    id.  Binding these artifacts to accepted provider/operation identities
+    is owned by the deferred RC3 live-streak stage.
+    """
 
     if value is None:
         return False
@@ -367,11 +437,20 @@ def _validate_material_cycle(value: object, position: int) -> bool:
             f"receipt {position} material_cycle requires exactly the durable "
             "artifacts: " + ", ".join(MATERIAL_CYCLE_ARTIFACT_FIELDS)
         )
-    for field in MATERIAL_CYCLE_ARTIFACT_FIELDS:
-        if not isinstance(value[field], str) or not value[field]:
-            raise StabilizationError(
-                f"receipt {position} material_cycle requires string {field}"
-            )
+    fix_head = value["fix_head"]
+    if (
+        not isinstance(fix_head, str)
+        or len(fix_head) != 40
+        or not set(fix_head) <= GIT_OID
+    ):
+        raise StabilizationError(
+            f"receipt {position} material_cycle fix_head must be a full "
+            "40-hex Git object id"
+        )
+    for field in MATERIAL_CYCLE_FILE_FIELDS:
+        _validate_evidence_file(
+            value[field], position, field, gate=gate, root=root
+        )
     return True
 
 
@@ -445,6 +524,7 @@ def validate_streak(
     expected_digest: str,
     config: SubjectConfig,
     gate: RC1Gate,
+    root: Path = ROOT,
 ) -> dict[str, object]:
     """Fold gate-bound run receipts into the current RC1 streak verdict."""
 
@@ -486,7 +566,9 @@ def validate_streak(
     streak = 0
     window: list[dict[str, object]] = []
     for position, receipt in enumerate(validated, start=1):
-        material = _validate_material_cycle(receipt["material_cycle"], position)
+        material = _validate_material_cycle(
+            receipt["material_cycle"], position, gate=gate, root=root
+        )
         fresh_success = (
             receipt["result"] == "success"
             and receipt["resource_free"] is True
@@ -605,6 +687,7 @@ def main() -> int:
     streak.add_argument("--receipts", type=Path, required=True)
     streak.add_argument("--expected-digest", required=True)
     streak.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
+    streak.add_argument("--root", type=Path, default=ROOT)
     ledger = sub.add_parser(
         "ledger", parents=[shared], help="apply the release stop rule"
     )
@@ -643,6 +726,7 @@ def main() -> int:
                 expected_digest=args.expected_digest,
                 config=config,
                 gate=load_rc1_gate(args.manifest),
+                root=args.root.expanduser().resolve(),
             )
             print(json.dumps(verdict, ensure_ascii=False, sort_keys=True))
             return 0 if verdict["complete"] else 1

@@ -12,10 +12,12 @@ The facade never launches a live provider cell.
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -52,16 +54,33 @@ def _load_script(name: str, relative: str):
 
 
 DIGEST_A = "a" * 64
+EVIDENCE_TMP = Path(tempfile.mkdtemp(prefix="rc1-facade-evidence-"))
 
 
-def _material_artifacts(sequence: int) -> dict[str, str]:
+def _evidence_file(relative: str, content: str) -> dict[str, str]:
+    path = EVIDENCE_TMP / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = content.encode("utf-8")
+    path.write_bytes(payload)
+    return {"path": relative, "sha256": hashlib.sha256(payload).hexdigest()}
+
+
+def _material_artifacts(sequence: int) -> dict[str, object]:
     prefix = f"docs/acceptance/evidence/v2.6.7/rc1-run-{sequence}"
     return {
-        "findings_artifact": f"{prefix}-findings.json",
+        "findings_artifact": _evidence_file(
+            f"{prefix}-findings.json", '{"findings": 1}'
+        ),
         "fix_head": "f" * 40,
-        "refreshed_summary_artifact": f"{prefix}-refreshed-summary.json",
-        "second_verification_artifact": f"{prefix}-verify-2.json",
-        "re_review_artifact": f"{prefix}-re-review.json",
+        "refreshed_summary_artifact": _evidence_file(
+            f"{prefix}-refreshed-summary.json", '{"summary": "refreshed"}'
+        ),
+        "second_verification_artifact": _evidence_file(
+            f"{prefix}-verify-2.json", '{"verify": 2}'
+        ),
+        "re_review_artifact": _evidence_file(
+            f"{prefix}-re-review.json", '{"review": "approve"}'
+        ),
     }
 
 
@@ -109,7 +128,7 @@ check(
 
 # --- Strict sequencing over streak-consumable receipts -----------------------
 
-plan = gate.plan([], expected_digest=DIGEST_A)
+plan = gate.plan([], expected_digest=DIGEST_A, evidence_root=EVIDENCE_TMP)
 check(
     "an empty receipt list plans the first configured cell",
     plan["next_cell"] == "rc1-corridor-run-1" and plan["complete"] is False,
@@ -129,7 +148,7 @@ check(
 )
 
 receipt_1 = _fill_template(template_1, 1)
-plan = gate.plan([receipt_1], expected_digest=DIGEST_A)
+plan = gate.plan([receipt_1], expected_digest=DIGEST_A, evidence_root=EVIDENCE_TMP)
 check(
     "one accepted receipt advances to the second configured cell",
     plan["next_cell"] == "rc1-corridor-run-2" and plan["complete"] is False,
@@ -143,7 +162,11 @@ receipt_2 = _fill_template(
 receipt_3 = _fill_template(
     gate.receipt_template("rc1-corridor-run-3", expected_digest=DIGEST_A), 3
 )
-plan = gate.plan([receipt_1, receipt_2, receipt_3], expected_digest=DIGEST_A)
+plan = gate.plan(
+    [receipt_1, receipt_2, receipt_3],
+    expected_digest=DIGEST_A,
+    evidence_root=EVIDENCE_TMP,
+)
 check(
     "three accepted receipts complete the gate with no further cell",
     plan["complete"] is True and plan["next_cell"] is None,
@@ -156,17 +179,22 @@ check(
         expected_digest=DIGEST_A,
         config=stab.load_subject_config(CONFIG_PATH),
         gate=stab.load_rc1_gate(MANIFEST_PATH),
+        root=EVIDENCE_TMP,
     )["complete"]
     is True,
 )
 
 check_rejects(
     "a skipped cell fails closed",
-    lambda: gate.plan([receipt_1, receipt_3], expected_digest=DIGEST_A),
+    lambda: gate.plan(
+        [receipt_1, receipt_3], expected_digest=DIGEST_A, evidence_root=EVIDENCE_TMP
+    ),
 )
 check_rejects(
     "reordered receipts fail closed",
-    lambda: gate.plan([receipt_2, receipt_1], expected_digest=DIGEST_A),
+    lambda: gate.plan(
+        [receipt_2, receipt_1], expected_digest=DIGEST_A, evidence_root=EVIDENCE_TMP
+    ),
 )
 check_rejects(
     "an unbound receipt fails closed",
@@ -189,6 +217,7 @@ check_rejects(
             }
         ],
         expected_digest=DIGEST_A,
+        evidence_root=EVIDENCE_TMP,
     ),
 )
 check_rejects(
@@ -236,6 +265,188 @@ check(
         "codex-lifecycle",
         "cross-runtime-composition",
         "deep-review",
+    ),
+)
+
+# --- Production execution path: reserve, launch, record ----------------------
+
+STATE_DIR = Path(tempfile.mkdtemp(prefix="rc1-facade-state-"))
+STATE_PATH = STATE_DIR / "rc1-streak-state.json"
+LAUNCHES: list[str] = []
+
+
+def _fake_launcher(root: Path, contract: dict, *, timeout: int, **_: object) -> dict:
+    LAUNCHES.append(contract["cell_id"])
+    return {"owner": "fake-corridor-driver", "returncode": 0}
+
+
+def _failing_launcher(root: Path, contract: dict, *, timeout: int, **_: object) -> dict:
+    LAUNCHES.append(contract["cell_id"])
+    raise RuntimeError("corridor crashed after reservation")
+
+
+check_rejects(
+    "an unauthorized run is contained before any launch or state effect",
+    lambda: gate.reserve_and_launch(
+        coordinator_authorized=False,
+        expected_digest=DIGEST_A,
+        state_path=STATE_PATH,
+        launcher=_fake_launcher,
+        evidence_root=EVIDENCE_TMP,
+    ),
+)
+check(
+    "containment invoked no launcher and wrote no state",
+    LAUNCHES == [] and not STATE_PATH.exists(),
+)
+
+fresh_receipts = []
+for sequence in (1, 2, 3):
+    report = gate.reserve_and_launch(
+        coordinator_authorized=True,
+        expected_digest=DIGEST_A,
+        state_path=STATE_PATH,
+        launcher=_fake_launcher,
+        evidence_root=EVIDENCE_TMP,
+    )
+    check(
+        f"run {sequence} reserves and launches exactly the next configured cell",
+        report["cell_id"] == f"rc1-corridor-run-{sequence}"
+        and report["status"] == "launched",
+    )
+    fresh = _fill_template(
+        {**report["receipt_template"]},
+        sequence + 10,  # fresh identities, distinct from the plan fixtures
+        material=sequence == 2,
+    )
+    fresh["run_id"] = f"live-run-{sequence}"
+    recorded = gate.record_receipt(
+        fresh,
+        expected_digest=DIGEST_A,
+        state_path=STATE_PATH,
+        evidence_root=EVIDENCE_TMP,
+    )
+    check(
+        f"run {sequence} receipt is validated and persisted by the authority",
+        recorded["streak"] == sequence,
+    )
+    fresh_receipts.append(fresh)
+check(
+    "the launcher saw the three cells strictly in configured order",
+    LAUNCHES == [f"rc1-corridor-run-{index}" for index in (1, 2, 3)],
+)
+check(
+    "the recorded streak is complete after the third run",
+    recorded["complete"] is True and recorded["material_finding_cycle"] is True,
+)
+check_rejects(
+    "a fourth run is refused once the streak is complete",
+    lambda: gate.reserve_and_launch(
+        coordinator_authorized=True,
+        expected_digest=DIGEST_A,
+        state_path=STATE_PATH,
+        launcher=_fake_launcher,
+        evidence_root=EVIDENCE_TMP,
+    ),
+)
+check(
+    "the refused fourth run launched nothing",
+    LAUNCHES == [f"rc1-corridor-run-{index}" for index in (1, 2, 3)],
+)
+
+# Restart safety: a crash after reservation resumes the same cell.
+RESTART_STATE = STATE_DIR / "rc1-restart-state.json"
+LAUNCHES.clear()
+try:
+    gate.reserve_and_launch(
+        coordinator_authorized=True,
+        expected_digest=DIGEST_A,
+        state_path=RESTART_STATE,
+        launcher=_failing_launcher,
+        evidence_root=EVIDENCE_TMP,
+    )
+except RuntimeError:
+    print("OK   a crashed launch leaves the durable reservation behind")
+else:
+    raise AssertionError("a crashed launch leaves the durable reservation behind")
+resumed = gate.reserve_and_launch(
+    coordinator_authorized=True,
+    expected_digest=DIGEST_A,
+    state_path=RESTART_STATE,
+    launcher=_fake_launcher,
+    evidence_root=EVIDENCE_TMP,
+)
+check(
+    "a restarted run resumes the reserved cell instead of skipping ahead",
+    resumed["cell_id"] == "rc1-corridor-run-1"
+    and LAUNCHES == ["rc1-corridor-run-1", "rc1-corridor-run-1"],
+)
+
+# Receipt authority: a tampered receipt is rejected and nothing persists.
+tampered = _fill_template(
+    {**gate.receipt_template("rc1-corridor-run-1", expected_digest=DIGEST_A)},
+    21,
+)
+tampered["executor_route"] = {"runtime": "claude", "model": "sonnet", "effort": "low"}
+check_rejects(
+    "a tampered receipt is rejected by the streak authority",
+    lambda: gate.record_receipt(
+        tampered,
+        expected_digest=DIGEST_A,
+        state_path=RESTART_STATE,
+        evidence_root=EVIDENCE_TMP,
+    ),
+)
+state_after = json.loads(RESTART_STATE.read_text(encoding="utf-8"))
+check(
+    "the rejected receipt left the durable state untouched",
+    state_after["receipts"] == [] and state_after["reservation"] is not None,
+)
+
+# The production dispatch driver binds the spec to the reserved cell before
+# any launch effect.
+SPEC_PATH = STATE_DIR / "dispatch-spec.json"
+SPEC_PATH.write_text(
+    json.dumps(
+        {
+            "pipeline": "research/deep",
+            "executor": {"runtime": "claude", "model": "fable", "effort": "high"},
+            "review": {
+                "mode": "simple",
+                "runtime": "claude",
+                "model": "fable",
+                "effort": "high",
+            },
+        }
+    ),
+    encoding="utf-8",
+)
+contract_1 = gate.authorize("rc1-corridor-run-1", coordinator_authorized=True)
+check_rejects(
+    "the dispatch driver rejects a spec whose pipeline drifts from the corridor",
+    lambda: facade.dispatch_corridor_driver(
+        ROOT, contract_1, timeout=5, spec_path=SPEC_PATH, approval_token="t"
+    ),
+)
+SPEC_PATH.write_text(
+    json.dumps(
+        {
+            "pipeline": "engineering/change",
+            "executor": {"runtime": "codex", "model": "gpt", "effort": "low"},
+            "review": {
+                "mode": "simple",
+                "runtime": "claude",
+                "model": "fable",
+                "effort": "high",
+            },
+        }
+    ),
+    encoding="utf-8",
+)
+check_rejects(
+    "the dispatch driver rejects a spec whose executor route drifts",
+    lambda: facade.dispatch_corridor_driver(
+        ROOT, contract_1, timeout=5, spec_path=SPEC_PATH, approval_token="t"
     ),
 )
 
