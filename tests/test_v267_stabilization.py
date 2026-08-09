@@ -31,6 +31,15 @@ def check(name: str, condition: bool) -> None:
     print(f"OK   {name}")
 
 
+def check_rejects(name: str, thunk) -> None:
+    try:
+        thunk()
+    except stab.StabilizationError:
+        print(f"OK   {name}")
+    else:
+        raise AssertionError(name)
+
+
 def _git(root: Path, *args: str) -> str:
     result = subprocess.run(
         ["git", "-C", str(root), *args],
@@ -359,76 +368,15 @@ check(
 )
 
 good = [_receipt(1, DIGEST_A), _receipt(2, DIGEST_A), _receipt(3, DIGEST_A)]
-verdict = stab.validate_streak(
-    good, expected_digest=DIGEST_A, config=config, gate=gate, root=EVID_TMP
-)
-check("three fresh successes complete the streak", verdict["complete"] is True)
-check("complete streak counts three runs", verdict["streak"] == 3)
-check(
-    "material finding cycle is present in the window",
-    verdict["material_finding_cycle"] is True,
-)
-
-reset = [
-    _receipt(1, DIGEST_A),
-    _receipt(2, DIGEST_A),
-    _receipt(3, DIGEST_B, material_cycle=_material(3)),
-]
-verdict = stab.validate_streak(
-    reset, expected_digest=DIGEST_B, config=config, gate=gate, root=EVID_TMP
-)
-check("behavioral digest change resets the streak", verdict["streak"] == 1)
-check("streak after digest change is incomplete", verdict["complete"] is False)
-
-stale = stab.validate_streak(
-    good, expected_digest=DIGEST_B, config=config, gate=gate, root=EVID_TMP
-)
-check(
-    "streak on a superseded digest counts zero",
-    stale["streak"] == 0 and stale["complete"] is False,
-)
-
-failed_middle = [
-    _receipt(1, DIGEST_A),
-    _receipt(2, DIGEST_A, result="failed"),
-    _receipt(3, DIGEST_A, material_cycle=_material(3)),
-]
-verdict = stab.validate_streak(
-    failed_middle, expected_digest=DIGEST_A, config=config, gate=gate, root=EVID_TMP
-)
-check("failed run resets the consecutive count", verdict["streak"] == 1)
-
-recovered = [
-    _receipt(1, DIGEST_A),
-    _receipt(2, DIGEST_A, coordinator_recovery=True),
-    _receipt(3, DIGEST_A, material_cycle=_material(3)),
-]
-verdict = stab.validate_streak(
-    recovered, expected_digest=DIGEST_A, config=config, gate=gate, root=EVID_TMP
-)
-check("coordinator recovery invalidates the run", verdict["streak"] == 1)
-
-leaked = [
-    _receipt(1, DIGEST_A),
-    _receipt(2, DIGEST_A, resource_free=False),
-    _receipt(3, DIGEST_A, material_cycle=_material(3)),
-]
-verdict = stab.validate_streak(
-    leaked, expected_digest=DIGEST_A, config=config, gate=gate, root=EVID_TMP
-)
-check("non-resource-free run invalidates the run", verdict["streak"] == 1)
-
-no_material = [
-    _receipt(1, DIGEST_A),
-    _receipt(2, DIGEST_A, material_cycle=None),
-    _receipt(3, DIGEST_A),
-]
-verdict = stab.validate_streak(
-    no_material, expected_digest=DIGEST_A, config=config, gate=gate, root=EVID_TMP
-)
-check(
-    "streak without a material finding cycle is incomplete",
-    verdict["streak"] == 3 and verdict["complete"] is False,
+check_rejects(
+    "caller receipts cannot substitute for durable live corridor authority",
+    lambda: stab.validate_streak(
+        good,
+        expected_digest=DIGEST_A,
+        config=config,
+        gate=gate,
+        root=EVID_TMP,
+    ),
 )
 
 for field in ("request_id", "owner_id", "store_id", "worktree_id"):
@@ -586,11 +534,7 @@ with tempfile.TemporaryDirectory() as raw:
         capture_output=True,
         check=False,
     )
-    check("streak CLI exits 0 on a complete streak", result.returncode == 0)
-    check(
-        "streak CLI reports completion",
-        json.loads(result.stdout)["complete"] is True,
-    )
+    check("streak CLI rejects self-authored completion", result.returncode == 3)
     result = subprocess.run(
         [
             sys.executable,
@@ -609,7 +553,7 @@ with tempfile.TemporaryDirectory() as raw:
         capture_output=True,
         check=False,
     )
-    check("streak CLI exits 1 on an incomplete streak", result.returncode == 1)
+    check("streak CLI rejects self-authored stale receipts", result.returncode == 3)
 
     ledger_path = Path(raw) / "ledger.json"
     ledger_path.write_text(json.dumps(three_classes), encoding="utf-8")

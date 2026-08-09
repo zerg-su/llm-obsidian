@@ -625,6 +625,12 @@ def build_corridor_world(
     task_id: str,
     *,
     owner_id: str = "owner-1",
+    executor_runtime: str = "codex",
+    executor_model: str = "gpt-5.6-sol",
+    executor_effort: str = "high",
+    review_runtime: str = "codex",
+    review_model: str = "sol",
+    review_effort: str = "high",
 ) -> CorridorWorld:
     vault = root / f"vault-{task_id}"
     worktree = root / f"worktree-{task_id}"
@@ -683,7 +689,13 @@ def build_corridor_world(
             f"key-{task_id}",
             "dispatch",
             owner_id,
-            RuntimeRoute("codex", "gpt-5.6-sol", "high", "executor", "a" * 64),
+            RuntimeRoute(
+                executor_runtime,
+                executor_model,
+                executor_effort,
+                "executor",
+                "a" * 64,
+            ),
             "packets/task.json",
             "scoped",
             contract_sha256=pipeline.definition_sha256,
@@ -703,7 +715,7 @@ def build_corridor_world(
         "task_id": task_id,
         "task_name": "Corridor engineering change",
         "origin_session": COORDINATOR_SESSION,
-        "executor_runtime": "codex",
+        "executor_runtime": executor_runtime,
         "interaction_policy": "unattended",
         "pipeline_policy": {
             "name": "engineering/change",
@@ -713,9 +725,9 @@ def build_corridor_world(
         },
         "routing": {
             "session": {
-                "runtime": "codex",
-                "model": "gpt-5.6-sol",
-                "effort": "high",
+                "runtime": executor_runtime,
+                "model": executor_model,
+                "effort": executor_effort,
             }
         },
         "plan_file": str(plan),
@@ -725,9 +737,9 @@ def build_corridor_world(
         "review_policy": {
             "mode": "simple",
             "cross_model": False,
-            "runtime": "codex",
-            "model": "sol",
-            "effort": "high",
+            "runtime": review_runtime,
+            "model": review_model,
+            "effort": review_effort,
             "max_verify_iterations": VERIFY_BUDGETS["simple"],
             "verification_profile": "scoped",
             "verification_profile_sha256": profile_sha,
@@ -790,7 +802,7 @@ def build_corridor_world(
         operation_id=task_id,
         run_id=f"run-{task_id}",
         surface_id=TASK_SURFACE,
-        runtime="codex",
+        runtime=executor_runtime,
         callback_mode="task-summary",
         task_summary_pointer=summary_path,
         origin_surface=ORIGIN_SURFACE,

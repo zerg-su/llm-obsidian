@@ -227,16 +227,15 @@ good = [
     _bound_receipt(2, DIGEST_A),
     _bound_receipt(3, DIGEST_A),
 ]
-verdict = stab.validate_streak(
-    good, expected_digest=DIGEST_A, config=config, gate=gate, root=EVIDENCE_TMP
-)
-check(
-    "three bound fresh successes complete the streak",
-    verdict["complete"] is True and verdict["streak"] == 3,
-)
-check(
-    "material cycle verdict derives from durable artifacts",
-    verdict["material_finding_cycle"] is True,
+check_rejects(
+    "bound caller receipts still require accepted live corridor authority",
+    lambda: stab.validate_streak(
+        good,
+        expected_digest=DIGEST_A,
+        config=config,
+        gate=gate,
+        root=EVIDENCE_TMP,
+    ),
 )
 
 # Self-asserted material evidence is rejected (finding 2).
@@ -289,14 +288,15 @@ first_pass_only = [
     _bound_receipt(2, DIGEST_A, material_cycle=None),
     _bound_receipt(3, DIGEST_A),
 ]
-verdict = stab.validate_streak(
-    first_pass_only, expected_digest=DIGEST_A, config=config, gate=gate, root=EVIDENCE_TMP
-)
-check(
-    "a streak of first-pass approvals is incomplete without a material cycle",
-    verdict["streak"] == 3
-    and verdict["material_finding_cycle"] is False
-    and verdict["complete"] is False,
+check_rejects(
+    "self-declared first-pass approvals lack live corridor authority",
+    lambda: stab.validate_streak(
+        first_pass_only,
+        expected_digest=DIGEST_A,
+        config=config,
+        gate=gate,
+        root=EVIDENCE_TMP,
+    ),
 )
 
 # Binding requirements (finding 3).
@@ -614,8 +614,8 @@ with tempfile.TemporaryDirectory() as raw:
         check=False,
     )
     check(
-        "streak CLI accepts a fully bound complete streak",
-        result.returncode == 0 and json.loads(result.stdout)["complete"] is True,
+        "streak CLI rejects schema-valid receipts without live authority",
+        result.returncode == 3,
     )
 
 

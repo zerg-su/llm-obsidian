@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 from dataclasses import replace
@@ -22,6 +23,7 @@ from harness.pipeline_builtins import compiled_builtin  # noqa: E402
 from harness.pipelines import reconcile_pipeline  # noqa: E402
 from harness.runtime_worker import provider_exit_is_final  # noqa: E402
 from harness.runtime_worker_loop import RuntimeWorkerLoopMixin  # noqa: E402
+import v267_stabilization as stab  # noqa: E402
 
 
 def check(label: str, value: bool, detail: object = "") -> None:
@@ -361,7 +363,15 @@ MATERIAL_FINDING = MATERIAL_CORRIDOR_FINDING
 
 with tempfile.TemporaryDirectory(prefix="golden-corridor.") as raw:
     corridor_root = Path(raw)
-    world = build_corridor_world(corridor_root, CORRIDOR_TASK)
+    world = build_corridor_world(
+        corridor_root,
+        CORRIDOR_TASK,
+        owner_id=CORRIDOR_TASK,
+        executor_runtime="claude",
+        executor_model="fable",
+        review_runtime="claude",
+        review_model="fable",
+    )
     verification_calls: list[tuple[str, ...]] = []
     runner = passing_verification_runner(verification_calls)
     corridor_trace: list[str] = []
@@ -529,6 +539,110 @@ with tempfile.TemporaryDirectory(prefix="golden-corridor.") as raw:
             (row.spec.operation_id, row.state, row.accepted_callback_id)
             for row in round_records
         ],
+    )
+
+    # RC1 consumes the existing owners as a read-only projection.  The
+    # dispatch record selects the exact OperationStore identity; review,
+    # verification, accepted callbacks, reap, corrected HEAD, and resource
+    # freedom remain authoritative in their production stores.
+    dispatch_root = world.vault / ".vault-meta" / "dispatch-runs"
+    dispatch_root.mkdir(parents=True)
+    launch = {
+        "schema_version": 1,
+        "status": "launched",
+        "request_id": CORRIDOR_TASK,
+        "worktree": str(world.worktree),
+        "harness": {
+            "owner_id": world.owner_id,
+            "operation_id": CORRIDOR_TASK,
+            "lane_id": terminal.lane_id,
+            "run_id": terminal.run_id,
+        },
+    }
+    (dispatch_root / f"{CORRIDOR_TASK}.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "request_id": CORRIDOR_TASK,
+                "status": "launched",
+                "result": launch,
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    evidence_root = world.vault / "docs/acceptance/evidence/v2.6.7"
+    evidence_root.mkdir(parents=True)
+    material: dict[str, object] = {"fix_head": world.head()}
+    artifact_types = {
+        "findings_artifact": "findings",
+        "refreshed_summary_artifact": "refreshed-summary",
+        "second_verification_artifact": "second-verification",
+        "re_review_artifact": "re-review",
+    }
+    for field, artifact_type in artifact_types.items():
+        payload = {
+            "schema_version": 1,
+            "type": artifact_type,
+            "cell_id": "rc1-corridor-run-1",
+            "head_sha": world.head(),
+        }
+        if field == "re_review_artifact":
+            payload["verdict"] = "approve"
+        encoded = json.dumps(payload, sort_keys=True).encode()
+        relative = f"docs/acceptance/evidence/v2.6.7/golden-{artifact_type}.json"
+        (world.vault / relative).write_bytes(encoded)
+        material[field] = {
+            "path": relative,
+            "sha256": hashlib.sha256(encoded).hexdigest(),
+        }
+    provider_sessions = sorted(
+        {terminal.run_id, *(row.run_id for row in round_records)}
+    )
+    receipt = {
+        "schema_version": 2,
+        "run_id": terminal.run_id,
+        "sequence": 1,
+        "cell_id": "rc1-corridor-run-1",
+        "corridor": "engineering/change",
+        "lifecycle_subject_sha256": "a" * 64,
+        "request_id": CORRIDOR_TASK,
+        "owner_id": world.owner_id,
+        "store_id": f"{world.store.root.resolve()}#owners/{world.owner_id}",
+        "worktree_id": str(world.worktree),
+        "provider_session_ids": provider_sessions,
+        "executor_route": {
+            "runtime": "claude",
+            "model": "fable",
+            "effort": "high",
+        },
+        "review_route": {
+            "mode": "simple",
+            "runtime": "claude",
+            "model": "fable",
+            "effort": "high",
+        },
+        "result": "success",
+        "material_cycle": material,
+        "resource_free": True,
+        "coordinator_recovery": False,
+    }
+    rc1_verdict = stab.validate_streak(
+        [receipt],
+        expected_digest="a" * 64,
+        config=stab.load_subject_config(
+            ROOT / "config/v267-stabilization-subject.json"
+        ),
+        gate=stab.load_rc1_gate(ROOT / "config/acceptance-cells.toml"),
+        root=world.vault,
+    )
+    check(
+        "RC1 derives one material cell from accepted durable corridor owners",
+        rc1_verdict["streak"] == 1
+        and rc1_verdict["material_finding_cycle"] is True
+        and rc1_verdict["complete"] is False,
+        rc1_verdict,
     )
 
 print("harness control-plane tests passed")

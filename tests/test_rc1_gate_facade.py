@@ -183,10 +183,11 @@ check(
 )
 
 receipt_1 = _fill_template(template_1, 1)
-plan = gate.plan([receipt_1], expected_digest=DIGEST_A, evidence_root=EVIDENCE_TMP)
-check(
-    "one accepted receipt advances to the second configured cell",
-    plan["next_cell"] == "rc1-corridor-run-2" and plan["complete"] is False,
+check_rejects(
+    "a schema-valid caller receipt cannot advance the gate",
+    lambda: gate.plan(
+        [receipt_1], expected_digest=DIGEST_A, evidence_root=EVIDENCE_TMP
+    ),
 )
 
 receipt_2 = _fill_template(
@@ -197,26 +198,13 @@ receipt_2 = _fill_template(
 receipt_3 = _fill_template(
     gate.receipt_template("rc1-corridor-run-3", expected_digest=DIGEST_A), 3
 )
-plan = gate.plan(
-    [receipt_1, receipt_2, receipt_3],
-    expected_digest=DIGEST_A,
-    evidence_root=EVIDENCE_TMP,
-)
-check(
-    "three accepted receipts complete the gate with no further cell",
-    plan["complete"] is True and plan["next_cell"] is None,
-)
-
-check(
-    "facade receipts are streak-consumable by the stabilization validator",
-    stab.validate_streak(
+check_rejects(
+    "three self-authored receipts cannot complete the gate",
+    lambda: gate.plan(
         [receipt_1, receipt_2, receipt_3],
         expected_digest=DIGEST_A,
-        config=stab.load_subject_config(CONFIG_PATH),
-        gate=stab.load_rc1_gate(MANIFEST_PATH),
-        root=EVIDENCE_TMP,
-    )["complete"]
-    is True,
+        evidence_root=EVIDENCE_TMP,
+    ),
 )
 
 check_rejects(
@@ -331,9 +319,23 @@ def _spec_file(name: str, request_id: str) -> Path:
     return spec
 
 
-def _fake_launcher(root: Path, contract: dict, *, timeout: int, **_: object) -> dict:
+def _fake_launcher(
+    root: Path, contract: dict, *, timeout: int, spec_path: Path, **_: object
+) -> dict:
     LAUNCHES.append(contract["cell_id"])
-    return {"owner": "fake-corridor-driver", "returncode": 0}
+    request_id = json.loads(spec_path.read_text(encoding="utf-8"))["request_id"]
+    return {
+        "schema_version": 1,
+        "status": "launched",
+        "request_id": request_id,
+        "worktree": str(EVIDENCE_TMP),
+        "harness": {
+            "owner_id": request_id,
+            "operation_id": request_id,
+            "lane_id": f"lane-{request_id}",
+            "run_id": f"run-{request_id}",
+        },
+    }
 
 
 def _failing_launcher(root: Path, contract: dict, *, timeout: int, **_: object) -> dict:
@@ -357,61 +359,43 @@ check(
     LAUNCHES == [] and not STATE_PATH.exists(),
 )
 
-recorded: dict[str, object] = {}
-for sequence in (1, 2, 3):
-    spec = _spec_file(f"spec-{sequence}.json", f"request-{sequence + 10}")
-    report = gate.reserve_and_launch(
-        coordinator_authorized=True,
-        expected_digest=DIGEST_A,
-        state_path=STATE_PATH,
-        launcher=_fake_launcher,
-        spec_path=spec,
-        evidence_root=EVIDENCE_TMP,
-    )
-    check(
-        f"run {sequence} reserves and launches exactly the next configured cell",
-        report["cell_id"] == f"rc1-corridor-run-{sequence}"
-        and report["status"] == "launched"
-        and report["request_id"] == f"request-{sequence + 10}",
-    )
-    fresh = _fill_template(
-        {**report["receipt_template"]},
-        sequence + 10,  # fresh identities, distinct from the plan fixtures
-        material=sequence == 2,
-    )
-    fresh["run_id"] = f"live-run-{sequence}"
-    recorded = gate.record_receipt(
+spec = _spec_file("spec-1.json", "request-11")
+report = gate.reserve_and_launch(
+    coordinator_authorized=True,
+    expected_digest=DIGEST_A,
+    state_path=STATE_PATH,
+    launcher=_fake_launcher,
+    spec_path=spec,
+    evidence_root=EVIDENCE_TMP,
+)
+check(
+    "the next cell preserves the structured dispatch identity",
+    report["cell_id"] == "rc1-corridor-run-1"
+    and report["status"] == "launched"
+    and report["launch"]["harness"]["operation_id"] == "request-11",
+)
+fresh = _fill_template({**report["receipt_template"]}, 11)
+fresh.update(
+    {
+        "request_id": "request-11",
+        "owner_id": report["launch"]["harness"]["owner_id"],
+        "run_id": report["launch"]["harness"]["run_id"],
+        "worktree_id": report["launch"]["worktree"],
+    }
+)
+unaccepted_state = STATE_PATH.read_bytes()
+check_rejects(
+    "a launched identity cannot mint a receipt without durable acceptance",
+    lambda: gate.record_receipt(
         fresh,
         expected_digest=DIGEST_A,
         state_path=STATE_PATH,
         evidence_root=EVIDENCE_TMP,
-    )
-    check(
-        f"run {sequence} receipt is validated and persisted by the authority",
-        recorded["streak"] == sequence,
-    )
-check(
-    "the launcher saw the three cells strictly in configured order",
-    LAUNCHES == [f"rc1-corridor-run-{index}" for index in (1, 2, 3)],
-)
-check(
-    "the recorded streak is complete after the third run",
-    recorded["complete"] is True and recorded["material_finding_cycle"] is True,
-)
-check_rejects(
-    "a fourth run is refused once the streak is complete",
-    lambda: gate.reserve_and_launch(
-        coordinator_authorized=True,
-        expected_digest=DIGEST_A,
-        state_path=STATE_PATH,
-        launcher=_fake_launcher,
-        spec_path=_spec_file("spec-4.json", "request-14"),
-        evidence_root=EVIDENCE_TMP,
     ),
 )
 check(
-    "the refused fourth run launched nothing",
-    LAUNCHES == [f"rc1-corridor-run-{index}" for index in (1, 2, 3)],
+    "rejected self-authored receipt leaves the launched reservation unchanged",
+    STATE_PATH.read_bytes() == unaccepted_state and LAUNCHES == ["rc1-corridor-run-1"],
 )
 
 # Restart safety: a crash after reservation resumes only the identical
@@ -544,8 +528,21 @@ race_barrier = threading.Barrier(2, timeout=10)
 
 
 def _race_launcher(root: Path, contract: dict, *, timeout: int, **options: object) -> dict:
-    race_launches.append(str(options.get("spec_path")))
-    return {"owner": "race-driver", "returncode": 0}
+    spec_path = Path(str(options["spec_path"]))
+    race_launches.append(str(spec_path))
+    request_id = json.loads(spec_path.read_text(encoding="utf-8"))["request_id"]
+    return {
+        "schema_version": 1,
+        "status": "launched",
+        "request_id": request_id,
+        "worktree": str(EVIDENCE_TMP),
+        "harness": {
+            "owner_id": request_id,
+            "operation_id": request_id,
+            "lane_id": f"lane-{request_id}",
+            "run_id": f"run-{request_id}",
+        },
+    }
 
 
 def _race(spec_name: str, request_id: str) -> None:

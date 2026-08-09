@@ -100,23 +100,21 @@ def _spec_identity(spec_path: Path) -> tuple[str, str]:
 
 
 def _read_streak_state(path: Path, *, expected_digest: str) -> dict[str, Any]:
-    """Durable streak progress; a changed behavioral digest starts fresh."""
+    """Read durable progress without erasing an active dispatch identity."""
 
     try:
         value = json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        value = {}
-    if (
-        not isinstance(value, dict)
-        or value.get("schema_version") != 1
-        or value.get("expected_digest") != expected_digest
-    ):
+    except FileNotFoundError:
         return {
             "schema_version": 1,
             "expected_digest": expected_digest,
             "receipts": [],
             "reservation": None,
         }
+    except (OSError, json.JSONDecodeError) as exc:
+        raise stab.StabilizationError("streak state is unreadable") from exc
+    if not isinstance(value, dict) or value.get("schema_version") != 1:
+        raise stab.StabilizationError("streak state schema is invalid")
     if not isinstance(value.get("receipts"), list):
         raise stab.StabilizationError("streak state receipts are malformed")
     reservation = value.get("reservation")
@@ -126,6 +124,51 @@ def _read_streak_state(path: Path, *, expected_digest: str) -> dict[str, Any]:
         or reservation.get("status") not in {"reserved", "launched"}
     ):
         raise stab.StabilizationError("streak state reservation is malformed")
+    stored_digest = value.get("expected_digest")
+    if reservation is not None and (
+        not isinstance(reservation.get("request_id"), str)
+        or not reservation["request_id"]
+        or not isinstance(reservation.get("spec_sha256"), str)
+        or len(reservation["spec_sha256"]) != 64
+        or not set(reservation["spec_sha256"]) <= stab.HEX_DIGITS
+        or reservation.get("lifecycle_subject_sha256") != stored_digest
+    ):
+        raise stab.StabilizationError(
+            "streak state reservation changed its behavioral identity"
+        )
+    if reservation is not None and reservation.get("status") == "launched":
+        launch = reservation.get("launch")
+        harness = launch.get("harness") if isinstance(launch, dict) else None
+        if (
+            not isinstance(launch, dict)
+            or launch.get("schema_version") != 1
+            or launch.get("status") != "launched"
+            or launch.get("request_id") != reservation["request_id"]
+            or not isinstance(launch.get("worktree"), str)
+            or not Path(launch["worktree"]).is_absolute()
+            or not isinstance(harness, dict)
+            or harness.get("operation_id") != reservation["request_id"]
+            or harness.get("owner_id") != reservation["request_id"]
+            or not all(
+                isinstance(harness.get(field), str) and harness.get(field)
+                for field in ("owner_id", "operation_id", "lane_id", "run_id")
+            )
+        ):
+            raise stab.StabilizationError(
+                "streak state launched identity is malformed"
+            )
+    if stored_digest != expected_digest:
+        if reservation is not None:
+            raise stab.StabilizationError(
+                "behavioral digest drift cannot replace an active RC1 dispatch "
+                "identity"
+            )
+        return {
+            "schema_version": 1,
+            "expected_digest": expected_digest,
+            "receipts": [],
+            "reservation": None,
+        }
     return value
 
 
@@ -293,6 +336,7 @@ class RC1GatePreflight:
                 "status": "reserved",
                 "spec_sha256": spec_sha256,
                 "request_id": request_id,
+                "lifecycle_subject_sha256": expected_digest,
             }
             _atomic_json(state_path, state)
             launch = launcher(
@@ -306,11 +350,30 @@ class RC1GatePreflight:
                 raise stab.StabilizationError(
                     "corridor launcher returned no launch record"
                 )
+            harness = launch.get("harness")
+            if (
+                launch.get("schema_version") != 1
+                or launch.get("status") != "launched"
+                or launch.get("request_id") != request_id
+                or not isinstance(launch.get("worktree"), str)
+                or not Path(launch["worktree"]).is_absolute()
+                or not isinstance(harness, dict)
+                or harness.get("operation_id") != request_id
+                or harness.get("owner_id") != request_id
+                or not all(
+                    isinstance(harness.get(field), str) and harness.get(field)
+                    for field in ("owner_id", "operation_id", "lane_id", "run_id")
+                )
+            ):
+                raise stab.StabilizationError(
+                    "corridor launcher returned no durable Harness identity"
+                )
             state["reservation"] = {
                 "cell_id": next_cell,
                 "status": "launched",
                 "spec_sha256": spec_sha256,
                 "request_id": request_id,
+                "lifecycle_subject_sha256": expected_digest,
                 "launch": launch,
             }
             _atomic_json(state_path, state)
@@ -366,6 +429,17 @@ class RC1GatePreflight:
                 raise stab.StabilizationError(
                     "receipt request_id must equal the launched dispatch "
                     "request identity"
+                )
+            launch = reservation.get("launch")
+            harness = launch.get("harness") if isinstance(launch, dict) else None
+            if (
+                not isinstance(harness, dict)
+                or receipt.get("owner_id") != harness.get("owner_id")
+                or receipt.get("run_id") != harness.get("run_id")
+                or receipt.get("worktree_id") != launch.get("worktree")
+            ):
+                raise stab.StabilizationError(
+                    "receipt must match the reserved durable Harness identity"
                 )
             candidate = [*state["receipts"], receipt]
             verdict = stab.validate_streak(
@@ -451,11 +525,29 @@ def dispatch_corridor_driver(
             "dispatch corridor launch failed: "
             + (result.stderr.strip().splitlines() or ["no stderr"])[-1]
         )
-    return {
-        "owner": "dispatch-runner",
-        "returncode": result.returncode,
-        "stdout": result.stdout.strip()[-2000:],
-    }
+    try:
+        launch = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise stab.StabilizationError(
+            "dispatch corridor launch returned invalid identity"
+        ) from exc
+    harness = launch.get("harness") if isinstance(launch, dict) else None
+    if (
+        not isinstance(launch, dict)
+        or launch.get("schema_version") != 1
+        or launch.get("status") != "launched"
+        or launch.get("request_id") != spec.get("request_id")
+        or not isinstance(launch.get("worktree"), str)
+        or not isinstance(harness, dict)
+        or not all(
+            isinstance(harness.get(field), str) and harness.get(field)
+            for field in ("owner_id", "operation_id", "lane_id", "run_id")
+        )
+    ):
+        raise stab.StabilizationError(
+            "dispatch corridor launch returned no durable Harness identity"
+        )
+    return launch
 
 
 def load_gate(root: Path = ROOT) -> RC1GatePreflight:

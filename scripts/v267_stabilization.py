@@ -20,6 +20,8 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+from rc1_live_authority import LiveAuthorityError, validate_live_corridor
+
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = ROOT / "config/v267-stabilization-subject.json"
@@ -492,10 +494,9 @@ def _validate_material_cycle(
     Evidence is validated, not just named: each artifact must exist as a
     non-empty file contained under the configured evidence root, match its
     declared content hash, and parse as the typed record it claims to be,
-    bound to this run's cell and to the exact corrected HEAD; the fix HEAD
-    must resolve to a real commit at the validation root.  Binding these
-    artifacts to accepted provider/operation identities is owned by the
-    deferred RC3 live-streak stage.
+    bound to this run's cell and to the exact corrected HEAD.  The live
+    corridor authority below establishes whether that HEAD is a real,
+    accepted review result; these caller-selected artifacts cannot do so.
     """
 
     if value is None:
@@ -520,17 +521,6 @@ def _validate_material_cycle(
             f"receipt {position} material_cycle fix_head must be a full "
             "40-hex Git object id"
         )
-    probe = subprocess.run(
-        ["git", "-C", str(root), "cat-file", "-t", fix_head],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    if probe.returncode or probe.stdout.strip() != "commit":
-        raise StabilizationError(
-            f"receipt {position} material_cycle fix_head does not resolve "
-            "to a commit at the validation root"
-        )
     for field in MATERIAL_CYCLE_FILE_FIELDS:
         payload = _validate_evidence_file(
             value[field], position, field, gate=gate, root=root
@@ -539,6 +529,15 @@ def _validate_material_cycle(
             payload, position, field, cell_id=cell_id, fix_head=fix_head
         )
     return True
+
+
+def _validate_live_corridor(
+    receipt: dict[str, object], position: int, *, root: Path
+) -> tuple[bool, str]:
+    try:
+        return validate_live_corridor(receipt, position, root=root)
+    except LiveAuthorityError as exc:
+        raise StabilizationError(str(exc)) from exc
 
 
 def _validate_receipt(
@@ -651,15 +650,25 @@ def validate_streak(
         validated.append(receipt)
 
     streak = 0
-    window: list[dict[str, object]] = []
+    window: list[bool] = []
     for position, receipt in enumerate(validated, start=1):
-        material = _validate_material_cycle(
+        declared_material = _validate_material_cycle(
             receipt["material_cycle"],
             position,
             gate=gate,
             root=root,
             cell_id=str(receipt["cell_id"]),
         )
+        live_material, live_head = _validate_live_corridor(
+            receipt, position, root=root
+        )
+        if declared_material != live_material or (
+            declared_material
+            and receipt["material_cycle"]["fix_head"] != live_head
+        ):
+            raise StabilizationError(
+                f"receipt {position} material cycle is not live-corridor-derived"
+            )
         fresh_success = (
             receipt["result"] == "success"
             and receipt["resource_free"] is True
@@ -670,7 +679,7 @@ def validate_streak(
             window = []
             continue
         streak += 1
-        window.append(material)
+        window.append(live_material)
     window = window[-config.streak_target :]
     material_runs = sum(1 for flag in window if flag)
     material_met = material_runs >= gate.required_material_cycle_runs
