@@ -94,6 +94,187 @@ def compile_review_attempt_identity(
 class ReviewGateAttemptMixin:
     """Own the new one-HEAD path without invoking legacy continuation code."""
 
+    def recover_late_started_attempt(self) -> bool:
+        """Replace one false zero-lane terminal with its exact accepted lane.
+
+        This does not rearm a genuine preflight failure.  It requires the
+        runtime's completed late-start receipt, the original one-lane attempt,
+        a recovered parent, and the already accepted callback child.
+        """
+
+        state = self.read()
+        raw_attempt = state.get("attempt")
+        if not isinstance(raw_attempt, Mapping):
+            return False
+        attempt = ReviewAttempt.from_mapping(raw_attempt)
+        if attempt.status == "awaiting-callback" and state.get("status") == "reviewing":
+            return True
+        terminal = attempt.terminal
+        stored_lanes = state.get("lanes")
+        if (
+            attempt.status != "terminal"
+            or terminal is None
+            or terminal.result != ReviewAttemptTerminalResult.ATTENTION_REQUIRED
+            or terminal.lane_results
+            or len(attempt.identity.lanes) != 1
+            or state.get("status") != "attention-required"
+            or state.get("owner_id") != attempt.identity.lanes[0].owner_id
+            or state.get("active_review_operation_id")
+            != attempt.identity.attempt_id
+            or not isinstance(stored_lanes, list)
+            or len(stored_lanes) > 1
+            or any(
+                state.get(field) not in ({}, None)
+                for field in ("round_results", "final_results", "evidence")
+            )
+        ):
+            return False
+        lane = attempt.identity.lanes[0]
+        parent = self.round_store.read(lane.owner_id, lane.operation_id)
+        children = [
+            record
+            for record in self.round_store.list(lane.owner_id)
+            if record.spec.parent_operation_id == lane.operation_id
+            and record.spec.kind == "review-round"
+            and record.lane_id == lane.lane_id
+        ]
+        receipt_path = (
+            self.round_store.root
+            / "owners"
+            / lane.owner_id
+            / "runtime"
+            / lane.operation_id
+            / "late-start-recovery.json"
+        )
+        callback_attention_path = receipt_path.with_name(
+            "callback-submit-attention.json"
+        )
+        ready_path = receipt_path.with_name("ready.json")
+        try:
+            receipt = _read_json(receipt_path)
+            ready = _read_json(ready_path)
+        except (OSError, ValueError):
+            return False
+        if len(children) != 1:
+            return False
+        child = children[0]
+        late_callback_attention = False
+        if parent.state == "attention-required":
+            try:
+                callback_attention = _read_json(callback_attention_path)
+            except (OSError, ValueError):
+                return False
+            late_callback_attention = (
+                parent.resume_state == "awaiting-callback"
+                and str(parent.attention_reason.value) == "attention-required"
+                and callback_attention.get("schema_version") == 1
+                and callback_attention.get("status") == "attention-required"
+                and callback_attention.get("reason")
+                == "callback-submit-stale-generation"
+                and callback_attention.get("operation_id") == lane.operation_id
+                and callback_attention.get("run_id") == lane.run_id
+            )
+        live_recovered = (
+            parent.state in {"awaiting-callback", "attention-required"}
+            and (
+                parent.state != "attention-required"
+                or late_callback_attention
+            )
+            and parent.effect_id == "start-provider"
+            and str(parent.effect_outcome.value) == "succeeded"
+            and bool(parent.resources.surface_id)
+            and parent.resources.process_group > 1
+            and parent.resources.supervisor_pid > 1
+            and receipt.get("surface_id") == parent.resources.surface_id
+            and receipt.get("process_identity")
+            == parent.resources.process_identity
+            and receipt.get("supervisor_identity")
+            == parent.resources.supervisor_identity
+        )
+        post_cleanup = (
+            parent.state == "complete"
+            and parent.effect_id == "request-exit"
+            and str(parent.effect_outcome.value) == "succeeded"
+            and not parent.resources.surface_id
+            and parent.resources.process_group == 0
+            and parent.resources.supervisor_pid == 0
+            and ready.get("schema_version") == 1
+            and ready.get("status") == "ready"
+            and receipt.get("process_identity") == ready.get("process_identity")
+            and receipt.get("supervisor_identity")
+            == ready.get("supervisor_identity")
+        )
+        exact_stored_lane = (
+            len(stored_lanes) == 1
+            and isinstance(stored_lanes[0], dict)
+            and stored_lanes[0].get("axis") == lane.axis
+            and stored_lanes[0].get("operation_id") == lane.operation_id
+            and stored_lanes[0].get("lane_id") == lane.lane_id
+            and stored_lanes[0].get("run_id") == lane.run_id
+            and stored_lanes[0].get("surface_id") == receipt.get("surface_id")
+        )
+        stored_lane_matches = (
+            stored_lanes == []
+            or exact_stored_lane
+        )
+        if (
+            parent.spec.route.runtime != lane.runtime
+            or parent.spec.route.model != lane.model
+            or parent.spec.route.effort != lane.effort
+            or parent.spec.route.profile != lane.profile
+            or parent.spec.route.routing_sha256 != lane.routing_sha256
+            or parent.run_id != lane.run_id
+            or parent.pending_effect
+            or not (live_recovered or post_cleanup)
+            or not stored_lane_matches
+            or child.state not in {"verifying", "finalizing", "exiting", "complete"}
+            or child.pending_effect
+            or child.accepted_callback_kind != "review"
+            or not child.accepted_callback_id
+            or re.fullmatch(r"[0-9a-f]{64}", child.accepted_callback_sha256)
+            is None
+            or receipt.get("schema_version") != 1
+            or receipt.get("status") != "complete"
+            or receipt.get("owner_id") != lane.owner_id
+            or receipt.get("parent_operation_id") != lane.operation_id
+            or receipt.get("parent_run_id") != lane.run_id
+            or receipt.get("child_operation_id") != child.spec.operation_id
+            or receipt.get("child_run_id") != child.run_id
+        ):
+            return False
+        raw_lane = (
+            {
+                **stored_lanes[0],
+                "surface_id": "",
+                "state": "complete",
+            }
+            if post_cleanup and stored_lanes
+            else {
+                "axis": lane.axis,
+                "operation_id": lane.operation_id,
+                "lane_id": lane.lane_id,
+                "run_id": lane.run_id,
+                "surface_id": parent.resources.surface_id,
+                "checkpoint": "",
+                "verification_iteration": lane.verification_iteration,
+                "state": parent.state,
+            }
+        )
+        recovered = ReviewAttempt(attempt.identity, "awaiting-callback")
+        with self._locked():
+            current = _read_json(self.state_path)
+            if current != state:
+                raise ReviewAttemptError(
+                    "late started review gate changed during recovery"
+                )
+            current.update(
+                status="reviewing",
+                lanes=[raw_lane],
+                attempt=recovered.payload(),
+            )
+            _atomic_json(self.state_path, current)
+        return True
+
     def _attempt(self) -> ReviewAttempt:
         raw = self.read().get("attempt")
         if not isinstance(raw, Mapping):

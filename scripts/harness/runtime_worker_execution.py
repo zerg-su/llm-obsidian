@@ -44,6 +44,40 @@ class RuntimeWorkerExecution(
     RuntimeWorkerLivenessMixin,
     RuntimeWorkerLoopMixin,
 ):
+    def _await_parent_start_committed(
+        self,
+        *,
+        observation_limit: int = 160,
+        observation_interval_seconds: float = 0.05,
+    ) -> bool:
+        """Wait until the parent has durably adopted the published process.
+
+        The ready handshake proves only process ownership.  Provider input is
+        a later external effect and must not race the manager's start-provider
+        commit.  Existing direct worker fixtures begin at awaiting-callback and
+        therefore cross this seam immediately.
+        """
+
+        for observation in range(observation_limit):
+            record = self.store.read(
+                self.spec["owner_id"], self.spec["operation_id"]
+            )
+            if (
+                record.state in {"running", "awaiting-callback"}
+                and not record.pending_effect
+            ):
+                return True
+            if record.state in {
+                "attention-required",
+                "complete",
+                "failed",
+                "cancelled",
+            }:
+                return False
+            if observation + 1 < observation_limit:
+                self.sleeper(observation_interval_seconds)
+        return False
+
     def _workspace_id(self) -> str:
         path = self.spec_path.parent / "session.json"
         try:
@@ -387,8 +421,6 @@ class RuntimeWorkerExecution(
                 {"schema_version": 1, "status": "start-failed", "exit_code": 127},
             )
             return 127
-        if not self._submit_initial_input(initial_start_observation_limit):
-            return 2
         _atomic_json(
             self.ready,
             {
@@ -401,6 +433,19 @@ class RuntimeWorkerExecution(
                 "supervisor_identity": self.supervisor_identity,
             },
         )
+        if not self._await_parent_start_committed():
+            self.contain_provider_start_failure(self.process, self.handle)
+            _atomic_json(
+                self.exit_path,
+                {
+                    "schema_version": 1,
+                    "status": "parent-start-unconfirmed",
+                    "exit_code": 2,
+                },
+            )
+            return 2
+        if not self._submit_initial_input(initial_start_observation_limit):
+            return 2
         self.checkpoint_probe = self.checkpoint_probe or CmuxAdapter().resume_checkpoint
         self.checkpoint = ""
         self.next_checkpoint_probe = 0.0

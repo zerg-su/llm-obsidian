@@ -79,6 +79,7 @@ except ImportError:
             "await_initial_start_acknowledged is not implemented"
         )
 from harness.runtime_provider_input import interactive_provider_input
+from harness.runtime_provider_events import RuntimeProviderEventStream
 from harness.runtime_worker import (
     load_spec as load_runtime_spec,
     provider_argv as runtime_provider_argv,
@@ -4643,7 +4644,12 @@ class PostSubmitTrustCmux(InitialStartWorkerCmux):
 
 
 def _initial_start_worker(
-    root: Path, name: str, cmux: FakeCmux, *, limit: int = 4
+    root: Path,
+    name: str,
+    cmux: FakeCmux,
+    *,
+    limit: int = 4,
+    before_join: Callable[[SurfaceLaunch], None] | None = None,
 ) -> tuple[int | None, SurfaceLaunch, OperationStore, Path]:
     cwd = root / f"{name}-product"
     (cwd / "callbacks").mkdir(parents=True)
@@ -4712,7 +4718,16 @@ def _initial_start_worker(
 
     thread = threading.Thread(target=drive)
     thread.start()
-    thread.join(timeout=30)
+    before_join_failure: BaseException | None = None
+    try:
+        if before_join is not None:
+            before_join(launch)
+    except BaseException as exc:  # noqa: BLE001 - release/join before surfacing RED
+        before_join_failure = exc
+    finally:
+        thread.join(timeout=30)
+    if before_join_failure is not None:
+        raise before_join_failure
     for exc in failure:
         # Only the scripted crash boundary may escape the worker; anything
         # else is a real defect and must surface as its own red reason.
@@ -4804,6 +4819,223 @@ def check_worker_accepts_acknowledged_initial_start() -> None:
         )
 
 
+class DelayedInitialAcknowledgementCmux(InitialStartWorkerCmux):
+    """Hold semantic acknowledgement after the provider process exists."""
+
+    def __init__(self) -> None:
+        super().__init__([ACTIVE_CLAUDE_SCREEN])
+        self.ack_started = threading.Event()
+        self.release_ack = threading.Event()
+
+    def read(self, surface_id: str) -> str:
+        if self.sent and self.submit_count > self.submits_at_last_send:
+            self.ack_started.set()
+            if not self.release_ack.wait(timeout=5):
+                raise AssertionError("initial acknowledgement fixture was not released")
+        return super().read(surface_id)
+
+
+def check_worker_handshakes_before_semantic_initial_ack() -> None:
+    """Process ownership must not inherit the slower input-ack budget."""
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        cmux = DelayedInitialAcknowledgementCmux()
+        observed: list[ProcessHandle] = []
+
+        def observe_handshake(launch: SurfaceLaunch) -> None:
+            check(
+                "worker reached the delayed semantic acknowledgement",
+                cmux.ack_started.wait(timeout=2),
+            )
+            try:
+                observed.append(
+                    ProcessAdapter().await_surface_handle(
+                        launch, timeout_seconds=0.2
+                    )
+                )
+            finally:
+                cmux.release_ack.set()
+
+        code, _launch, _store, _callback = _initial_start_worker(
+            root,
+            "delayed-ack",
+            cmux,
+            before_join=observe_handshake,
+        )
+        check(
+            "worker publishes exact process ownership before input acknowledgement",
+            code == 0
+            and len(observed) == 1
+            and observed[0].process_group > 1
+            and observed[0].process_identity,
+            (code, observed),
+        )
+
+
+def check_late_ready_review_recovery_is_exact_and_replay_free() -> None:
+    """Adopt one late worker handshake without replaying provider input."""
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        owner = "late-ready-owner"
+        parent_id = "late-ready-parent"
+        child_id = "late-ready-round"
+        parent_run = "late-ready-parent-run"
+        child_run = "late-ready-round-run"
+        lane = "anthropic-holistic"
+        route = RuntimeRoute(
+            "claude",
+            "fable",
+            "high",
+            "reviewer-callback",
+            "d" * 64,
+        )
+        store = OperationStore(root / "store")
+        parent_spec = OperationSpec(
+            parent_id,
+            "late-ready-parent-key",
+            "simple-review-holistic",
+            owner,
+            route,
+            "packets/review.json",
+            "scoped",
+        )
+        child_spec = OperationSpec(
+            child_id,
+            "late-ready-child-key",
+            "review-round",
+            owner,
+            route,
+            "packets/review.json",
+            "scoped",
+            parent_operation_id=parent_id,
+        )
+        store.create(parent_spec, lane_id=lane, run_id=parent_run)
+        store.transition(owner, parent_id, "preflight")
+        store.transition(owner, parent_id, "starting")
+        store.begin_effect(owner, parent_id, "start-provider")
+        OperationSupervisor(store, owner, parent_id).bind_resources(
+            OwnedResources(surface_id=SURFACE)
+        )
+        store.transition(
+            owner,
+            parent_id,
+            "attention-required",
+            reason=AttentionReason.PROCESS_START_FAILED,
+        )
+        store.create(child_spec, lane_id=lane, run_id=child_run)
+        for state in ("preflight", "starting", "running", "awaiting-callback", "failed"):
+            store.transition(owner, child_id, state)
+
+        runtime_root = store.root / "owners" / owner / "runtime" / parent_id
+        callback_root = root / "callbacks" / lane
+        callback_root.mkdir(parents=True)
+        runtime_root.mkdir(parents=True)
+        callback_pointer = callback_root / ".review-callback.json"
+        payload = {
+            "schema_version": 1,
+            "parent_session_operation_id": parent_id,
+            "axis": lane,
+            "verification_iteration": 0,
+            "verdict": "approve",
+            "findings": [],
+        }
+        payload_sha256 = hashlib.sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        callback_value = {
+            "schema_version": 1,
+            "callback_id": f"review-{payload_sha256[:24]}",
+            "operation_id": child_id,
+            "run_id": child_run,
+            "kind": "review",
+            "payload": payload,
+            "payload_sha256": payload_sha256,
+        }
+        callback_pointer.write_text(
+            json.dumps(callback_value, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        for name, value in {
+            "session.json": {
+                "schema_version": 1,
+                "operation_id": parent_id,
+                "run_id": parent_run,
+                "workspace_id": WORKSPACE,
+                "cwd": str(root),
+            },
+            "callback-target.json": {
+                "schema_version": 1,
+                "generation": 2,
+                "operation_id": child_id,
+                "run_id": child_run,
+                "callback_pointer": f"callbacks/{lane}/.review-callback.json",
+            },
+            "ready.json": {
+                "schema_version": 1,
+                "status": "ready",
+                "pid": 123,
+                "process_group": 123,
+                "supervisor_pid": 124,
+                "process_identity": PROCESS_IDENTITY,
+                "supervisor_identity": SUPERVISOR_IDENTITY,
+            },
+        }.items():
+            (runtime_root / name).write_text(
+                json.dumps(value, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+        stream = RuntimeProviderEventStream.create(
+            runtime_root / "provider-events",
+            owner_id=owner,
+            operation_id=parent_id,
+            run_id=parent_run,
+            generation=2,
+            process_identity=PROCESS_IDENTITY,
+            workspace_id=WORKSPACE,
+            surface_id=SURFACE,
+            input_sha256="e" * 64,
+        )
+        stream.start()
+        stream.reserve_input()
+        stream.accept_input()
+
+        manager = RuntimeSessionManager(
+            store,
+            FakeCmux([]),
+            FakeProcess([]),
+            preflight=lambda route, callback: CapabilityReport(route, True, ()),
+        )
+        recovered = manager.recover_late_started_review_callback(
+            owner, parent_id
+        )
+        parent = store.read(owner, parent_id)
+        child = store.read(owner, child_id)
+        before_replay = (parent.revision, child.revision)
+        manager.recover_late_started_review_callback(owner, parent_id)
+        replay_parent = store.read(owner, parent_id)
+        replay_child = store.read(owner, child_id)
+        delivery = stream.controller.current_state()
+        check(
+            "late ready recovery binds exact ownership and reopens one round",
+            recovered.action == "late-start-recovered"
+            and parent.state == "awaiting-callback"
+            and parent.effect_outcome == EffectOutcome.SUCCEEDED
+            and parent.resources.process_group == 123
+            and child.state == "awaiting-callback"
+            and not child.accepted_callback_id,
+            (recovered, parent, child),
+        )
+        check(
+            "late ready recovery is idempotent and never replays input",
+            before_replay == (replay_parent.revision, replay_child.revision)
+            and delivery.send_attempts == 1
+            and delivery.send_status == "accepted",
+            (before_replay, replay_parent.revision, replay_child.revision, delivery),
+        )
+
+
 def check_worker_handles_recognized_post_submit_prompt() -> None:
     """A safe native prompt after Enter must not lose or replay the task."""
 
@@ -4863,6 +5095,8 @@ _INITIAL_START_FIXTURES = (
     check_initial_start_observes_within_budget,
     check_worker_contains_unconfirmed_initial_start,
     check_worker_accepts_acknowledged_initial_start,
+    check_worker_handshakes_before_semantic_initial_ack,
+    check_late_ready_review_recovery_is_exact_and_replay_free,
     check_worker_handles_recognized_post_submit_prompt,
     check_worker_crash_after_enter_stays_replay_free,
 )

@@ -36,7 +36,11 @@ from .runtime_session_continuation import (
     await_surface_transport_visible,
     deliver_continuation,
 )
-from .runtime_callback_io import _bounded_file_sha256
+from .runtime_callback_io import _bounded_file_sha256, _envelope
+from .runtime_provider_events import (
+    RuntimeProviderEventError,
+    RuntimeProviderEventStream,
+)
 from .runtime_provider_input import (
     bound_continuation_effect_id,
     initial_provider_argv,
@@ -49,6 +53,152 @@ from .supervisor import OperationSupervisor
 
 class RuntimeSessionLaunchMixin:
     """Own provider launch, continuation, and callback registration effects."""
+
+    def recover_late_started_review_callback(
+        self,
+        owner_id: str,
+        parent_operation_id: str,
+    ) -> RuntimeSessionResult:
+        """Adopt one late ready handshake whose exact input already succeeded.
+
+        The recovery consumes no provider effect and accepts no callback.  It
+        only restores the standard awaiting-callback boundary so the existing
+        worker can ingest the already-published exact review artifact.
+        """
+
+        parent = self.store.read(owner_id, parent_operation_id)
+        runtime_root = self._state_root(parent)
+        receipt_path = runtime_root / "late-start-recovery.json"
+        try:
+            metadata = self._metadata(parent)
+            target = self._callback_target(parent)
+            ready = json.loads(
+                (runtime_root / "ready.json").read_text(encoding="utf-8")
+            )
+            generation = int(target.get("generation", 0))
+            cwd = Path(str(metadata.get("cwd") or "")).expanduser().resolve()
+            callback_path = self._resolve_pointer(
+                cwd,
+                str(target.get("callback_pointer") or ""),
+                must_exist=True,
+            )
+            if callback_path.is_symlink() or not callback_path.is_file():
+                raise RuntimeSessionError("late review callback is invalid")
+            envelope = _envelope(
+                json.loads(callback_path.read_text(encoding="utf-8"))
+            )
+            delivery = RuntimeProviderEventStream.rehydrate(
+                runtime_root / "provider-events", generation
+            ).controller.current_state()
+        except (
+            OSError,
+            ValueError,
+            json.JSONDecodeError,
+            RuntimeProviderEventError,
+        ) as exc:
+            raise RuntimeSessionError(
+                "late started review evidence is unavailable"
+            ) from exc
+
+        if not isinstance(ready, dict):
+            raise RuntimeSessionError("late worker handshake is invalid")
+        resources = OwnedResources(
+            surface_id=parent.resources.surface_id,
+            process_group=ready.get("process_group", 0),
+            supervisor_pid=ready.get("supervisor_pid", 0),
+            process_identity=ready.get("process_identity", ""),
+            supervisor_identity=ready.get("supervisor_identity", ""),
+        )
+        identity = delivery.identity
+        child = self.store.read(owner_id, str(target.get("operation_id") or ""))
+        exact_evidence = (
+            ready.get("schema_version") == 1
+            and ready.get("status") == "ready"
+            and ready.get("pid") == resources.process_group
+            and generation >= 1
+            and metadata.get("schema_version") == 1
+            and metadata.get("operation_id") == parent_operation_id
+            and metadata.get("run_id") == parent.run_id
+            and isinstance(metadata.get("workspace_id"), str)
+            and bool(metadata.get("workspace_id"))
+            and envelope.operation_id == child.spec.operation_id
+            and envelope.run_id == child.run_id
+            and envelope.kind == "review"
+            and envelope.payload.get("parent_session_operation_id")
+            == parent_operation_id
+            and identity.owner_id == owner_id
+            and identity.operation_id == parent_operation_id
+            and identity.run_id == parent.run_id
+            and identity.generation == generation
+            and identity.process_identity == resources.process_identity
+            and identity.workspace_id == metadata.get("workspace_id")
+            and identity.surface_id == resources.surface_id
+            and delivery.cursor.provider_started
+            and delivery.cursor.input_accepted
+            and delivery.send_attempts == 1
+            and delivery.send_status == "accepted"
+        )
+        if not exact_evidence:
+            raise RuntimeSessionError("late started review identity changed")
+        try:
+            process_status = self.process.process_status(
+                resources.process_group, resources.process_identity
+            )
+            supervisor_probe = getattr(self.process, "pid_status")
+            supervisor_status = supervisor_probe(
+                resources.supervisor_pid, resources.supervisor_identity
+            )
+            surface_status = self.cmux.status(resources.surface_id)
+        except Exception as exc:
+            raise RuntimeSessionError(
+                "late started review ownership is unavailable"
+            ) from exc
+        if (process_status, supervisor_status, surface_status) != (
+            "alive",
+            "alive",
+            "alive",
+        ):
+            raise RuntimeSessionError(
+                "late started review ownership is not exact and live"
+            )
+
+        callback_sha256 = hashlib.sha256(callback_path.read_bytes()).hexdigest()
+        receipt = {
+            "schema_version": 1,
+            "owner_id": owner_id,
+            "parent_operation_id": parent_operation_id,
+            "parent_run_id": parent.run_id,
+            "child_operation_id": child.spec.operation_id,
+            "child_run_id": child.run_id,
+            "generation": generation,
+            "callback_id": envelope.callback_id,
+            "callback_sha256": callback_sha256,
+            "process_identity": resources.process_identity,
+            "supervisor_identity": resources.supervisor_identity,
+            "surface_id": resources.surface_id,
+            "status": "prepared",
+        }
+        completed = {**receipt, "status": "complete"}
+        if receipt_path.exists():
+            if receipt_path.is_symlink() or not receipt_path.is_file():
+                raise RuntimeSessionError("late start recovery receipt is invalid")
+            existing = json.loads(receipt_path.read_text(encoding="utf-8"))
+            if existing not in (receipt, completed):
+                raise RuntimeSessionError("late start recovery receipt changed")
+        else:
+            self._write_json(receipt_path, receipt)
+        recovered_parent, _child = self.store.recover_late_started_review_round(
+            owner_id,
+            parent_operation_id,
+            child.spec.operation_id,
+            resources,
+        )
+        if not receipt_path.is_file() or json.loads(
+            receipt_path.read_text(encoding="utf-8")
+        ) != completed:
+            self._write_json(receipt_path, completed)
+        self._notify(owner_id, parent_operation_id)
+        return self._result(recovered_parent, "late-start-recovered")
 
     def _continuation_receipt_path(
         self, record: OperationRecord, effect_id: str

@@ -587,6 +587,14 @@ def _run_exact_head_review(
     if gate_exists:
         prior_state = gate.read()
         prior_attempt = ReviewAttempt.from_mapping(prior_state["attempt"])
+        if (
+            prior_attempt.status == "terminal"
+            and gate.recover_late_started_attempt()
+        ):
+            prior_state = gate.read()
+            prior_attempt = ReviewAttempt.from_mapping(
+                prior_state["attempt"]
+            )
         cycle = prior_attempt.identity.cycle
         if prior_attempt.status == "terminal":
             assert prior_attempt.terminal is not None

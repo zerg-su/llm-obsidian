@@ -64,6 +64,7 @@ from harness.workflows.review import (
     ReviewFinding,
     ReviewOperationRequest,
     ReviewResult,
+    ReviewRound,
     review_round_envelope,
     review_round_payload,
     start_review,
@@ -3703,6 +3704,149 @@ with tempfile.TemporaryDirectory(prefix="review-zero-lane-preflight.") as raw:
         and len(failed_runtime.started) == 1
         and gate.read()["status"] == "reviewing"
         and gate.read()["attempt"]["status"] == "awaiting-callback",
+    )
+
+
+with tempfile.TemporaryDirectory(prefix="review-late-ready-recovery.") as raw:
+    base = Path(raw)
+    scratch = base / "scratch"
+    scratch.mkdir()
+    store = OperationStore(base / "store")
+
+    class LateReadyFailureRuntime(FakeRuntime):
+        def hydrate_durable_checkpoint(self, *_args: object) -> object:
+            raise RuntimeCheckpointEvidenceMissing("checkpoint not yet published")
+
+        def start(self, request: object, *, on_surface_opened=None) -> object:
+            self.started.append(request)
+            record = self.store.create(
+                request.spec, lane_id=request.lane_id, run_id=request.run_id
+            )
+            record = replace(
+                record,
+                resources=OwnedResources(
+                    surface_id="55555555-5555-4555-8555-555555555555"
+                ),
+                revision=record.revision + 1,
+            )
+            self.store.save(record, expected_revision=record.revision - 1)
+            if on_surface_opened is not None:
+                on_surface_opened(FakeSessionResult(record, ""))
+            self.store.transition(record.spec.owner_id, record.spec.operation_id, "preflight")
+            self.store.transition(record.spec.owner_id, record.spec.operation_id, "starting")
+            self.store.begin_effect(
+                record.spec.owner_id, record.spec.operation_id, "start-provider"
+            )
+            self.store.transition(
+                record.spec.owner_id,
+                record.spec.operation_id,
+                "attention-required",
+                reason=AttentionReason.PROCESS_START_FAILED,
+            )
+            raise RuntimeSessionError("runtime worker readiness timed out")
+
+    runtime = LateReadyFailureRuntime(store)
+    gate = ReviewGateController(base / "gate", runtime, store)
+    request = request_for("review-late-ready-cycle-1", context=context)
+    try:
+        gate.begin_attempt(
+            dispatch_operation_id="review-late-ready-dispatch",
+            finalization_lineage_id="review-late-ready-lineage",
+            cycle=1,
+            plan_sha256="3" * 64,
+            outcome_sha256="4" * 64,
+            request=request,
+            origin_surface="11111111-1111-4111-8111-111111111111",
+            cwd=scratch,
+            product_root=ROOT,
+            prompt_pointer="prompts/review.md",
+            callback_root="callbacks/review-late-ready",
+        )
+    except RuntimeSessionError:
+        pass
+    else:
+        raise AssertionError("late ready fixture did not fail")
+    failed = gate.read()
+    attempt = failed["attempt"]["identity"]
+    lane_identity = attempt["lanes"][0]
+    parent_id = lane_identity["operation_id"]
+    owner_id = lane_identity["owner_id"]
+    parent = store.read(owner_id, parent_id)
+    child = next(
+        record
+        for record in store.list(owner_id)
+        if record.spec.parent_operation_id == parent_id
+    )
+    recovered_resources = OwnedResources(
+        surface_id=parent.resources.surface_id,
+        process_group=123,
+        supervisor_pid=124,
+        process_identity="a" * 64,
+        supervisor_identity="b" * 64,
+    )
+    store.recover_late_started_review_round(
+        owner_id, parent_id, child.spec.operation_id, recovered_resources
+    )
+    round_ = ReviewRound(
+        parent_operation_id=parent_id,
+        operation_id=child.spec.operation_id,
+        owner_id=owner_id,
+        lane_id=child.lane_id,
+        run_id=child.run_id,
+        axis=lane_identity["axis"],
+        verification_iteration=0,
+        spec=child.spec,
+    )
+    result = ReviewResult(lane_identity["axis"], "approve", (), 0)
+    runtime.accept_callback(review_round_envelope(round_, result))
+    receipt_root = store.root / "owners" / owner_id / "runtime" / parent_id
+    receipt_root.mkdir(parents=True, exist_ok=True)
+    (receipt_root / "ready.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "status": "ready",
+                "process_identity": recovered_resources.process_identity,
+                "supervisor_identity": recovered_resources.supervisor_identity,
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (receipt_root / "late-start-recovery.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "owner_id": owner_id,
+                "parent_operation_id": parent_id,
+                "parent_run_id": parent.run_id,
+                "child_operation_id": child.spec.operation_id,
+                "child_run_id": child.run_id,
+                "surface_id": recovered_resources.surface_id,
+                "process_identity": recovered_resources.process_identity,
+                "supervisor_identity": recovered_resources.supervisor_identity,
+                "status": "complete",
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    recovered = gate.recover_late_started_attempt()
+    recovered_state = gate.read()
+    run = gate.rehydrate_attempt()
+    decision = gate.complete_attempt_round(
+        run, run.execution.lanes[0], run.rounds[lane_identity["axis"]], result
+    )
+    check(
+        "late ready callback replaces only its false zero-lane terminal",
+        recovered
+        and recovered_state["status"] == "reviewing"
+        and recovered_state["attempt"]["status"] == "awaiting-callback"
+        and len(recovered_state["lanes"]) == 1
+        and decision.action == "approved"
+        and gate.read()["status"] == "approved",
     )
 
 

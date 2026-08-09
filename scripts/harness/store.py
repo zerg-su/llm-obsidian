@@ -310,6 +310,93 @@ class OperationStore:
             )
             return updated
 
+    def recover_late_started_review_round(
+        self,
+        owner_id: str,
+        parent_operation_id: str,
+        child_operation_id: str,
+        resources: OwnedResources,
+    ) -> tuple[OperationRecord, OperationRecord]:
+        """Adopt one exact late process handshake and reopen its false-failed round.
+
+        This is deliberately narrower than a terminal-state retry.  The parent
+        must still carry the unresolved ``start-provider`` effect and the child
+        must be the untouched review round failed by start_review containment.
+        No provider or callback effect is performed here.
+        """
+
+        with self.locked(owner_id):
+            parent = self.read(owner_id, parent_operation_id)
+            child = self.read(owner_id, child_operation_id)
+            already_recovered = (
+                parent.state == "awaiting-callback"
+                and not parent.pending_effect
+                and parent.effect_id == "start-provider"
+                and parent.effect_outcome == EffectOutcome.SUCCEEDED
+                and parent.resources == resources
+                and child.state == "awaiting-callback"
+                and not child.accepted_callback_id
+            )
+            if already_recovered:
+                return parent, child
+            if (
+                parent.spec.owner_id != owner_id
+                or parent.spec.operation_id != parent_operation_id
+                or parent.spec.route.profile != "reviewer-callback"
+                or parent.state != "attention-required"
+                or parent.attention_reason != AttentionReason.PROCESS_START_FAILED
+                or parent.resume_state != "starting"
+                or parent.pending_effect != "start-provider"
+                or parent.effect_id != "start-provider"
+                or parent.effect_outcome != EffectOutcome.PENDING
+                or parent.resources != OwnedResources(surface_id=resources.surface_id)
+                or resources.process_group <= 1
+                or resources.supervisor_pid <= 1
+                or child.spec.owner_id != owner_id
+                or child.spec.operation_id != child_operation_id
+                or child.spec.kind != "review-round"
+                or child.spec.parent_operation_id != parent_operation_id
+                or child.spec.route.profile != "reviewer-callback"
+                or child.lane_id != parent.lane_id
+                or child.state != "failed"
+                or child.pending_effect
+                or child.effect_id
+                or child.effect_outcome != EffectOutcome.NONE
+                or child.resources != OwnedResources()
+                or child.accepted_callback_id
+                or child.accepted_callback_kind
+                or child.accepted_callback_sha256
+            ):
+                raise StoreError("late started review identity changed")
+
+            reopened_child = replace(
+                child,
+                state="awaiting-callback",
+                revision=child.revision + 1,
+                attention_reason=None,
+                resume_state="",
+            )
+            recovered_parent = resolve_effect(parent, EffectOutcome.SUCCEEDED)
+            recovered_parent = replace(
+                recovered_parent,
+                resources=resources,
+                revision=recovered_parent.revision + 1,
+            )
+            for state in ("starting", "running", "awaiting-callback"):
+                recovered_parent, _ = transition(recovered_parent, state)
+
+            # Child first is fail-safe: until the parent commit appears the
+            # worker still cannot classify this as the active generation.
+            self._write(
+                self._operation_path(owner_id, child_operation_id),
+                to_dict(reopened_child),
+            )
+            self._write(
+                self._operation_path(owner_id, parent_operation_id),
+                to_dict(recovered_parent),
+            )
+            return recovered_parent, reopened_child
+
     def begin_effect(self, owner_id: str, operation_id: str, effect: str) -> OperationRecord:
         with self.locked(owner_id):
             record = self.read(owner_id, operation_id)
