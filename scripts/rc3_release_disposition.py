@@ -9,6 +9,7 @@ import json
 import re
 import subprocess
 import sys
+import tomllib
 from collections import Counter
 from pathlib import Path
 from typing import Any, Mapping
@@ -42,24 +43,38 @@ SHA = re.compile(r"[0-9a-f]{40,64}\Z")
 DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 _ROUTING = load_tracked_config(ROOT)
 #: 2.6.6 release evidence is immutable: it stays bound to the finalization
-#: routes registered when that evidence was produced, not to whatever the
-#: live routing config registers later (2.6.7 re-registered both aliases).
-_INDEPENDENT_ROUTE = {
-    "alias": "finalization-independent",
-    "runtime": "claude",
-    "model": "fable",
-    "effort": "xhigh",
-}
+#: routes registered when that evidence was produced (the exact routing
+#: config committed at the v2.6.6-rc4-fix3 tag), not to whatever the live
+#: routing config registers later (2.6.7 re-registered both aliases).
+_EVIDENCE_ERA_SHA = "5ac90ef94029371507320d900f32c4c0b254d790"
+
+
+def _evidence_era_route(alias: str) -> dict[str, str]:
+    shown = subprocess.run(
+        ["git", "show", f"{_EVIDENCE_ERA_SHA}:config/model-routing.toml"],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    config = tomllib.loads(shown.stdout)
+    route = config["finalization_routes"][alias]
+    aliases = config.get("model_aliases", {})
+    target = aliases.get(route["model"], {}).get("target", route["model"])
+    return {
+        "alias": alias,
+        "runtime": str(route["runtime"]),
+        "model": str(target),
+        "effort": str(route["effort"]),
+    }
+
+
+_INDEPENDENT_ROUTE = _evidence_era_route("finalization-independent")
 _INDEPENDENT_ROLE = _INDEPENDENT_ROUTE["model"]
 _REVIEW_PROFILE = load_profiles(ROOT / "config/verification-profiles.toml")[
     "scoped"
 ]
-_PRIMARY_ROUTE = {
-    "alias": "finalization-primary",
-    "runtime": "codex",
-    "model": "gpt-5.6-sol",
-    "effort": "xhigh",
-}
+_PRIMARY_ROUTE = _evidence_era_route("finalization-primary")
 ROLE_AXES = {
     _INDEPENDENT_ROLE: "anthropic-holistic",
     "independent-configured": "openai-holistic",
