@@ -3649,6 +3649,7 @@ with tempfile.TemporaryDirectory(prefix="review-zero-lane-preflight.") as raw:
     else:
         raise AssertionError("preflight fixture did not fail")
     failed_state = gate.read()
+    late_recovery_rejected = not gate.recover_late_started_attempt()
     replacement = request_for(
         "review-zero-lane-cycle-2", context=context
     )
@@ -3678,6 +3679,7 @@ with tempfile.TemporaryDirectory(prefix="review-zero-lane-preflight.") as raw:
         and failed_state["lanes"] == []
         and failed_state["round_results"] == {}
         and failed_state["final_results"] == {}
+        and late_recovery_rejected
         and not store.list("owner-1")
         and reopened == replayed
         and reopened.status == "pending"

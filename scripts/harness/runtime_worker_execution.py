@@ -421,6 +421,12 @@ class RuntimeWorkerExecution(
                 {"schema_version": 1, "status": "start-failed", "exit_code": 127},
             )
             return 127
+        reviewer_ready_first = expected_reviewer
+        if (
+            not reviewer_ready_first
+            and not self._submit_initial_input(initial_start_observation_limit)
+        ):
+            return 2
         _atomic_json(
             self.ready,
             {
@@ -433,7 +439,7 @@ class RuntimeWorkerExecution(
                 "supervisor_identity": self.supervisor_identity,
             },
         )
-        if not self._await_parent_start_committed():
+        if reviewer_ready_first and not self._await_parent_start_committed():
             self.contain_provider_start_failure(self.process, self.handle)
             _atomic_json(
                 self.exit_path,
@@ -444,7 +450,10 @@ class RuntimeWorkerExecution(
                 },
             )
             return 2
-        if not self._submit_initial_input(initial_start_observation_limit):
+        if (
+            reviewer_ready_first
+            and not self._submit_initial_input(initial_start_observation_limit)
+        ):
             return 2
         self.checkpoint_probe = self.checkpoint_probe or CmuxAdapter().resume_checkpoint
         self.checkpoint = ""

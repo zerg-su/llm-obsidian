@@ -10,6 +10,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Callable, Mapping
 
+from ..store import StoreError
 from ..review_attempt import (
     EXACT_HEAD_REVIEW_PROTOCOL,
     ReviewAttempt,
@@ -130,14 +131,17 @@ class ReviewGateAttemptMixin:
         ):
             return False
         lane = attempt.identity.lanes[0]
-        parent = self.round_store.read(lane.owner_id, lane.operation_id)
-        children = [
-            record
-            for record in self.round_store.list(lane.owner_id)
-            if record.spec.parent_operation_id == lane.operation_id
-            and record.spec.kind == "review-round"
-            and record.lane_id == lane.lane_id
-        ]
+        try:
+            parent = self.round_store.read(lane.owner_id, lane.operation_id)
+            children = [
+                record
+                for record in self.round_store.list(lane.owner_id)
+                if record.spec.parent_operation_id == lane.operation_id
+                and record.spec.kind == "review-round"
+                and record.lane_id == lane.lane_id
+            ]
+        except StoreError:
+            return False
         receipt_path = (
             self.round_store.root
             / "owners"

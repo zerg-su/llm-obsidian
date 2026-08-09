@@ -4649,39 +4649,68 @@ def _initial_start_worker(
     cmux: FakeCmux,
     *,
     limit: int = 4,
+    route_profile: str = "executor",
     before_join: Callable[[SurfaceLaunch], None] | None = None,
 ) -> tuple[int | None, SurfaceLaunch, OperationStore, Path]:
-    cwd = root / f"{name}-product"
+    product_root = root / f"{name}-product"
+    product_root.mkdir()
+    product_root = product_root.resolve()
+    cwd = (
+        root / f"{name}-review-scratch"
+        if route_profile == "reviewer-callback"
+        else product_root
+    )
     (cwd / "callbacks").mkdir(parents=True)
+    cwd = cwd.resolve()
     prompt_path = cwd / "prompt.md"
     prompt_path.write_text(f"{INITIAL_ANCHOR}\n", encoding="utf-8")
+    callback = cwd / "callbacks" / "result.json"
+    route = RuntimeRoute(
+        "claude", "claude-opus-5", "high", route_profile, "c" * 64
+    )
     # Inline argv: the crash fixture leaves its provider to start after the
     # temporary root is gone, and a missing script file would print to stderr.
-    provider_argv = (
-        str(Path(sys.executable).resolve()),
-        "-c",
-        "import time; time.sleep(1.0)",
-    )
+    if route_profile == "reviewer-callback":
+        provider = root / "claude"
+        provider.write_text("#!/bin/sh\nsleep 1\n", encoding="utf-8")
+        provider.chmod(0o700)
+        provider = provider.resolve()
+        provider_argv = (
+            *ClaudeDriver(provider).command(
+                route,
+                callback_pointer=callback,
+                product_root=product_root,
+                session_root=cwd,
+            ),
+            "review",
+        )
+    else:
+        provider_argv = (
+            str(Path(sys.executable).resolve()),
+            "-c",
+            "import time; time.sleep(1.0)",
+        )
     store = OperationStore(root / f"{name}-store")
     spec = OperationSpec(
         f"{name}-op",
         f"{name}-key",
         "runtime-lifecycle",
         f"owner-{name}",
-        RuntimeRoute("claude", "claude-opus-5", "high", "executor", "c" * 64),
+        route,
         "packets/runtime.json",
         "scoped",
     )
     store.create(spec, lane_id=f"lane-{name}", run_id=f"run-{name}")
     for state in ("preflight", "starting", "running", "awaiting-callback"):
         store.transition(f"owner-{name}", f"{name}-op", state)
-    callback = cwd / "callbacks" / "result.json"
     launch = ProcessAdapter().prepare_surface_launch(
         argv=provider_argv,
         cwd=cwd,
         state_root=root / f"{name}-state",
         worker=ROOT / "scripts" / "harness-runtime-worker.py",
         callback_pointer=callback,
+        product_root=product_root,
+        reviewer_sandbox=route_profile == "reviewer-callback",
         store_root=store.root,
         owner_id=f"owner-{name}",
         operation_id=f"{name}-op",
@@ -4726,13 +4755,13 @@ def _initial_start_worker(
         before_join_failure = exc
     finally:
         thread.join(timeout=30)
-    if before_join_failure is not None:
-        raise before_join_failure
     for exc in failure:
         # Only the scripted crash boundary may escape the worker; anything
         # else is a real defect and must surface as its own red reason.
         if not isinstance(exc, SurfaceVanished):
             raise exc
+    if before_join_failure is not None:
+        raise before_join_failure
     return (outcome[0] if outcome else None), launch, store, callback
 
 
@@ -4844,15 +4873,15 @@ def check_worker_handshakes_before_semantic_initial_ack() -> None:
         observed: list[ProcessHandle] = []
 
         def observe_handshake(launch: SurfaceLaunch) -> None:
-            check(
-                "worker reached the delayed semantic acknowledgement",
-                cmux.ack_started.wait(timeout=2),
-            )
             try:
                 observed.append(
                     ProcessAdapter().await_surface_handle(
-                        launch, timeout_seconds=0.2
+                        launch, timeout_seconds=2.0
                     )
+                )
+                check(
+                    "worker reached the delayed semantic acknowledgement",
+                    cmux.ack_started.wait(timeout=2),
                 )
             finally:
                 cmux.release_ack.set()
@@ -4861,6 +4890,7 @@ def check_worker_handshakes_before_semantic_initial_ack() -> None:
             root,
             "delayed-ack",
             cmux,
+            route_profile="reviewer-callback",
             before_join=observe_handshake,
         )
         check(
