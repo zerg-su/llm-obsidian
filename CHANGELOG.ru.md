@@ -16,6 +16,45 @@
 внутренними контрольными точками и вошли в следующие публичные релизы; тегов и
 пакетов с этими номерами не выпускалось.
 
+## [2.6.7-rc1] — 2026-08-09 (не выпущено)
+
+Ограниченная стабилизация Harness: поддерживаемый коридор engineering/change
+сходится после рестарта воркера на каждой именованной durable-границе, а
+финализационный леджер отделяет продуктовые циклы от mechanism-восстановления.
+
+### Исправлено
+
+- Прерванный own-identity эффект pipeline-верификации возобновляется при
+  рестарте воркера вместо латча `pipeline-verification-effect-uncertain`.
+- Runtime worker повторно запускает review flow один раз на каждый новый
+  durable drive input, когда review gate находится в `attention-required`,
+  возвращая code-owned recovery, удалённый в RC4-рефакторинге.
+- Оборванный callback wake (findings, refresh или reap notification)
+  возобновляется один раз на рестартнутое поколение воркера; живые повторы в
+  том же поколении остаются fail-closed.
+- Рестартнутое поколение воркера один раз потребляет durable resumable
+  mechanism-латч attention вместо требования координаторского `resume`.
+- Валидаторы evidence релиза 2.6.6 (`rc3_release_disposition`,
+  `rc4_gate_bundle`) привязаны к замороженным маршрутам своей эпохи и к
+  дереву коммита из receipt, а не к движущемуся дереву кандидата.
+
+### Добавлено
+
+- `scripts/v267_stabilization.py` и `config/v267-stabilization-subject.json`:
+  детерминированный `lifecycle_subject_sha256`, валидация RC1-стрика и
+  типизированное правило остановки релиза по трём классам.
+- `scripts/harness/finalization_pivot.py`: ровно третий материальный провал
+  замораживает read-only структурный pivot-пакет; четвёртый продуктовый цикл
+  требует принятого receipt `finalization-independent`.
+- Mechanism-исходы (`attention-required`, `blocked`) освобождают резервацию
+  финализации в ограниченные иммутабельные attempt-receipts; только
+  материальные исходы потребляют пять продуктовых циклов.
+- Крэш-матрица коридора поверх золотого сценария engineering/change
+  (`tests/harness/test_lifecycle_crash_matrix.py`,
+  `tests/harness/lifecycle_simulator_world.py`).
+- Потолки `tests/rc4_scope_ratchet.py` подняты до 272 файлов / 93000 строк —
+  ровно два авторизованных планом скрипта 2.6.7 и строки owner-ремонтов.
+
 ## [2.6.6-rc4-fix3] — 2026-08-09
 
 Этот ограниченный reconciliation-патч выполняет синхронизацию Codex dispatch

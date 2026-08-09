@@ -105,6 +105,14 @@ file, including canonical receipt hashing of the projected bytes.
 The historical RC2 snapshot is retained separately in
 ``tests/test_v266_rc2_scope.py``; it is evidence about a released commit, not a
 constraint on this one.
+
+2.6.7 RC1 then added exactly the two production scripts its approved plan
+names: ``v267_stabilization.py`` (Slice 0's read-only subject-digest, streak,
+and release-stop validator) and ``harness/finalization_pivot.py`` (Slice 4's
+bounded third-failure pivot packet).  The line growth is those two modules
+plus the Slice 3 owner repairs and Slice 4 mechanism-neutral cycle
+accounting inside existing files; the ceilings move just above that
+candidate so the next unplanned script still fails the build.
 """
 
 from __future__ import annotations
@@ -112,11 +120,11 @@ from __future__ import annotations
 from pathlib import Path
 
 
-#: Maximum tracked Python files under ``scripts/`` for the RC4 candidate.
-SCRIPT_FILE_CEILING = 268
+#: Maximum tracked Python files under ``scripts/`` for the 2.6.7 RC1 candidate.
+SCRIPT_FILE_CEILING = 272
 
-#: Maximum total lines across those files for the RC4 candidate.
-SCRIPT_LINE_CEILING = 91_342
+#: Maximum total lines across those files for the 2.6.7 RC1 candidate.
+SCRIPT_LINE_CEILING = 93_000
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

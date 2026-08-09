@@ -10,6 +10,45 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.6.7-rc1] - 2026-08-09 (unreleased)
+
+Bounded harness stabilization: the supported engineering/change corridor
+converges across worker restart at every named durable boundary, and the
+finalization ledger separates product cycles from mechanism recovery.
+
+### Fixed
+
+- An interrupted own-identity pipeline verification effect resumes on worker
+  restart instead of latching `pipeline-verification-effect-uncertain`.
+- The runtime worker re-drives the review flow once per distinct durable
+  drive input when the review gate is at `attention-required`, restoring the
+  code-owned recovery removed in the RC4 refactor.
+- A torn callback wake (findings, refresh, or reap notification) resumes once
+  per restarted worker generation; live same-generation retries stay
+  fail-closed.
+- A restarted worker generation consumes a durable resumable mechanism
+  attention latch exactly once instead of requiring coordinator `resume`.
+- 2.6.6 release evidence validators (`rc3_release_disposition`,
+  `rc4_gate_bundle`) now bind to their own era's frozen routes and to the
+  receipt's recorded commit tree instead of the moving candidate tree.
+
+### Added
+
+- `scripts/v267_stabilization.py` and `config/v267-stabilization-subject.json`:
+  deterministic `lifecycle_subject_sha256`, RC1 streak validation, and the
+  typed three-class release stop rule.
+- `scripts/harness/finalization_pivot.py`: the exact third material failure
+  freezes a read-only structural pivot packet; product cycle four requires
+  the accepted `finalization-independent` receipt.
+- Mechanism outcomes (`attention-required`, `blocked`) release their
+  finalization reservation into bounded immutable attempt receipts; only
+  material outcomes consume the five product cycles.
+- Corridor crash matrix over the golden engineering/change scenario
+  (`tests/harness/test_lifecycle_crash_matrix.py`,
+  `tests/harness/lifecycle_simulator_world.py`).
+- `tests/rc4_scope_ratchet.py` ceilings raised to 272 files / 93000 lines for
+  exactly the two plan-authorized 2.6.7 scripts and the owner-repair lines.
+
 ## [2.6.6-rc4-fix3] - 2026-08-09
 
 This bounded reconciliation patch keeps Codex dispatch profile synchronization

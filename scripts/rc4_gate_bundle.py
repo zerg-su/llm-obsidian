@@ -60,10 +60,12 @@ def _git(*args: str) -> str:
     return result.stdout.strip()
 
 
-def _tracked_tree_digest(exclude: tuple[str, ...] = ()) -> str:
+def _tracked_tree_digest(
+    exclude: tuple[str, ...] = (), *, commit: str = "HEAD"
+) -> str:
     """Hash every tracked path and its blob, excluding the receipt itself."""
 
-    entries = _git("ls-tree", "-r", "HEAD").splitlines()
+    entries = _git("ls-tree", "-r", commit).splitlines()
     digest = hashlib.sha256()
     for entry in sorted(entries):
         meta, _, relative = entry.partition("\t")
@@ -189,13 +191,18 @@ def verify() -> dict[str, object]:
         raise GateBundleError(
             "RC4 gate receipt binds a commit outside the candidate lineage"
         )
-    current_tree = _tracked_tree_digest(
+    # The receipt is immutable 2.6.6 evidence: it must match the exact tree
+    # of the commit that produced it.  Later releases move HEAD by design,
+    # so the candidate-tree equality is checked against that recorded
+    # commit, and lineage stays enforced by the ancestor check above.
+    produced_tree = _tracked_tree_digest(
         exclude=(
             str(RECEIPT_PATH.relative_to(ROOT)),
             str(LOG_PATH.relative_to(ROOT)),
-        )
+        ),
+        commit=produced,
     )
-    if receipt.get("tracked_tree_sha256") != current_tree:
+    if receipt.get("tracked_tree_sha256") != produced_tree:
         raise GateBundleError(
             "RC4 gate receipt is stale for the current tracked candidate tree"
         )

@@ -131,8 +131,14 @@ for changelog in ("CHANGELOG.md", "CHANGELOG.ru.md"):
     check(
         FINDING,
         f"{changelog} records the restored live scope ratchet under 2.6.6-rc4",
-        "rc4_scope_ratchet" in rc4_section
-        and str(SCRIPT_FILE_CEILING) in rc4_section,
+        "rc4_scope_ratchet" in rc4_section,
+    )
+    # Later releases may raise the ceilings, but only together with their own
+    # changelog entry naming the new value.
+    check(
+        FINDING,
+        f"{changelog} documents the current scope ratchet ceiling",
+        str(SCRIPT_FILE_CEILING) in text,
     )
 
 rc2_scope = source("tests/test_v266_rc2_scope.py")
