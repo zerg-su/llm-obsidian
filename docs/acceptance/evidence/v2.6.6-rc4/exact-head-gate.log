@@ -99,7 +99,7 @@ OK   fake external adapters contain no process, network, or real cmux launch pri
 OK   conformance path reports measured zero real provider, model, cmux, and network effects
 
 All lifecycle provider-conformance tests passed.
-{"actions":25,"invariants":7,"scenarios":7,"schedules":8,"wall_seconds":0.174119}
+{"actions":25,"invariants":7,"scenarios":7,"schedules":8,"wall_seconds":0.202975}
 OK   stable JSON serialization
 OK   contracts are frozen
 OK   unknown runtime rejected
@@ -433,10 +433,62 @@ OK   CLI accepted callback probe error stays fail-closed
 OK   CLI non-callback unknown ownership stays fail-closed
 OK   CLI close keeps unknown exact resources attention-required
 OK   terminal exact approval selects callback-free recovery
+OK   terminal exact findings select callback-free transport recovery
 OK   accepted review recovery terminalizes dispatch exactly once
+OK   changes-requested recovery republishes the exact review generation
+OK   terminal findings recovery bypasses stale resolution parsing
+OK   completed resolution handoff advances instead of redelivering findings
+OK   fixture reproduces the incident shape
+OK   one root cancel leaves every exact descendant terminal
+OK   root itself is terminal after cascade
+OK   already-terminal descendants keep their terminal state
+OK   cascade leaves the exact subtree resource-free
+OK   cascade is child-first: review-round precedes its review parent
+OK   cascade is child-first: every descendant precedes the root
+OK   sibling subtree under the same owner is untouched
+OK   foreign owner is untouched
+OK   the cascade transitions no foreign owner and nothing outside the subtree
+OK   unknown root is rejected as StoreError, not any exception
+OK   rejected drift applies no transition
+OK   a corrupt parent cycle raises StoreError
+OK   the cycle error names the repeated operation
+OK   the cycle guard applies no transition
+OK   repeated root cancel is state-idempotent
+OK   repeated root cancel writes no new revisions
+OK   public cancel exits 0
+OK   public cancel reports a terminal root
+OK   public cancel leaves no exact descendant nonterminal
+OK   public cancel does not touch the sibling subtree
+OK   the release fixture actually binds resources first
+OK   a resource-bearing subtree still cascades to completion
+OK   every resource-bearing descendant reaches a terminal state
+OK   the cascade releases every exact owned surface
+OK   resource probes target only the exact owned surfaces
+OK   an unprovable reviewer descendant truncates the cascade
+OK   the unprovable reviewer descendant is held for cleanup attention
+OK   no surface is closed without durable cleanup ownership
+OK   the reviewer descendant keeps its owned surface
+OK   pending effect: the cascade reports itself truncated
+OK   pending effect: the outcome names the requested root, not the blocker
+OK   pending effect: the blocking descendant is identified
+OK   pending effect: the payload keys on the root and marks it partial
+OK   pending effect: the root is left nonterminal, not falsely cancelled
+OK   live owned surface: the cascade reports itself truncated
+OK   live owned surface: the outcome names the requested root, not the blocker
+OK   live owned surface: the blocking descendant is identified
+OK   live owned surface: the payload keys on the root and marks it partial
+OK   live owned surface: the root is left nonterminal, not falsely cancelled
+OK   public cancel does not exit 0 when the cascade is truncated
+OK   the truncated payload names the requested root
+OK   the truncated cascade leaves the root nonterminal
+OK   a live owned surface truncates the first cascade
+OK   re-running the same command makes forward progress
+OK   the retried cascade terminalizes the whole exact subtree
+cascade cancellation regressions: ok
 OK   split returns exact UUID and container identity
 OK   status matches exact UUID
 OK   workspace creation derives exact origin window without surface guessing
+OK   workspace creation derives the exact window for an offscreen origin
 OK   exact cmux calls ignore ambient caller targeting
 OK   workspace cleanup binds exact workspace and window
 OK   adapter never uses focus/title/index ownership guesses
@@ -970,7 +1022,7 @@ OK   review-inspect rejects unknown operations
 OK   all review inspection leaves worktree and Git metadata byte-stable
 
 All review-inspect tests passed.
-Initialized empty Git repository in /private/var/folders/w7/vtxrl9d178d9zsg47p1_1ls80000gn/T/plan-review-facade.mby9t0o5/repo/.git/
+Initialized empty Git repository in /private/var/folders/w7/vtxrl9d178d9zsg47p1_1ls80000gn/T/plan-review-facade.dyuxe8uc/repo/.git/
 OK   1 valid plan compiles four independent artifacts
 OK   2 design artifact replaces every protected region with its digest
 OK   3 missing Outcome heading fails closed
@@ -1424,7 +1476,7 @@ OK   owned-missing-gate stops after its active pointer and before its gate
 OK   active pointer without a gate retains any operation row fail closed
 OK   current release review binds one external artifact root
 OK   release callback wake is an idempotent active-review resume
-OK   current release review rejects checkout ancestor /var/folders/w7/vtxrl9d178d9zsg47p1_1ls80000gn/T/current-release-artifacts.y5nnmwn_/valid
+OK   current release review rejects checkout ancestor /var/folders/w7/vtxrl9d178d9zsg47p1_1ls80000gn/T/current-release-artifacts.raxze8lw/valid
 OK   current release review rejects checkout ancestor /
 OK   current release review rejects artifact-root drift on resume
 OK   current release review rejects an out-of-root outcome artifact
@@ -1920,7 +1972,7 @@ OK   Claude reviewer status renderer covers the normal payload in-process
 OK   Claude reviewer status renderer fails safe for a malformed payload
 OK   Claude reviewer status renderer fails safe for missing fields
 OK   Claude reviewer status renderer fails safe for wrong field types
-OK   review callback profile edits and writes only isolated scratch transport
+OK   review callback profile uses Edit path permissions for isolated scratch transport
 OK   Codex reviewer excludes ambient temporary roots and shell credentials
 OK   Codex reviewer rejects missing sandbox_workspace_write.exclude_slash_tmp=true
 OK   Codex reviewer rejects missing sandbox_workspace_write.exclude_tmpdir_env_var=true
@@ -1986,8 +2038,12 @@ OK   failed automatic review keeps only a typed content-free reason
 OK   unrecognized runner failures keep the generic typed reason
 OK   durable summary refresh replay performs no duplicate cmux effect
 OK   review resolution cmux crash windows never replay effects
+OK   durable review packet generation advances exactly once
+OK   resolution HEAD drift wakes the executor exactly once
 OK   automatic review drive waits for the complete resolution handoff
 OK   automatic review drive resumes after the exact durable handoff
+OK   terminal exact review resumes after the durable resolution handoff
+OK   terminal non-resolution result cannot consume finding evidence
 OK   automatic review drive rejects a prior-boundary callback identity
 OK   automatic review drive accepts one material anthropic-holistic axis
 OK   automatic review drive accepts one material openai-holistic axis
@@ -2345,12 +2401,82 @@ OK   diagnostic packet is content-free and bounded
 OK   code observer catches typed findings pending task delivery
 OK   unknown attention delegates only compact read-only triage
 harness diagnostics tests passed
-harness suite registration: ok (74 files)
+OK   classification escalation is ordered and fails closed on unknown values
+OK   projection resolves the real compiled pipeline from the operation contract
+OK   loop visits come from durable per-pass receipts
+OK   compiled reconciliation drives step status and the next action
+OK   parallel operation lanes and review axes are both projected
+OK   a live recorded surface is proven against the bounded cmux probe
+OK   a surface missing from the cmux tree is attention, never silent cleanup
+OK   an unreadable cmux tree requests coordinator classification
+OK   an ambiguous surface requests coordinator classification
+OK   projection never mutates durable state
+OK   the rendered dashboard is bounded English terminal text
+OK   the TTY renderer uses the restrained semantic palette without changing plain bytes
+OK   the CLI renders the dashboard without touching lifecycle authority
+OK   the CLI emits one typed JSON projection with an unavailable probe
+OK   malformed fix evidence is attention and never a completed visit
+OK   a valid-looking receipt without durable callback acceptance is invalid
+OK   a receipt drifting from its accepted callback identity is invalid
+OK   an unknown pipeline contract never invents progress
+OK   all active programs remain visible while issues stay bounded
+OK   a non-English persisted reason is omitted rather than translated
+OK   an unparseable durable record is reported, never skipped in silence
+OK   accepted complete verification receipts count without inventing a loop
+OK   valid failed verification evidence becomes bounded attention
+OK   wrong-identity verification evidence is invalid, never complete
+OK   malformed verification evidence is contained as one bounded issue
+OK   a receipt disappearing during a read is invalid rather than passed
+OK   an old failed HEAD cannot poison successful exact-HEAD verification
+OK   tampered current-HEAD attempt identity remains visible attention
+OK   missing exact-HEAD verification has one accurate program-level outcome
+OK   an unrelated running verification child cannot hide missing exact-HEAD evidence
+OK   only the durably matching current verification attempt defers the missing receipt
+OK   a failed root stops only its interrupted frontier
+OK   a cancelled root stops only its interrupted frontier
+OK   one dispatch renders as exactly one root program, not three
+OK   verification and review children nest under their owning pipeline step
+OK   active verification never leaves the finished implementation highlighted
+OK   pipelines without bounded-loop control report no loop counter
+OK   each step shows the frozen route of the record that executes it
+OK   the rendered tree shows one program with nested route-annotated steps
+OK   history caps retain the current review lineage axes and drop counts
+OK   a cancelled review parent with a complete round is finished, not attention
+OK   cancelled nested operations render with the explicit stopped marker
+OK   absent step metadata is labeled unknown rather than inferred
+OK   a running record owning no runtime resource is unresolved, not live
+OK   nested operations stay distinguishable on production-shaped ids
+OK   an ambiguous step binding stays at the program level, never guessed
+OK   a frozen custom dispatch projects its exact compiled graph
+OK   a bounded redraw keeps the newest live program above compact old attention summaries
+OK   viewport exact-fit preserves full detail while one-short truncates truthfully
+OK   bounded rendering retains multiple live identities and compacts attention-only views
+OK   small full-footer viewports retain the newest live program before old evidence
+OK   live redraw re-reads terminal rows while TTY --once stays byte-stable and unbounded
+OK   the standalone CLI shows every active pipeline and bounded terminal history
+OK   the standalone CLI bounds --interval
+OK   the standalone CLI bounds --recent
+OK   live mode redraws locally and exits cleanly on Ctrl-C
+OK   the external launcher creates once, reuses exactly, and never owns Harness state
+OK   simultaneous dead-ready recovery owns exactly one replacement split
+OK   simultaneous retryable recovery owns exactly one replacement split
+OK   the external launcher recovers after open failure
+OK   the external launcher recovers after send failure
+OK   the external launcher recovers after enter failure
+OK   fresh reservations reject concurrency while stale reservations recover once
+OK   one critical section binds one immutable caller placement probe
+OK   stale starting-published state closes and replaces its exact split
+OK   stale startup-delivered state closes and replaces its exact split
+OK   ambiguous caller placement is rejected before any cmux effect
+OK   a split response cannot alias or mutate the coordinator surface
+OK   persisted caller aliases are retryable without reuse or caller cleanup
+harness dashboard tests passed
+harness suite registration: ok (76 files)
 === code quality audit unit contracts ===
 code quality audit unit contracts passed
 2.6.6 RC1 evidence schemas passed
 RC3 release evidence contracts passed
-code quality audit: 268 files, 0 release blockers, 0 owned hotspots, 449 review signals
+code quality audit: 275 files, 0 release blockers, 0 owned hotspots, 464 review signals
 WARN  hooks/run-hook.py: 233 lines requires cohesion review
 WARN  prototypes/rt03-review-delta-packet.py: 308 lines requires cohesion review
 WARN  prototypes/rt03-review-delta-packet.py:72:main: 233 lines requires extraction review
@@ -2390,9 +2516,9 @@ WARN  scripts/dispatch_custom_contracts.py: 315 lines requires cohesion review
 WARN  scripts/dispatch_execution.py: 270 lines requires cohesion review
 WARN  scripts/dispatch_execution.py:50:start: 221 lines requires extraction review
 WARN  scripts/dispatch_lifecycle.py: 244 lines requires cohesion review
-WARN  scripts/dispatch_setup.py: 527 lines requires cohesion review
-WARN  scripts/dispatch_setup.py:175:render_task_prompt: 191 lines requires extraction review
-WARN  scripts/dispatch_setup.py:423:review_topology_preview: 72 lines requires extraction review
+WARN  scripts/dispatch_setup.py: 562 lines requires cohesion review
+WARN  scripts/dispatch_setup.py:209:render_task_prompt: 192 lines requires extraction review
+WARN  scripts/dispatch_setup.py:458:review_topology_preview: 72 lines requires extraction review
 WARN  scripts/dispatch_workspace.py: 300 lines requires cohesion review
 WARN  scripts/dispatch_workspace.py:158:write_task_files: 116 lines requires extraction review
 WARN  scripts/docling-adapter.py: 436 lines requires cohesion review
@@ -2406,12 +2532,12 @@ WARN  scripts/document_normalize_quality.py:172:quality_issues: 91 lines require
 WARN  scripts/engineering-eval-runner.py: 640 lines requires cohesion review
 WARN  scripts/engineering-eval-runner.py:106:rc4_cases: 162 lines requires extraction review
 WARN  scripts/engineering-eval-runner.py:477:run: 72 lines requires extraction review
-WARN  scripts/fold-log.py: 268 lines requires cohesion review
-WARN  scripts/harness/adapters/claude.py: 666 lines requires cohesion review
+WARN  scripts/fold-log.py: 273 lines requires cohesion review
+WARN  scripts/harness/adapters/claude.py: 659 lines requires cohesion review
 WARN  scripts/harness/adapters/claude.py:151:reviewer_sandbox_settings: 74 lines requires extraction review
-WARN  scripts/harness/adapters/claude.py:227:validate_reviewer_sandbox_command: 78 lines requires extraction review
-WARN  scripts/harness/adapters/claude.py:312:command: 129 lines requires extraction review
-WARN  scripts/harness/adapters/cmux.py: 441 lines requires cohesion review
+WARN  scripts/harness/adapters/claude.py:227:validate_reviewer_sandbox_command: 77 lines requires extraction review
+WARN  scripts/harness/adapters/claude.py:311:command: 123 lines requires extraction review
+WARN  scripts/harness/adapters/cmux.py: 479 lines requires cohesion review
 WARN  scripts/harness/adapters/codex.py: 527 lines requires cohesion review
 WARN  scripts/harness/adapters/codex.py:57:validate_reviewer_sandbox_command: 86 lines requires extraction review
 WARN  scripts/harness/adapters/codex.py:150:command: 138 lines requires extraction review
@@ -2424,12 +2550,12 @@ WARN  scripts/harness/callback_submit_recovery.py: 348 lines requires cohesion r
 WARN  scripts/harness/callback_submit_recovery.py:268:classify_callback_submit: 81 lines requires extraction review
 WARN  scripts/harness/capabilities.py: 227 lines requires cohesion review
 WARN  scripts/harness/capabilities.py:57:check: 171 lines requires extraction review
-WARN  scripts/harness/cli.py: 757 lines requires cohesion review
-WARN  scripts/harness/cli.py:166:_reconcile_owned_resources: 73 lines requires extraction review
-WARN  scripts/harness/cli.py:249:_cancel_or_close: 94 lines requires extraction review
-WARN  scripts/harness/cli.py:385:_recover_finalizing_review_if_present: 98 lines requires extraction review
-WARN  scripts/harness/cli.py:485:_resume: 121 lines requires extraction review
-WARN  scripts/harness/cli.py:608:main: 150 lines requires extraction review
+WARN  scripts/harness/cli.py: 977 lines requires cohesion review
+WARN  scripts/harness/cli.py:136:_reconcile_owned_resources: 73 lines requires extraction review
+WARN  scripts/harness/cli.py:219:_cancel_or_close: 94 lines requires extraction review
+WARN  scripts/harness/cli.py:465:_recover_finalizing_review_if_present: 123 lines requires extraction review
+WARN  scripts/harness/cli.py:675:_resume: 162 lines requires extraction review
+WARN  scripts/harness/cli.py:839:main: 139 lines requires extraction review
 WARN  scripts/harness/context.py: 243 lines requires cohesion review
 WARN  scripts/harness/context.py:156:build: 75 lines requires extraction review
 WARN  scripts/harness/contracts.py: 450 lines requires cohesion review
@@ -2440,6 +2566,16 @@ WARN  scripts/harness/custom_pipelines.py: 445 lines requires cohesion review
 WARN  scripts/harness/custom_pipelines.py:144:_validate_custom_flow: 82 lines requires extraction review
 WARN  scripts/harness/custom_pipelines.py:228:compile_custom_spec: 104 lines requires extraction review
 WARN  scripts/harness/custom_pipelines.py:365:render_custom_approval: 81 lines requires extraction review
+WARN  scripts/harness/dashboard_policy.py: 291 lines requires cohesion review
+WARN  scripts/harness/dashboard_projection.py: 924 lines requires cohesion review
+WARN  scripts/harness/dashboard_projection.py:341:_step_view: 68 lines requires extraction review
+WARN  scripts/harness/dashboard_projection.py:411:_steps: 112 lines requires extraction review
+WARN  scripts/harness/dashboard_projection.py:642:_program: 72 lines requires extraction review
+WARN  scripts/harness/dashboard_projection.py:739:_program_issues: 69 lines requires extraction review
+WARN  scripts/harness/dashboard_receipts.py: 297 lines requires cohesion review
+WARN  scripts/harness/dashboard_receipts.py:126:verification_receipt_status: 83 lines requires extraction review
+WARN  scripts/harness/dashboard_receipts.py:236:verification_receipt_visits: 62 lines requires extraction review
+WARN  scripts/harness/dashboard_view.py: 422 lines requires cohesion review
 WARN  scripts/harness/diagnostics.py:48:observe: 145 lines requires extraction review
 WARN  scripts/harness/ephemeral_provider.py: 573 lines requires cohesion review
 WARN  scripts/harness/finalization_ledger.py: 499 lines requires cohesion review
@@ -2501,8 +2637,8 @@ WARN  scripts/harness/runtime_session_launch.py:847:register_callback_target: 66
 WARN  scripts/harness/runtime_session_liveness.py: 299 lines requires cohesion review
 WARN  scripts/harness/runtime_sessions.py: 517 lines requires cohesion review
 WARN  scripts/harness/runtime_sessions.py:110:for_root: 63 lines requires extraction review
-WARN  scripts/harness/runtime_worker.py: 442 lines requires cohesion review
-WARN  scripts/harness/runtime_worker.py:157:_review_resolution_handoff_ready: 108 lines requires extraction review
+WARN  scripts/harness/runtime_worker.py: 476 lines requires cohesion review
+WARN  scripts/harness/runtime_worker.py:157:_review_resolution_handoff_ready: 120 lines requires extraction review
 WARN  scripts/harness/runtime_worker_control.py: 519 lines requires cohesion review
 WARN  scripts/harness/runtime_worker_control.py:36:inspect_control: 88 lines requires extraction review
 WARN  scripts/harness/runtime_worker_control.py:166:inspect_callback: 101 lines requires extraction review
@@ -2521,15 +2657,16 @@ WARN  scripts/harness/runtime_worker_liveness.py:184:inspect_callback_submit_rec
 WARN  scripts/harness/runtime_worker_liveness.py:422:inspect_liveness: 144 lines requires extraction review
 WARN  scripts/harness/runtime_worker_loop.py: 341 lines requires cohesion review
 WARN  scripts/harness/runtime_worker_loop.py:189:start_replacement_provider: 77 lines requires extraction review
-WARN  scripts/harness/runtime_worker_review_bridge.py: 800 lines requires cohesion review
+WARN  scripts/harness/runtime_worker_review_bridge.py: 857 lines requires cohesion review
 WARN  scripts/harness/runtime_worker_review_bridge.py:134:accept_callback_after_timeout: 77 lines requires extraction review
 WARN  scripts/harness/runtime_worker_review_bridge.py:212:inspect_callback: 117 lines requires extraction review
 WARN  scripts/harness/runtime_worker_review_bridge.py:436:build_review_resolution_packet: 139 lines requires extraction review
+WARN  scripts/harness/runtime_worker_review_bridge.py:676:send_review_resolution_notification: 109 lines requires extraction review
 WARN  scripts/harness/runtime_worker_spec.py: 346 lines requires cohesion review
 WARN  scripts/harness/runtime_worker_spec.py:243:load_spec: 104 lines requires extraction review
-WARN  scripts/harness/runtime_worker_summary.py: 544 lines requires cohesion review
-WARN  scripts/harness/runtime_worker_summary.py:292:advance_review_boundary: 62 lines requires extraction review
-WARN  scripts/harness/runtime_worker_summary.py:355:advance_compiled_pipeline: 61 lines requires extraction review
+WARN  scripts/harness/runtime_worker_summary.py: 539 lines requires cohesion review
+WARN  scripts/harness/runtime_worker_summary.py:287:advance_review_boundary: 62 lines requires extraction review
+WARN  scripts/harness/runtime_worker_summary.py:350:advance_compiled_pipeline: 61 lines requires extraction review
 WARN  scripts/harness/runtime_worker_verification.py: 999 lines requires cohesion review
 WARN  scripts/harness/runtime_worker_verification.py:62:load_verification_receipt: 106 lines requires extraction review
 WARN  scripts/harness/runtime_worker_verification.py:169:controller_verification_receipt: 73 lines requires extraction review
@@ -2549,9 +2686,9 @@ WARN  scripts/harness/split_evidence.py: 473 lines requires cohesion review
 WARN  scripts/harness/split_evidence.py:291:project: 160 lines requires extraction review
 WARN  scripts/harness/split_join.py:112:evaluate_join: 62 lines requires extraction review
 WARN  scripts/harness/split_validation.py:104:validate_manifest: 77 lines requires extraction review
-WARN  scripts/harness/status_segment.py: 475 lines requires cohesion review
-WARN  scripts/harness/status_segment.py:293:_collect: 81 lines requires extraction review
-WARN  scripts/harness/status_segment.py:407:publish: 69 lines requires extraction review
+WARN  scripts/harness/status_segment.py: 477 lines requires cohesion review
+WARN  scripts/harness/status_segment.py:295:_collect: 81 lines requires extraction review
+WARN  scripts/harness/status_segment.py:409:publish: 69 lines requires extraction review
 WARN  scripts/harness/store.py: 340 lines requires cohesion review
 WARN  scripts/harness/store.py:167:accept_callback: 91 lines requires extraction review
 WARN  scripts/harness/supervisor.py: 401 lines requires cohesion review
@@ -2602,6 +2739,9 @@ WARN  scripts/harness/workflows/review_results.py: 283 lines requires cohesion r
 WARN  scripts/harness-coverage-audit.py: 250 lines requires cohesion review
 WARN  scripts/harness-coverage-audit.py:99:run_trace: 62 lines requires extraction review
 WARN  scripts/harness-coverage-audit.py:186:main: 61 lines requires extraction review
+WARN  scripts/harness-dashboard.py: 529 lines requires cohesion review
+WARN  scripts/harness-dashboard.py:116:snapshot: 88 lines requires extraction review
+WARN  scripts/harness-dashboard.py:267:_open_dashboard_unlocked: 146 lines requires extraction review
 WARN  scripts/install-docling.py: 334 lines requires cohesion review
 WARN  scripts/install-docling.py:203:install: 111 lines requires extraction review
 WARN  scripts/journal-write.py: 347 lines requires cohesion review
@@ -2657,8 +2797,9 @@ WARN  scripts/rc3_release_disposition.py:264:_review_bundle: 73 lines requires e
 WARN  scripts/rc3_release_disposition.py:464:compile_disposition: 69 lines requires extraction review
 WARN  scripts/rc3_release_disposition.py:570:main: 62 lines requires extraction review
 WARN  scripts/rc3_slice_receipt.py: 249 lines requires cohesion review
-WARN  scripts/rc4_gate_bundle.py: 218 lines requires cohesion review
+WARN  scripts/rc4_gate_bundle.py: 228 lines requires cohesion review
 WARN  scripts/rc4_gate_bundle.py:83:run_gate: 61 lines requires extraction review
+WARN  scripts/rc4_gate_bundle.py:146:verify: 61 lines requires extraction review
 WARN  scripts/reap-runner.py: 549 lines requires cohesion review
 WARN  scripts/reap-runner.py:347:_finalize_reap: 97 lines requires extraction review
 WARN  scripts/reap_effect_reconciliation.py: 490 lines requires cohesion review
@@ -2718,10 +2859,10 @@ WARN  scripts/task_escalation_records.py:802:append_amendment: 66 lines requires
 WARN  scripts/task_reap_lifecycle.py: 415 lines requires cohesion review
 WARN  scripts/task_reap_lifecycle.py:207:prepare_reap: 108 lines requires extraction review
 WARN  scripts/task_reap_lifecycle.py:317:complete_reap: 99 lines requires extraction review
-WARN  scripts/task_review_context.py: 789 lines requires cohesion review
-WARN  scripts/task_review_context.py:322:_purpose_boundary_inputs: 71 lines requires extraction review
-WARN  scripts/task_review_context.py:410:_delta_inputs: 68 lines requires extraction review
-WARN  scripts/task_review_context.py:500:_context: 290 lines requires extraction review
+WARN  scripts/task_review_context.py: 853 lines requires cohesion review
+WARN  scripts/task_review_context.py:379:_purpose_boundary_inputs: 71 lines requires extraction review
+WARN  scripts/task_review_context.py:467:_delta_inputs: 68 lines requires extraction review
+WARN  scripts/task_review_context.py:557:_context: 297 lines requires extraction review
 WARN  scripts/task_review_current.py: 709 lines requires cohesion review
 WARN  scripts/task_review_current.py:141:_current_review_artifact_root: 64 lines requires extraction review
 WARN  scripts/task_review_current.py:292:_active_current_review: 171 lines requires extraction review
@@ -3196,6 +3337,8 @@ ok - dispatch rejects unknown reap keys
 ok - dispatch placement never guesses from focus
 ok - unattended finalization uses the internal callback broker
 ok - prompt delegates lifecycle mechanics to harness
+ok - task prompt binds read-only harness diagnostics to canonical ownership
+ok - task prompt keeps harness mutations coordinator-owned
 ok - default dispatch requires automatic simple review
 ok - task prompt leaves automatic review launch to the harness
 ok - approved dispatch can select the built-in engineering change profile
@@ -3975,21 +4118,21 @@ OK   refresh-only skips report
 OK   refresh-only warm exit 0
 ---
 type: meta
-title: "tiling-report-2026-08-08"
-created: 2026-08-08
-updated: 2026-08-08
+title: "tiling-report-2026-08-09"
+created: 2026-08-09
+updated: 2026-08-09
 status: solid
 tags:
   - meta
   - report
   - tiling
 sessions:
-  - 019fab00-3160-7380-8920-4b20183afb76
+  - 019fe523-7353-72a0-b46b-ee690884b169
 ---
 
 # Semantic Tiling Report
 
-- generated: 2026-08-08T08:04:29Z
+- generated: 2026-08-09T06:59:07Z
 - model: m
 - ollama_url: x
 - thresholds: error>=0.9, review=0.85-0.9
@@ -4454,7 +4597,7 @@ OK   no uncovered runtime keeps the verdict complete
 OK   unattributed agent activity blocks a complete verdict
 OK   an unattributed router hint is unverified evidence, not dead weight
 OK   unattributed activity without an agent op stays out of the verdict
-OK   stats exits 0 (pipeline-stats-codex.x0l32a9n)
+OK   stats exits 0 (pipeline-stats-codex._zdy3d71)
 OK   report names the runtime coverage boundary
 OK   coverage table reports Codex as observed but unobservable
 OK   zero list is not presented as a proven dead-weight verdict
@@ -4463,22 +4606,22 @@ OK   a Codex-hinted skill is separated from removal candidates
 OK   a router hint is not rendered as proof of invocation
 OK   the coverage counts are not presented as comparable across runtimes
 OK   unhinted skills stay listed as removal candidates
-OK   stats exits 0 (pipeline-stats-claude.bpsxnaga)
+OK   stats exits 0 (pipeline-stats-claude.lk60evo6)
 OK   a Claude-only window with real usage reports a complete verdict
 OK   unused skills are candidates when nothing else was observed
 OK   the skill that was actually used is not a candidate
 OK   the report never claims a runtime tag means 'no model'
-OK   stats exits 0 (pipeline-stats-unattributed.bu1rz8z_)
+OK   stats exits 0 (pipeline-stats-unattributed.j93qi875)
 OK   unattributed orchestration blocks the complete dead-weight verdict
 OK   the unattributed boundary is named in the zero section
 OK   an unattributed router hint is reported as unverified, not removable
 OK   an unrecognized router tag does not become its own coverage row
 OK   the unattributed row states missing attribution, not missing capability
-OK   stats exits 0 (pipeline-stats-empty.5nn_rmz8)
+OK   stats exits 0 (pipeline-stats-empty.p1o9h8bd)
 OK   an evidence-free window makes no dead-weight claim
 OK   an evidence-free window says so explicitly
 OK   no installed skill is listed for removal without evidence
-OK   stats exits 0 (pipeline-stats-small.ln_oh6cn)
+OK   stats exits 0 (pipeline-stats-small.506a04e4)
 OK   a healthy but empty window still makes no dead-weight claim
 OK   healthy Claude sources are not blamed for the empty window
 
@@ -4668,6 +4811,8 @@ All retrieval experiment tests passed.
 OK   parser sees all log entries
 OK   content hash length
 OK   fold operation excluded
+OK   summary truncation cannot create wikilinks
+OK   summary retains readable link label
 OK   status exit 0
 OK   status batch size
 OK   status unprocessed
@@ -4968,9 +5113,9 @@ dcg asset tests: 19 passed, 0 failed
 Passed: 6
 
 All tests passed.
-..
+.......
 ----------------------------------------------------------------------
-Ran 2 tests in 0.000s
+Ran 7 tests in 0.013s
 
 OK
 verification-receipt: test-evidence 1/2 proof-output
@@ -4983,8 +5128,8 @@ verification-receipt: test-stability-bootstrap 3/3 clean-status
 verification-receipt: test-stability-bootstrap 1/3 mcp-sync-config
 verification-receipt: release-final 1/1 proof
 verification-receipt: release-final 1/1 failure
-task-sessions: skipped corrupt queued operation f87abb31-f799-41e5-b40e-e28cfb5ddfd1; the exact lane remains available
-task-sessions: skipped corrupt queued operation 15ec1c76-9d52-420b-963f-84886b826bb5; the exact lane remains available
+task-sessions: skipped corrupt queued operation 7f0a5907-f5e7-46e6-9f59-a114cec01ae7; the exact lane remains available
+task-sessions: skipped corrupt queued operation 1af1561d-8e2c-4313-8a23-15e64789099e; the exact lane remains available
 live acceptance could not release every owned surface; recover the exact operations with harness-cli.py reconcile: live-aaaaaaaaaaaa-claude-lifecycle-1: attention-required (callback-invalid)
 live acceptance could not release every owned surface; recover the exact operations with harness-cli.py reconcile: live-aaaaaaaaaaaa-claude-lifecycle-1: attention-required (attention-required)
 live acceptance could not release every owned surface; recover the exact operations with harness-cli.py reconcile: live-aaaaaaaaaaaa-claude-lifecycle-1: terminal failed retained owned resources
@@ -4994,7 +5139,7 @@ ERR: cache read failed: Expecting value: line 1 column 1 (char 0)
 ERR: unknown cache version: 999
 refresh-only: scanned=2 cached=0 computed=2 orphans_pruned=0
 refresh-only: scanned=2 cached=2 computed=0 orphans_pruned=0
-report written: /private/var/folders/w7/vtxrl9d178d9zsg47p1_1ls80000gn/T/tmp0m3qvfy1/report.md
+report written: /private/var/folders/w7/vtxrl9d178d9zsg47p1_1ls80000gn/T/tmpozsd3ze5/report.md
 refresh-only: scanned=2 cached=1 computed=1 orphans_pruned=0
 ollama not reachable at x; skipping tiling check
 reindex: 5 file(s) without frontmatter are INVISIBLE to indexes: wiki/concepts/_index.md, wiki/plans/_index.md, wiki/questions/_index.md, wiki/reindex-fixture/_index.md, wiki/sources/_index.md
