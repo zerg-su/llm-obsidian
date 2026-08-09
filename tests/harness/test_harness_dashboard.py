@@ -45,6 +45,7 @@ from harness.dashboard_projection import (
     _bind_children,
     escalate,
     project,
+    project_root,
 )
 from harness.dashboard_view import MAX_LINE, _colorize, render
 from harness.custom_pipelines import (
@@ -1791,7 +1792,7 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-viewport.") as raw:
 
     baseline = _tree_bytes(store_root)
     resize_code = dashboard_script.main(
-        ["--store", str(store_root), "--interval", "0.1", "--no-color"],
+        ["--store", str(store_root), "--all", "--interval", "0.1", "--no-color"],
         inventory_probe=lambda **_kwargs: LiveInventory(
             {live_surface.casefold(): "workspace-live"}
         ),
@@ -1802,7 +1803,7 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-viewport.") as raw:
     )
     once_output: list[str] = []
     once_code = dashboard_script.main(
-        ["--store", str(store_root), "--once", "--no-color"],
+        ["--store", str(store_root), "--all", "--once", "--no-color"],
         inventory_probe=lambda **_kwargs: LiveInventory(
             {live_surface.casefold(): "workspace-live"}
         ),
@@ -1880,6 +1881,7 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-cli.") as raw:
         str(ROOT / "scripts" / "harness-dashboard.py"),
         "--store",
         str(store_root),
+        "--all",
         "--once",
         "--recent",
         "2",
@@ -1910,7 +1912,7 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-cli.") as raw:
     )
     for option, value in (("--interval", "0"), ("--recent", "4")):
         rejected = subprocess.run(
-            [*command[:4], option, value, "--once"],
+            [*command[:4], "--all", option, value, "--once"],
             text=True,
             capture_output=True,
             check=False,
@@ -1927,7 +1929,7 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-cli.") as raw:
         raise KeyboardInterrupt
 
     code = dashboard_script.main(
-        ["--store", str(store_root), "--interval", "0.1", "--no-color"],
+        ["--store", str(store_root), "--all", "--interval", "0.1", "--no-color"],
         inventory_probe=lambda **_kwargs: None,
         sleeper=interrupt,
         output=rendered.append,
@@ -1937,6 +1939,198 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-cli.") as raw:
         code == 0
         and len(rendered) == 1
         and rendered[0].startswith("\x1b[2J\x1b[H")
+        and _tree_bytes(store_root) == baseline,
+    )
+
+
+ROOT_SCOPE_A = "root-scope-alpha"
+ROOT_SCOPE_B = "root-scope-beta"
+ROOT_SCOPE_HISTORICAL = "root-scope-historical"
+
+with tempfile.TemporaryDirectory(prefix="harness-dashboard-root.") as raw:
+    store_root = Path(raw) / "harness"
+    store = OperationStore(store_root)
+    compiled = compiled_builtin("engineering/change")
+    for owner in (ROOT_SCOPE_A, ROOT_SCOPE_B):
+        _create(
+            store,
+            owner,
+            "dispatch",
+            lane_id=f"lane-{owner}",
+            contract_sha256=compiled.definition_sha256,
+            owner=owner,
+        )
+        _advance(store, owner, "preflight", "starting", owner=owner)
+    scoped_child = f"{ROOT_SCOPE_A}-verify-0"
+    _create(
+        store,
+        scoped_child,
+        "pipeline-verify",
+        lane_id=f"lane-{ROOT_SCOPE_A}",
+        parent=ROOT_SCOPE_A,
+        owner=ROOT_SCOPE_A,
+    )
+    _advance(store, scoped_child, "preflight", "starting", "running", owner=ROOT_SCOPE_A)
+    _create(
+        store,
+        ROOT_SCOPE_HISTORICAL,
+        "dispatch",
+        lane_id="lane-historical",
+        contract_sha256=compiled.definition_sha256,
+        owner=ROOT_SCOPE_HISTORICAL,
+    )
+    _advance(store, ROOT_SCOPE_HISTORICAL, "preflight", "starting", owner=ROOT_SCOPE_HISTORICAL)
+    store.transition(
+        ROOT_SCOPE_HISTORICAL,
+        ROOT_SCOPE_HISTORICAL,
+        "attention-required",
+        reason=AttentionReason.ATTENTION_REQUIRED,
+    )
+
+    baseline = _tree_bytes(store_root)
+    scoped = project_root(store_root, ROOT_SCOPE_A)
+    scoped_frame = render(scoped, scope="root")
+    check(
+        "root projection renders exactly one root with its descendants and no unrelated owner",
+        scoped.owner_id == ROOT_SCOPE_A
+        and tuple(program.operation_id for program in scoped.programs)
+        == (ROOT_SCOPE_A,)
+        and scoped.classification in {HEALTHY, ACTIVE, WAITING}
+        and all(
+            issue.operation_id
+            not in {ROOT_SCOPE_B, ROOT_SCOPE_HISTORICAL}
+            for issue in scoped.issues
+        )
+        and f"Harness dashboard - root {ROOT_SCOPE_A}" in scoped_frame
+        and scoped_child in scoped_frame
+        and ROOT_SCOPE_B not in scoped_frame
+        and ROOT_SCOPE_HISTORICAL not in scoped_frame
+        and _tree_bytes(store_root) == baseline,
+    )
+
+    pre = project_root(store_root, "root-scope-unseen")
+    pre_frame = render(pre, scope="root")
+    check(
+        "a pre-start root observer is empty, waiting, and read-only",
+        pre.owner_id == "root-scope-unseen"
+        and pre.programs == ()
+        and pre.issues == ()
+        and pre.classification == WAITING
+        and "root-scope-unseen" in pre_frame
+        and "waiting" in pre_frame.lower()
+        and ROOT_SCOPE_A not in pre_frame
+        and _tree_bytes(store_root) == baseline,
+    )
+
+    early = "root-scope-early-failure"
+    _create(
+        store,
+        early,
+        "dispatch",
+        lane_id="lane-early",
+        contract_sha256=compiled.definition_sha256,
+        owner=early,
+    )
+    _advance(store, early, "preflight", owner=early)
+    store.transition(early, early, "failed")
+    failed_scope = project_root(store_root, early)
+    failed_frame = render(failed_scope, scope="root")
+    check(
+        "an early start failure is visible inside its root observer",
+        tuple(program.state for program in failed_scope.programs) == ("failed",)
+        and any(issue.code == "terminal-failed" for issue in failed_scope.issues)
+        and early in failed_frame,
+    )
+
+    unseen_child_scope = project_root(store_root, scoped_child)
+    nested_owner = "root-scope-nested"
+    nested_parent = "root-scope-nested-parent"
+    _create(
+        store,
+        nested_parent,
+        "dispatch",
+        lane_id="lane-nested",
+        contract_sha256=compiled.definition_sha256,
+        owner=nested_owner,
+    )
+    _create(
+        store,
+        nested_owner,
+        "pipeline-verify",
+        lane_id="lane-nested",
+        parent=nested_parent,
+        owner=nested_owner,
+    )
+    child_scope = project_root(store_root, nested_owner)
+    check(
+        "a non-root identity fails closed without rendering its parent tree",
+        unseen_child_scope.programs == ()
+        and unseen_child_scope.classification == WAITING
+        and child_scope.programs == ()
+        and any(
+            issue.code == "root-scope-not-a-root"
+            and issue.operation_id == nested_owner
+            and issue.classification == COORDINATOR
+            for issue in child_scope.issues
+        )
+        and child_scope.classification == COORDINATOR
+        and nested_parent
+        not in {program.operation_id for program in child_scope.programs},
+    )
+
+    scope_errors = []
+    for argv in (
+        ["--store", str(store_root), "--once", "--no-color"],
+        [
+            "--store",
+            str(store_root),
+            "--once",
+            "--no-color",
+            "--root",
+            ROOT_SCOPE_A,
+            "--all",
+        ],
+        ["--store", str(store_root), "--once", "--no-color", "--root", "../evil"],
+        ["--store", str(store_root), "--once", "--no-color", "--root", ""],
+    ):
+        try:
+            dashboard_script.main(argv, inventory_probe=lambda **_kwargs: None)
+        except SystemExit as exc:
+            scope_errors.append(exc.code)
+        else:
+            scope_errors.append(None)
+    check(
+        "normal mode requires exactly one exact --root and --all stays a separate diagnostic",
+        scope_errors == [2, 2, 2, 2],
+    )
+
+    baseline = _tree_bytes(store_root)
+    root_once: list[str] = []
+    root_code = dashboard_script.main(
+        ["--store", str(store_root), "--root", ROOT_SCOPE_A, "--once", "--no-color"],
+        inventory_probe=lambda **_kwargs: None,
+        output=root_once.append,
+        tty_probe=lambda: False,
+    )
+    all_once: list[str] = []
+    all_code = dashboard_script.main(
+        ["--store", str(store_root), "--all", "--once", "--no-color"],
+        inventory_probe=lambda **_kwargs: None,
+        output=all_once.append,
+        tty_probe=lambda: False,
+    )
+    check(
+        "the CLI renders one root in normal mode while --all keeps the global diagnostic",
+        root_code == 0
+        and len(root_once) == 1
+        and ROOT_SCOPE_A in root_once[0]
+        and ROOT_SCOPE_B not in root_once[0]
+        and ROOT_SCOPE_HISTORICAL not in root_once[0]
+        and all_code == 0
+        and all(
+            owner in all_once[0]
+            for owner in (ROOT_SCOPE_A, ROOT_SCOPE_B, ROOT_SCOPE_HISTORICAL)
+        )
         and _tree_bytes(store_root) == baseline,
     )
 
@@ -2043,6 +2237,9 @@ class MovingCmux:
         pass
 
 
+OPEN_ROOT = "root-open-alpha"
+OPEN_ROOT_B = "root-open-beta"
+
 with tempfile.TemporaryDirectory(prefix="harness-dashboard-open.") as raw:
     root = Path(raw)
     vault = root / "vault"
@@ -2057,6 +2254,7 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-open.") as raw:
     baseline = _tree_bytes(store_root)
     first = dashboard_script.open_dashboard(
         vault=vault,
+        root=OPEN_ROOT,
         store=store_root,
         caller_surface=caller,
         adapter=adapter,
@@ -2064,6 +2262,7 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-open.") as raw:
     )
     second = dashboard_script.open_dashboard(
         vault=vault,
+        root=OPEN_ROOT,
         store=store_root,
         caller_surface=caller,
         adapter=adapter,
@@ -2072,6 +2271,7 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-open.") as raw:
     fake.created = False
     replacement = dashboard_script.open_dashboard(
         vault=vault,
+        root=OPEN_ROOT,
         store=store_root,
         caller_surface=caller,
         adapter=adapter,
@@ -2109,11 +2309,123 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-open.") as raw:
         and not any("focus" in call and "new-split" not in call for call in fake.calls)
         and _tree_bytes(store_root) == baseline,
     )
+
+    fake.created = True
+    second_root_result = dashboard_script.open_dashboard(
+        vault=vault,
+        root=OPEN_ROOT_B,
+        store=store_root,
+        caller_surface=caller,
+        adapter=adapter,
+        marker_root=marker_root,
+    )
+    second_root_repeat = dashboard_script.open_dashboard(
+        vault=vault,
+        root=OPEN_ROOT_B,
+        store=store_root,
+        caller_surface=caller,
+        adapter=adapter,
+        marker_root=marker_root,
+    )
+    marker_values = [
+        json.loads(path.read_text(encoding="ascii"))
+        for path in sorted(marker_root.glob("*.json"))
+    ]
+    send_texts = [call[-1] for call in fake.calls if call[1:2] == ["send"]]
+    check(
+        "dashboard split identity binds vault, workspace, and exact root",
+        not second_root_result.reused
+        and second_root_repeat.reused
+        and sorted(value["root_id"] for value in marker_values)
+        == sorted((OPEN_ROOT, OPEN_ROOT_B))
+        and all(value["schema_version"] == 3 for value in marker_values)
+        and any(f"--root {OPEN_ROOT}" in text for text in send_texts)
+        and any(f"--root {OPEN_ROOT_B}" in text for text in send_texts)
+        and all("--all" not in text for text in send_texts),
+    )
+
+    def cmux_effects() -> int:
+        return len(
+            [
+                call
+                for call in fake.calls
+                if any(
+                    op in call
+                    for op in ("new-split", "send", "send-key", "close-surface")
+                )
+            ]
+        )
+
+    foreign_marker = next(
+        path
+        for path in marker_root.glob("*.json")
+        if json.loads(path.read_text(encoding="ascii"))["root_id"] == OPEN_ROOT_B
+    )
+    foreign_value = json.loads(foreign_marker.read_text(encoding="ascii"))
+    foreign_value["root_id"] = "root-open-foreign"
+    foreign_marker.write_text(json.dumps(foreign_value), encoding="ascii")
+    effects_before = cmux_effects()
+    try:
+        dashboard_script.open_dashboard(
+            vault=vault,
+            root=OPEN_ROOT_B,
+            store=store_root,
+            caller_surface=caller,
+            adapter=adapter,
+            marker_root=marker_root,
+        )
+    except Exception as exc:
+        foreign_rejected = "identity" in str(exc)
+    else:
+        foreign_rejected = False
+    check(
+        "a foreign root marker fails closed without touching another surface",
+        foreign_rejected and cmux_effects() == effects_before,
+    )
+
+    invalid_root_effects = []
+    for bad_root in ("", "../evil", "root open space", "x" * 129):
+        bad_fake = FakeCmuxRunner(caller, dashboard, workspace)
+        try:
+            dashboard_script.open_dashboard(
+                vault=vault,
+                root=bad_root,
+                store=store_root,
+                caller_surface=caller,
+                adapter=CmuxAdapter(runner=bad_fake, binary="cmux"),
+                marker_root=root / "bad-root-markers",
+            )
+        except Exception:
+            invalid_root_effects.append(len(bad_fake.calls))
+        else:
+            invalid_root_effects.append(-1)
+    try:
+        dashboard_script.main(
+            [
+                "open",
+                "--vault",
+                str(vault),
+                "--store",
+                str(store_root),
+                "--surface",
+                caller,
+            ]
+        )
+    except SystemExit as exc:
+        open_requires_root = exc.code == 2
+    else:
+        open_requires_root = False
+    check(
+        "an inexact or missing root identity is rejected before any cmux effect",
+        invalid_root_effects == [0, 0, 0, 0] and open_requires_root,
+    )
+
     race_fake = FakeCmuxRunner(caller, dashboard, workspace)
     race_adapter = CmuxAdapter(runner=race_fake, binary="cmux")
     race_markers = root / "race-markers"
     dashboard_script.open_dashboard(
         vault=vault,
+        root=OPEN_ROOT,
         store=store_root,
         caller_surface=caller,
         adapter=race_adapter,
@@ -2126,6 +2438,7 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-open.") as raw:
         start.wait()
         return dashboard_script.open_dashboard(
             vault=vault,
+            root=OPEN_ROOT,
             store=store_root,
             caller_surface=caller,
             adapter=race_adapter,
@@ -2164,6 +2477,7 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-open.") as raw:
         try:
             dashboard_script.open_dashboard(
                 vault=vault,
+                root=OPEN_ROOT,
                 store=store_root,
                 caller_surface=caller,
                 adapter=failed_adapter,
@@ -2175,6 +2489,7 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-open.") as raw:
             raise AssertionError(f"{failure} failure was accepted")
         recovered = dashboard_script.open_dashboard(
             vault=vault,
+            root=OPEN_ROOT,
             store=store_root,
             caller_surface=caller,
             adapter=failed_adapter,
@@ -2194,6 +2509,7 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-open.") as raw:
     try:
         dashboard_script.open_dashboard(
             vault=vault,
+            root=OPEN_ROOT,
             store=store_root,
             caller_surface=caller,
             adapter=reserved_adapter,
@@ -2209,6 +2525,7 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-open.") as raw:
     try:
         dashboard_script.open_dashboard(
             vault=vault,
+            root=OPEN_ROOT,
             store=store_root,
             caller_surface=caller,
             adapter=reserved_adapter,
@@ -2221,6 +2538,7 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-open.") as raw:
         concurrent_rejected = False
     stale = dashboard_script.open_dashboard(
         vault=vault,
+        root=OPEN_ROOT,
         store=store_root,
         caller_surface=caller,
         adapter=reserved_adapter,
@@ -2235,6 +2553,7 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-open.") as raw:
     moving = MovingCmux(caller, dashboard, (workspace, moved_workspace))
     moved = dashboard_script.open_dashboard(
         vault=vault,
+        root=OPEN_ROOT,
         store=store_root,
         caller_surface=caller,
         adapter=moving,
@@ -2259,6 +2578,7 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-open.") as raw:
         try:
             dashboard_script.open_dashboard(
                 vault=vault,
+                root=OPEN_ROOT,
                 store=store_root,
                 caller_surface=caller,
                 adapter=crash_adapter,
@@ -2272,6 +2592,7 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-open.") as raw:
             crashed = False
         recovered = dashboard_script.open_dashboard(
             vault=vault,
+            root=OPEN_ROOT,
             store=store_root,
             caller_surface=caller,
             adapter=crash_adapter,
@@ -2292,6 +2613,7 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-open.") as raw:
     try:
         dashboard_script.open_dashboard(
             vault=vault,
+            root=OPEN_ROOT,
             store=store_root,
             caller_surface=caller,
             adapter=ambiguous,
@@ -2312,6 +2634,7 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-open.") as raw:
     try:
         dashboard_script.open_dashboard(
             vault=vault,
+            root=OPEN_ROOT,
             store=store_root,
             caller_surface=caller,
             adapter=alias_adapter,
@@ -2343,6 +2666,7 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-open.") as raw:
         markers = root / f"persisted-alias-{state}"
         dashboard_script.open_dashboard(
             vault=vault,
+            root=OPEN_ROOT,
             store=store_root,
             caller_surface=caller,
             adapter=adapter,
@@ -2361,6 +2685,7 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-open.") as raw:
         call_count = len(fake.calls)
         result = dashboard_script.open_dashboard(
             vault=vault,
+            root=OPEN_ROOT,
             store=store_root,
             caller_surface=caller,
             adapter=adapter,

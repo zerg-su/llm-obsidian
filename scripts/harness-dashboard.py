@@ -23,6 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from harness.adapters.cmux import CmuxAdapter, CmuxError, UUID_RE
+from harness.contracts import ID_RE
 from harness.dashboard_projection import (
     ACTIVE,
     ATTENTION,
@@ -33,6 +34,7 @@ from harness.dashboard_projection import (
     IssueView,
     escalate,
     project,
+    project_root,
 )
 from harness.dashboard_view import render
 from harness.state_machine import TERMINAL
@@ -65,9 +67,28 @@ def _interval(value: str) -> float:
     return parsed
 
 
+def _root_id_argument(value: str) -> str:
+    if not ID_RE.fullmatch(value):
+        raise argparse.ArgumentTypeError(
+            "root must be one exact bounded operation identity"
+        )
+    return value
+
+
 def _live_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="harness-dashboard")
     parser.add_argument("--store", type=Path, required=True)
+    scope = parser.add_mutually_exclusive_group(required=True)
+    scope.add_argument(
+        "--root",
+        type=_root_id_argument,
+        help="project exactly one root operation and its descendants",
+    )
+    scope.add_argument(
+        "--all",
+        action="store_true",
+        help="explicit diagnostic projection across every owner",
+    )
     parser.add_argument(
         "--once",
         action="store_true",
@@ -88,6 +109,7 @@ def _open_parser() -> argparse.ArgumentParser:
     parser.add_argument("--vault", type=Path, required=True)
     parser.add_argument("--store", type=Path, required=True)
     parser.add_argument("--surface", required=True)
+    parser.add_argument("--root", type=_root_id_argument, required=True)
     return parser
 
 
@@ -267,6 +289,7 @@ def _read_marker(path: Path) -> dict[str, object]:
 def _open_dashboard_unlocked(
     *,
     resolved_store: Path,
+    root_id: str,
     caller_surface: str,
     cmux: CmuxAdapter,
     inventory: object,
@@ -375,6 +398,8 @@ def _open_dashboard_unlocked(
             str(Path(__file__).resolve()),
             "--store",
             str(resolved_store),
+            "--root",
+            root_id,
             "--interval",
             "1",
             "--recent",
@@ -417,12 +442,18 @@ def open_dashboard(
     vault: Path,
     store: Path,
     caller_surface: str,
+    root: str,
     adapter: CmuxAdapter | None = None,
     marker_root: Path | None = None,
     clock: Callable[[], float] = time.time,
     crash_hook: Callable[[str], None] | None = None,
 ) -> OpenResult:
-    """Serialize and open one external observer for a vault/workspace pair."""
+    """Serialize and open one root-scoped external observer split.
+
+    The split identity is the vault plus the exact coordinator workspace plus
+    one root operation id, so reopening one request reuses exactly one split
+    and a second request owns a second split.
+    """
 
     resolved_vault = vault.expanduser().resolve()
     resolved_store = store.expanduser().resolve()
@@ -432,6 +463,8 @@ def open_dashboard(
         raise CmuxError("dashboard store must belong to the exact vault")
     if not UUID_RE.fullmatch(caller_surface):
         raise CmuxError("coordinator surface must be an exact UUID")
+    if not ID_RE.fullmatch(root):
+        raise CmuxError("dashboard root must be one exact operation identity")
     cmux = adapter or CmuxAdapter()
     markers = (marker_root or _marker_root()).expanduser().resolve()
     markers.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -444,17 +477,19 @@ def open_dashboard(
         workspace_id = inventory.surface_workspaces.get(caller_key, "")
         if not UUID_RE.fullmatch(workspace_id):
             raise CmuxError("coordinator surface has no exact workspace identity")
-        marker_key = _digest(f"{vault_digest}\0{workspace_id.casefold()}")
+        marker_key = _digest(f"{vault_digest}\0{workspace_id.casefold()}\0{root}")
         marker = markers / f"{marker_key}.json"
         expected = {
-            "schema_version": 2,
+            "schema_version": 3,
             "marker_key": marker_key,
             "vault_sha256": vault_digest,
             "store_sha256": _digest(str(resolved_store)),
             "workspace_id": workspace_id,
+            "root_id": root,
         }
         return _open_dashboard_unlocked(
             resolved_store=resolved_store,
+            root_id=root,
             caller_surface=caller_surface,
             cmux=cmux,
             inventory=inventory,
@@ -472,6 +507,7 @@ def _open_main(argv: Sequence[str]) -> int:
         vault=args.vault,
         store=args.store,
         caller_surface=args.surface,
+        root=args.root,
     )
     print(
         json.dumps(
@@ -480,6 +516,7 @@ def _open_main(argv: Sequence[str]) -> int:
                 "status": "reused" if result.reused else "created",
                 "surface_id": result.surface_id,
                 "workspace_id": result.workspace_id,
+                "root": args.root,
             },
             sort_keys=True,
         )
@@ -509,13 +546,25 @@ def main(
     try:
         while True:
             inventory = _probe_inventory(inventory_probe)
-            projection = snapshot(args.store, recent=args.recent, inventory=inventory)
+            projection = (
+                snapshot(args.store, recent=args.recent, inventory=inventory)
+                if args.all
+                else project_root(
+                    args.store,
+                    args.root,
+                    inventory=inventory,
+                    surface_probe=(
+                        "observed" if inventory is not None else "unavailable"
+                    ),
+                )
+            )
             rows = max(int(row_probe()), 1) if is_tty and not args.once else None
             text = render(
                 projection,
                 recent=args.recent,
                 color=color,
                 rows=rows,
+                scope="owner" if args.all else "root",
             )
             emit(text if args.once else CLEAR + text)
             if args.once:

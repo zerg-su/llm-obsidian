@@ -41,6 +41,17 @@ hidden counts. TTY output uses a small semantic ANSI palette.
 and is not screen-height truncated; continuous mode always emits the redraw
 clear sequence.
 
+The standalone observer (`scripts/harness-dashboard.py`) is root-scoped in
+normal mode: `--root <operation-id>` projects exactly one root operation plus
+its recorded descendants, renders an empty waiting frame before dispatch start,
+and never scans another owner's records. The global all-owner projection stays
+available only through the explicit `--all` diagnostic flag. `open` binds one
+external user-owned split to the vault plus the exact coordinator workspace
+plus one root id: reopening one request reuses exactly one split, a second
+request owns a second split, and an ambiguous, stale, moved, or foreign marker
+fails closed without touching another surface. The observer never appears in
+Harness `OwnedResources`, and Harness cleanup never signals or closes it.
+
 One dispatch renders as one tree. Verification children, review parents, and
 review rounds are nested under the compiled step that executes them, resolved
 from exact durable lineage (`parent_operation_id`, and `owner_id` for a review

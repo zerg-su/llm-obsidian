@@ -375,6 +375,7 @@ def render(
     recent: int = 3,
     color: bool = False,
     rows: int | None = None,
+    scope: str = "owner",
 ) -> str:
     """Render one bounded read-only English dashboard for a terminal."""
 
@@ -387,7 +388,7 @@ def render(
         program for program in projection.programs if program.state in TERMINAL
     )[:recent]
     header = [
-        f"Harness dashboard - owner {projection.owner_id}",
+        f"Harness dashboard - {scope} {projection.owner_id}",
         f"Classification: {projection.classification}",
         f"cmux surface probe: {projection.surface_probe}",
         f"Programs: {len(projection.programs)}{suffix}",
@@ -397,7 +398,12 @@ def render(
     footer = _footer_lines(terminal, projection)
     lines = list(header)
     if not projection.programs:
-        lines.append("No program is bound to this owner.")
+        lines.append(
+            "No root program is projected yet; "
+            "the observer is waiting for dispatch start."
+            if scope == "root"
+            else "No program is bound to this owner."
+        )
         lines.append("")
     elif rows is None:
         for program in active:

@@ -132,6 +132,16 @@ The accepted RC1 architecture-stop repair and bounded cleanup recovery then
 completed the same approved stabilization corridor without adding another
 production script.  Their measured final delta moves only the line ceiling to
 93,750, leaving 15 lines of explicit headroom at the packaged RC1 candidate.
+
+The adopted RC2 startup-repair base (``75b53ec6``, recognized post-submit
+prompt confirmation) then cost 54 production lines inside two existing runtime
+session owners — 39 lines past the RC1 headroom — without moving this ceiling
+in its own commit.  2.6.7 RC2 Slice 5 accounts for that inherited overshoot
+together with its own approved growth: exact root scoping (``project_root``,
+required ``--root`` with an explicit ``--all`` diagnostic mode, and root-bound
+split marker identity) inside the three existing dashboard files.  No
+production script is added; the line ceiling is pinned to the measured
+93,916-line candidate with no blanket headroom.
 """
 
 from __future__ import annotations
@@ -139,11 +149,11 @@ from __future__ import annotations
 from pathlib import Path
 
 
-#: Maximum tracked Python files under ``scripts/`` for the 2.6.7 RC1 candidate.
+#: Maximum tracked Python files under ``scripts/`` for the 2.6.7 RC2 candidate.
 SCRIPT_FILE_CEILING = 272
 
-#: Maximum total lines across those files for the 2.6.7 RC1 candidate.
-SCRIPT_LINE_CEILING = 93_750
+#: Maximum total lines across those files for the 2.6.7 RC2 candidate.
+SCRIPT_LINE_CEILING = 93_916
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

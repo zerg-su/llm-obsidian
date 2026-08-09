@@ -19,7 +19,7 @@ from typing import Any, Mapping
 
 from review_contract import REVIEW_PARENT_KINDS
 
-from .contracts import ContractError, OperationRecord
+from .contracts import ContractError, OperationRecord, _identifier
 from .custom_pipelines import CustomPipelinePolicy, resolve_custom_executable
 from .diagnostics import observe
 from .pipeline_builtins import builtin_registry, compiled_executable_for_contract
@@ -887,6 +887,98 @@ def _deduplicated(issues: list[IssueView]) -> list[IssueView]:
     return unique
 
 
+def _bounded_projection(
+    subject_id: str,
+    programs: tuple[ProgramView, ...],
+    issues: list[IssueView],
+    surface_probe: str,
+    *,
+    empty_classification: str = HEALTHY,
+) -> DashboardProjection:
+    """Deduplicate, bound, and classify one already-selected projection.
+
+    Classification reads every observed issue, not just the displayed prefix:
+    bounding the view must never bound the coordinator's signal.
+    """
+
+    bounded = _deduplicated(issues)
+    classification = (
+        empty_classification if not programs and not bounded else HEALTHY
+    )
+    for program in programs:
+        classification = escalate(classification, program.classification)
+    for issue in bounded:
+        classification = escalate(classification, issue.classification)
+    return DashboardProjection(
+        subject_id,
+        classification,
+        surface_probe,
+        programs,
+        tuple(bounded[:MAX_ISSUES]),
+        {
+            "programs": 0,
+            "issues": max(len(bounded) - MAX_ISSUES, 0),
+            "children": sum(program.dropped_children for program in programs),
+            "lanes": sum(program.dropped_lanes for program in programs),
+        },
+    )
+
+
+def project_root(
+    store_root: Path | str,
+    root_id: str,
+    *,
+    inventory: LiveInventory | None = None,
+    surface_probe: str = "unavailable",
+) -> DashboardProjection:
+    """Project exactly one root operation and its recorded descendants.
+
+    The supported corridor binds ``request_id == owner_id == root
+    operation_id`` before provider launch, so root scope reads one owner
+    directory and never scans another owner's records.  A store that does not
+    know the root yet is the expected pre-start observer state, not a
+    failure, and a recorded identity that is not its own root fails closed
+    instead of rendering the tree it merely belongs to.
+    """
+
+    _identifier(root_id, "root operation id")
+    store = OperationStore(store_root)
+    records, issues = _invalid_records(store, root_id)
+    by_id = {record.spec.operation_id: record for record in records}
+    roots = {
+        record.spec.operation_id: _root_id(record, by_id) for record in records
+    }
+    members = [
+        record for record in records if roots[record.spec.operation_id] == root_id
+    ]
+    _controllers, programs = _programs(store, members, root_id, inventory)
+    if root_id in by_id and not programs:
+        issues.append(
+            IssueView(
+                "root-scope-not-a-root",
+                root_id,
+                "recorded identity does not own a root program",
+                COORDINATOR,
+            )
+        )
+    member_ids = {member.spec.operation_id for member in members} | {root_id}
+    issues.extend(_program_issues(programs))
+    issues.extend(
+        issue
+        for issue in _diagnostic_issues(store.root, root_id)
+        if issue.operation_id in member_ids
+    )
+    # An empty scope is the observer opened before dispatch start: it is a
+    # statement that nothing has happened yet, not that everything is healthy.
+    return _bounded_projection(
+        root_id,
+        programs,
+        issues,
+        surface_probe,
+        empty_classification=WAITING,
+    )
+
+
 def project(
     store_root: Path | str,
     owner_id: str,
@@ -901,24 +993,4 @@ def project(
     controllers, programs = _programs(store, records, owner_id, inventory)
     issues.extend(_program_issues(programs))
     issues.extend(_diagnostic_issues(store.root, owner_id))
-    bounded = _deduplicated(issues)
-    classification = HEALTHY
-    for program in programs:
-        classification = escalate(classification, program.classification)
-    # Classification reads every observed issue, not just the displayed
-    # prefix: bounding the view must never bound the coordinator's signal.
-    for issue in bounded:
-        classification = escalate(classification, issue.classification)
-    return DashboardProjection(
-        owner_id,
-        classification,
-        surface_probe,
-        programs,
-        tuple(bounded[:MAX_ISSUES]),
-        {
-            "programs": 0,
-            "issues": max(len(bounded) - MAX_ISSUES, 0),
-            "children": sum(program.dropped_children for program in programs),
-            "lanes": sum(program.dropped_lanes for program in programs),
-        },
-    )
+    return _bounded_projection(owner_id, programs, issues, surface_probe)
