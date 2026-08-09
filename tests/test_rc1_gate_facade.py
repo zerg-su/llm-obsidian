@@ -55,6 +55,7 @@ def _load_script(name: str, relative: str):
 
 
 DIGEST_A = "a" * 64
+DIGEST_B = "b" * 64
 EVIDENCE_TMP = Path(tempfile.mkdtemp(prefix="rc1-facade-evidence-"))
 for _args in (
     ("init", "-q"),
@@ -477,6 +478,23 @@ check_rejects(
         spec_path=RESTART_SPEC,
         evidence_root=EVIDENCE_TMP,
     ),
+)
+drift_state = RESTART_STATE.read_bytes()
+drift_launches = list(LAUNCHES)
+check_rejects(
+    "caller digest drift cannot replace or relaunch an active reservation",
+    lambda: gate.reserve_and_launch(
+        coordinator_authorized=True,
+        expected_digest=DIGEST_B,
+        state_path=RESTART_STATE,
+        launcher=_fake_launcher,
+        spec_path=RESTART_SPEC,
+        evidence_root=EVIDENCE_TMP,
+    ),
+)
+check(
+    "rejected digest drift leaves reservation bytes and launch count unchanged",
+    RESTART_STATE.read_bytes() == drift_state and LAUNCHES == drift_launches,
 )
 
 # Receipt authority: fabricated or tampered receipts are rejected and

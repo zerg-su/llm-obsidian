@@ -662,4 +662,19 @@ check(
     (ROOT / "scripts/live_acceptance_rc1_gate.py").is_file(),
 )
 
+# Architecture-stop regression: schema-valid caller declarations and semantic
+# JSON files are not accepted live-corridor evidence. Positive authority must
+# be re-derived from the existing runtime/store/provider/review/verification
+# owners; these fixtures intentionally provide none of those durable facts.
+check_rejects(
+    "caller-authored claims and semantic JSON cannot complete the live streak",
+    lambda: stab.validate_streak(
+        good,
+        expected_digest=DIGEST_A,
+        config=config,
+        gate=gate,
+        root=EVIDENCE_TMP,
+    ),
+)
+
 print("rc1 streak binding regression tests passed")
