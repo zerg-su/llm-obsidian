@@ -10,6 +10,29 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.6.7-rc2] - 2026-08-10
+
+Root-scoped Harness observability: each dispatch opens or reuses one external,
+read-only terminal observer for its exact root operation instead of mixing all
+historical owners in one global dashboard.
+
+### Added
+
+- Root-scoped dashboard projection with compact parent/child lineage, route,
+  model, effort, step, cycle, terminal outcome, and bounded issue context.
+- A per-root cmux marker: the same root reuses its observer split while a
+  different root receives a separate split.
+
+### Fixed
+
+- Dispatch binds the observer to its pre-known request/root identity before
+  provider launch without making observer availability lifecycle authority.
+- Fable tasks use dedicated workspaces by default, matching other executors.
+- Late reviewer readiness can recover from exact durable process, supervisor,
+  surface, provider, and callback identity without replaying provider input.
+- An exact callback from a prior terminal review attempt is archived before a
+  fresh zero-effect review cycle; foreign or ambiguous callbacks fail closed.
+
 ## [2.6.7-rc1] - 2026-08-09
 
 Bounded harness stabilization: the supported engineering/change corridor

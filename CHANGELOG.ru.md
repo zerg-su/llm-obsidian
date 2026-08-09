@@ -16,6 +16,29 @@
 внутренними контрольными точками и вошли в следующие публичные релизы; тегов и
 пакетов с этими номерами не выпускалось.
 
+## [2.6.7-rc2] — 2026-08-10
+
+Root-scoped наблюдаемость Harness: каждый dispatch открывает или переиспользует
+один внешний read-only terminal observer для своей точной root-операции, не
+смешивая исторических owners в общей панели.
+
+### Добавлено
+
+- Root-scoped проекция dashboard с компактными lineage, route, model, effort,
+  step, cycle, terminal outcome и ограниченным контекстом проблем.
+- Per-root cmux marker: тот же root переиспользует свой split, а другой root
+  получает отдельный split.
+
+### Исправлено
+
+- Dispatch привязывает observer к заранее известному request/root identity до
+  запуска provider, не превращая доступность observer в lifecycle authority.
+- Задачи Fable по умолчанию используют отдельные workspace.
+- Поздняя готовность reviewer восстанавливается по точной durable identity
+  процесса, supervisor, surface, provider и callback без повтора provider input.
+- Точный callback предыдущей terminal review-попытки архивируется перед новым
+  zero-effect review cycle; чужие и неоднозначные callback закрываются fail-closed.
+
 ## [2.6.7-rc1] — 2026-08-09
 
 Ограниченная стабилизация Harness: поддерживаемый коридор engineering/change

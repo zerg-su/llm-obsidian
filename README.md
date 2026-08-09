@@ -394,6 +394,7 @@ There is no speculative roadmap in this README. The repository describes what is
 
 | Topic | Document |
 |---|---|
+| v2.6.7 RC2 root-scoped Harness observer | [v2.6.7 RC2 release notes](docs/releases/v2.6.7-rc2.md) |
 | v2.6.7 RC1 bounded Harness stabilization | [v2.6.7 RC1 release notes](docs/releases/v2.6.7-rc1.md) |
 | v2.6.6 RC4-fix3 target-local Codex dispatch repair | [v2.6.6 RC4-fix3 release notes](docs/releases/v2.6.6-rc4-fix3.md) |
 | v2.6.6 RC4-fix2 live Harness dashboard | [v2.6.6 RC4-fix2 release notes](docs/releases/v2.6.6-rc4-fix2.md) |

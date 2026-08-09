@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Executable documentation and version contract for v2.6.7 RC1."""
+"""Executable documentation and version contract for v2.6.7 RC2."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "2.6.7-rc1"
+VERSION = "2.6.7-rc2"
 
 
 def text(relative: str) -> str:
@@ -23,12 +23,12 @@ assert codex["version"] == VERSION
 assert marketplace["metadata"]["version"] == VERSION
 assert marketplace["plugins"][0]["version"] == VERSION
 
-assert "## [2.6.7-rc1] - 2026-08-09" in text("CHANGELOG.md")
-assert "## [2.6.7-rc1] — 2026-08-09" in text("CHANGELOG.ru.md")
+assert "## [2.6.7-rc2] - 2026-08-10" in text("CHANGELOG.md")
+assert "## [2.6.7-rc2] — 2026-08-10" in text("CHANGELOG.ru.md")
 for relative in ("README.md", "README.ru.md"):
-    assert "docs/releases/v2.6.7-rc1.md" in text(relative)
+    assert "docs/releases/v2.6.7-rc2.md" in text(relative)
 
-notes = text("docs/releases/v2.6.7-rc1.md")
+notes = text("docs/releases/v2.6.7-rc2.md")
 normalized_notes = " ".join(notes.split()).lower()
 readiness = text("docs/acceptance/v2.6.6-rc4-release-readiness.md")
 for evidence_number in range(1, 11):
@@ -41,9 +41,9 @@ for required in (
 ):
     assert required in readiness
 assert "single holistic Opus" in readiness
-assert "bounded harness stabilization" in normalized_notes
-assert "provider-backed live streak" in normalized_notes
-assert "does not claim general harness reliability" in normalized_notes
+assert "root-scoped harness observer" in normalized_notes
+assert "external read-only observer" in normalized_notes
+assert "does not claim rc3 live acceptance" in normalized_notes
 assert "published as the prerelease tag" in normalized_notes
 
 makefile = text("Makefile")
