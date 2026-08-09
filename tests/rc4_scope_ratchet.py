@@ -74,6 +74,13 @@ without hiding a running verification child, and rejects a split response that
 aliases the coordinator surface.  It adds no production file and moves the line
 ceiling by the measured 13-line correction.
 
+RC4 Fix2 visible-live-work restores the hard per-file quality gate by extracting
+three cohesive modules: immutable dashboard policy, read-only CLI commands, and
+CLI argument/output adaptation.  The file ceiling therefore moves by exactly
+three.  Semantic colors, exact-attempt truth, caller-safe marker recovery, and
+height-bounded live rendering bring the measured tree to 91,177 lines; the line
+ceiling is pinned to that exact candidate with no blanket headroom.
+
 The historical RC2 snapshot is retained separately in
 ``tests/test_v266_rc2_scope.py``; it is evidence about a released commit, not a
 constraint on this one.
@@ -85,10 +92,10 @@ from pathlib import Path
 
 
 #: Maximum tracked Python files under ``scripts/`` for the RC4 candidate.
-SCRIPT_FILE_CEILING = 265
+SCRIPT_FILE_CEILING = 268
 
 #: Maximum total lines across those files for the RC4 candidate.
-SCRIPT_LINE_CEILING = 90_871
+SCRIPT_LINE_CEILING = 91_177
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

@@ -13,7 +13,7 @@ coordinator believe an unknown state is progress.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field, replace
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -27,17 +27,42 @@ from .pipelines import CompiledPipeline, reconcile_pipeline
 from .state_machine import TERMINAL
 from .status_segment import CONTROLLER_KINDS, LiveInventory
 from .store import OperationStore, StoreError
-from .dashboard_receipts import fix_receipt_visits, verification_receipt_visits
+from .dashboard_receipts import (
+    fix_receipt_visits,
+    verification_receipt_visits,
+)
+from .dashboard_policy import (
+    ACTIVE,
+    ATTENTION,
+    COORDINATOR,
+    HEALTHY,
+    MAX_CHILDREN,
+    MAX_DEPTH,
+    MAX_ISSUES,
+    MAX_LANES,
+    MAX_PROGRAMS,
+    REVIEW_OBSERVATIONS,
+    SURFACE_BOUND_STATES,
+    UNKNOWN,
+    UNKNOWN_ROUTE,
+    WAITING,
+    ChildView,
+    DashboardProjection,
+    IssueView,
+    LaneView,
+    ProgramView,
+    RouteView,
+    StepView,
+    aggregate as _aggregate,
+    current_verification_ids as _current_verification_ids,
+    escalate,
+    executor_status as _executor_status,
+    program_classification as _program_classification,
+    record_activity as _record_activity,
+    route_view as _route_view,
+)
 
 
-MAX_ISSUES = 5
-MAX_PROGRAMS = 8
-MAX_LANES = 8
-MAX_VISITS = 16
-MAX_CHILDREN = 8
-MAX_DEPTH = 4
-
-UNKNOWN = "unknown"
 # Which durable operation kinds are executed by which compiled primitive.  A
 # child whose kind appears in no set has no exact step lineage and is shown at
 # the program level rather than guessed onto the nearest-looking step.
@@ -46,123 +71,6 @@ STEP_PRIMITIVE_KINDS = {
     "review": frozenset(REVIEW_PARENT_KINDS | {"review-round"}),
 }
 
-HEALTHY = "healthy"
-ACTIVE = "in-progress"
-WAITING = "waiting"
-ATTENTION = "attention-required"
-COORDINATOR = "request-coordinator-classification"
-CLASSIFICATION_ORDER = (HEALTHY, ACTIVE, WAITING, ATTENTION, COORDINATOR)
-
-SURFACE_BOUND_STATES = frozenset({"running", "awaiting-callback"})
-# Mirrors the production review observation vocabulary consumed by
-# runtime_worker_summary.advance_compiled_pipeline; a status outside it stays
-# unknown rather than being guessed into the nearest familiar bucket.
-REVIEW_OBSERVATIONS = {
-    "approved": "complete",
-    "skipped": "complete",
-    "reviewing": "running",
-    "verifying": "running",
-    "awaiting-resolution": "running",
-    "changes-requested": "running",
-    "recovery-verification-required": "running",
-    "fresh-boundary-authorized": "running",
-    "attention-required": "attention",
-    "blocked": "attention",
-    "stopped": "attention",
-}
-
-
-def escalate(current: str, candidate: str) -> str:
-    """Return the more severe of two classifications; unknown wins outright."""
-
-    if current not in CLASSIFICATION_ORDER or candidate not in CLASSIFICATION_ORDER:
-        return COORDINATOR
-    return max(current, candidate, key=CLASSIFICATION_ORDER.index)
-
-
-@dataclass(frozen=True)
-class RouteView:
-    """The frozen execution metadata one step or record actually consumes."""
-
-    runtime: str = UNKNOWN
-    model: str = UNKNOWN
-    effort: str = UNKNOWN
-    preset: str = UNKNOWN
-
-
-UNKNOWN_ROUTE = RouteView()
-
-
-@dataclass(frozen=True)
-class ChildView:
-    operation_id: str
-    kind: str
-    state: str
-    status: str
-    route: RouteView
-    children: tuple["ChildView", ...] = ()
-
-
-@dataclass(frozen=True)
-class StepView:
-    step_id: str
-    primitive: str
-    session_mode: str
-    status: str
-    visits: int
-    route: RouteView = UNKNOWN_ROUTE
-    children: tuple[ChildView, ...] = ()
-    evidence_issue: str = ""
-
-
-@dataclass(frozen=True)
-class LaneView:
-    lane_id: str
-    scope: str
-    members: tuple[str, ...]
-    status: str
-
-
-@dataclass(frozen=True)
-class IssueView:
-    code: str
-    operation_id: str
-    detail: str
-    classification: str
-
-
-@dataclass(frozen=True)
-class ProgramView:
-    operation_id: str
-    kind: str
-    state: str
-    revision: int
-    pipeline: str
-    definition_sha256: str
-    controls: tuple[str, ...]
-    steps: tuple[StepView, ...]
-    lanes: tuple[LaneView, ...]
-    next_action: str
-    loop_passes: int
-    loop_limit: int
-    surface: str
-    classification: str
-    executor: RouteView = UNKNOWN_ROUTE
-    executor_status: str = UNKNOWN
-    children: tuple[ChildView, ...] = ()
-    dropped_children: int = 0
-    dropped_lanes: int = 0
-
-
-@dataclass(frozen=True)
-class DashboardProjection:
-    owner_id: str
-    classification: str
-    surface_probe: str
-    programs: tuple[ProgramView, ...] = ()
-    issues: tuple[IssueView, ...] = ()
-    truncated: Mapping[str, int] = field(default_factory=dict)
-    schema_version: int = 1
 
 
 def _read_object(path: Path) -> dict[str, Any] | None:
@@ -270,69 +178,6 @@ def _root_id(
             return current.spec.operation_id
         seen.add(parent.spec.operation_id)
         current = parent
-
-
-def _record_activity(record: OperationRecord) -> str:
-    """Classify what one durable record is really doing right now.
-
-    A record that claims a live model session while owning no runtime resource
-    is unresolved, not live work: only the kinds that actually bind a surface
-    are held to that rule, so an in-process verification child stays running.
-    A pending effect is deliberately not attention here — a verification child
-    holds one for the whole time it is legitimately working.
-    """
-
-    if record.state == "attention-required":
-        return "attention"
-    if record.state == "complete":
-        return "complete"
-    if record.state in TERMINAL:
-        return "stopped"
-    if (
-        record.state in SURFACE_BOUND_STATES
-        and record.spec.kind in CONTROLLER_KINDS
-        and not record.resources.surface_id
-    ):
-        return "attention"
-    if record.state in {"created", "preflight"}:
-        return "pending"
-    return "running"
-
-
-def _aggregate(statuses: tuple[str, ...]) -> str:
-    """Fold child activity into one step status the compiler can reconcile.
-
-    ``stopped`` is finished work, not an alarm: the harness closes a review
-    parent by cancelling it while its round is retained, so treating a
-    terminal child as attention would report every normal review as broken.
-    """
-
-    if not statuses:
-        return "pending"
-    if any(status == "attention" for status in statuses):
-        return "attention"
-    if any(status == "running" for status in statuses):
-        return "running"
-    if all(status in {"complete", "stopped"} for status in statuses):
-        return "complete"
-    return "pending"
-
-
-def _route_view(record: OperationRecord) -> RouteView:
-    """Report the frozen route of one record; never fill a gap by guessing."""
-
-    route = record.spec.route
-    preset = (
-        record.spec.verification_profile
-        if record.spec.kind == "pipeline-verify"
-        else route.profile
-    )
-    return RouteView(
-        route.runtime or UNKNOWN,
-        route.model or UNKNOWN,
-        route.effort or UNKNOWN,
-        preset or UNKNOWN,
-    )
 
 
 def _child_views(
@@ -528,8 +373,10 @@ def _step_view(
             runtime,
             exact_head_sha=_review_head(gate),
         )
+        current_ids = _current_verification_ids(record, step, gate)
         if issue == "verification-receipt-missing" and any(
-            child.status == "running" for child in children
+            child.status == "running" and child.operation_id in current_ids
+            for child in children
         ):
             evidence, status, issue = True, _aggregate(child_statuses), ""
         elif issue:
@@ -634,6 +481,37 @@ def _steps(
             frontier = True
         collected.append(view)
     views = tuple(collected)
+    verify_index = next(
+        (
+            index
+            for index, view in enumerate(views)
+            if view.primitive.split("@", 1)[0] == "verify"
+        ),
+        -1,
+    )
+    if verify_index >= 0:
+        verify = views[verify_index]
+        gate_status = str(
+            gate.get("status") if isinstance(gate, Mapping) else ""
+        )
+        if (
+            verify.evidence_issue == "verification-receipt-missing"
+            and gate_status == "verifying"
+        ):
+            normalized = tuple(
+                replace(view, status="complete")
+                if index < verify_index and not raw[index][1]
+                else replace(view, status="pending")
+                if index > verify_index
+                else view
+                for index, view in enumerate(views)
+            )
+            return normalized, "attention"
+        if verify.status == "running" and gate_status == "verifying":
+            views = tuple(
+                replace(view, status="pending") if index > verify_index else view
+                for index, view in enumerate(views)
+            )
     observations = {view.step_id: view.status for view in views}
     if any(view.status == "unknown" for view in views):
         return views, "unknown"
@@ -717,53 +595,6 @@ def _surface(
     return "live" if inventory.contains(surface_id) else "missing"
 
 
-def _program_classification(
-    record: OperationRecord,
-    *,
-    surface: str,
-    next_action: str,
-    pipeline_resolved: bool,
-) -> str:
-    if record.state == "attention-required" or record.pending_effect:
-        return ATTENTION
-    if surface in {"ambiguous", "unknown"} or not pipeline_resolved:
-        return COORDINATOR
-    if next_action == "unknown":
-        return COORDINATOR
-    if surface in {"missing", "unbound"} and record.state in SURFACE_BOUND_STATES:
-        return ATTENTION
-    if record.state == "complete":
-        return HEALTHY
-    if record.state in {"failed", "cancelled"}:
-        return ATTENTION
-    if record.state == "awaiting-callback":
-        return WAITING
-    return ACTIVE
-
-
-def _executor_status(
-    record: OperationRecord,
-    steps: tuple[StepView, ...],
-) -> str:
-    """Say what the executor session itself is doing, not what the pipeline is.
-
-    Once a later step owns the live work, the executor is not running: it is
-    waiting for the next harness transition.  Reporting that plainly is what
-    stops a finished implementation from looking like the current step.
-    """
-
-    if record.state == "attention-required" or record.pending_effect:
-        return "attention"
-    if record.state in TERMINAL:
-        return _record_activity(record)
-    downstream = any(
-        view.status in {"running", "attention"}
-        for view in steps
-        if view.primitive.split("@", 1)[0] != "model_step"
-    )
-    return "awaiting-transition" if downstream else _record_activity(record)
-
-
 def _uncompiled_program(
     record: OperationRecord,
     lanes: tuple[LaneView, ...],
@@ -840,6 +671,7 @@ def _program(
             dropped_lanes,
         )
     steps, next_action = _steps(store, record, compiled, runtime, gate, by_step)
+    executor_status = _executor_status(record, steps)
     definition = compiled.definition
     return ProgramView(
         record.spec.operation_id,
@@ -871,9 +703,10 @@ def _program(
             surface=surface,
             next_action=next_action,
             pipeline_resolved=True,
+            executor_status=executor_status,
         ),
         _route_view(record),
-        _executor_status(record, steps),
+        executor_status,
         loose,
         dropped["children"],
         dropped_lanes,
@@ -937,7 +770,11 @@ def _program_issues(programs: tuple[ProgramView, ...]) -> list[IssueView]:
         # Only the states that must already own a live session are held to
         # this rule; a queued or starting operation has legitimately bound
         # nothing yet.
-        if program.surface == "unbound" and program.state in SURFACE_BOUND_STATES:
+        if (
+            program.surface == "unbound"
+            and program.state in SURFACE_BOUND_STATES
+            and program.executor_status != "awaiting-transition"
+        ):
             issues.append(
                 IssueView(
                     "operation-resources-absent",

@@ -33,6 +33,14 @@ deterministic without adding another orchestrator or provider route.
 
 ### Fixed
 
+- The live Harness dashboard now prioritizes newest running work, fits each TTY
+  redraw to the current terminal height, and compacts older attention-only
+  programs without truncating the underlying read-only projection. A restrained
+  semantic ANSI palette distinguishes complete, running, waiting/review, retry,
+  attention, and model tokens; `--no-color`, non-TTY, and `--once` output remain
+  plain. Missing exact-HEAD verification is attention unless a running child is
+  durably bound to the current attempt, and persisted dashboard markers can no
+  longer reuse or close the caller surface.
 - The harness dashboard now renders one dispatch as one tree. Verification
   children, review parents, and review rounds nest under the compiled step that
   executes them instead of appearing as unrelated top-level programs, each step
@@ -42,7 +50,7 @@ deterministic without adding another orchestrator or provider route.
   owning no runtime resource is reported as unresolved rather than live.
 - Restored the live `scripts/` scope ratchet: it measures the working tree again
   instead of a frozen historical commit, under explicit RC4 ceilings declared in
-  `tests/rc4_scope_ratchet.py` (265 files, 90,871 lines). The dashboard surface
+  `tests/rc4_scope_ratchet.py` (268 files, 91,177 lines). The dashboard surface
   now includes the extracted read-only receipt validator; its review corrections
   bind fix visits to accepted callbacks, serialize marker recovery with atomic
   writes, resolve exact frozen custom pipelines, recover bounded stale startup

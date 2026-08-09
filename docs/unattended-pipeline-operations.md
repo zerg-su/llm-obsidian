@@ -30,6 +30,14 @@ classified `request-coordinator-classification` instead of being rendered as
 progress, so an unreadable cmux tree leaves surfaces `unknown` rather than
 implying that cleanup is due.
 
+Continuous TTY mode re-reads the terminal height on every refresh. Newest
+genuinely running programs render before attention-only records; running work
+keeps bounded detail, older attention records collapse to one-line summaries,
+and any presentation omission is counted without changing the complete
+projection or JSON state. TTY output uses a small semantic ANSI palette.
+`--no-color`, non-TTY output, and `--once` stay plain; one-shot output is not
+screen-height truncated.
+
 One dispatch renders as one tree. Verification children, review parents, and
 review rounds are nested under the compiled step that executes them, resolved
 from exact durable lineage (`parent_operation_id`, and `owner_id` for a review

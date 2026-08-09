@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import argparse
 import hashlib
 import importlib.util
 import json
-import os
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from time import time
@@ -28,58 +25,23 @@ from .contracts import (
     TransitionResult,
     to_dict,
 )
-from .dashboard_projection import DashboardProjection, project
-from .dashboard_view import render as render_dashboard
-from .diagnostics import observe as observe_diagnostics
+from .cli_io import emit as _emit, parser
+from .cli_readonly import COMMANDS as READ_ONLY_COMMANDS
+from .cli_readonly import dashboard as _dashboard
+from .cli_readonly import execute as execute_read_only
 from .reconciliation import (
     ReconcileDecision,
     prove_accepted_callback_ownership,
     reconcile,
 )
 from .state_machine import TERMINAL
-from .status_segment import live_inventory, publish as publish_status
+from .status_segment import publish as publish_status
 from .store import OperationStore, StoreError
 from .supervisor import OperationSupervisor
 from .runtime_sessions import RuntimeSessionError, RuntimeSessionManager
 from .review_finalization import _head as _review_worktree_head
 from .runtime_worker import _review_resolution_handoff_ready
 from .runtime_worker_review_bridge import publish_review_resolution_transport
-
-
-def parser() -> argparse.ArgumentParser:
-    result = argparse.ArgumentParser(prog="harness")
-    result.add_argument("--store", type=Path, default=Path(".vault-meta/harness"))
-    result.add_argument("--owner", default="local")
-    result.add_argument("--json", action="store_true")
-    commands = result.add_subparsers(dest="command", required=True)
-    commands.add_parser("status")
-    inspect = commands.add_parser("inspect")
-    inspect.add_argument("operation_id")
-    resume = commands.add_parser("resume")
-    resume.add_argument("operation_id")
-    commands.add_parser("reconcile")
-    cancel = commands.add_parser("cancel")
-    cancel.add_argument("operation_id")
-    close = commands.add_parser("close")
-    close.add_argument("operation_id")
-    commands.add_parser("doctor")
-    commands.add_parser("diagnose")
-    commands.add_parser("dashboard")
-    return result
-
-
-def _emit(value: object, *, json_mode: bool) -> None:
-    if json_mode:
-        print(json.dumps(value, ensure_ascii=False, sort_keys=True))
-    elif isinstance(value, list):
-        for row in value:
-            detail = row.get("kind", row.get("action", ""))
-            print(f"{row['operation_id']}\t{row['state']}\t{detail}")
-    elif isinstance(value, dict):
-        for key, item in value.items():
-            print(f"{key}: {item}")
-    else:
-        print(value)
 
 
 def _has_owned_resources(record: OperationRecord) -> bool:
@@ -875,39 +837,6 @@ def _resume(
     )
 
 
-def _dashboard(
-    store_root: Path,
-    owner: str,
-    *,
-    inventory_probe: object | None = None,
-) -> DashboardProjection:
-    """Project one owner read-only, annotated by one bounded cmux tree probe.
-
-    The probe is best effort by design. A tree that cannot be read leaves every
-    recorded surface `unknown` instead of claiming it is gone, because this
-    command owns no lifecycle authority and must never imply cleanup.
-    """
-
-    binary = os.environ.get("CMUX_BUNDLED_CLI_PATH") or "cmux"
-    try:
-        if inventory_probe is not None:
-            inventory = inventory_probe(binary=binary)
-        elif shutil.which(binary):
-            inventory = live_inventory(binary=binary)
-        else:
-            inventory = None
-    except Exception:
-        # A diagnostics view degrades to "unknown"; it must not turn a broken
-        # probe into a failed command that hides the durable ledger too.
-        inventory = None
-    return project(
-        store_root,
-        owner,
-        inventory=inventory,
-        surface_probe="observed" if inventory is not None else "unavailable",
-    )
-
-
 def main(
     argv: Sequence[str] | None = None,
     *,
@@ -923,39 +852,11 @@ def main(
     suppress_status_publish = False
     cascade_truncated = False
     try:
-        if args.command == "status":
-            value = [
-                {
-                    "operation_id": row.spec.operation_id,
-                    "kind": row.spec.kind,
-                    "state": row.state,
-                    "revision": row.revision,
-                    "lane_id": row.lane_id,
-                    "run_id": row.run_id,
-                }
-                for row in store.list(args.owner)
-            ]
-        elif args.command == "inspect":
-            value = to_dict(store.read(args.owner, args.operation_id))
-        elif args.command == "doctor":
-            value = {
-                "status": "ok" if shutil.which("cmux") else "degraded",
-                "cmux": bool(shutil.which("cmux")),
-                "claude": bool(shutil.which("claude")),
-                "codex": bool(shutil.which("codex")),
-            }
-        elif args.command == "diagnose":
-            value = observe_diagnostics(args.store, args.owner)
-        elif args.command == "dashboard":
-            projection = _dashboard(
-                args.store,
-                args.owner,
+        if args.command in READ_ONLY_COMMANDS:
+            value = execute_read_only(
+                args,
+                store,
                 inventory_probe=inventory_probe,
-            )
-            value = (
-                to_dict(projection)
-                if args.json
-                else render_dashboard(projection).rstrip("\n")
             )
         elif args.command == "reconcile":
             value = []

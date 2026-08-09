@@ -39,6 +39,14 @@
 
 ### Исправлено
 
+- Live Harness dashboard теперь ставит новейшую выполняемую работу первой,
+  вмещает каждый TTY redraw в текущую высоту терминала и компактно показывает
+  старые attention-only программы, не урезая исходную read-only projection.
+  Сдержанная semantic ANSI palette различает complete, running, waiting/review,
+  retry, attention и model tokens; `--no-color`, non-TTY и `--once` остаются
+  plain. Отсутствующий exact-HEAD verification receipt требует attention, если
+  running child не привязан к текущей попытке, а persisted dashboard marker
+  больше не может переиспользовать или закрыть caller surface.
 - Harness dashboard теперь рисует один dispatch как одно дерево. Verification-
   дети, review parents и review rounds вкладываются в тот compiled step,
   который их исполняет, а не всплывают отдельными top-level программами; на
@@ -48,7 +56,7 @@
   без собственного runtime-ресурса помечается как unresolved, а не как живая.
 - Восстановлен живой scope ratchet для `scripts/`: он снова измеряет рабочее
   дерево, а не замороженный исторический коммит, с явными RC4-потолками в
-  `tests/rc4_scope_ratchet.py` (265 файлов, 90 871 строк). В dashboard теперь
+  `tests/rc4_scope_ratchet.py` (268 файлов, 91 177 строк). В dashboard теперь
   входит отдельный read-only валидатор receipts; review-коррекции привязывают
   fix visits к принятым callbacks, сериализуют recovery marker через atomic
   writes, резолвят exact frozen custom pipelines, восстанавливают bounded stale

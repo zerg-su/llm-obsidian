@@ -8,7 +8,12 @@ unknown state into a confident one.
 
 from __future__ import annotations
 
+import re
+
 from .dashboard_projection import (
+    ACTIVE,
+    ATTENTION,
+    WAITING,
     ChildView,
     DashboardProjection,
     ProgramView,
@@ -40,6 +45,16 @@ NEXT_ACTION_TEXT = {
     "unknown": "cannot be derived from durable evidence",
     "none": "no compiled pipeline is bound to this operation",
 }
+RESET = "\x1b[0m"
+SEMANTIC_COLORS = {
+    "complete": "\x1b[32m",
+    "running": "\x1b[36m",
+    "waiting": "\x1b[33m",
+    "retry": "\x1b[38;5;208m",
+    "attention": "\x1b[31m",
+    "model": "\x1b[35m",
+}
+MODEL_TOKEN = re.compile(r"(?<=/)[A-Za-z0-9][A-Za-z0-9._-]*(?=/)")
 
 
 def _short(value: str) -> str:
@@ -170,13 +185,28 @@ def _issue_lines(projection: DashboardProjection) -> list[str]:
 def _colorize(line: str, *, color: bool) -> str:
     if not color:
         return line
-    if "[!]" in line or "attention-required" in line:
-        return f"\x1b[31m{line}\x1b[0m"
-    if "[>]" in line or "in-progress" in line:
-        return f"\x1b[36m{line}\x1b[0m"
-    if "[x]" in line or "healthy" in line:
-        return f"\x1b[32m{line}\x1b[0m"
-    return line
+    rendered = MODEL_TOKEN.sub(
+        lambda match: f"{SEMANTIC_COLORS['model']}{match.group()}{RESET}",
+        line,
+    )
+    tokens = (
+        ("verification-receipt-failed", "retry"),
+        ("fix-receipt-failed", "retry"),
+        ("attention-required", "attention"),
+        ("in-progress", "running"),
+        ("awaiting-transition", "waiting"),
+        ("reviewing", "waiting"),
+        ("waiting", "waiting"),
+        ("healthy", "complete"),
+        ("[!]", "attention"),
+        ("[>]", "running"),
+        ("[x]", "complete"),
+    )
+    for token, role in tokens:
+        rendered = rendered.replace(
+            token, f"{SEMANTIC_COLORS[role]}{token}{RESET}"
+        )
+    return rendered
 
 
 def _history_line(program: ProgramView) -> str:
@@ -186,11 +216,90 @@ def _history_line(program: ProgramView) -> str:
     )
 
 
+def _compact_program_line(program: ProgramView) -> str:
+    return (
+        f"  {program.operation_id}  {program.kind}  {program.state}  "
+        f"pipeline {program.pipeline}  {program.classification}"
+    )
+
+
+def _presentation_priority(program: ProgramView) -> int:
+    if program.classification == ACTIVE:
+        return 0
+    if program.classification == WAITING:
+        return 1
+    if program.classification == ATTENTION:
+        return 2
+    return 3
+
+
+def _bounded_program_lines(
+    programs: tuple[ProgramView, ...],
+    budget: int,
+) -> list[str]:
+    """Fit live detail and compact attention summaries into one row budget."""
+
+    if budget <= 0 or not programs:
+        return []
+    ordered = tuple(
+        program
+        for _index, program in sorted(
+            enumerate(programs),
+            key=lambda item: (_presentation_priority(item[1]), item[0]),
+        )
+    )
+    minimum = [
+        (
+            [
+                _program_lines(program)[0],
+                f"  status   {program.classification}  details compacted",
+            ]
+            if _presentation_priority(program) < 2
+            else [_compact_program_line(program)]
+        )
+        for program in ordered
+    ]
+    required = sum(len(group) for group in minimum)
+    if required > budget:
+        lines: list[str] = []
+        hidden = 0
+        for index, group in enumerate(minimum):
+            remaining = len(minimum) - index - 1
+            reserve = 1 if remaining else 0
+            if len(lines) + len(group) + reserve > budget:
+                hidden = len(minimum) - index
+                break
+            lines.extend(group)
+        if hidden and len(lines) < budget:
+            lines.append(f"Programs hidden by viewport: {hidden}")
+        return lines[:budget]
+
+    groups = [list(group) for group in minimum]
+    remaining = budget - required
+    for index, program in enumerate(ordered):
+        if _presentation_priority(program) >= 2 or remaining <= 0:
+            continue
+        full = _program_lines(program) + [""]
+        extra_needed = len(full) - len(groups[index])
+        if extra_needed <= remaining:
+            groups[index] = full
+            remaining -= extra_needed
+            continue
+        visible = max(len(groups[index]), len(groups[index]) + remaining - 1)
+        omitted = len(full) - visible
+        groups[index] = full[:visible] + [
+            f"  viewport details truncated +{omitted} lines"
+        ]
+        remaining = 0
+    return [line for group in groups for line in group]
+
+
 def render(
     projection: DashboardProjection,
     *,
     recent: int = 3,
     color: bool = False,
+    rows: int | None = None,
 ) -> str:
     """Render one bounded read-only English dashboard for a terminal."""
 
@@ -202,7 +311,7 @@ def render(
     terminal = tuple(
         program for program in projection.programs if program.state in TERMINAL
     )[:recent]
-    lines = [
+    header = [
         f"Harness dashboard - owner {projection.owner_id}",
         f"Classification: {projection.classification}",
         f"cmux surface probe: {projection.surface_probe}",
@@ -210,14 +319,26 @@ def render(
         f"Active pipelines: {len(active)}",
         "",
     ]
+    footer = [f"Terminal history: {len(terminal)}"]
+    footer.extend(_history_line(program) for program in terminal)
+    footer.append("")
+    footer.extend(_issue_lines(projection))
+    lines = list(header)
     if not projection.programs:
         lines.append("No program is bound to this owner.")
         lines.append("")
-    for program in active:
-        lines.extend(_program_lines(program))
-        lines.append("")
-    lines.append(f"Terminal history: {len(terminal)}")
-    lines.extend(_history_line(program) for program in terminal)
-    lines.append("")
-    lines.extend(_issue_lines(projection))
+    elif rows is None:
+        for program in active:
+            lines.extend(_program_lines(program))
+            lines.append("")
+    else:
+        lines.extend(
+            _bounded_program_lines(active, max(rows - len(header) - len(footer), 0))
+        )
+    lines.extend(footer)
+    if rows is not None and len(lines) > rows:
+        omitted = len(lines) - rows + 1
+        lines = lines[: max(rows - 1, 0)]
+        if rows:
+            lines.append(f"Viewport truncated +{omitted} lines")
     return "\n".join(_colorize(_clip(line), color=color) for line in lines) + "\n"

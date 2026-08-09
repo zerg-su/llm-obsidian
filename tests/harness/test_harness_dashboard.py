@@ -1641,6 +1641,103 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-viewport.") as raw:
         )
         <= 2,
     )
+    live_program = next(
+        program for program in projection.programs if program.operation_id == live_owner
+    )
+    live_projection = replace(
+        projection,
+        classification=live_program.classification,
+        programs=(live_program,),
+        issues=(),
+    )
+    full_live = render(live_projection)
+    exact_rows = len(full_live.splitlines())
+    exact_fit = render(live_projection, rows=exact_rows)
+    one_short = render(live_projection, rows=exact_rows - 1)
+    check(
+        "viewport exact-fit preserves full detail while one-short truncates truthfully",
+        exact_fit == full_live
+        and len(one_short.splitlines()) == exact_rows - 1
+        and live_owner in one_short
+        and "viewport details truncated" in one_short,
+    )
+
+    second_live = replace(live_program, operation_id="dashboard-y-second-live")
+    multiple = render(
+        replace(
+            live_projection,
+            programs=(second_live, live_program),
+        ),
+        rows=18,
+    )
+    attention_only = render(
+        replace(
+            projection,
+            programs=tuple(
+                program
+                for program in projection.programs
+                if program.operation_id in attention_owners
+            ),
+            issues=(),
+        ),
+        rows=12,
+    )
+    check(
+        "bounded rendering retains multiple live identities and compacts attention-only views",
+        len(multiple.splitlines()) <= 18
+        and second_live.operation_id in multiple
+        and live_owner in multiple
+        and len(attention_only.splitlines()) <= 12
+        and all(owner in attention_only for owner in attention_owners),
+    )
+
+    rendered_frames: list[str] = []
+    row_values = iter((36, 24))
+
+    def stop_after_two_frames(_interval: float) -> None:
+        if len(rendered_frames) == 2:
+            raise KeyboardInterrupt
+
+    baseline = _tree_bytes(store_root)
+    resize_code = dashboard_script.main(
+        ["--store", str(store_root), "--interval", "0.1", "--no-color"],
+        inventory_probe=lambda **_kwargs: LiveInventory(
+            {live_surface.casefold(): "workspace-live"}
+        ),
+        sleeper=stop_after_two_frames,
+        output=rendered_frames.append,
+        tty_probe=lambda: True,
+        terminal_rows=lambda: next(row_values),
+    )
+    once_output: list[str] = []
+    once_code = dashboard_script.main(
+        ["--store", str(store_root), "--once", "--no-color"],
+        inventory_probe=lambda **_kwargs: LiveInventory(
+            {live_surface.casefold(): "workspace-live"}
+        ),
+        output=once_output.append,
+        tty_probe=lambda: True,
+        terminal_rows=lambda: (_ for _ in ()).throw(
+            AssertionError("--once must not inspect terminal rows")
+        ),
+    )
+    frame_counts = [
+        len(frame.removeprefix(dashboard_script.CLEAR).splitlines())
+        for frame in rendered_frames
+    ]
+    check(
+        "live redraw re-reads terminal rows while TTY --once stays byte-stable and unbounded",
+        resize_code == 0
+        and frame_counts[0] <= 36
+        and frame_counts[1] <= 24
+        and frame_counts[1] < frame_counts[0]
+        and all(live_owner in frame for frame in rendered_frames)
+        and once_code == 0
+        and len(once_output) == 1
+        and not once_output[0].startswith(dashboard_script.CLEAR)
+        and len(once_output[0].splitlines()) > 36
+        and _tree_bytes(store_root) == baseline,
+    )
 
 with tempfile.TemporaryDirectory(prefix="harness-dashboard-cli.") as raw:
     store_root = Path(raw) / "harness"

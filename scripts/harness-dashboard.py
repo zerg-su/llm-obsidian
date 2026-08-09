@@ -24,8 +24,11 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from harness.adapters.cmux import CmuxAdapter, CmuxError, UUID_RE
 from harness.dashboard_projection import (
+    ACTIVE,
+    ATTENTION,
     HEALTHY,
     MAX_ISSUES,
+    WAITING,
     DashboardProjection,
     IssueView,
     escalate,
@@ -65,10 +68,18 @@ def _interval(value: str) -> float:
 def _live_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="harness-dashboard")
     parser.add_argument("--store", type=Path, required=True)
-    parser.add_argument("--once", action="store_true")
+    parser.add_argument(
+        "--once",
+        action="store_true",
+        help="render one unbounded compatibility snapshot",
+    )
     parser.add_argument("--interval", type=_interval, default=1.0)
     parser.add_argument("--recent", type=int, choices=RECENT_CHOICES, default=3)
-    parser.add_argument("--no-color", action="store_true")
+    parser.add_argument(
+        "--no-color",
+        action="store_true",
+        help="disable semantic ANSI colors",
+    )
     return parser
 
 
@@ -156,7 +167,16 @@ def snapshot(
             for program in owner_view.programs
         )
 
-    active = [item for item in programs if item[2].state not in TERMINAL]
+    priority = {ACTIVE: 0, WAITING: 1, ATTENTION: 2}
+    active = sorted(
+        (item for item in programs if item[2].state not in TERMINAL),
+        key=lambda item: (
+            priority.get(item[2].classification, 3),
+            -item[0],
+            item[1],
+            item[2].operation_id,
+        ),
+    )
     terminal = sorted(
         (item for item in programs if item[2].state in TERMINAL),
         key=lambda item: (-item[0], item[1], item[2].operation_id),
@@ -189,6 +209,10 @@ def _marker_root() -> Path:
 
 def _digest(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _aliases_caller(surface_id: str, caller_surface: str) -> bool:
+    return surface_id.casefold() == caller_surface.casefold()
 
 
 def _write_marker(path: Path, value: dict[str, object]) -> None:
@@ -261,8 +285,10 @@ def _open_dashboard_unlocked(
         state = str(value.get("state") or "")
         surface_id = str(value.get("surface_id") or "")
         surface_key = surface_id.casefold()
+        caller_alias = _aliases_caller(surface_id, caller_surface)
         live = (
             UUID_RE.fullmatch(surface_id) is not None
+            and not caller_alias
             and surface_key not in inventory.ambiguous_surfaces
             and inventory.surface_workspaces.get(surface_key, "").casefold()
             == workspace_id.casefold()
@@ -312,7 +338,7 @@ def _open_dashboard_unlocked(
             {**expected, "state": "retryable", "surface_id": "", "reserved_at": 0},
         )
         raise
-    caller_alias = surface.surface_id.casefold() == caller_surface.casefold()
+    caller_alias = _aliases_caller(surface.surface_id, caller_surface)
     invalid_placement = (
         not UUID_RE.fullmatch(surface.surface_id)
         or surface.workspace_id.casefold() != workspace_id.casefold()
@@ -467,18 +493,30 @@ def main(
     inventory_probe: Callable[..., LiveInventory | None] | None = None,
     sleeper: Callable[[float], None] = time.sleep,
     output: Callable[[str], None] | None = None,
+    tty_probe: Callable[[], bool] | None = None,
+    terminal_rows: Callable[[], int] | None = None,
 ) -> int:
     values = list(sys.argv[1:] if argv is None else argv)
     if values[:1] == ["open"]:
         return _open_main(values[1:])
     args = _live_parser().parse_args(values)
     emit = output or (lambda value: print(value, end=""))
-    color = not args.no_color and sys.stdout.isatty()
+    is_tty = (tty_probe or sys.stdout.isatty)()
+    color = not args.no_color and is_tty
+    row_probe = terminal_rows or (
+        lambda: shutil.get_terminal_size(fallback=(80, 24)).lines
+    )
     try:
         while True:
             inventory = _probe_inventory(inventory_probe)
             projection = snapshot(args.store, recent=args.recent, inventory=inventory)
-            text = render(projection, recent=args.recent, color=color)
+            rows = max(int(row_probe()), 1) if is_tty and not args.once else None
+            text = render(
+                projection,
+                recent=args.recent,
+                color=color,
+                rows=rows,
+            )
             emit(text if args.once else CLEAR + text)
             if args.once:
                 return 0
