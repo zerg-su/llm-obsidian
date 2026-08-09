@@ -369,7 +369,17 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
             }
         ),
     )
-    check("classic dispatch defaults to split placement", request["placement"] == "split")
+    check(
+        "continuable dispatch defaults to dedicated workspace placement",
+        request["placement"] == "workspace",
+    )
+    explicit_split_raw = json.loads(json.dumps(raw_request))
+    explicit_split_raw["placement"] = "split"
+    explicit_split_request = runner.validate_request(explicit_split_raw)
+    check(
+        "split placement remains an explicit opt-in",
+        explicit_split_request["placement"] == "split",
+    )
     workspace_raw = json.loads(json.dumps(raw_request))
     workspace_raw["placement"] = "workspace"
     workspace_raw["reap"]["plan_mode"] = "shared"
@@ -1555,7 +1565,10 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     )
     check("runner writes one plan branch", (worktree / ".task-prompt.md").read_text().count("## Approved plan") == 1)
     check("runner metadata validates", runner.normalize_task_contract(meta)["interaction_policy"] == "unattended")
-    check("runner metadata records split placement", meta["surface_policy"]["placement"] == "split")
+    check(
+        "runner metadata records default workspace placement",
+        meta["surface_policy"]["placement"] == "workspace",
+    )
     workspace_meta = runner.write_task_files(
         workspace_request,
         config,

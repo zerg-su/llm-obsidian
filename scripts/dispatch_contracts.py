@@ -348,7 +348,7 @@ def validate_request(raw: dict[str, Any]) -> dict[str, Any]:
     base_branch = require_string(raw.get("base_branch"), "base_branch", maximum=300)
     base_sha = resolve_base_commit(target_repo, base_branch)
     origin_surface = require_string(raw.get("origin_surface"), "origin_surface", maximum=100)
-    placement = str(raw.get("placement") or "split").strip()
+    placement = str(raw.get("placement") or "workspace").strip()
     if placement not in {"split", "workspace"}:
         raise DispatchError("placement must be split or workspace")
     raw_split = raw.get("split")

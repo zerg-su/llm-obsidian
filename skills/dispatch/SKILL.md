@@ -1,7 +1,7 @@
 ---
 name: dispatch
 metadata:
-  version: 1.7.0
+  version: 1.7.1
 description: Dispatch approved work through cmux or registered ephemeral review/schema execution.
 allowed-tools: Read Write Edit Glob Grep Bash AskUserQuestion
 ---
@@ -9,9 +9,9 @@ allowed-tools: Read Write Edit Glob Grep Bash AskUserQuestion
 # /dispatch — approved task handoff
 
 Open an isolated task under an approved pipeline. The coordinator approves the
-plan; the task executes it. Inherit the current route. Continuable executor
-work opens to the right of the cmux surface. A bounded review or schema-producing
-step may instead use the compiled ephemeral profile below.
+plan; the task executes it. Inherit the current route. Continuable work defaults
+to a workspace; splits require explicit `placement=split`.
+Bounded review/schema work may use the compiled ephemeral profile below.
 
 ## Normal path
 
