@@ -535,11 +535,11 @@ cross_simple_finalization = finalization_bound_frozen_request(
 check(
     "generated default Deep metadata equals finalization-bound runtime topology",
     deep_finalization.policy.axes
-    == ("openai-intent", "openai-engineering"),
+    == ("anthropic-intent", "anthropic-engineering"),
 )
 check(
     "generated cross-model Simple metadata equals finalization-bound runtime topology",
-    cross_simple_finalization.policy.axes == ("openai-holistic",),
+    cross_simple_finalization.policy.axes == ("anthropic-holistic",),
 )
 drifted_meta = json.loads(json.dumps(frozen_meta))
 drifted_meta["review_topology"]["sha256"] = "0" * 64
