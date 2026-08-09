@@ -1014,17 +1014,17 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         runner.review_topology_preview(deep_default, deep_default_policy)["lanes"]
         == [
             {
-                "lane": "openai-intent",
-                "provider": "openai",
-                "runtime": "codex",
-                "model": "gpt-5.6-sol",
+                "lane": "anthropic-intent",
+                "provider": "anthropic",
+                "runtime": "claude",
+                "model": "fable",
                 "responsibility": "intent",
             },
             {
-                "lane": "openai-engineering",
-                "provider": "openai",
-                "runtime": "codex",
-                "model": "gpt-5.6-sol",
+                "lane": "anthropic-engineering",
+                "provider": "anthropic",
+                "runtime": "claude",
+                "model": "fable",
                 "responsibility": "engineering",
             },
         ],
