@@ -55,8 +55,10 @@
 - Крэш-матрица коридора поверх золотого сценария engineering/change
   (`tests/harness/test_lifecycle_crash_matrix.py`,
   `tests/harness/lifecycle_simulator_world.py`).
-- Потолки `tests/rc4_scope_ratchet.py` подняты до 272 файлов / 93000 строк —
-  ровно два авторизованных планом скрипта 2.6.7 и строки owner-ремонтов.
+- Потолки `tests/rc4_scope_ratchet.py` подняты до 272 файлов / 93 750 строк для
+  принятого стабилизационного коридора 2.6.7 RC1, включая финальные ремонты
+  architecture-stop и cleanup recovery; у упакованного кандидата остаётся
+  явный запас в 15 строк.
 
 ## [2.6.6-rc4-fix3] — 2026-08-09
 

@@ -127,6 +127,11 @@ request identity with launched-only receipt recording; and
 cell and corrected HEAD, and fix-OID commit resolution).  The line
 ceiling moves just above that reviewed candidate; the file ceiling does
 not move.
+
+The accepted RC1 architecture-stop repair and bounded cleanup recovery then
+completed the same approved stabilization corridor without adding another
+production script.  Their measured final delta moves only the line ceiling to
+93,750, leaving 15 lines of explicit headroom at the packaged RC1 candidate.
 """
 
 from __future__ import annotations
@@ -138,7 +143,7 @@ from pathlib import Path
 SCRIPT_FILE_CEILING = 272
 
 #: Maximum total lines across those files for the 2.6.7 RC1 candidate.
-SCRIPT_LINE_CEILING = 93_250
+SCRIPT_LINE_CEILING = 93_750
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

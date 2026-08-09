@@ -49,8 +49,10 @@ finalization ledger separates product cycles from mechanism recovery.
 - Corridor crash matrix over the golden engineering/change scenario
   (`tests/harness/test_lifecycle_crash_matrix.py`,
   `tests/harness/lifecycle_simulator_world.py`).
-- `tests/rc4_scope_ratchet.py` ceilings raised to 272 files / 93000 lines for
-  exactly the two plan-authorized 2.6.7 scripts and the owner-repair lines.
+- `tests/rc4_scope_ratchet.py` ceilings raised to 272 files / 93,750 lines for
+  the accepted 2.6.7 RC1 stabilization corridor, including the final
+  architecture-stop and cleanup-recovery repairs; the packaged candidate
+  retains 15 lines of explicit headroom.
 
 ## [2.6.6-rc4-fix3] - 2026-08-09
 
