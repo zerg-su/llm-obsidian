@@ -8,12 +8,14 @@ import importlib.util
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import redirect_stdout
+from dataclasses import replace
 from pathlib import Path
 
 
@@ -26,6 +28,7 @@ from harness import dashboard_receipts
 from harness.adapters.cmux import CmuxAdapter, Surface, SurfaceWorkspaceIndex
 from harness.contracts import CallbackEnvelope, OperationSpec, OwnedResources, RuntimeRoute, VerificationEvidence, to_dict
 from harness.dashboard_projection import (
+    ACTIVE,
     ATTENTION,
     COORDINATOR,
     HEALTHY,
@@ -61,6 +64,7 @@ from harness.pipelines import (
 from harness.status_segment import LiveInventory
 from harness.store import OperationStore
 from harness.supervisor import OperationSupervisor
+from harness.runtime_worker import _pipeline_verify_identity
 from harness.verification_attempt import VerificationAttempt
 from harness.workflows.engineering_fix import FixStepReceipt
 from harness.workflows.engineering_fix_model import PHASE_SCHEMAS
@@ -81,6 +85,19 @@ def check(label: str, condition: bool) -> None:
     if not condition:
         raise AssertionError(label)
     print(f"OK   {label}")
+
+
+REGRESSION_FAILURES: list[str] = []
+
+
+def regression_check(label: str, condition: bool) -> None:
+    """Run the whole new regression matrix before reporting its red members."""
+
+    if condition:
+        print(f"OK   {label}")
+        return
+    REGRESSION_FAILURES.append(label)
+    print(f"RED  {label}")
 
 
 def _route_of(view: object) -> tuple[str, str, str, str]:
@@ -294,6 +311,50 @@ def _verification_receipt(
     return operation_id
 
 
+def _running_current_verification(
+    store: OperationStore,
+    parent: str,
+    compiled: object,
+    *,
+    head_sha: str,
+    profile_sha256: str = "7" * 64,
+) -> str:
+    """Create the exact production-shaped child for the current verify attempt."""
+
+    parent_record = store.read(OWNER, parent)
+    verify_step = next(
+        step for step in compiled.definition.steps if step.primitive_id == "verify"
+    )
+    input_sha256 = hashlib.sha256(
+        json.dumps(
+            {
+                "definition_sha256": compiled.definition_sha256,
+                "head_sha": head_sha,
+                "profile_sha256": profile_sha256,
+                "schema_version": verify_step.schema_version,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    child, lane_id, run_id = _pipeline_verify_identity(
+        parent_record.spec,
+        definition_sha256=compiled.definition_sha256,
+        input_sha256=input_sha256,
+        profile=parent_record.spec.verification_profile,
+    )
+    store.create(child, lane_id=lane_id, run_id=run_id)
+    _advance(
+        store,
+        child.operation_id,
+        "preflight",
+        "starting",
+        "running",
+        "verifying",
+    )
+    return child.operation_id
+
+
 def _write_gate(
     store: OperationStore,
     status: str,
@@ -313,7 +374,11 @@ def _write_gate(
                 "dispatch_operation_id": subject,
                 "status": status,
                 "active_review_operation_id": active_review,
-                "context": {"head_sha": head_sha},
+                "context": {
+                    "head_sha": head_sha,
+                    "verification_profile": "scoped",
+                    "verification_profile_sha256": "7" * 64,
+                },
                 "lanes": [{"axis": "openai-holistic"}, {"axis": "claude-spec"}],
                 "round_results": {},
             },
@@ -468,6 +533,35 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard.") as raw:
         and "parallel lanes: 4 (4 active)" in text
         and "wait for the running step" in text
         and "[x] minimal-fix" in text,
+    )
+    colored = render(projection, color=True)
+    attention_projection = replace(projection, classification=ATTENTION)
+    attention_colored = render(attention_projection, color=True)
+    retry_projection = replace(
+        projection,
+        issues=(
+            IssueView(
+                "verification-receipt-failed",
+                DISPATCH,
+                "verify durable evidence is not accepted",
+                ATTENTION,
+            ),
+        ),
+    )
+    retry_colored = render(retry_projection, color=True)
+    ansi = re.compile(r"\x1b\[[0-9;]*m")
+    regression_check(
+        "the TTY renderer uses the restrained semantic palette without changing plain bytes",
+        "\x1b[32m[x]\x1b[0m" in colored
+        and "\x1b[36m[>]\x1b[0m" in colored
+        and "\x1b[33mwaiting\x1b[0m" in colored
+        and "\x1b[38;5;208mverification-receipt-failed\x1b[0m"
+        in retry_colored
+        and "\x1b[31mattention-required\x1b[0m" in attention_colored
+        and "\x1b[35mclaude-opus-5\x1b[0m" in colored
+        and ansi.sub("", colored) == text
+        and ansi.sub("", attention_colored) == render(attention_projection)
+        and ansi.sub("", retry_colored) == render(retry_projection),
     )
 
     captured = io.StringIO()
@@ -829,38 +923,75 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-missing-current-verif
     )
 
     missing = project(store_root, OWNER, inventory=LiveInventory({}))
+    missing_program = missing.programs[0]
     missing_verify = next(
-        step for step in missing.programs[0].steps if step.step_id == "verify"
+        step for step in missing_program.steps if step.step_id == "verify"
     )
-    check(
-        "historical success cannot establish missing exact-HEAD completion",
+    missing_evidence_issues = [
+        issue.code
+        for issue in missing.issues
+        if issue.code.startswith(("verification-receipt-", "pipeline-progress-"))
+    ]
+    regression_check(
+        "missing exact-HEAD verification has one accurate program-level outcome",
         missing_verify.visits == 1
         and missing_verify.status == "attention"
-        and any(
-            issue.code == "verification-receipt-missing"
-            for issue in missing.issues
-        ),
+        and missing_program.next_action == "attention"
+        and missing_program.classification == ATTENTION
+        and missing_evidence_issues == ["verification-receipt-missing"],
     )
-    live_child = "dashboard-current-live-verify"
+    unrelated_child = "dashboard-unrelated-live-verify"
     _create(
         store,
-        live_child,
+        unrelated_child,
         "pipeline-verify",
-        lane_id="current-verify-lane",
+        lane_id="unrelated-verify-lane",
         contract_sha256=compiled.definition_sha256,
         parent=DISPATCH,
     )
-    _advance(store, live_child, "preflight", "starting", "running", "verifying")
-    running = project(store_root, OWNER, inventory=LiveInventory({}))
-    running_verify = next(
-        step for step in running.programs[0].steps if step.step_id == "verify"
+    _advance(
+        store,
+        unrelated_child,
+        "preflight",
+        "starting",
+        "running",
+        "verifying",
     )
-    check(
-        "live verification remains running when exact-HEAD receipt is not ready",
+    unrelated = project(store_root, OWNER, inventory=LiveInventory({}))
+    unrelated_program = unrelated.programs[0]
+    unrelated_verify = next(
+        step for step in unrelated_program.steps if step.step_id == "verify"
+    )
+    regression_check(
+        "an unrelated running verification child cannot hide missing exact-HEAD evidence",
+        unrelated_verify.status == "attention"
+        and unrelated_program.next_action == "attention"
+        and unrelated_program.classification == ATTENTION
+        and any(
+            issue.code == "verification-receipt-missing"
+            for issue in unrelated.issues
+        ),
+    )
+    current_child = _running_current_verification(
+        store,
+        DISPATCH,
+        compiled,
+        head_sha="a" * 40,
+    )
+    running = project(store_root, OWNER, inventory=LiveInventory({}))
+    running_program = running.programs[0]
+    running_verify = next(
+        step for step in running_program.steps if step.step_id == "verify"
+    )
+    regression_check(
+        "only the durably matching current verification attempt defers the missing receipt",
         running_verify.visits == 1
         and running_verify.status == "running"
+        and current_child in {child.operation_id for child in running_verify.children}
+        and running_program.next_action == "wait"
+        and running_program.classification == ACTIVE
         and not any(
-            issue.code == "verification-receipt-missing"
+            issue.code.startswith(("verification-receipt-", "pipeline-progress-"))
             for issue in running.issues
         ),
     )
@@ -1932,6 +2063,68 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-open.") as raw:
         and alias_marker["state"] == "retryable"
         and alias_marker["surface_id"] == ""
         and _tree_bytes(store_root) == alias_baseline,
+    )
+
+    def recover_persisted_caller_alias(
+        state: str,
+    ) -> tuple[object, list[list[str]], dict[str, object]]:
+        fake = FakeCmuxRunner(caller, dashboard, workspace)
+        adapter = CmuxAdapter(runner=fake, binary="cmux")
+        markers = root / f"persisted-alias-{state}"
+        dashboard_script.open_dashboard(
+            vault=vault,
+            store=store_root,
+            caller_surface=caller,
+            adapter=adapter,
+            marker_root=markers,
+            clock=lambda: 100.0,
+        )
+        marker_path = next(markers.glob("*.json"))
+        marker = json.loads(marker_path.read_text(encoding="ascii"))
+        marker.update(
+            state=state,
+            surface_id=caller,
+            reserved_at=100.0 if state == "starting" else 0,
+        )
+        marker_path.write_text(json.dumps(marker), encoding="ascii")
+        fake.created = False
+        call_count = len(fake.calls)
+        result = dashboard_script.open_dashboard(
+            vault=vault,
+            store=store_root,
+            caller_surface=caller,
+            adapter=adapter,
+            marker_root=markers,
+            clock=lambda: 131.0,
+        )
+        final_marker = json.loads(marker_path.read_text(encoding="ascii"))
+        return result, fake.calls[call_count:], final_marker
+
+    ready_result, ready_calls, ready_marker = recover_persisted_caller_alias(
+        "ready"
+    )
+    starting_result, starting_calls, starting_marker = (
+        recover_persisted_caller_alias("starting")
+    )
+    regression_check(
+        "persisted caller aliases are retryable without reuse or caller cleanup",
+        ready_result.surface_id == dashboard
+        and not ready_result.reused
+        and starting_result.surface_id == dashboard
+        and not starting_result.reused
+        and not any(
+            call[1:2] == ["close-surface"] and caller in call
+            for call in ready_calls + starting_calls
+        )
+        and ready_marker["state"] == "ready"
+        and ready_marker["surface_id"] == dashboard
+        and starting_marker["state"] == "ready"
+        and starting_marker["surface_id"] == dashboard,
+    )
+
+if REGRESSION_FAILURES:
+    raise AssertionError(
+        "dashboard regressions failed: " + "; ".join(REGRESSION_FAILURES)
     )
 
 print("harness dashboard tests passed")
