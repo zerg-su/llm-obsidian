@@ -891,19 +891,19 @@ class RuntimeWorkerVerificationMixin:
             supervisor.transition("verifying")
             supervisor.consume_attempt()
             current = supervisor.read()
-        if current.pending_effect:
-            if (
-                current.pending_effect == self.verification_effect_id
-                and existing is not None
-            ):
-                self.store.resolve_effect(
-                    self.spec["owner_id"],
-                    self.verification_spec.operation_id,
-                    EffectOutcome.SUCCEEDED,
-                )
-            else:
-                self.summary_attention("pipeline-verification-effect-uncertain")
-                return
+        # An interrupted own-identity effect without a receipt resumes: the
+        # probes are process-local and the receipt is their only outcome.
+        pending = current.pending_effect
+        if pending and pending != self.verification_effect_id:
+            self.summary_attention("pipeline-verification-effect-uncertain")
+            return
+        resume_pending = bool(pending) and existing is None
+        if pending and existing is not None:
+            self.store.resolve_effect(
+                self.spec["owner_id"],
+                self.verification_spec.operation_id,
+                EffectOutcome.SUCCEEDED,
+            )
         if existing is None:
             current = supervisor.read()
             if current.state != "verifying":
@@ -978,6 +978,7 @@ class RuntimeWorkerVerificationMixin:
                 self.verification_effect_id,
                 execute_verification,
                 persist_result=persist_verification,
+                resume_pending=resume_pending,
             )
             existing = self.verification_receipt()
         if existing is None:

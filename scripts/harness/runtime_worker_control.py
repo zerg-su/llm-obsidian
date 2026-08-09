@@ -233,6 +233,7 @@ class RuntimeWorkerControlMixin:
                 self.spec_path.parent,
                 envelope.callback_id,
                 self.cmux_adapter,
+                resume_uncertain=wake_resume_once(self, envelope.callback_id),
             ):
                 self.summary_attention("callback-wake-effect-uncertain")
                 return

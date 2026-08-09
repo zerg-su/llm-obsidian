@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "defects": [
+    {
+      "defect_id": "D267-001",
+      "root_cause_class": "interrupted-verification-effect-fails-closed",
+      "seam": "other",
+      "alias_of": null,
+      "reproducer": "tests/harness/test_lifecycle_crash_matrix.py::summary-consumed-before-verification",
+      "durable_pre_state": "pipeline-verify child at verifying with its own pending effect id and no receipt",
+      "expected_owner": "RuntimeWorkerVerificationMixin.run_verification",
+      "expected_transition": "resume the exact pending local verification effect and publish its receipt",
+      "observed_post_state": "restart classified pipeline-verification-effect-uncertain and latched dispatch attention-required",
+      "effect_ambiguity": "none: verification probes are process-local and their sole durable outcome is the receipt",
+      "focused_regression": "tests/harness/test_lifecycle_crash_matrix.py",
+      "disposition": "repaired"
+    },
+    {
+      "defect_id": "D267-002",
+      "root_cause_class": "missing-review-redrive-owner",
+      "seam": "callback-finalization",
+      "alias_of": null,
+      "reproducer": "tests/harness/test_lifecycle_crash_matrix.py::verification-receipt-published",
+      "durable_pre_state": "review gate at attention-required with a zero-effect terminal attempt after a begin-attempt crash",
+      "expected_owner": "RuntimeWorkerSummaryMixin.advance_review_boundary",
+      "expected_transition": "one code-owned re-drive per distinct durable drive input so the flow supersedes the zero-effect attempt",
+      "observed_post_state": "worker latched review-finalization-attention without ever invoking the flow that owns the recovery",
+      "effect_ambiguity": "none: the flow validates zero-effect supersede against durable lane and callback artifacts",
+      "focused_regression": "tests/harness/test_lifecycle_crash_matrix.py",
+      "disposition": "repaired"
+    },
+    {
+      "defect_id": "D267-003",
+      "root_cause_class": "torn-callback-wake-fails-closed",
+      "seam": "callback-finalization",
+      "alias_of": null,
+      "reproducer": "tests/harness/test_lifecycle_crash_matrix.py::findings-notification-sent",
+      "durable_pre_state": "callback-wake marker at paste-reserved/effect-uncertain for the same wake identity after a torn cmux send",
+      "expected_owner": "runtime_callback_io._publish_callback_wake_locked",
+      "expected_transition": "resume the same-identity wake; wake text instructs idempotent runners so re-sending converges",
+      "observed_post_state": "every later publication of the same wake identity returned effect-uncertain and re-latched attention",
+      "effect_ambiguity": "wake duplication only; wakes carry no lifecycle authority and their runners are idempotent",
+      "focused_regression": "tests/harness/test_lifecycle_crash_matrix.py",
+      "disposition": "repaired"
+    },
+    {
+      "defect_id": "D267-004",
+      "root_cause_class": "attention-latch-blocks-restart-recovery",
+      "seam": "callback-finalization",
+      "alias_of": null,
+      "reproducer": "tests/harness/test_lifecycle_crash_matrix.py::findings-notification-sent",
+      "durable_pre_state": "dispatch attention-required with resume_state awaiting-callback and a typed resumable mechanism latch",
+      "expected_owner": "RuntimeWorkerCustomMixin.recover_restart_summary_attention",
+      "expected_transition": "one restart-scoped resume to the durable resume boundary per worker generation",
+      "observed_post_state": "provider_exit_is_final ended every restarted generation immediately; only coordinator resume could converge",
+      "effect_ambiguity": "none: recovery replays no effect, it re-enters the durable wait state",
+      "focused_regression": "tests/harness/test_lifecycle_crash_matrix.py",
+      "disposition": "repaired"
+    },
+    {
+      "defect_id": "D267-005",
+      "root_cause_class": "mechanism-outcome-consumed-product-cycle",
+      "seam": "callback-finalization",
+      "alias_of": null,
+      "reproducer": "tests/harness/test_finalization_ledger.py::mechanism-neutral-accounting",
+      "durable_pre_state": "finalization cycle reserved, then a mechanism terminal (attention-required or blocked)",
+      "expected_owner": "FinalizationLedger.record_terminal",
+      "expected_transition": "release the reservation into a bounded immutable attempt receipt; only material outcomes consume cycles",
+      "observed_post_state": "mechanism outcomes permanently occupied one of the five product cycles",
+      "effect_ambiguity": "none: ledger-only accounting",
+      "focused_regression": "tests/harness/test_finalization_ledger.py",
+      "disposition": "repaired"
+    }
+  ]
+}

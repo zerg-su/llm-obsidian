@@ -130,6 +130,8 @@ def _publish_callback_wake_locked(
     state_root: Path,
     callback_id: str,
     cmux_adapter: object,
+    *,
+    resume_uncertain: bool = False,
 ) -> bool:
     """Publish while the exact operation wake lock is held."""
 
@@ -170,17 +172,22 @@ def _publish_callback_wake_locked(
                         },
                     )
                 return True
-            if status != "effect-uncertain":
-                _atomic_json(
-                    notify_path,
-                    {
-                        "schema_version": 1,
-                        "callback_id": callback_id,
-                        "status": "effect-uncertain",
-                    },
-                )
-            return False
-        if notified.get("status") != "sent":
+            if not resume_uncertain:
+                if status != "effect-uncertain":
+                    _atomic_json(
+                        notify_path,
+                        {
+                            "schema_version": 1,
+                            "callback_id": callback_id,
+                            "status": "effect-uncertain",
+                        },
+                    )
+                return False
+            # A restarted generation resumes a torn same-identity wake once:
+            # wake text instructs an idempotent runner, so re-sending the
+            # exact message converges, unlike a provider input whose replay
+            # would be a second effect.  Live retries stay fail-closed.
+        elif notified.get("status") != "sent":
             raise RuntimeWorkerError("prior callback wake effect is uncertain")
     _atomic_json(
         notify_path,
@@ -230,17 +237,37 @@ def _publish_callback_wake_locked(
     return True
 
 
+def wake_resume_once(worker: object, identity: str) -> bool:
+    """Authorize at most one torn-wake resume per identity per generation.
+
+    Only a real worker generation (which initializes its resumed-identity
+    set) may resume; bare probes and CLI-side publishers stay fail-closed.
+    """
+
+    resumed = getattr(worker, "resumed_wake_identities", None)
+    if resumed is None or identity in resumed:
+        return False
+    resumed.add(identity)
+    return True
+
+
 def publish_callback_wake(
     spec: dict[str, Any],
     state_root: Path,
     callback_id: str,
     cmux_adapter: object,
+    *,
+    resume_uncertain: bool = False,
 ) -> bool:
     """Publish one crash-safe, concurrent-idempotent coordinator wake."""
 
     with _callback_wake_lock(state_root):
         return _publish_callback_wake_locked(
-            spec, state_root, callback_id, cmux_adapter
+            spec,
+            state_root,
+            callback_id,
+            cmux_adapter,
+            resume_uncertain=resume_uncertain,
         )
 
 

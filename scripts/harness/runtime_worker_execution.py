@@ -385,6 +385,8 @@ class RuntimeWorkerExecution(
         self.summary_digest = ""
         self.summary_stable_reads = 0
         self.summary_attention_revision = -1
+        self.restart_attention_recovery_done = False
+        self.resumed_wake_identities: set[str] = set()
         self.operation_contract = operation.spec.contract_sha256
         try:
             self._pipeline_name, self.pipeline = compiled_executable_for_contract(

@@ -364,11 +364,10 @@ class RuntimeWorkerCustomMixin:
             self.summary_attention("pipeline-custom-callback-invalid")
 
     def recover_task_summary_attention(self) -> None:
-        if (
-            self.spec["callback_mode"] != "task-summary"
-            or not self.callback_handled
-            or self.summary_attention_revision < 0
-        ):
+        if self.spec["callback_mode"] != "task-summary":
+            return
+        self.recover_restart_summary_attention()
+        if not self.callback_handled or self.summary_attention_revision < 0:
             return
         try:
             current = self.store.read(self.spec["owner_id"], self.spec["operation_id"])
@@ -393,6 +392,58 @@ class RuntimeWorkerCustomMixin:
         self.summary_digest = ""
         self.summary_stable_reads = 0
         self.summary_attention_revision = -1
+
+    def recover_restart_summary_attention(self) -> None:
+        """Resume once per generation from a durable mechanism attention latch.
+
+        A prior worker generation that latched a typed mechanism/transport
+        failure exits immediately on restart, so the restarted generation is
+        the sole owner that can consume the durable resume boundary.  Exactly
+        one recovery per generation keeps a persistent failure fail-closed:
+        it re-latches on the next poll and stays with the coordinator.
+        """
+
+        if getattr(self, "restart_attention_recovery_done", True):
+            return
+        if self.callback_handled or self.summary_attention_revision >= 0:
+            return
+        latch_path = self.spec_path.parent / "callback-error.json"
+        if not latch_path.is_file() or latch_path.is_symlink():
+            return
+        try:
+            latch = json.loads(latch_path.read_text(encoding="utf-8"))
+            current = self.store.read(
+                self.spec["owner_id"], self.spec["operation_id"]
+            )
+        except Exception:
+            return
+        if (
+            not isinstance(latch, dict)
+            or latch.get("status") not in RESUMABLE_SUMMARY_ATTENTION
+            or current.state != "attention-required"
+            or current.resume_state not in CALLBACK_WAIT_STATES
+        ):
+            return
+        self.restart_attention_recovery_done = True
+        try:
+            self.store.transition(
+                self.spec["owner_id"],
+                self.spec["operation_id"],
+                current.resume_state,
+            )
+        except Exception:
+            return
+        _atomic_json(
+            self.spec_path.parent / "callback-recovery.json",
+            {
+                "schema_version": 1,
+                "operation_id": self.spec["operation_id"],
+                "attention_revision": current.revision,
+                "resumed_revision": current.revision + 1,
+                "attention_status": str(latch.get("status")),
+                "status": "restart-resumed",
+            },
+        )
 
     def inspect_task_summary(self) -> None:
         if self.callback_handled:

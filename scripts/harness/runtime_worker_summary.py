@@ -345,6 +345,23 @@ class RuntimeWorkerSummaryMixin:
             ):
                 self.drive_review()
             return True
+        if (
+            state.marker is not None
+            and self.review.status == "attention"
+            and gate_state.get("status") == "attention-required"
+        ):
+            # The gate owns recovery classification for its own attention
+            # boundary (for example a zero-effect attempt whose provider
+            # session never started).  One code-owned re-drive per distinct
+            # durable drive input lets the flow supersede or re-arm; an
+            # unchanged input falls through to the real attention latch.
+            current_drive_sha256 = self.review_drive_sha256()
+            if (
+                state.marker["status"] == "pending"
+                or state.marker.get("drive_sha256") != current_drive_sha256
+            ):
+                self.drive_review()
+                return True
         return False
 
     def advance_compiled_pipeline(self, state: SummaryPipelineState) -> bool:
@@ -468,12 +485,16 @@ class RuntimeWorkerSummaryMixin:
                 raise RuntimeWorkerError("task summary notification marker is invalid")
             if marker.get("status") == "sent":
                 return
-            if marker.get("status") == "pending":
+            if marker.get("status") != "pending":
+                raise RuntimeWorkerError(
+                    "task summary notification marker state is invalid"
+                )
+            # A torn reap wake resumes once per generation: the wake
+            # instructs the idempotent reap runner, so re-sending the exact
+            # message converges. Live retries stay fail-closed.
+            if not wake_resume_once(self, envelope.callback_id):
                 self.mark_attention(AttentionReason.ATTENTION_REQUIRED)
                 return
-            raise RuntimeWorkerError(
-                "task summary notification marker state is invalid"
-            )
         vault_root = Path(str(self.meta.get("vault_root") or "")).resolve()
         reap_runner = vault_root / "scripts" / "reap-runner.py"
         if (

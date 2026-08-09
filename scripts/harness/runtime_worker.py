@@ -131,6 +131,7 @@ from .runtime_callback_io import (
     observe_review_artifact,
     publish_callback_wake,
     submit_stable_review_input,
+    wake_resume_once,
 )
 from .runtime_provider import (
     RESEARCH_PATH,
@@ -152,6 +153,18 @@ MAX_SCREEN_BYTES = 70_000
 MAX_PIPELINE_VERIFY_RESUBMITS = 1
 CALLBACK_WAIT_STATES = frozenset(
     {"running", "awaiting-callback", "verifying"}
+)
+#: Mechanism/transport failure classes a restarted worker generation may
+#: resume once from their durable resume boundary.  Policy and budget
+#: terminals (retry-exhausted, contract drift, budget ceilings) stay with the
+#: coordinator.
+RESUMABLE_SUMMARY_ATTENTION = frozenset(
+    {
+        "wiki-summary-invalid",
+        "review-drive-failed",
+        "callback-wake-effect-uncertain",
+        "pipeline-verification-effect-uncertain",
+    }
 )
 
 

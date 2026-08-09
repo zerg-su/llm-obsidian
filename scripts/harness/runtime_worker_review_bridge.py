@@ -15,7 +15,7 @@ from .runtime_worker import (
     _research_input_provenance,
     _review_resolution_handoff_ready,
 )
-from .runtime_callback_io import publish_callback_wake
+from .runtime_callback_io import publish_callback_wake, wake_resume_once
 from review_contract import ReviewContractError, axis_finding_id
 
 
@@ -314,6 +314,7 @@ class RuntimeWorkerReviewBridgeMixin:
                 self.spec_path.parent,
                 envelope.callback_id,
                 self.cmux_adapter,
+                resume_uncertain=wake_resume_once(self, envelope.callback_id),
             ):
                 self.summary_attention("callback-wake-effect-uncertain")
                 return
@@ -736,7 +737,11 @@ class RuntimeWorkerReviewBridgeMixin:
             wake_root = self.spec_path.parent / "review-resolution-wake"
             wake_root.mkdir(parents=True, exist_ok=True, mode=0o700)
             if not publish_callback_wake(
-                wake_spec, wake_root, wake_id, self.cmux_adapter
+                wake_spec,
+                wake_root,
+                wake_id,
+                self.cmux_adapter,
+                resume_uncertain=wake_resume_once(self, wake_id),
             ):
                 raise RuntimeWorkerError(
                     "review resolution rebind notification effect is uncertain"
@@ -767,6 +772,7 @@ class RuntimeWorkerReviewBridgeMixin:
             wake_root,
             packet_sha256,
             self.cmux_adapter,
+            resume_uncertain=wake_resume_once(self, packet_sha256),
         ):
             raise RuntimeWorkerError(
                 "review resolution notification effect is uncertain"
