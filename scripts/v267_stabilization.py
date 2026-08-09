@@ -51,6 +51,14 @@ MATERIAL_CYCLE_ARTIFACT_FIELDS = (
 MATERIAL_CYCLE_FILE_FIELDS = tuple(
     field for field in MATERIAL_CYCLE_ARTIFACT_FIELDS if field != "fix_head"
 )
+#: Required typed content of each material artifact file: the artifact must
+#: declare itself, bind the run's cell, and bind the corrected HEAD.
+MATERIAL_ARTIFACT_TYPES = {
+    "findings_artifact": "findings",
+    "refreshed_summary_artifact": "refreshed-summary",
+    "second_verification_artifact": "second-verification",
+    "re_review_artifact": "re-review",
+}
 GIT_OID = set("0123456789abcdef")
 EXECUTOR_ROUTE_KEYS = ("runtime", "model", "effort")
 REVIEW_ROUTE_KEYS = ("mode", "runtime", "model", "effort")
@@ -358,7 +366,7 @@ def load_rc1_gate(manifest_path: Path = DEFAULT_MANIFEST) -> RC1Gate:
 
 def _validate_evidence_file(
     reference: object, position: int, field: str, *, gate: RC1Gate, root: Path
-) -> None:
+) -> bytes:
     """The artifact must exist under the evidence root with matching bytes."""
 
     if (
@@ -411,18 +419,83 @@ def _validate_evidence_file(
             f"receipt {position} material_cycle {field} content does not "
             "match its declared sha256"
         )
+    return payload
+
+
+def _validate_artifact_semantics(
+    payload: bytes,
+    position: int,
+    field: str,
+    *,
+    cell_id: str,
+    fix_head: str,
+) -> None:
+    """The artifact bytes must be the typed record they claim to be.
+
+    Arbitrary well-hashed bytes are rejected: each artifact must parse as a
+    typed JSON record naming its own kind, the run's exact cell, and the
+    exact corrected HEAD (`findings` precede the fix, so they bind any full
+    commit id, while the refreshed summary, second verification, and
+    approving re-review must bind `fix_head`), and the re-review must be an
+    approval.
+    """
+
+    expected_type = MATERIAL_ARTIFACT_TYPES[field]
+    try:
+        record = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise StabilizationError(
+            f"receipt {position} material_cycle {field} is not a typed "
+            "JSON evidence record"
+        ) from None
+    if not isinstance(record, dict) or record.get("schema_version") != 1:
+        raise StabilizationError(
+            f"receipt {position} material_cycle {field} requires a "
+            "schema_version 1 evidence record"
+        )
+    if record.get("type") != expected_type:
+        raise StabilizationError(
+            f"receipt {position} material_cycle {field} must declare type "
+            f"{expected_type}"
+        )
+    if record.get("cell_id") != cell_id:
+        raise StabilizationError(
+            f"receipt {position} material_cycle {field} binds the wrong run"
+        )
+    head = record.get("head_sha")
+    if not isinstance(head, str) or len(head) != 40 or not set(head) <= GIT_OID:
+        raise StabilizationError(
+            f"receipt {position} material_cycle {field} requires a full "
+            "head_sha commit binding"
+        )
+    if field != "findings_artifact" and head != fix_head:
+        raise StabilizationError(
+            f"receipt {position} material_cycle {field} binds the wrong "
+            "corrected HEAD"
+        )
+    if field == "re_review_artifact" and record.get("verdict") != "approve":
+        raise StabilizationError(
+            f"receipt {position} material_cycle re-review is not an approval"
+        )
 
 
 def _validate_material_cycle(
-    value: object, position: int, *, gate: RC1Gate, root: Path
+    value: object,
+    position: int,
+    *,
+    gate: RC1Gate,
+    root: Path,
+    cell_id: str,
 ) -> bool:
     """True when the receipt proves a complete material-finding cycle.
 
     Evidence is validated, not just named: each artifact must exist as a
-    non-empty file contained under the configured evidence root and match
-    its declared content hash, and the fix HEAD must be a full Git object
-    id.  Binding these artifacts to accepted provider/operation identities
-    is owned by the deferred RC3 live-streak stage.
+    non-empty file contained under the configured evidence root, match its
+    declared content hash, and parse as the typed record it claims to be,
+    bound to this run's cell and to the exact corrected HEAD; the fix HEAD
+    must resolve to a real commit at the validation root.  Binding these
+    artifacts to accepted provider/operation identities is owned by the
+    deferred RC3 live-streak stage.
     """
 
     if value is None:
@@ -447,9 +520,23 @@ def _validate_material_cycle(
             f"receipt {position} material_cycle fix_head must be a full "
             "40-hex Git object id"
         )
+    probe = subprocess.run(
+        ["git", "-C", str(root), "cat-file", "-t", fix_head],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if probe.returncode or probe.stdout.strip() != "commit":
+        raise StabilizationError(
+            f"receipt {position} material_cycle fix_head does not resolve "
+            "to a commit at the validation root"
+        )
     for field in MATERIAL_CYCLE_FILE_FIELDS:
-        _validate_evidence_file(
+        payload = _validate_evidence_file(
             value[field], position, field, gate=gate, root=root
+        )
+        _validate_artifact_semantics(
+            payload, position, field, cell_id=cell_id, fix_head=fix_head
         )
     return True
 
@@ -567,7 +654,11 @@ def validate_streak(
     window: list[dict[str, object]] = []
     for position, receipt in enumerate(validated, start=1):
         material = _validate_material_cycle(
-            receipt["material_cycle"], position, gate=gate, root=root
+            receipt["material_cycle"],
+            position,
+            gate=gate,
+            root=root,
+            cell_id=str(receipt["cell_id"]),
         )
         fresh_success = (
             receipt["result"] == "success"

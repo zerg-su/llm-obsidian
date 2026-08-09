@@ -7,7 +7,8 @@ configured RC1 cells, sequence them strictly under coordinator
 authorization, bind runs to lifecycle_subject_sha256, emit
 streak-consumable receipts, preserve the additive legacy four-cell
 release path, and reject unknown/skipped/reordered/unbound cells.
-The facade never launches a live provider cell.
+Execution is exercised only through injected corridor drivers: these
+tests never launch a live provider cell.
 """
 
 from __future__ import annotations
@@ -55,6 +56,19 @@ def _load_script(name: str, relative: str):
 
 DIGEST_A = "a" * 64
 EVIDENCE_TMP = Path(tempfile.mkdtemp(prefix="rc1-facade-evidence-"))
+for _args in (
+    ("init", "-q"),
+    ("config", "user.email", "test@example.com"),
+    ("config", "user.name", "test"),
+    ("commit", "--allow-empty", "-qm", "fix"),
+):
+    subprocess.run(["git", "-C", str(EVIDENCE_TMP), *_args], check=True)
+FIX_HEAD = subprocess.run(
+    ["git", "-C", str(EVIDENCE_TMP), "rev-parse", "HEAD"],
+    text=True,
+    capture_output=True,
+    check=True,
+).stdout.strip()
 
 
 def _evidence_file(relative: str, content: str) -> dict[str, str]:
@@ -65,21 +79,37 @@ def _evidence_file(relative: str, content: str) -> dict[str, str]:
     return {"path": relative, "sha256": hashlib.sha256(payload).hexdigest()}
 
 
-def _material_artifacts(sequence: int) -> dict[str, object]:
+def _typed_record(kind: str, cell_id: str, head: str, **extra: object) -> str:
+    return json.dumps(
+        {
+            "schema_version": 1,
+            "type": kind,
+            "cell_id": cell_id,
+            "head_sha": head,
+            **extra,
+        }
+    )
+
+
+def _material_artifacts(sequence: int, cell_id: str) -> dict[str, object]:
     prefix = f"docs/acceptance/evidence/v2.6.7/rc1-run-{sequence}"
     return {
         "findings_artifact": _evidence_file(
-            f"{prefix}-findings.json", '{"findings": 1}'
+            f"{prefix}-findings.json",
+            _typed_record("findings", cell_id, FIX_HEAD),
         ),
-        "fix_head": "f" * 40,
+        "fix_head": FIX_HEAD,
         "refreshed_summary_artifact": _evidence_file(
-            f"{prefix}-refreshed-summary.json", '{"summary": "refreshed"}'
+            f"{prefix}-refreshed-summary.json",
+            _typed_record("refreshed-summary", cell_id, FIX_HEAD),
         ),
         "second_verification_artifact": _evidence_file(
-            f"{prefix}-verify-2.json", '{"verify": 2}'
+            f"{prefix}-verify-2.json",
+            _typed_record("second-verification", cell_id, FIX_HEAD),
         ),
         "re_review_artifact": _evidence_file(
-            f"{prefix}-re-review.json", '{"review": "approve"}'
+            f"{prefix}-re-review.json",
+            _typed_record("re-review", cell_id, FIX_HEAD, verdict="approve"),
         ),
     }
 
@@ -102,7 +132,11 @@ def _fill_template(
                 f"reviewer-session-{sequence}",
             ],
             "result": "success",
-            "material_cycle": _material_artifacts(sequence) if material else None,
+            "material_cycle": _material_artifacts(
+                sequence, str(template["cell_id"])
+            )
+            if material
+            else None,
             "resource_free": True,
             "coordinator_recovery": False,
         }
@@ -275,6 +309,27 @@ STATE_PATH = STATE_DIR / "rc1-streak-state.json"
 LAUNCHES: list[str] = []
 
 
+def _spec_file(name: str, request_id: str) -> Path:
+    spec = STATE_DIR / name
+    spec.write_text(
+        json.dumps(
+            {
+                "request_id": request_id,
+                "pipeline": "engineering/change",
+                "executor": {"runtime": "claude", "model": "fable", "effort": "high"},
+                "review": {
+                    "mode": "simple",
+                    "runtime": "claude",
+                    "model": "fable",
+                    "effort": "high",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    return spec
+
+
 def _fake_launcher(root: Path, contract: dict, *, timeout: int, **_: object) -> dict:
     LAUNCHES.append(contract["cell_id"])
     return {"owner": "fake-corridor-driver", "returncode": 0}
@@ -292,6 +347,7 @@ check_rejects(
         expected_digest=DIGEST_A,
         state_path=STATE_PATH,
         launcher=_fake_launcher,
+        spec_path=_spec_file("spec-unauthorized.json", "request-x"),
         evidence_root=EVIDENCE_TMP,
     ),
 )
@@ -300,19 +356,22 @@ check(
     LAUNCHES == [] and not STATE_PATH.exists(),
 )
 
-fresh_receipts = []
+recorded: dict[str, object] = {}
 for sequence in (1, 2, 3):
+    spec = _spec_file(f"spec-{sequence}.json", f"request-{sequence + 10}")
     report = gate.reserve_and_launch(
         coordinator_authorized=True,
         expected_digest=DIGEST_A,
         state_path=STATE_PATH,
         launcher=_fake_launcher,
+        spec_path=spec,
         evidence_root=EVIDENCE_TMP,
     )
     check(
         f"run {sequence} reserves and launches exactly the next configured cell",
         report["cell_id"] == f"rc1-corridor-run-{sequence}"
-        and report["status"] == "launched",
+        and report["status"] == "launched"
+        and report["request_id"] == f"request-{sequence + 10}",
     )
     fresh = _fill_template(
         {**report["receipt_template"]},
@@ -330,7 +389,6 @@ for sequence in (1, 2, 3):
         f"run {sequence} receipt is validated and persisted by the authority",
         recorded["streak"] == sequence,
     )
-    fresh_receipts.append(fresh)
 check(
     "the launcher saw the three cells strictly in configured order",
     LAUNCHES == [f"rc1-corridor-run-{index}" for index in (1, 2, 3)],
@@ -346,6 +404,7 @@ check_rejects(
         expected_digest=DIGEST_A,
         state_path=STATE_PATH,
         launcher=_fake_launcher,
+        spec_path=_spec_file("spec-4.json", "request-14"),
         evidence_root=EVIDENCE_TMP,
     ),
 )
@@ -354,39 +413,92 @@ check(
     LAUNCHES == [f"rc1-corridor-run-{index}" for index in (1, 2, 3)],
 )
 
-# Restart safety: a crash after reservation resumes the same cell.
+# Restart safety: a crash after reservation resumes only the identical
+# dispatch identity; a competing spec is rejected.
 RESTART_STATE = STATE_DIR / "rc1-restart-state.json"
 LAUNCHES.clear()
+RESTART_SPEC = _spec_file("spec-restart.json", "request-21")
 try:
     gate.reserve_and_launch(
         coordinator_authorized=True,
         expected_digest=DIGEST_A,
         state_path=RESTART_STATE,
         launcher=_failing_launcher,
+        spec_path=RESTART_SPEC,
         evidence_root=EVIDENCE_TMP,
     )
 except RuntimeError:
     print("OK   a crashed launch leaves the durable reservation behind")
 else:
     raise AssertionError("a crashed launch leaves the durable reservation behind")
+check_rejects(
+    "a failed launch cannot be recorded as a successful cell",
+    lambda: gate.record_receipt(
+        _fill_template(
+            {**gate.receipt_template("rc1-corridor-run-1", expected_digest=DIGEST_A)},
+            21,
+        ),
+        expected_digest=DIGEST_A,
+        state_path=RESTART_STATE,
+        evidence_root=EVIDENCE_TMP,
+    ),
+)
+check_rejects(
+    "a competing dispatch identity cannot resume the reserved cell",
+    lambda: gate.reserve_and_launch(
+        coordinator_authorized=True,
+        expected_digest=DIGEST_A,
+        state_path=RESTART_STATE,
+        launcher=_fake_launcher,
+        spec_path=_spec_file("spec-competing.json", "request-99"),
+        evidence_root=EVIDENCE_TMP,
+    ),
+)
 resumed = gate.reserve_and_launch(
     coordinator_authorized=True,
     expected_digest=DIGEST_A,
     state_path=RESTART_STATE,
     launcher=_fake_launcher,
+    spec_path=RESTART_SPEC,
     evidence_root=EVIDENCE_TMP,
 )
 check(
-    "a restarted run resumes the reserved cell instead of skipping ahead",
+    "a restarted run resumes the reserved cell with the identical identity",
     resumed["cell_id"] == "rc1-corridor-run-1"
     and LAUNCHES == ["rc1-corridor-run-1", "rc1-corridor-run-1"],
 )
+check_rejects(
+    "a launched, unrecorded cell refuses any further run",
+    lambda: gate.reserve_and_launch(
+        coordinator_authorized=True,
+        expected_digest=DIGEST_A,
+        state_path=RESTART_STATE,
+        launcher=_fake_launcher,
+        spec_path=RESTART_SPEC,
+        evidence_root=EVIDENCE_TMP,
+    ),
+)
 
-# Receipt authority: a tampered receipt is rejected and nothing persists.
+# Receipt authority: fabricated or tampered receipts are rejected and
+# nothing persists.
+foreign = _fill_template(
+    {**gate.receipt_template("rc1-corridor-run-1", expected_digest=DIGEST_A)},
+    31,
+)
+check_rejects(
+    "a receipt with a foreign request identity is rejected",
+    lambda: gate.record_receipt(
+        foreign,
+        expected_digest=DIGEST_A,
+        state_path=RESTART_STATE,
+        evidence_root=EVIDENCE_TMP,
+    ),
+)
 tampered = _fill_template(
     {**gate.receipt_template("rc1-corridor-run-1", expected_digest=DIGEST_A)},
-    21,
+    32,
 )
+tampered["request_id"] = "request-21"
 tampered["executor_route"] = {"runtime": "claude", "model": "sonnet", "effort": "low"}
 check_rejects(
     "a tampered receipt is rejected by the streak authority",
@@ -399,8 +511,56 @@ check_rejects(
 )
 state_after = json.loads(RESTART_STATE.read_text(encoding="utf-8"))
 check(
-    "the rejected receipt left the durable state untouched",
+    "the rejected receipts left the durable state untouched",
     state_after["receipts"] == [] and state_after["reservation"] is not None,
+)
+
+# Concurrency: the claim is linearizable, so two callers with two
+# route-compatible specs cannot both launch the same cell.
+import threading
+
+RACE_STATE = STATE_DIR / "rc1-race-state.json"
+race_launches: list[str] = []
+race_errors: list[str] = []
+race_barrier = threading.Barrier(2, timeout=10)
+
+
+def _race_launcher(root: Path, contract: dict, *, timeout: int, **options: object) -> dict:
+    race_launches.append(str(options.get("spec_path")))
+    return {"owner": "race-driver", "returncode": 0}
+
+
+def _race(spec_name: str, request_id: str) -> None:
+    spec = _spec_file(spec_name, request_id)
+    race_barrier.wait()
+    try:
+        gate.reserve_and_launch(
+            coordinator_authorized=True,
+            expected_digest=DIGEST_A,
+            state_path=RACE_STATE,
+            launcher=_race_launcher,
+            spec_path=spec,
+            evidence_root=EVIDENCE_TMP,
+        )
+    except stab.StabilizationError as exc:
+        race_errors.append(str(exc))
+
+
+threads = [
+    threading.Thread(target=_race, args=("spec-race-a.json", "request-41")),
+    threading.Thread(target=_race, args=("spec-race-b.json", "request-42")),
+]
+for thread in threads:
+    thread.start()
+for thread in threads:
+    thread.join()
+race_state = json.loads(RACE_STATE.read_text(encoding="utf-8"))
+check(
+    "two concurrent callers produce exactly one launch and one reservation",
+    len(race_launches) == 1
+    and len(race_errors) == 1
+    and race_state["reservation"] is not None
+    and race_state["reservation"]["status"] == "launched",
 )
 
 # The production dispatch driver binds the spec to the reserved cell before
@@ -409,6 +569,7 @@ SPEC_PATH = STATE_DIR / "dispatch-spec.json"
 SPEC_PATH.write_text(
     json.dumps(
         {
+            "request_id": "request-51",
             "pipeline": "research/deep",
             "executor": {"runtime": "claude", "model": "fable", "effort": "high"},
             "review": {
@@ -431,6 +592,7 @@ check_rejects(
 SPEC_PATH.write_text(
     json.dumps(
         {
+            "request_id": "request-52",
             "pipeline": "engineering/change",
             "executor": {"runtime": "codex", "model": "gpt", "effort": "low"},
             "review": {
@@ -448,6 +610,21 @@ check_rejects(
     lambda: facade.dispatch_corridor_driver(
         ROOT, contract_1, timeout=5, spec_path=SPEC_PATH, approval_token="t"
     ),
+)
+
+# The CLI help no longer claims the command is effect-free.
+help_result = subprocess.run(
+    [sys.executable, str(FACADE_PATH), "--help"],
+    text=True,
+    capture_output=True,
+    check=False,
+)
+check(
+    "the CLI help distinguishes read-only preflight from effectful run/record",
+    help_result.returncode == 0
+    and "never launches a provider cell" not in help_result.stdout
+    and "read-only" in help_result.stdout
+    and "coordinator-authorized" in help_result.stdout,
 )
 
 # --- Preflight CLI ------------------------------------------------------------

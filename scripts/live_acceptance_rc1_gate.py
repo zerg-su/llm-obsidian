@@ -1,28 +1,40 @@
 #!/usr/bin/env python3
-"""RC1 gate preflight facade: the production consumer of the [rc1] cells.
+"""RC1 gate: the production owner of the three configured [rc1] cells.
 
-Contract/preflight only.  The facade consumes the exact three configured
-RC1 corridor cells from ``config/acceptance-cells.toml``, plans their
-strictly sequential execution, refuses any run that is not coordinator
-authorized, binds every receipt to ``lifecycle_subject_sha256`` and the
-registered Fable High routes, and emits templates that the
-``v267_stabilization`` streak validator consumes as its single authority.
-It never launches a provider cell, opens a surface, or mutates state;
-live execution stays coordinator-owned.  The legacy four-cell release
-path (``release-acceptance.py`` / ``live-acceptance-runner.py``) is
-untouched: the RC1 gate is additive beside it.
+Three commands with distinct effect boundaries:
+
+- ``preflight`` is read-only: it validates the gate declaration from
+  ``config/acceptance-cells.toml`` and names the next configured cell.
+- ``run`` is effectful and coordinator-authorized only: it writes an
+  exclusive durable reservation for exactly the next cell (state file:
+  ``.vault-meta/acceptance/rc1-streak-state.json``, claim serialized by a
+  file lock and bound to the dispatch spec digest and request identity)
+  and launches the engineering/change corridor through the existing
+  dispatch owner, ``scripts/dispatch-runner.py start``.  Without explicit
+  coordinator authorization it refuses before any state or launch effect.
+- ``record`` mutates durable state: it completes a *launched* reservation
+  with one authoritative schema-2 receipt, but only after the whole
+  receipt list re-validates through the ``v267_stabilization`` streak
+  authority; a rejected receipt leaves the state untouched.
+
+The legacy four-cell release path (``release-acceptance.py`` /
+``live-acceptance-runner.py``) is untouched: the RC1 gate is additive
+beside it.
 """
 
 from __future__ import annotations
 
 import argparse
+import fcntl
+import hashlib
 import json
 import os
 import subprocess
 import sys
 import tempfile
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -50,6 +62,41 @@ def _atomic_json(path: Path, value: object) -> None:
         os.replace(tmp, path)
     finally:
         tmp.unlink(missing_ok=True)
+
+
+@contextmanager
+def _claim_lock(state_path: Path) -> Iterator[None]:
+    """Serialize the read/claim/launch/persist transaction on the state file.
+
+    Atomic file replacement alone protects bytes, not the transaction; the
+    exclusive lock makes the reservation claim linearizable so two callers
+    cannot both claim and launch the same cell.
+    """
+
+    lock_path = state_path.with_name(state_path.name + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(lock_path, "w", encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def _spec_identity(spec_path: Path) -> tuple[str, str]:
+    """The dispatch spec digest and request identity that bind one claim."""
+
+    try:
+        payload = Path(spec_path).read_bytes()
+        spec = json.loads(payload.decode("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise stab.StabilizationError(f"cannot read dispatch spec: {exc}") from exc
+    request_id = spec.get("request_id") if isinstance(spec, dict) else None
+    if not isinstance(request_id, str) or not request_id:
+        raise stab.StabilizationError(
+            "dispatch spec requires a non-empty request_id"
+        )
+    return hashlib.sha256(payload).hexdigest(), request_id
 
 
 def _read_streak_state(path: Path, *, expected_digest: str) -> dict[str, Any]:
@@ -185,6 +232,7 @@ class RC1GatePreflight:
         expected_digest: str,
         state_path: Path,
         launcher: CorridorLauncher,
+        spec_path: Path,
         evidence_root: Path | None = None,
         timeout: int = 1200,
         **launcher_options: Any,
@@ -193,53 +241,84 @@ class RC1GatePreflight:
 
         Containment precedes authorization: without an explicit coordinator
         authorization no state is written and the launcher is never invoked.
-        The reservation is persisted before launch, so a crashed or
-        interrupted run resumes the same cell after restart instead of
-        skipping ahead.
+        The whole read/claim/launch/persist transaction runs under an
+        exclusive file lock, and the claim is bound immutably to the
+        dispatch spec digest and request identity, so a second caller — or
+        a changed spec — cannot relaunch the same cell.  A crashed launch
+        leaves a ``reserved`` claim that only the identical spec identity
+        may resume; a ``launched`` claim must be completed by ``record``
+        before any further run.
         """
 
-        state = _read_streak_state(state_path, expected_digest=expected_digest)
-        plan = self.plan(
-            state["receipts"],
-            expected_digest=expected_digest,
-            evidence_root=evidence_root,
-        )
-        if plan["complete"] or plan["next_cell"] is None:
-            raise stab.StabilizationError(
-                "the RC1 streak is already complete; no further cell may run"
-            )
-        next_cell = str(plan["next_cell"])
-        reservation = state.get("reservation")
-        if reservation is not None and reservation["cell_id"] != next_cell:
-            raise stab.StabilizationError(
-                f"streak state reserves {reservation['cell_id']} but the "
-                f"validated prefix requires {next_cell}"
-            )
         if coordinator_authorized is not True:
             raise stab.StabilizationError(
-                f"RC1 cell {next_cell} requires coordinator authorization"
+                "RC1 cells require coordinator authorization"
             )
-        contract = self.authorize(next_cell, coordinator_authorized=True)
-        state["reservation"] = {"cell_id": next_cell, "status": "reserved"}
-        _atomic_json(state_path, state)
-        launch = launcher(
-            ROOT,
-            contract,
-            timeout=timeout,
-            **launcher_options,
-        )
-        if not isinstance(launch, dict):
-            raise stab.StabilizationError("corridor launcher returned no launch record")
-        state["reservation"] = {
-            "cell_id": next_cell,
-            "status": "launched",
-            "launch": launch,
-        }
-        _atomic_json(state_path, state)
+        spec_sha256, request_id = _spec_identity(spec_path)
+        with _claim_lock(state_path):
+            state = _read_streak_state(state_path, expected_digest=expected_digest)
+            plan = self.plan(
+                state["receipts"],
+                expected_digest=expected_digest,
+                evidence_root=evidence_root,
+            )
+            if plan["complete"] or plan["next_cell"] is None:
+                raise stab.StabilizationError(
+                    "the RC1 streak is already complete; no further cell may run"
+                )
+            next_cell = str(plan["next_cell"])
+            reservation = state.get("reservation")
+            if reservation is not None:
+                if reservation["cell_id"] != next_cell:
+                    raise stab.StabilizationError(
+                        f"streak state reserves {reservation['cell_id']} but "
+                        f"the validated prefix requires {next_cell}"
+                    )
+                if reservation.get("status") == "launched":
+                    raise stab.StabilizationError(
+                        f"RC1 cell {next_cell} is already launched; record "
+                        "its receipt before any further run"
+                    )
+                if (
+                    reservation.get("spec_sha256") != spec_sha256
+                    or reservation.get("request_id") != request_id
+                ):
+                    raise stab.StabilizationError(
+                        f"RC1 cell {next_cell} is reserved by a different "
+                        "dispatch identity; restart requires the identical spec"
+                    )
+            contract = self.authorize(next_cell, coordinator_authorized=True)
+            state["reservation"] = {
+                "cell_id": next_cell,
+                "status": "reserved",
+                "spec_sha256": spec_sha256,
+                "request_id": request_id,
+            }
+            _atomic_json(state_path, state)
+            launch = launcher(
+                ROOT,
+                contract,
+                timeout=timeout,
+                spec_path=spec_path,
+                **launcher_options,
+            )
+            if not isinstance(launch, dict):
+                raise stab.StabilizationError(
+                    "corridor launcher returned no launch record"
+                )
+            state["reservation"] = {
+                "cell_id": next_cell,
+                "status": "launched",
+                "spec_sha256": spec_sha256,
+                "request_id": request_id,
+                "launch": launch,
+            }
+            _atomic_json(state_path, state)
         return {
             "schema_version": 1,
             "cell_id": next_cell,
             "status": "launched",
+            "request_id": request_id,
             "launch": launch,
             "receipt_template": self.receipt_template(
                 next_cell, expected_digest=expected_digest
@@ -254,34 +333,51 @@ class RC1GatePreflight:
         state_path: Path,
         evidence_root: Path | None = None,
     ) -> dict[str, Any]:
-        """Complete the open reservation with one validated authoritative receipt.
+        """Complete one *launched* reservation with its authoritative receipt.
 
-        The candidate list is validated through the streak authority before
-        anything is persisted, so a tampered or unbound receipt leaves the
-        durable state untouched.
+        A receipt can only be recorded against a reservation whose corridor
+        actually launched, and it must carry the launched dispatch request
+        identity.  The candidate list is validated through the streak
+        authority before anything is persisted, so a fabricated, tampered,
+        or unbound receipt leaves the durable state untouched.
         """
 
-        state = _read_streak_state(state_path, expected_digest=expected_digest)
-        reservation = state.get("reservation")
-        if reservation is None:
-            raise stab.StabilizationError(
-                "no reserved RC1 cell is awaiting a receipt"
+        with _claim_lock(state_path):
+            state = _read_streak_state(state_path, expected_digest=expected_digest)
+            reservation = state.get("reservation")
+            if reservation is None:
+                raise stab.StabilizationError(
+                    "no reserved RC1 cell is awaiting a receipt"
+                )
+            if reservation.get("status") != "launched":
+                raise stab.StabilizationError(
+                    f"RC1 cell {reservation['cell_id']} was never launched; "
+                    "a receipt cannot be recorded for a failed or pending claim"
+                )
+            if (
+                not isinstance(receipt, dict)
+                or receipt.get("cell_id") != reservation["cell_id"]
+            ):
+                raise stab.StabilizationError(
+                    f"receipt must complete the reserved cell "
+                    f"{reservation['cell_id']}"
+                )
+            if receipt.get("request_id") != reservation.get("request_id"):
+                raise stab.StabilizationError(
+                    "receipt request_id must equal the launched dispatch "
+                    "request identity"
+                )
+            candidate = [*state["receipts"], receipt]
+            verdict = stab.validate_streak(
+                candidate,
+                expected_digest=expected_digest,
+                config=self._config,
+                gate=self._declaration,
+                root=evidence_root if evidence_root is not None else ROOT,
             )
-        if not isinstance(receipt, dict) or receipt.get("cell_id") != reservation["cell_id"]:
-            raise stab.StabilizationError(
-                f"receipt must complete the reserved cell {reservation['cell_id']}"
-            )
-        candidate = [*state["receipts"], receipt]
-        verdict = stab.validate_streak(
-            candidate,
-            expected_digest=expected_digest,
-            config=self._config,
-            gate=self._declaration,
-            root=evidence_root if evidence_root is not None else ROOT,
-        )
-        state["receipts"] = candidate
-        state["reservation"] = None
-        _atomic_json(state_path, state)
+            state["receipts"] = candidate
+            state["reservation"] = None
+            _atomic_json(state_path, state)
         return {
             "schema_version": 1,
             "cell_id": reservation["cell_id"],

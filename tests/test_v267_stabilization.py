@@ -78,6 +78,14 @@ def _commit(root: Path, relative: str, content: str) -> None:
 
 
 EVID_TMP = Path(tempfile.mkdtemp(prefix="v267-evidence-"))
+for _args in (
+    ("init", "-q"),
+    ("config", "user.email", "test@example.com"),
+    ("config", "user.name", "test"),
+    ("commit", "--allow-empty", "-qm", "fix"),
+):
+    subprocess.run(["git", "-C", str(EVID_TMP), *_args], check=True)
+FIX_HEAD = _git(EVID_TMP, "rev-parse", "HEAD")
 
 
 def _evidence_file(relative: str, content: str) -> dict[str, str]:
@@ -88,21 +96,38 @@ def _evidence_file(relative: str, content: str) -> dict[str, str]:
     return {"path": relative, "sha256": hashlib.sha256(payload).hexdigest()}
 
 
+def _typed_record(kind: str, cell_id: str, head: str, **extra: object) -> str:
+    return json.dumps(
+        {
+            "schema_version": 1,
+            "type": kind,
+            "cell_id": cell_id,
+            "head_sha": head,
+            **extra,
+        }
+    )
+
+
 def _material(sequence: int) -> dict[str, object]:
     prefix = f"docs/acceptance/evidence/v2.6.7/rc1-run-{sequence}"
+    cell_id = f"rc1-corridor-run-{sequence}"
     return {
         "findings_artifact": _evidence_file(
-            f"{prefix}-findings.json", '{"findings": 1}'
+            f"{prefix}-findings.json",
+            _typed_record("findings", cell_id, FIX_HEAD),
         ),
-        "fix_head": "f" * 40,
+        "fix_head": FIX_HEAD,
         "refreshed_summary_artifact": _evidence_file(
-            f"{prefix}-refreshed-summary.json", '{"summary": "refreshed"}'
+            f"{prefix}-refreshed-summary.json",
+            _typed_record("refreshed-summary", cell_id, FIX_HEAD),
         ),
         "second_verification_artifact": _evidence_file(
-            f"{prefix}-verify-2.json", '{"verify": 2}'
+            f"{prefix}-verify-2.json",
+            _typed_record("second-verification", cell_id, FIX_HEAD),
         ),
         "re_review_artifact": _evidence_file(
-            f"{prefix}-re-review.json", '{"review": "approve"}'
+            f"{prefix}-re-review.json",
+            _typed_record("re-review", cell_id, FIX_HEAD, verdict="approve"),
         ),
     }
 

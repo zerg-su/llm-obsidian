@@ -77,6 +77,19 @@ FABLE_REVIEW = {
 
 
 EVIDENCE_TMP = Path(tempfile.mkdtemp(prefix="rc1-streak-evidence-"))
+for _args in (
+    ("init", "-q"),
+    ("config", "user.email", "test@example.com"),
+    ("config", "user.name", "test"),
+    ("commit", "--allow-empty", "-qm", "fix"),
+):
+    subprocess.run(["git", "-C", str(EVIDENCE_TMP), *_args], check=True)
+FIX_HEAD = subprocess.run(
+    ["git", "-C", str(EVIDENCE_TMP), "rev-parse", "HEAD"],
+    text=True,
+    capture_output=True,
+    check=True,
+).stdout.strip()
 
 
 def _evidence_file(relative: str, content: str) -> dict[str, str]:
@@ -87,21 +100,38 @@ def _evidence_file(relative: str, content: str) -> dict[str, str]:
     return {"path": relative, "sha256": hashlib.sha256(payload).hexdigest()}
 
 
+def _typed_record(kind: str, cell_id: str, head: str, **extra: object) -> str:
+    return json.dumps(
+        {
+            "schema_version": 1,
+            "type": kind,
+            "cell_id": cell_id,
+            "head_sha": head,
+            **extra,
+        }
+    )
+
+
 def _material_artifacts(sequence: int) -> dict[str, object]:
     prefix = f"docs/acceptance/evidence/v2.6.7/rc1-run-{sequence}"
+    cell_id = f"rc1-corridor-run-{sequence}"
     return {
         "findings_artifact": _evidence_file(
-            f"{prefix}-findings.json", '{"findings": 1}'
+            f"{prefix}-findings.json",
+            _typed_record("findings", cell_id, FIX_HEAD),
         ),
-        "fix_head": "f" * 40,
+        "fix_head": FIX_HEAD,
         "refreshed_summary_artifact": _evidence_file(
-            f"{prefix}-refreshed-summary.json", '{"summary": "refreshed"}'
+            f"{prefix}-refreshed-summary.json",
+            _typed_record("refreshed-summary", cell_id, FIX_HEAD),
         ),
         "second_verification_artifact": _evidence_file(
-            f"{prefix}-verify-2.json", '{"verify": 2}'
+            f"{prefix}-verify-2.json",
+            _typed_record("second-verification", cell_id, FIX_HEAD),
         ),
         "re_review_artifact": _evidence_file(
-            f"{prefix}-re-review.json", '{"review": "approve"}'
+            f"{prefix}-re-review.json",
+            _typed_record("re-review", cell_id, FIX_HEAD, verdict="approve"),
         ),
     }
 
@@ -454,6 +484,57 @@ for label, forged in (
         _forged_material(
             findings_artifact=_evidence_file(
                 "docs/acceptance/evidence/v2.6.7/empty.json", ""
+            )
+        ),
+    ),
+    (
+        "a fix_head that resolves to no commit fails closed",
+        _forged_material(fix_head="f" * 40),
+    ),
+    (
+        "arbitrary well-hashed non-semantic bytes fail closed",
+        _forged_material(
+            findings_artifact=_evidence_file(
+                "docs/acceptance/evidence/v2.6.7/opaque.json",
+                "not semantic evidence",
+            )
+        ),
+    ),
+    (
+        "an artifact declaring the wrong record type fails closed",
+        _forged_material(
+            findings_artifact=_evidence_file(
+                "docs/acceptance/evidence/v2.6.7/wrong-type.json",
+                _typed_record("re-review", "rc1-corridor-run-1", FIX_HEAD),
+            )
+        ),
+    ),
+    (
+        "an artifact bound to the wrong run fails closed",
+        _forged_material(
+            findings_artifact=_evidence_file(
+                "docs/acceptance/evidence/v2.6.7/wrong-run.json",
+                _typed_record("findings", "rc1-corridor-run-3", FIX_HEAD),
+            )
+        ),
+    ),
+    (
+        "a verification artifact bound to the wrong HEAD fails closed",
+        _forged_material(
+            second_verification_artifact=_evidence_file(
+                "docs/acceptance/evidence/v2.6.7/wrong-head.json",
+                _typed_record("second-verification", "rc1-corridor-run-1", "a" * 40),
+            )
+        ),
+    ),
+    (
+        "a non-approving re-review artifact fails closed",
+        _forged_material(
+            re_review_artifact=_evidence_file(
+                "docs/acceptance/evidence/v2.6.7/rejected-review.json",
+                _typed_record(
+                    "re-review", "rc1-corridor-run-1", FIX_HEAD, verdict="reject"
+                ),
             )
         ),
     ),
