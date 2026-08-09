@@ -99,7 +99,7 @@ OK   fake external adapters contain no process, network, or real cmux launch pri
 OK   conformance path reports measured zero real provider, model, cmux, and network effects
 
 All lifecycle provider-conformance tests passed.
-{"actions":25,"invariants":7,"scenarios":7,"schedules":8,"wall_seconds":0.186813}
+{"actions":25,"invariants":7,"scenarios":7,"schedules":8,"wall_seconds":0.197007}
 OK   stable JSON serialization
 OK   contracts are frozen
 OK   unknown runtime rejected
@@ -1022,7 +1022,7 @@ OK   review-inspect rejects unknown operations
 OK   all review inspection leaves worktree and Git metadata byte-stable
 
 All review-inspect tests passed.
-Initialized empty Git repository in /private/var/folders/w7/vtxrl9d178d9zsg47p1_1ls80000gn/T/plan-review-facade.j9o205kd/repo/.git/
+Initialized empty Git repository in /private/var/folders/w7/vtxrl9d178d9zsg47p1_1ls80000gn/T/plan-review-facade.l79gibq0/repo/.git/
 OK   1 valid plan compiles four independent artifacts
 OK   2 design artifact replaces every protected region with its digest
 OK   3 missing Outcome heading fails closed
@@ -1476,7 +1476,7 @@ OK   owned-missing-gate stops after its active pointer and before its gate
 OK   active pointer without a gate retains any operation row fail closed
 OK   current release review binds one external artifact root
 OK   release callback wake is an idempotent active-review resume
-OK   current release review rejects checkout ancestor /var/folders/w7/vtxrl9d178d9zsg47p1_1ls80000gn/T/current-release-artifacts.3bbudyow/valid
+OK   current release review rejects checkout ancestor /var/folders/w7/vtxrl9d178d9zsg47p1_1ls80000gn/T/current-release-artifacts.e115zz51/valid
 OK   current release review rejects checkout ancestor /
 OK   current release review rejects artifact-root drift on resume
 OK   current release review rejects an out-of-root outcome artifact
@@ -2530,9 +2530,9 @@ WARN  scripts/document_normalize_conversion.py: 255 lines requires cohesion revi
 WARN  scripts/document_normalize_conversion.py:162:docling_convert: 82 lines requires extraction review
 WARN  scripts/document_normalize_quality.py: 310 lines requires cohesion review
 WARN  scripts/document_normalize_quality.py:172:quality_issues: 91 lines requires extraction review
-WARN  scripts/engineering-eval-runner.py: 640 lines requires cohesion review
-WARN  scripts/engineering-eval-runner.py:106:rc4_cases: 162 lines requires extraction review
-WARN  scripts/engineering-eval-runner.py:477:run: 72 lines requires extraction review
+WARN  scripts/engineering-eval-runner.py: 672 lines requires cohesion review
+WARN  scripts/engineering-eval-runner.py:134:rc4_cases: 162 lines requires extraction review
+WARN  scripts/engineering-eval-runner.py:507:run: 72 lines requires extraction review
 WARN  scripts/fold-log.py: 273 lines requires cohesion review
 WARN  scripts/harness/adapters/claude.py: 659 lines requires cohesion review
 WARN  scripts/harness/adapters/claude.py:151:reviewer_sandbox_settings: 74 lines requires extraction review
@@ -3521,6 +3521,8 @@ OK   unknown capability fails closed
 
 All engineering eval runner tests passed.
 OK   RC4 aggregate has four exact unique identities
+OK   RC4 governing-source projection permits only the registered fork branding
+OK   RC4 governing-source projection rejects non-branding drift
 OK   RC4 live evidence binds the exact successful coordinator execution
 OK   RC4 live evidence distinguishes command-log and execution working directories
 OK   RC4 live evidence publishes no operator-local path
@@ -4134,7 +4136,7 @@ sessions:
 
 # Semantic Tiling Report
 
-- generated: 2026-08-09T10:58:07Z
+- generated: 2026-08-09T11:18:36Z
 - model: m
 - ollama_url: x
 - thresholds: error>=0.9, review=0.85-0.9
@@ -4599,7 +4601,7 @@ OK   no uncovered runtime keeps the verdict complete
 OK   unattributed agent activity blocks a complete verdict
 OK   an unattributed router hint is unverified evidence, not dead weight
 OK   unattributed activity without an agent op stays out of the verdict
-OK   stats exits 0 (pipeline-stats-codex.7ah9jx3i)
+OK   stats exits 0 (pipeline-stats-codex.glav2_3r)
 OK   report names the runtime coverage boundary
 OK   coverage table reports Codex as observed but unobservable
 OK   zero list is not presented as a proven dead-weight verdict
@@ -4608,22 +4610,22 @@ OK   a Codex-hinted skill is separated from removal candidates
 OK   a router hint is not rendered as proof of invocation
 OK   the coverage counts are not presented as comparable across runtimes
 OK   unhinted skills stay listed as removal candidates
-OK   stats exits 0 (pipeline-stats-claude.6egf4z9s)
+OK   stats exits 0 (pipeline-stats-claude.f_qabf1e)
 OK   a Claude-only window with real usage reports a complete verdict
 OK   unused skills are candidates when nothing else was observed
 OK   the skill that was actually used is not a candidate
 OK   the report never claims a runtime tag means 'no model'
-OK   stats exits 0 (pipeline-stats-unattributed.oshpvkrx)
+OK   stats exits 0 (pipeline-stats-unattributed.bb2sdhyh)
 OK   unattributed orchestration blocks the complete dead-weight verdict
 OK   the unattributed boundary is named in the zero section
 OK   an unattributed router hint is reported as unverified, not removable
 OK   an unrecognized router tag does not become its own coverage row
 OK   the unattributed row states missing attribution, not missing capability
-OK   stats exits 0 (pipeline-stats-empty.ipuckh1p)
+OK   stats exits 0 (pipeline-stats-empty.05211zm7)
 OK   an evidence-free window makes no dead-weight claim
 OK   an evidence-free window says so explicitly
 OK   no installed skill is listed for removal without evidence
-OK   stats exits 0 (pipeline-stats-small.jjjdv6vd)
+OK   stats exits 0 (pipeline-stats-small.riujosz2)
 OK   a healthy but empty window still makes no dead-weight claim
 OK   healthy Claude sources are not blamed for the empty window
 
@@ -5117,7 +5119,7 @@ Passed: 6
 All tests passed.
 .......
 ----------------------------------------------------------------------
-Ran 7 tests in 0.013s
+Ran 7 tests in 0.021s
 
 OK
 verification-receipt: test-evidence 1/2 proof-output
@@ -5130,8 +5132,8 @@ verification-receipt: test-stability-bootstrap 3/3 clean-status
 verification-receipt: test-stability-bootstrap 1/3 mcp-sync-config
 verification-receipt: release-final 1/1 proof
 verification-receipt: release-final 1/1 failure
-task-sessions: skipped corrupt queued operation 6ce33e91-d321-4845-984a-452043c2fa70; the exact lane remains available
-task-sessions: skipped corrupt queued operation ef8406ba-9221-41a7-867c-687291377297; the exact lane remains available
+task-sessions: skipped corrupt queued operation dd84b6e1-5fb4-4cc2-9554-bfe6d7f48732; the exact lane remains available
+task-sessions: skipped corrupt queued operation aae07b66-5d91-4861-978b-9d21f210ddaf; the exact lane remains available
 live acceptance could not release every owned surface; recover the exact operations with harness-cli.py reconcile: live-aaaaaaaaaaaa-claude-lifecycle-1: attention-required (callback-invalid)
 live acceptance could not release every owned surface; recover the exact operations with harness-cli.py reconcile: live-aaaaaaaaaaaa-claude-lifecycle-1: attention-required (attention-required)
 live acceptance could not release every owned surface; recover the exact operations with harness-cli.py reconcile: live-aaaaaaaaaaaa-claude-lifecycle-1: terminal failed retained owned resources
@@ -5141,7 +5143,7 @@ ERR: cache read failed: Expecting value: line 1 column 1 (char 0)
 ERR: unknown cache version: 999
 refresh-only: scanned=2 cached=0 computed=2 orphans_pruned=0
 refresh-only: scanned=2 cached=2 computed=0 orphans_pruned=0
-report written: /private/var/folders/w7/vtxrl9d178d9zsg47p1_1ls80000gn/T/tmppnt7rt9y/report.md
+report written: /private/var/folders/w7/vtxrl9d178d9zsg47p1_1ls80000gn/T/tmpgrxrq5rm/report.md
 refresh-only: scanned=2 cached=1 computed=1 orphans_pruned=0
 ollama not reachable at x; skipping tiling check
 reindex: 5 file(s) without frontmatter are INVISIBLE to indexes: wiki/concepts/_index.md, wiki/plans/_index.md, wiki/questions/_index.md, wiki/reindex-fixture/_index.md, wiki/sources/_index.md
