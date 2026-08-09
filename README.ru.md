@@ -399,6 +399,7 @@ Acceptance heartbeat хранит только stage/status/counters/timestamps.
 
 | Тема | Документ |
 |---|---|
+| Ограниченная стабилизация Harness в v2.6.7 RC1 | [Release notes v2.6.7 RC1](docs/releases/v2.6.7-rc1.md) |
 | Target-local Codex dispatch repair в v2.6.6 RC4-fix3 | [Release notes v2.6.6 RC4-fix3](docs/releases/v2.6.6-rc4-fix3.md) |
 | Live Harness dashboard в v2.6.6 RC4-fix2 | [Release notes v2.6.6 RC4-fix2](docs/releases/v2.6.6-rc4-fix2.md) |
 | Ограниченные dogfood-исправления в v2.6.6 RC4-fix1 | [Release notes v2.6.6 RC4-fix1](docs/releases/v2.6.6-rc4-fix1.md) |

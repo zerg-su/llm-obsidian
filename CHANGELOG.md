@@ -10,7 +10,7 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
-## [2.6.7-rc1] - 2026-08-09 (unreleased)
+## [2.6.7-rc1] - 2026-08-09
 
 Bounded harness stabilization: the supported engineering/change corridor
 converges across worker restart at every named durable boundary, and the
@@ -31,6 +31,9 @@ finalization ledger separates product cycles from mechanism recovery.
 - 2.6.6 release evidence validators (`rc3_release_disposition`,
   `rc4_gate_bundle`) now bind to their own era's frozen routes and to the
   receipt's recorded commit tree instead of the moving candidate tree.
+- An approved dispatch whose provider cleanup already released every exact
+  resource can resume from `attention-required(resume_state=exiting)` and
+  terminalize without replaying review or provider effects.
 
 ### Added
 
