@@ -330,4 +330,214 @@ check(
     ),
 )
 
+
+# --- Golden supported corridor (E267.RC1.CORRIDOR) -------------------------
+#
+# One deterministic production-core engineering/change scenario:
+# summary → scoped verify → Simple review → material findings → fix →
+# refreshed summary → re-verify → review approve → reap → cleanup.
+# Model turns are world actions; provider/process/cmux/review-runtime are
+# fake ports; every transition is owned by production code.
+
+import tempfile  # noqa: E402
+import threading  # noqa: E402
+
+sys.path.insert(0, str(ROOT / "tests" / "harness"))
+
+from harness.finalization_ledger import FinalizationLedger  # noqa: E402
+from harness.workflows.reap import run_reap  # noqa: E402
+from lifecycle_simulator_world import (  # noqa: E402
+    ORIGIN_SURFACE,
+    TASK_SURFACE,
+    build_corridor_world,
+    passing_verification_runner,
+)
+
+CORRIDOR_TASK = "cccc0267-0267-4267-8267-000000000001"
+MATERIAL_FINDING = {
+    "finding_id": "F-corridor-material",
+    "severity": "important",
+    "file": "product.txt",
+    "line": 1,
+    "summary": "Material corridor finding",
+    "evidence": "The original content is incomplete.",
+    "recommendation": "Commit the exact correction.",
+}
+
+
+with tempfile.TemporaryDirectory(prefix="golden-corridor.") as raw:
+    corridor_root = Path(raw)
+    world = build_corridor_world(corridor_root, CORRIDOR_TASK)
+    verification_calls: list[tuple[str, ...]] = []
+    runner = passing_verification_runner(verification_calls)
+    corridor_trace: list[str] = []
+
+    def reviewer_and_executor_turns(world) -> None:
+        # Reviewer turn 1: material changes-requested on the first attempt.
+        world.await_condition(
+            "first review round is awaiting its callback",
+            lambda: bool(world.gate_state().get("lanes"))
+            and world.gate_state().get("status") == "reviewing",
+        )
+        corridor_trace.append("review-round-1-open")
+        world.publish_review_callback(
+            verdict="changes-requested",
+            findings=(MATERIAL_FINDING,),
+            verification_iteration=0,
+        )
+        corridor_trace.append("review-callback-1-published")
+        # Executor turn 2: consume the findings packet, commit the fix,
+        # and publish the typed resolution.
+        world.await_condition(
+            "material findings packet reaches the executor worktree",
+            lambda: (world.worktree / ".task-review.json").is_file(),
+        )
+        corridor_trace.append("findings-packet-delivered")
+        world.resolve_findings(commit_message="resolve corridor finding")
+        corridor_trace.append("resolution-published")
+        # Executor turn 3: refreshed summary for the resolved HEAD.
+        world.await_condition(
+            "refreshed summary is requested after resolution",
+            lambda: (
+                world.state_root / "pipeline-summary-refresh-notify.json"
+            ).is_file(),
+        )
+        world.publish_summary(
+            "The corridor evidence is established.\n\n"
+            "Resolved the material review finding at the final HEAD."
+        )
+        corridor_trace.append("summary-refreshed")
+        # Reviewer turn 2: approve the re-reviewed resolved HEAD.
+        world.await_condition(
+            "second review attempt is awaiting its callback",
+            lambda: world.gate_state().get("status") == "reviewing"
+            and any(
+                lane.get("verification_iteration") == 0
+                for lane in world.gate_state().get("lanes", [])
+            )
+            and world.gate_state().get("context", {}).get("head_sha")
+            == world.head(),
+        )
+        corridor_trace.append("review-round-2-open")
+        world.publish_review_callback(
+            verdict="approve",
+            findings=(),
+            verification_iteration=0,
+        )
+        corridor_trace.append("review-callback-2-published")
+
+    exit_code = world.run_worker_generation(
+        verification_runner=runner,
+        during=reviewer_and_executor_turns,
+        timeout=90.0,
+    )
+    record = world.record()
+    check(
+        "golden corridor reaches the durable wiki-summary boundary",
+        exit_code == 0
+        and record.state == "finalizing"
+        and record.accepted_callback_kind == "wiki-summary",
+        {
+            "exit_code": exit_code,
+            "state": record.state,
+            "trace": corridor_trace,
+            "gate": world.gate_state().get("status"),
+            "faults": [repr(fault) for fault in world.worker_faults],
+        },
+    )
+    gate_state = world.gate_state()
+    check(
+        "corridor review gate is terminally approved at the resolved HEAD",
+        gate_state.get("status") == "approved"
+        and gate_state.get("context", {}).get("head_sha") == world.head(),
+        {"status": gate_state.get("status")},
+    )
+    check(
+        "corridor wakes exactly the origin surface with the reap command",
+        len(world.cmux.sent) >= 1
+        and world.cmux.sent[-1][0] == ORIGIN_SURFACE
+        and "reap-runner.py" in world.cmux.sent[-1][1]
+        and all(surface in {ORIGIN_SURFACE, TASK_SURFACE} for surface, _ in world.cmux.sent),
+        world.cmux.sent,
+    )
+    ledger = FinalizationLedger(
+        world.vault / ".vault-meta" / "harness" / "finalization-ledger",
+        lineage_id=CORRIDOR_TASK,
+        origin_task_id=CORRIDOR_TASK,
+        plan_sha256=str(world.meta["approved_plan_sha256"]),
+        outcome_contract_sha256=str(world.meta["outcome_contract_sha256"]),
+    )
+    lineage = ledger.snapshot()
+    check(
+        "corridor consumes exactly two product cycles ending approved",
+        [cycle["terminal_result"] for cycle in lineage["cycles"]]
+        == ["changes-requested", "approved"]
+        and lineage["terminal_disposition"] == "approved",
+        lineage,
+    )
+    summary = json.loads(world.summary_path.read_text(encoding="utf-8"))
+    reap = run_reap(
+        world.store,
+        owner_id=world.owner_id,
+        operation_id=CORRIDOR_TASK,
+        summary=summary,
+        finalize=lambda _record: {"schema_version": 1, "status": "filed"},
+    )
+    check(
+        "reap finalizes the exact accepted summary callback once",
+        reap.result == {"schema_version": 1, "status": "filed"}
+        and reap.record.state == "finalizing"
+        and reap.record.accepted_callback_sha256
+        == record.accepted_callback_sha256,
+        reap.record,
+    )
+    world.store.transition(world.owner_id, CORRIDOR_TASK, "exiting")
+    world.store.transition(world.owner_id, CORRIDOR_TASK, "complete")
+    terminal = world.record()
+    check(
+        "corridor terminates resource-free with no pending effect",
+        terminal.state == "complete"
+        and not any(
+            value
+            for value in (
+                terminal.resources.surface_id,
+                terminal.resources.process_group,
+                terminal.resources.supervisor_pid,
+                terminal.resources.process_identity,
+                terminal.resources.supervisor_identity,
+            )
+        )
+        and not terminal.pending_effect,
+        terminal,
+    )
+    verify_children = [
+        row
+        for row in world.store.list(world.owner_id)
+        if row.spec.kind == "pipeline-verify"
+    ]
+    check(
+        "corridor runs scoped verification once per reviewed HEAD",
+        len(verify_children) == 2
+        and all(row.state == "complete" for row in verify_children)
+        and all(
+            row.spec.parent_operation_id == CORRIDOR_TASK
+            for row in verify_children
+        ),
+        [(row.spec.operation_id, row.state) for row in verify_children],
+    )
+    round_records = [
+        row
+        for row in world.store.list(CORRIDOR_TASK)
+        if row.spec.kind == "review-round"
+    ]
+    check(
+        "corridor review rounds carry exactly one accepted callback each",
+        len(round_records) == 2
+        and all(row.accepted_callback_id for row in round_records),
+        [
+            (row.spec.operation_id, row.state, row.accepted_callback_id)
+            for row in round_records
+        ],
+    )
+
 print("harness control-plane tests passed")
