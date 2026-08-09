@@ -247,6 +247,10 @@ def render_task_prompt(request: dict[str, Any], config: dict[str, Any]) -> str:
         else "inherited current Codex environment"
     )
     outcome_contract = extract_from_bytes(request["plan_file"].read_bytes())
+    shared_plan = request["reap"]["plan_mode"] == "shared"
+    summary_disposition = "partially-achieved" if shared_plan else "achieved"
+    summary_evidence = [] if shared_plan else list(outcome_contract.evidence_ids)
+    summary_gaps = [str(approved_plan_file(request))] if shared_plan else []
     replacements = {
         "<task_name>": request["task_name"],
         "<description from user, multi-line ok>": request["description"],
@@ -265,9 +269,9 @@ def render_task_prompt(request: dict[str, Any], config: dict[str, Any]) -> str:
                 "title": request["reap"]["title"],
                 "session": request["origin_session"],
                 "body": "<bounded Markdown summary>",
-                "outcome_disposition": "achieved",
-                "outcome_evidence_ids": list(outcome_contract.evidence_ids),
-                "residual_gap_pointers": [],
+                "outcome_disposition": summary_disposition,
+                "outcome_evidence_ids": summary_evidence,
+                "residual_gap_pointers": summary_gaps,
             },
             ensure_ascii=False,
             separators=(",", ":"),

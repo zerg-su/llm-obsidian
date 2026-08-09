@@ -63,14 +63,13 @@ Bounded review/schema work may use the compiled ephemeral profile below.
    Omit caller identity fields normally: the
    runner binds `CMUX_SURFACE_ID`, current session ID, and host-confirmed route.
    It never inspects the globally focused surface.
-   Before built-in validate/start, when cmux is available, idempotently run
+   Before built-in validate/start, if cmux is available, idempotently run
    `python3 <vault-root>/scripts/harness-dashboard.py open --vault <vault-root>
    --store <vault-root>/.vault-meta/harness --surface "$CMUX_SURFACE_ID"
-   --root "<request-id>"` with the exact approved request UUID as the root, so
-   the split observes only that request and its descendants; validate echoes
-   the same command as `observer.argv`. Continue after a
-   contained display failure because this observer remains
-   external to Harness ownership.
+   --root "<request-id>"` with the exact approved request UUID. The split sees
+   only that request tree. `observer.argv` omits `--surface`; coordinator appends
+   its anchored value before execution. Continue after a contained display failure;
+   the observer is external to Harness ownership.
 6. Run `python3 <vault-root>/scripts/dispatch-runner.py validate --spec
    <request.json>` and show its typed route/hash echo-confirm block. Include the
    exact target, route, plan/context, interaction/review/reap/surface/watchdog

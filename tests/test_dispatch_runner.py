@@ -390,6 +390,15 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         workspace_request["placement"] == "workspace"
         and "scripts/harness-cli.py" in workspace_prompt,
     )
+    check(
+        "shared-plan task prompt cannot preclaim the final outcome",
+        '"outcome_disposition":"partially-achieved"' in workspace_prompt
+        and '"outcome_evidence_ids":[]' in workspace_prompt
+        and '"residual_gap_pointers":[' in workspace_prompt
+        and str(plan) in workspace_prompt
+        and '"outcome_disposition":"achieved"' not in workspace_prompt,
+        workspace_prompt,
+    )
     split_parent = ParentContract(
         plan_sha256=hashlib.sha256(plan.read_bytes()).hexdigest(),
         outcome_contract_sha256=workspace_request["outcome_contract_sha256"],
