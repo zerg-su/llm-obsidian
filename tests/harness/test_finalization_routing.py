@@ -44,8 +44,8 @@ primary = config.finalization_route("finalization-primary")
 independent = config.finalization_route("finalization-independent")
 check(
     "finalization routes are registered as independent provider choices",
-    primary["runtime"] == "codex"
-    and independent["runtime"] == "claude"
+    primary["runtime"] == "claude"
+    and independent["runtime"] == "codex"
     and primary["runtime"] != independent["runtime"],
 )
 
@@ -243,7 +243,7 @@ for label, mutate, expected in (
         "routing config requires provider independence",
         lambda value: value["finalization_routes"][
             "finalization-independent"
-        ].update({"runtime": "codex", "model": "sol"}),
+        ].update({"runtime": "claude", "model": "fable"}),
         "different providers",
     ),
 ):

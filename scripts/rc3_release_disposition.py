@@ -41,12 +41,25 @@ from review_contract import VERDICTS as REVIEW_VERDICTS  # noqa: E402
 SHA = re.compile(r"[0-9a-f]{40,64}\Z")
 DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 _ROUTING = load_tracked_config(ROOT)
-_INDEPENDENT_ROUTE = _ROUTING.finalization_route("finalization-independent")
+#: 2.6.6 release evidence is immutable: it stays bound to the finalization
+#: routes registered when that evidence was produced, not to whatever the
+#: live routing config registers later (2.6.7 re-registered both aliases).
+_INDEPENDENT_ROUTE = {
+    "alias": "finalization-independent",
+    "runtime": "claude",
+    "model": "fable",
+    "effort": "xhigh",
+}
 _INDEPENDENT_ROLE = _INDEPENDENT_ROUTE["model"]
 _REVIEW_PROFILE = load_profiles(ROOT / "config/verification-profiles.toml")[
     "scoped"
 ]
-_PRIMARY_ROUTE = _ROUTING.finalization_route("finalization-primary")
+_PRIMARY_ROUTE = {
+    "alias": "finalization-primary",
+    "runtime": "codex",
+    "model": "gpt-5.6-sol",
+    "effort": "xhigh",
+}
 ROLE_AXES = {
     _INDEPENDENT_ROLE: "anthropic-holistic",
     "independent-configured": "openai-holistic",

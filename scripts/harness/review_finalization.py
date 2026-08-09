@@ -24,6 +24,11 @@ from .finalization_policy import (
     require_registered_finalization_routes,
 )
 from .finalization_ledger import CycleDecision, FinalizationLedger
+from .finalization_pivot import (
+    FinalizationPivotError,
+    load_accepted_pivot_receipt,
+    pivot_required,
+)
 from .verification import VerificationError, load_profiles
 from .workflows.review_gate import (
     ReviewGateAuthorization,
@@ -103,6 +108,7 @@ def compile_task_finalization_routes(
     cycle_number: int,
     independent_permitted: bool,
     availability: AvailabilityEvidence | None,
+    structural_pivot_accepted: bool = False,
     now_epoch: int,
 ) -> FinalizationRouteDecision | None:
     """Compile task policy without changing standalone review topology."""
@@ -128,6 +134,7 @@ def compile_task_finalization_routes(
         explicit_model=model,
         explicit_effort=effort,
         required_mode=str(review.get("mode") or ""),
+        structural_pivot_accepted=structural_pivot_accepted,
         now_epoch=now_epoch,
     )
 
@@ -158,6 +165,24 @@ def reserve_task_finalization_cycle(
         return None
     if ledger.max_cycles != policy.max_cycles:
         raise ValueError("finalization ledger and task policy ceilings differ")
+    snapshot = ledger.snapshot(missing_ok=True)
+    pivot_receipt = None
+    if pivot_required(snapshot):
+        try:
+            pivot_receipt = load_accepted_pivot_receipt(
+                ledger.root, snapshot=snapshot
+            )
+        except FinalizationPivotError as exc:
+            raise ValueError(str(exc)) from exc
+        already_reserved = any(
+            cycle.get("attempt_id") == attempt_id
+            for cycle in snapshot.get("cycles", [])
+        )
+        if pivot_receipt is None and not already_reserved:
+            raise ValueError(
+                "the third material failure requires an accepted structural "
+                "pivot receipt before another product cycle"
+            )
     decisions: dict[int, FinalizationRouteDecision] = {}
     for cycle in range(1, policy.max_cycles + 1):
         decision = compile_task_finalization_routes(
@@ -166,6 +191,7 @@ def reserve_task_finalization_cycle(
             cycle_number=cycle,
             independent_permitted=independent_permitted,
             availability=availability,
+            structural_pivot_accepted=pivot_receipt is not None,
             now_epoch=now_epoch,
         )
         assert decision is not None

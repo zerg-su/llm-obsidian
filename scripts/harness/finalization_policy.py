@@ -273,6 +273,7 @@ def compile_finalization_routes(
     explicit_model: str = "",
     explicit_effort: str = "",
     required_mode: str = "",
+    structural_pivot_accepted: bool = False,
     now_epoch: int,
 ) -> FinalizationRouteDecision:
     """Compile one finalization cycle without performing availability effects."""
@@ -289,6 +290,8 @@ def compile_finalization_routes(
         )
     if type(independent_permitted) is not bool:
         raise FinalizationPolicyError("independent_permitted must be boolean")
+    if type(structural_pivot_accepted) is not bool:
+        raise FinalizationPolicyError("structural_pivot_accepted must be boolean")
     if required_mode not in {"", "simple", "deep", "full"}:
         raise FinalizationPolicyError("required review mode is invalid")
     _bounded_epoch(now_epoch, "now_epoch")
@@ -338,6 +341,12 @@ def compile_finalization_routes(
     if not independent_permitted:
         return FinalizationRouteDecision(
             cycle_number, (primary,), "provider-policy"
+        )
+    if structural_pivot_accepted:
+        # The accepted read-only pivot receipt is the structural route's
+        # availability evidence; no additional probe effect is permitted.
+        return FinalizationRouteDecision(
+            cycle_number, (primary, independent), "structural-pivot"
         )
     if (
         availability is not None

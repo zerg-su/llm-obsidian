@@ -177,7 +177,13 @@ def reserve_exact_head_attempt(
         raise FinalizationAttemptError(
             f"exact-HEAD finalization stopped: {reservation.cycle.reason}"
         )
-    if reservation.cycle.cycle_number != cycle:
+    if (
+        reservation.cycle.cycle_number is not None
+        and reservation.cycle.cycle_number > cycle
+    ):
+        # The gate attempt ordinal counts every superseding attempt while the
+        # ledger numbers only product cycles (mechanism outcomes release their
+        # reservation), so the product cycle can trail but never lead.
         raise FinalizationAttemptError("exact-HEAD finalization cycle changed")
     return (
         _bind_routes(

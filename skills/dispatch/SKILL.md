@@ -56,9 +56,10 @@ step may instead use the compiled ephemeral profile below.
    hashes. Reject commands, arbitrary paths/providers, and authority expansion.
    Custom is only for a proven semantic gap.
    Persist the optional additive `finalization_policy` exactly as compiled:
-   at most five cycles, `execution=ephemeral`, and only the registered
+   at most five product cycles, `execution=ephemeral`, and only the registered
    `finalization-primary` and `finalization-independent` aliases. The public
-   spec never names a provider CLI transport.
+   spec never names a provider CLI transport; cycle accounting and the pivot
+   stay with the review skill and `FinalizationLedger`.
    Omit caller identity fields normally: the
    runner binds `CMUX_SURFACE_ID`, current session ID, and host-confirmed route.
    It never inspects the globally focused surface.

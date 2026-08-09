@@ -204,4 +204,135 @@ with tempfile.TemporaryDirectory(prefix="finalization-ledger-approved.") as raw:
         and snapshot["cycles"][1]["terminal_result"] == "",
     )
 
+
+# --- Mechanism-neutral attempt accounting (E267.RC1.PRODUCT_BUDGET) ---------
+#
+# Only a material product outcome (changes-requested or approved) may consume
+# one of the five product cycles.  Mechanism outcomes (attention-required,
+# blocked) release the reserved cycle into an immutable attempt receipt.
+
+with tempfile.TemporaryDirectory(prefix="finalization-ledger-mechanism.") as raw:
+    ledger = FinalizationLedger(
+        Path(raw),
+        lineage_id=attempt(400),
+        origin_task_id=attempt(401),
+        plan_sha256="e" * 64,
+        outcome_contract_sha256="f" * 64,
+    )
+    reserve(ledger, 30)
+    mechanism = ledger.record_terminal(
+        attempt_id=attempt(30), terminal_result="attention-required"
+    )
+    snapshot = ledger.snapshot()
+    check(
+        "a mechanism outcome releases its product-cycle reservation",
+        mechanism.reason == "mechanism-recorded"
+        and mechanism.terminal_result == "attention-required"
+        and snapshot["cycles"] == []
+        and len(snapshot["attempts"]) == 1
+        and snapshot["attempts"][0]["attempt_id"] == attempt(30)
+        and snapshot["attempts"][0]["classification"] == "attention-required"
+        and snapshot["attempts"][0]["cycle_number"] == 1,
+    )
+    before_replay = ledger.path.read_bytes()
+    replay = ledger.record_terminal(
+        attempt_id=attempt(30), terminal_result="attention-required"
+    )
+    check(
+        "a mechanism outcome replay is idempotent",
+        replay.reason == "already-mechanism"
+        and ledger.path.read_bytes() == before_replay,
+    )
+    retry = reserve(ledger, 31)
+    check(
+        "the released cycle number is reserved again by the retry",
+        retry.allowed and retry.created and retry.cycle_number == 1,
+    )
+    blocked = ledger.record_terminal(
+        attempt_id=attempt(31), terminal_result="blocked"
+    )
+    snapshot = ledger.snapshot()
+    check(
+        "a blocked review is mechanism evidence, not a product cycle",
+        blocked.reason == "mechanism-recorded"
+        and snapshot["cycles"] == []
+        and [row["classification"] for row in snapshot["attempts"]]
+        == ["attention-required", "blocked"],
+    )
+    for number in range(32, 37):
+        reserve(ledger, number)
+        ledger.record_terminal(
+            attempt_id=attempt(number), terminal_result="changes-requested"
+        )
+    snapshot = ledger.snapshot()
+    check(
+        "five material failures exhaust the lineage despite mechanism receipts",
+        [cycle["terminal_result"] for cycle in snapshot["cycles"]]
+        == ["changes-requested"] * 5
+        and snapshot["terminal_disposition"] == "finalization-budget-exhausted"
+        and len(snapshot["attempts"]) == 2,
+    )
+    before_sixth = ledger.path.read_bytes()
+    sixth = reserve(ledger, 37)
+    check(
+        "mechanism receipts do not reopen the exhausted lineage",
+        not sixth.allowed
+        and sixth.reason == "finalization-budget-exhausted"
+        and ledger.path.read_bytes() == before_sixth,
+    )
+
+with tempfile.TemporaryDirectory(prefix="finalization-ledger-legacy.") as raw:
+    legacy = FinalizationLedger(
+        Path(raw),
+        lineage_id=attempt(500),
+        origin_task_id=attempt(501),
+        plan_sha256="a" * 64,
+        outcome_contract_sha256="b" * 64,
+    )
+    reserve(legacy, 40)
+    legacy.record_terminal(
+        attempt_id=attempt(40), terminal_result="changes-requested"
+    )
+    # A pre-2.6.7 ledger has no attempts field; reading it must not require
+    # a migration.
+    stored = json.loads(legacy.path.read_text(encoding="utf-8"))
+    stored.pop("attempts")
+    legacy.path.write_text(
+        json.dumps(stored, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    snapshot = legacy.snapshot()
+    check(
+        "a legacy ledger without attempt receipts stays readable",
+        snapshot["attempts"] == []
+        and [cycle["terminal_result"] for cycle in snapshot["cycles"]]
+        == ["changes-requested"],
+    )
+
+with tempfile.TemporaryDirectory(prefix="finalization-ledger-bound.") as raw:
+    bounded = FinalizationLedger(
+        Path(raw),
+        lineage_id=attempt(600),
+        origin_task_id=attempt(601),
+        plan_sha256="c" * 64,
+        outcome_contract_sha256="d" * 64,
+    )
+    for number in range(50, 50 + 25):
+        reserve(bounded, number)
+        bounded.record_terminal(
+            attempt_id=attempt(number), terminal_result="attention-required"
+        )
+    try:
+        reserve(bounded, 99)
+        bounded.record_terminal(
+            attempt_id=attempt(99), terminal_result="attention-required"
+        )
+    except FinalizationLedgerError as exc:
+        check(
+            "mechanism recovery evidence is separately bounded",
+            "mechanism" in str(exc),
+        )
+    else:
+        check("mechanism recovery evidence is separately bounded", False)
+
 print("\nAll finalization ledger tests passed.")

@@ -73,11 +73,11 @@
       "token_estimate": 236
     },
     "dispatch": {
-      "body_bytes": 9520,
-      "body_lines": 153,
-      "closure_bytes": 9520,
-      "closure_token_estimate": 2380,
-      "token_estimate": 2380
+      "body_bytes": 9615,
+      "body_lines": 154,
+      "closure_bytes": 9615,
+      "closure_token_estimate": 2404,
+      "token_estimate": 2404
     },
     "distill-runbook": {
       "body_bytes": 4343,
@@ -108,11 +108,11 @@
       "token_estimate": 650
     },
     "improve-skills": {
-      "body_bytes": 4322,
+      "body_bytes": 4319,
       "body_lines": 100,
-      "closure_bytes": 11008,
+      "closure_bytes": 11005,
       "closure_token_estimate": 2752,
-      "token_estimate": 1081
+      "token_estimate": 1080
     },
     "journal": {
       "body_bytes": 2464,
@@ -171,11 +171,11 @@
       "token_estimate": 185
     },
     "review": {
-      "body_bytes": 4589,
-      "body_lines": 85,
-      "closure_bytes": 4589,
-      "closure_token_estimate": 1148,
-      "token_estimate": 1148
+      "body_bytes": 4861,
+      "body_lines": 87,
+      "closure_bytes": 4861,
+      "closure_token_estimate": 1216,
+      "token_estimate": 1216
     },
     "save": {
       "body_bytes": 11968,
@@ -213,11 +213,11 @@
       "token_estimate": 375
     },
     "vault-repair": {
-      "body_bytes": 1784,
-      "body_lines": 39,
-      "closure_bytes": 1784,
-      "closure_token_estimate": 446,
-      "token_estimate": 446
+      "body_bytes": 1477,
+      "body_lines": 35,
+      "closure_bytes": 1477,
+      "closure_token_estimate": 370,
+      "token_estimate": 370
     },
     "wiki": {
       "body_bytes": 3083,

@@ -26,7 +26,14 @@ IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 TERMINAL_RESULTS = frozenset(
     {"approved", "changes-requested", "blocked", "attention-required"}
 )
+#: Product cycles are consumed only by material review outcomes; mechanism
+#: outcomes release their reservation into an immutable attempt receipt.
+PRODUCT_RESULTS = frozenset({"approved", "changes-requested"})
+MECHANISM_RESULTS = frozenset({"attention-required", "blocked"})
 MAX_FINALIZATION_CYCLES = 5
+#: Mechanism recovery evidence is separately bounded; an unbounded durable
+#: receipt list would be unvalidatable and hide a broken retry loop.
+MECHANISM_ATTEMPT_CEILING = 25
 LEDGER_FIELDS = frozenset(
     {
         "schema_version",
@@ -39,6 +46,7 @@ LEDGER_FIELDS = frozenset(
         "terminal_disposition",
     }
 )
+LEDGER_FIELDS_WITH_ATTEMPTS = LEDGER_FIELDS | {"attempts"}
 CYCLE_FIELDS = frozenset(
     {
         "number",
@@ -49,6 +57,9 @@ CYCLE_FIELDS = frozenset(
         "provider_policy",
         "terminal_result",
     }
+)
+ATTEMPT_RECEIPT_FIELDS = frozenset(
+    {"attempt_id", "cycle_number", "classification"}
 )
 
 
@@ -215,6 +226,7 @@ class FinalizationLedger:
             "outcome_contract_sha256": self.outcome_contract_sha256,
             "max_cycles": self.max_cycles,
             "cycles": [],
+            "attempts": [],
             "terminal_disposition": "",
         }
 
@@ -231,11 +243,14 @@ class FinalizationLedger:
             value = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             raise FinalizationLedgerError("finalization ledger is invalid") from exc
+        if isinstance(value, dict) and "attempts" not in value:
+            # Pre-2.6.7 ledgers carry no mechanism attempt receipts.
+            value["attempts"] = []
         self._validate(value)
         return value
 
     def _validate(self, value: Any) -> None:
-        if not isinstance(value, dict) or set(value) != LEDGER_FIELDS:
+        if not isinstance(value, dict) or set(value) != LEDGER_FIELDS_WITH_ATTEMPTS:
             raise FinalizationLedgerError("finalization ledger shape is invalid")
         expected = self._empty()
         for field in (
@@ -275,6 +290,32 @@ class FinalizationLedger:
                 active += 1
         if active > 1 or (active and not cycles[-1].get("terminal_result") == ""):
             raise FinalizationLedgerError("finalization active reservation is invalid")
+        attempts = value.get("attempts")
+        if not isinstance(attempts, list):
+            raise FinalizationLedgerError("finalization attempts are invalid")
+        if len(attempts) > MECHANISM_ATTEMPT_CEILING:
+            raise FinalizationLedgerError(
+                "mechanism attempt receipts exceed their bounded ceiling"
+            )
+        for receipt in attempts:
+            if not isinstance(receipt, dict) or set(receipt) != ATTEMPT_RECEIPT_FIELDS:
+                raise FinalizationLedgerError(
+                    "mechanism attempt receipt shape is invalid"
+                )
+            _canonical_uuid(receipt.get("attempt_id"), "attempt_id")
+            cycle_number = receipt.get("cycle_number")
+            if (
+                isinstance(cycle_number, bool)
+                or not isinstance(cycle_number, int)
+                or not 1 <= cycle_number <= self.max_cycles
+            ):
+                raise FinalizationLedgerError(
+                    "mechanism attempt cycle number is invalid"
+                )
+            if receipt.get("classification") not in MECHANISM_RESULTS:
+                raise FinalizationLedgerError(
+                    "mechanism attempt classification is invalid"
+                )
         disposition = value.get("terminal_disposition")
         if disposition not in {"", "approved", "finalization-budget-exhausted"}:
             raise FinalizationLedgerError("finalization terminal disposition is invalid")
@@ -463,8 +504,53 @@ class FinalizationLedger:
                 if cycle["attempt_id"] == attempt_id
             ]
             if not matching:
+                recorded_attempts = [
+                    receipt
+                    for receipt in value["attempts"]
+                    if receipt["attempt_id"] == attempt_id
+                ]
+                if recorded_attempts and terminal_result in MECHANISM_RESULTS:
+                    latest = recorded_attempts[-1]
+                    if latest["classification"] != terminal_result:
+                        raise FinalizationLedgerError(
+                            "mechanism attempt classification is immutable"
+                        )
+                    return CycleDecision(
+                        allowed=False,
+                        created=False,
+                        reason="already-mechanism",
+                        cycle_number=int(latest["cycle_number"]),
+                        attempt_id=attempt_id,
+                        terminal_result=terminal_result,
+                        terminal_disposition=value["terminal_disposition"],
+                    )
                 raise FinalizationLedgerError("attempt reservation is unavailable")
             cycle = matching[0]
+            if terminal_result in MECHANISM_RESULTS:
+                if cycle["terminal_result"]:
+                    raise FinalizationLedgerError(
+                        "a product-terminal attempt cannot become mechanism evidence"
+                    )
+                if cycle is not value["cycles"][-1]:
+                    raise FinalizationLedgerError("only the active attempt can finish")
+                value["cycles"].remove(cycle)
+                value["attempts"].append(
+                    {
+                        "attempt_id": attempt_id,
+                        "cycle_number": int(cycle["number"]),
+                        "classification": terminal_result,
+                    }
+                )
+                self._write(value)
+                return CycleDecision(
+                    allowed=False,
+                    created=False,
+                    reason="mechanism-recorded",
+                    cycle_number=int(cycle["number"]),
+                    attempt_id=attempt_id,
+                    terminal_result=terminal_result,
+                    terminal_disposition=value["terminal_disposition"],
+                )
             recorded = cycle["terminal_result"]
             if recorded:
                 if recorded != terminal_result:
@@ -492,8 +578,8 @@ class FinalizationLedger:
                 disposition=value["terminal_disposition"],
             )
 
-    def snapshot(self) -> dict[str, Any]:
+    def snapshot(self, *, missing_ok: bool = False) -> dict[str, Any]:
         """Return a validated detached view for inspect/status projections."""
 
         with self._locked():
-            return json.loads(json.dumps(self._read()))
+            return json.loads(json.dumps(self._read(missing_ok=missing_ok)))

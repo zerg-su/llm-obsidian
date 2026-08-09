@@ -30,8 +30,9 @@ Deep/Full use `review_profiles.deep`; overrides accept routing aliases only.
 overrides. Lane IDs use `anthropic-*`/`openai-*`; concrete routes stay metadata.
 
 Standalone Deep remains unchanged. Finalization is separate: cycles 1–3 use
-only `finalization-primary`; cycles 4–5 may add `finalization-independent` on
-permission plus fresh typed availability. Explicit single-model always wins.
+only `finalization-primary`; the third material failure freezes one read-only
+pivot packet, and cycles 4–5 add `finalization-independent` only after its
+accepted receipt (no availability probe). Explicit single-model always wins.
 
 ## Purpose boundaries
 
@@ -71,9 +72,12 @@ call, severity cap, reranking, vote, average, or loop.
    axis JSON only through its generated `harness/review_submit.py` command.
 3. Keep lanes independent. Before effect, finalization reserves
    `FinalizationLedger`; each cycle owns one fresh exact-HEAD attempt and an
-   immutable terminal result. A changed HEAD uses the next cycle. Fifth failure
-   exhausts the lineage; a sixth cycle has zero effect. Standalone operations
-   keep their preset budgets.
+   immutable terminal result. Only material `changes-requested`/`approved`
+   consumes a product cycle; mechanism outcomes release the slot into a
+   bounded attempt receipt. A changed HEAD uses the next cycle; cycle 4 needs
+   the accepted pivot receipt. The fifth material failure exhausts the
+   lineage; a sixth cycle has zero effect. Standalone operations keep their
+   preset budgets.
 4. The executor records typed rulings/checks and escalates protected boundaries.
    A plan finding may rebind retained lanes only when the exact Git delta changes
    the design artifact alone; Outcome, dispositions, or evidence-map changes
