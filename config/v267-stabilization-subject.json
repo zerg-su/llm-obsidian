@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "release": "2.6.7",
+  "digest_algorithm": "ls-tree-path-blob-sha256-v1",
+  "known_defect_seam": "callback-finalization",
+  "release_stop_class_limit": 3,
+  "streak_target": 3,
+  "subject_rules": {
+    "excluded_roots": [
+      "wiki",
+      "docs",
+      "references",
+      "tests",
+      "evals",
+      "examples",
+      "prototypes",
+      "_templates",
+      ".obsidian",
+      ".raw",
+      ".vault-meta",
+      ".claude-memory",
+      ".github",
+      ".mcp-profiles"
+    ],
+    "excluded_paths": [
+      "LICENSE",
+      "Makefile",
+      ".gitignore",
+      ".gitattributes",
+      ".mcp.json.example"
+    ],
+    "included_documents": [
+      "AGENTS.md",
+      "CLAUDE.md",
+      "docs/runtime-capabilities.md",
+      "docs/task-sessions.md"
+    ],
+    "included_document_roots": [
+      "docs/skill-references/"
+    ],
+    "root_markdown_excluded": true
+  }
+}
