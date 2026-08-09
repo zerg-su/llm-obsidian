@@ -21,8 +21,8 @@ summary bytes. Only `--no-review` persists a typed bypass.
 - `review --full`: only when explicitly requested, the four-lane
   `{Anthropic, OpenAI} × {intent, engineering}` grid at `xhigh`;
 - `--cross-model`: for the one-route Simple preset, select the opposite
-  runtime. Default Deep and explicit Full already use both providers, so the
-  flag does not change their topology; explicit runtime/model overrides remain
+  runtime. Default Deep and explicit Full already use both providers, so
+  the flag does not change their topology; explicit overrides stay
   authoritative.
 
 Deep/Full use `review_profiles.deep`; overrides accept routing aliases only.
@@ -30,9 +30,9 @@ Deep/Full use `review_profiles.deep`; overrides accept routing aliases only.
 overrides. Lane IDs use `anthropic-*`/`openai-*`; concrete routes stay metadata.
 
 Standalone Deep remains unchanged. Finalization is separate: cycles 1–3 use
-only `finalization-primary`; the third material failure freezes one read-only
-pivot packet, and cycles 4–5 add `finalization-independent` only after its
-accepted receipt (no availability probe). Explicit single-model always wins.
+only `finalization-primary`; the third material failure freezes a read-only
+pivot packet; cycles 4–5 add `finalization-independent` only after its
+accepted receipt, without an availability probe. Explicit single-model always wins.
 
 ## Purpose boundaries
 
@@ -72,12 +72,11 @@ call, severity cap, reranking, vote, average, or loop.
    axis JSON only through its generated `harness/review_submit.py` command.
 3. Keep lanes independent. Before effect, finalization reserves
    `FinalizationLedger`; each cycle owns one fresh exact-HEAD attempt and an
-   immutable terminal result. Only material `changes-requested`/`approved`
+   immutable terminal result. Material `changes-requested`/`approved`
    consumes a product cycle; mechanism outcomes release the slot into a
-   bounded attempt receipt. A changed HEAD uses the next cycle; cycle 4 needs
-   the accepted pivot receipt. The fifth material failure exhausts the
-   lineage; a sixth cycle has zero effect. Standalone operations keep their
-   preset budgets.
+   bounded attempt receipt. A changed HEAD uses the next cycle; cycle 4
+   needs the accepted pivot receipt. A fifth material failure exhausts the lineage; a
+   sixth cycle has zero effect. Standalone keeps preset budgets.
 4. The executor records typed rulings/checks and escalates protected boundaries.
    A plan finding may rebind retained lanes only when the exact Git delta changes
    the design artifact alone; Outcome, dispositions, or evidence-map changes
