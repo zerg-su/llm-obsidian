@@ -277,7 +277,8 @@
     "wiki/plans/2026-08-04-175932-llm-obsidian-2-6-4-subplan-c-plan-review-safety.md",
     "wiki/plans/2026-08-04-175932-llm-obsidian-2-6-4-subplan-d-wiki-self-heal.md",
     "wiki/plans/2026-08-05-113349-llm-obsidian-2-6-5-event-driven-lifecycle-bounded-finalizati.md",
-    "wiki/plans/2026-08-06-154927-llm-obsidian-2-6-6-zakrytie-lifecycle-debt-posle-2-6-5.md"
+    "wiki/plans/2026-08-06-154927-llm-obsidian-2-6-6-zakrytie-lifecycle-debt-posle-2-6-5.md",
+    "wiki/plans/2026-08-09-151537-llm-obsidian-2-6-7-bounded-harness-stabilization-and-root-sc.md"
   ],
   "mcp": [
     "wiki/decisions/LLM Obsidian 2.6.3 — MCP runtime bootstrap authorization.md"
@@ -371,7 +372,8 @@
     "wiki/plans/2026-08-05-145351-llm-obsidian-2-6-5-subplan-b-provider-events-and-delivery.md",
     "wiki/plans/2026-08-05-145351-llm-obsidian-2-6-5-subplan-c-bounded-finalization-and-dsl.md",
     "wiki/plans/2026-08-05-145351-llm-obsidian-2-6-5-subplan-d-split-components.md",
-    "wiki/plans/2026-08-06-154927-llm-obsidian-2-6-6-zakrytie-lifecycle-debt-posle-2-6-5.md"
+    "wiki/plans/2026-08-06-154927-llm-obsidian-2-6-6-zakrytie-lifecycle-debt-posle-2-6-5.md",
+    "wiki/plans/2026-08-09-151537-llm-obsidian-2-6-7-bounded-harness-stabilization-and-root-sc.md"
   ],
   "product-roadmap": [
     "wiki/concepts/cherry-picks.md"
