@@ -149,6 +149,12 @@ fork_sources["CLAUDE.md"] = (
         b"codex plugin add llm-obsidian-swarm@llm-obsidian-swarm-codex",
     )
 )
+aliased_sources = (
+    canonical_sources
+    if hashlib.sha256(canonical_sources["AGENTS.md"]).hexdigest()
+    != module.RC4_SOURCE_SHA256["AGENTS.md"]
+    else fork_sources
+)
 module.validate_aggregate_sources(fork_sources)
 check(
     "RC4 governing-source projection permits only the registered fork branding",
@@ -350,7 +356,7 @@ print("OK   governing source weakening rejected by frozen digest")
 with tempfile.TemporaryDirectory(prefix="engineering-source-snapshot.") as raw:
     source_root = Path(raw)
     for relative in module.RC4_SOURCE_SHA256:
-        source_root.joinpath(relative).write_bytes(ROOT.joinpath(relative).read_bytes())
+        source_root.joinpath(relative).write_bytes(aliased_sources[relative])
     original_root = module.ROOT
     original_run = module.run
     prompts = []

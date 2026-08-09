@@ -627,7 +627,9 @@ def aggregate_receipt(
         "effort": effort,
         "scenario_manifest_sha256": RC4_SCENARIO_MANIFEST_SHA256,
         "source_sha256": {
-            relative: hashlib.sha256(source_snapshot[relative]).hexdigest()
+            relative: hashlib.sha256(
+                normalized_governing_source(relative, source_snapshot[relative])
+            ).hexdigest()
             for relative in RC4_SOURCE_SHA256
         },
         "summary": {"total": len(rows), "passed": passed, "failed": len(rows) - passed},
