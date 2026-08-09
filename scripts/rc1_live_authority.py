@@ -10,6 +10,7 @@ from pathlib import Path
 from harness.contracts import EffectOutcome, OperationRecord, OwnedResources
 from harness.finalization_ledger import FinalizationLedger, FinalizationLedgerError
 from harness.review_finalization import require_task_review
+from harness.state_machine import TERMINAL
 from harness.store import OperationStore, StoreError
 
 
@@ -340,3 +341,81 @@ def validate_live_corridor(
         identity, current_head, verification, reviews, position
     )
     return material, current_head
+
+
+def validate_live_non_success(
+    receipt: dict[str, object], position: int, *, root: Path
+) -> None:
+    """Bind one failed/invalidated cell to a terminal resource-free run.
+
+    This is negative closure only: it can reset the streak and release the
+    gate reservation, but it cannot establish a successful cell.  The durable
+    dispatch/store identity and terminal state remain authoritative; caller
+    result/recovery fields merely select the matching negative disposition.
+    """
+
+    identity = _dispatch_authority(receipt, position, Path(root))
+    store = OperationStore(identity.store_root)
+    try:
+        root_record = store.read(identity.owner_id, identity.operation_id)
+        records = store.list(identity.operation_id)
+    except (OSError, StoreError, ValueError) as exc:
+        raise LiveAuthorityError(
+            f"receipt {position} negative corridor authority is unavailable"
+        ) from exc
+    expected_state = {
+        "failed": ("failed", False),
+        "invalidated": ("cancelled", True),
+    }.get(str(receipt["result"]))
+    route = root_record.spec.route
+    policy = identity.meta.get("review_policy")
+    expected_review = (
+        {key: policy.get(key) for key in ("mode", "runtime", "model", "effort")}
+        if isinstance(policy, dict)
+        else None
+    )
+    if (
+        expected_state is None
+        or root_record.spec.kind != "dispatch"
+        or root_record.spec.owner_id != identity.owner_id
+        or root_record.lane_id != identity.lane_id
+        or root_record.run_id != identity.run_id
+        or root_record.state != expected_state[0]
+        or receipt["coordinator_recovery"] is not expected_state[1]
+        or receipt["resource_free"] is not True
+        or receipt["executor_route"]
+        != {
+            "runtime": route.runtime,
+            "model": route.model,
+            "effort": route.effort,
+        }
+        or receipt["review_route"] != expected_review
+    ):
+        raise LiveAuthorityError(
+            f"receipt {position} negative corridor disposition is not durable"
+        )
+    relevant = [
+        row
+        for row in records
+        if row.spec.kind == "dispatch"
+        or row.spec.kind == "pipeline-verify"
+        or row.spec.kind == "review-round"
+        or row.spec.kind.startswith(
+            ("simple-review-", "deep-review-", "full-review-")
+        )
+    ]
+    if any(
+        row.state not in TERMINAL
+        or row.resources != OwnedResources()
+        or bool(row.pending_effect)
+        for row in relevant
+    ):
+        raise LiveAuthorityError(
+            f"receipt {position} negative corridor retains live resources"
+        )
+    reviews = [row for row in relevant if row.spec.kind == "review-round"]
+    provider_sessions = sorted({root_record.run_id, *(row.run_id for row in reviews)})
+    if receipt["provider_session_ids"] != provider_sessions:
+        raise LiveAuthorityError(
+            f"receipt {position} provider sessions are not runtime-derived"
+        )

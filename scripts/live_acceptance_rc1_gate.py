@@ -449,7 +449,10 @@ class RC1GatePreflight:
                 gate=self._declaration,
                 root=evidence_root if evidence_root is not None else ROOT,
             )
-            state["receipts"] = candidate
+            # A negative/non-fresh receipt is a typed closure, not a streak
+            # cell.  Its durable OperationStore record remains the evidence;
+            # clearing the prefix makes the next reservation cell 1 again.
+            state["receipts"] = candidate if verdict["streak"] else []
             state["reservation"] = None
             _atomic_json(state_path, state)
         return {

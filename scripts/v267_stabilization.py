@@ -20,7 +20,11 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-from rc1_live_authority import LiveAuthorityError, validate_live_corridor
+from rc1_live_authority import (
+    LiveAuthorityError,
+    validate_live_corridor,
+    validate_live_non_success,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -540,6 +544,15 @@ def _validate_live_corridor(
         raise StabilizationError(str(exc)) from exc
 
 
+def _validate_live_non_success(
+    receipt: dict[str, object], position: int, *, root: Path
+) -> None:
+    try:
+        validate_live_non_success(receipt, position, root=root)
+    except LiveAuthorityError as exc:
+        raise StabilizationError(str(exc)) from exc
+
+
 def _validate_receipt(
     receipt: object, position: int, cell: RC1GateCell, gate: RC1Gate
 ) -> dict[str, object]:
@@ -652,6 +665,16 @@ def validate_streak(
     streak = 0
     window: list[bool] = []
     for position, receipt in enumerate(validated, start=1):
+        if receipt["result"] != "success":
+            if receipt["material_cycle"] is not None:
+                raise StabilizationError(
+                    f"receipt {position} negative closure cannot claim a "
+                    "material cycle"
+                )
+            _validate_live_non_success(receipt, position, root=root)
+            streak = 0
+            window = []
+            continue
         declared_material = _validate_material_cycle(
             receipt["material_cycle"],
             position,
@@ -669,10 +692,8 @@ def validate_streak(
             raise StabilizationError(
                 f"receipt {position} material cycle is not live-corridor-derived"
             )
-        fresh_success = (
-            receipt["result"] == "success"
-            and receipt["resource_free"] is True
-            and receipt["coordinator_recovery"] is False
+        fresh_success = receipt["resource_free"] is True and (
+            receipt["coordinator_recovery"] is False
         )
         if receipt["lifecycle_subject_sha256"] != expected_digest or not fresh_success:
             streak = 0

@@ -624,6 +624,7 @@ def build_corridor_world(
     root: Path,
     task_id: str,
     *,
+    shared_vault: Path | None = None,
     owner_id: str = "owner-1",
     executor_runtime: str = "codex",
     executor_model: str = "gpt-5.6-sol",
@@ -632,14 +633,14 @@ def build_corridor_world(
     review_model: str = "sol",
     review_effort: str = "high",
 ) -> CorridorWorld:
-    vault = root / f"vault-{task_id}"
+    vault = shared_vault if shared_vault is not None else root / f"vault-{task_id}"
     worktree = root / f"worktree-{task_id}"
-    (vault / "wiki" / "plans").mkdir(parents=True)
-    (vault / "scripts").mkdir()
-    (vault / "config").mkdir()
+    (vault / "wiki" / "plans").mkdir(parents=True, exist_ok=True)
+    (vault / "scripts").mkdir(exist_ok=True)
+    (vault / "config").mkdir(exist_ok=True)
     for name in ("verification-profiles.toml", "model-routing.toml"):
         shutil.copy2(ROOT / "config" / name, vault / "config" / name)
-    (vault / "skills" / "review").mkdir(parents=True)
+    (vault / "skills" / "review").mkdir(parents=True, exist_ok=True)
     shutil.copy2(
         ROOT / "skills" / "review" / "SKILL.md",
         vault / "skills" / "review" / "SKILL.md",

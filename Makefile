@@ -52,6 +52,7 @@ test-harness:
 	@python3 tests/harness/test_callback_submit_recovery.py
 	@python3 tests/harness/test_callback_submit_recovery_runtime.py
 	@python3 tests/harness/test_harness_control_plane.py
+	@python3 tests/harness/test_rc1_live_streak_gate.py
 	@python3 tests/harness/test_release_transition_matrix.py
 	@python3 tests/harness/test_rc4_transition_certificate.py
 	@python3 tests/harness/test_context_verification.py
