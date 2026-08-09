@@ -150,6 +150,16 @@ root-scoped open argv from the already-approved request identity, and
 new identifier, moving provider start, or granting the observer any lifecycle
 authority.  No production script is added; the line ceiling moves by the
 measured 29-line cost to the exact 93,945-line candidate.
+
+RC2 review-start recovery then closes the reproduced late-readiness and stale
+callback seams without adding a production script or replay authority.  The
+587-line measured delta is confined to the existing runtime launch, store,
+review-gate, worker, review-flow, and resolution-bundle owners.  It proves one
+already-started reviewer from exact durable process/provider/callback identity,
+keeps ordinary executors on their original input-before-ready boundary, and
+archives only a callback already accepted by one exact prior terminal attempt.
+The line ceiling is pinned to the resulting 94,532-line candidate with no
+blanket headroom.
 """
 
 from __future__ import annotations
@@ -161,7 +171,7 @@ from pathlib import Path
 SCRIPT_FILE_CEILING = 272
 
 #: Maximum total lines across those files for the 2.6.7 RC2 candidate.
-SCRIPT_LINE_CEILING = 93_945
+SCRIPT_LINE_CEILING = 94_532
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

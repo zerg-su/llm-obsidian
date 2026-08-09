@@ -190,6 +190,34 @@ Operator recovery, in order:
 `input-unconfirmed` is a containment outcome, not a failure of the reviewed
 work; it never advances the review gate and never consumes a finalization cycle.
 
+### Late reviewer readiness recovery
+
+If the review manager timed out before the review worker published `ready.json`,
+but that exact worker subsequently completed the initial-input handshake and
+published its bound review callback, the coordinator may invoke the existing
+runtime owner directly.  This is deliberately not a public Harness CLI action:
+
+```python
+from pathlib import Path
+from harness.runtime_sessions import RuntimeSessionManager
+
+vault_root = Path("/absolute/vault/root")
+owner_id = "<persisted-owner-id>"
+review_operation_id = "<persisted-review-parent-operation-id>"
+store_root = vault_root / ".vault-meta" / "harness"
+runtime = RuntimeSessionManager.for_root(vault_root, store_root=store_root)
+runtime.recover_late_started_review_callback(owner_id, review_operation_id)
+```
+
+The coordinator must use the canonical writable vault context and the exact
+persisted owner and review-parent operation IDs.  The method succeeds only when
+`ready.json`, the callback target and callback envelope, provider generation,
+accepted input event, live process/supervisor identities, and cmux surface all
+bind to that same review parent.  It writes `late-start-recovery.json` and
+restores the existing parent to `awaiting-callback`; it neither starts a model,
+resends input, nor accepts the callback.  Any missing, stale, ambiguous, or
+non-live identity remains fail-closed and requires coordinator classification.
+
 ## Protected research shadow parity
 
 Protected research is the shadow-validation example for staged compiled
