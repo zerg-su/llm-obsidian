@@ -56,7 +56,7 @@
   без собственного runtime-ресурса помечается как unresolved, а не как живая.
 - Восстановлен живой scope ratchet для `scripts/`: он снова измеряет рабочее
   дерево, а не замороженный исторический коммит, с явными RC4-потолками в
-  `tests/rc4_scope_ratchet.py` (268 файлов, 91 297 строк). В dashboard теперь
+  `tests/rc4_scope_ratchet.py` (268 файлов, 91 300 строк). В dashboard теперь
   входит отдельный read-only валидатор receipts; review-коррекции привязывают
   fix visits к принятым callbacks, сериализуют recovery marker через atomic
   writes, резолвят exact frozen custom pipelines, восстанавливают bounded stale

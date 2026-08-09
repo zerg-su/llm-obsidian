@@ -7,10 +7,12 @@ from typing import Any, Mapping
 
 from .contracts import OperationRecord
 from .dashboard_receipts import verification_identity
-from .runtime_worker import verification_input_sha256
 from .state_machine import TERMINAL
 from .status_segment import CONTROLLER_KINDS
-from .verification_attempt import MAX_SAME_HEAD_ATTEMPT_INDEX
+from .verification_attempt import (
+    MAX_SAME_HEAD_ATTEMPT_INDEX,
+    verification_input_sha256,
+)
 
 
 MAX_ISSUES = 5

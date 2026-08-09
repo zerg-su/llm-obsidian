@@ -50,7 +50,7 @@ deterministic without adding another orchestrator or provider route.
   owning no runtime resource is reported as unresolved rather than live.
 - Restored the live `scripts/` scope ratchet: it measures the working tree again
   instead of a frozen historical commit, under explicit RC4 ceilings declared in
-  `tests/rc4_scope_ratchet.py` (268 files, 91,297 lines). The dashboard surface
+  `tests/rc4_scope_ratchet.py` (268 files, 91,300 lines). The dashboard surface
   now includes the extracted read-only receipt validator; its review corrections
   bind fix visits to accepted callbacks, serialize marker recovery with atomic
   writes, resolve exact frozen custom pipelines, recover bounded stale startup

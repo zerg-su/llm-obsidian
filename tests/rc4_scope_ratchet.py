@@ -87,6 +87,11 @@ owner, and made stale exact-HEAD gate evidence fail closed. Together with the
 single-pass ANSI matcher and restored extraction rationale, this moves only the
 line ceiling, by the exact measured 120 lines, to 91,297.
 
+The follow-up review moves verification input composition from the provider
+runtime into the dependency-free verification-attempt value module, restoring
+the read-only projection boundary. Expanded explicit imports add exactly three
+lines and move the ceiling to 91,300 without adding a file.
+
 The historical RC2 snapshot is retained separately in
 ``tests/test_v266_rc2_scope.py``; it is evidence about a released commit, not a
 constraint on this one.
@@ -101,7 +106,7 @@ from pathlib import Path
 SCRIPT_FILE_CEILING = 268
 
 #: Maximum total lines across those files for the RC4 candidate.
-SCRIPT_LINE_CEILING = 91_297
+SCRIPT_LINE_CEILING = 91_300
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

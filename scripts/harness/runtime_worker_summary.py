@@ -10,8 +10,8 @@ from .runtime_worker import (
     _pipeline_verify_effect_id,
     _pipeline_verify_identity,
     _review_resolution_handoff_ready,
-    verification_input_sha256,
 )
+from .verification_attempt import verification_input_sha256
 
 
 @dataclass

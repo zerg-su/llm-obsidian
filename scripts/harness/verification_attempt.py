@@ -26,6 +26,28 @@ class VerificationAttemptError(ValueError):
     """Raised when verification attempt authority is invalid or exhausted."""
 
 
+def verification_input_sha256(
+    definition_sha256: str,
+    head_sha: str,
+    profile_sha256: str,
+    schema_version: int,
+) -> str:
+    """Bind the canonical immutable input consumed by one verification run."""
+
+    return hashlib.sha256(
+        json.dumps(
+            {
+                "definition_sha256": definition_sha256,
+                "head_sha": head_sha,
+                "profile_sha256": profile_sha256,
+                "schema_version": schema_version,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+
+
 @dataclass(frozen=True)
 class VerificationAttempt:
     """Freeze parent, profile, exact HEAD, and the bounded retry index."""

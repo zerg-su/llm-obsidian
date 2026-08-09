@@ -65,11 +65,11 @@ from harness.pipelines import (
 from harness.status_segment import LiveInventory
 from harness.store import OperationStore
 from harness.supervisor import OperationSupervisor
-from harness.runtime_worker import (
-    _pipeline_verify_identity,
+from harness.runtime_worker import _pipeline_verify_identity
+from harness.verification_attempt import (
+    VerificationAttempt,
     verification_input_sha256,
 )
-from harness.verification_attempt import VerificationAttempt
 from harness.workflows.engineering_fix import FixStepReceipt
 from harness.workflows.engineering_fix_model import PHASE_SCHEMAS
 
@@ -396,6 +396,25 @@ def _tree_bytes(root: Path) -> dict[str, str]:
         if path.is_file()
     }
 
+
+isolated_import = subprocess.run(
+    [
+        sys.executable,
+        "-c",
+        (
+            "import sys; "
+            f"sys.path.insert(0, {str(ROOT / 'scripts')!r}); "
+            "import harness.dashboard_projection; "
+            "raise SystemExit('harness.runtime_worker' in sys.modules)"
+        ),
+    ],
+    cwd=ROOT,
+    check=False,
+)
+check(
+    "read-only dashboard projection does not import the provider runtime worker",
+    isolated_import.returncode == 0,
+)
 
 check(
     "classification escalation is ordered and fails closed on unknown values",
@@ -1718,15 +1737,47 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-viewport.") as raw:
         rows: render(full_footer_projection, recent=3, rows=rows)
         for rows in range(16, 21)
     }
+
+    def truthful_section_count(
+        frame: str,
+        label: str,
+        detail_prefix: str,
+        total: int,
+        omitted_word: str,
+    ) -> bool:
+        header = re.search(
+            rf"^{re.escape(label)}: (\d+)(?: \(\+(\d+) {omitted_word}\))?$",
+            frame,
+            re.MULTILINE,
+        )
+        if header is None:
+            return False
+        shown = int(header.group(1))
+        omitted = int(header.group(2) or 0)
+        detail_rows = sum(
+            line.startswith(detail_prefix) for line in frame.splitlines()
+        )
+        return shown == detail_rows and shown + omitted == total
+
     check(
         "small full-footer viewports retain the newest live program before old evidence",
         all(len(frame.splitlines()) <= rows for rows, frame in tight_frames.items())
         and all(live_owner in frame for frame in tight_frames.values())
         and all(
-            "hidden" in frame
-            or "more" in frame
-            or "viewport details truncated" in frame
-            or "details compacted" in frame
+            truthful_section_count(
+                frame,
+                "Terminal history",
+                "  dashboard-terminal-",
+                len(terminal_history),
+                "hidden",
+            )
+            and truthful_section_count(
+                frame,
+                "Recent issues",
+                "  - dashboard-issue-",
+                len(full_footer_projection.issues),
+                "more",
+            )
             for frame in tight_frames.values()
         ),
     )

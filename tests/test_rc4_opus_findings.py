@@ -24,6 +24,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -151,11 +152,8 @@ evidence_root = ROOT / "docs/acceptance/evidence/v2.6.6-rc4"
 # scripts/rc4_gate_bundle.py suppresses exactly these checks for its own run and
 # records the suppression in the receipt.  Every other check below still runs.
 from rc4_gate_bundle import (  # noqa: E402
-    LOG_PATH as RC4_GATE_LOG_PATH,
-    RECEIPT_PATH as RC4_GATE_RECEIPT_PATH,
     SELF_REFERENCE_ENV,
     GateBundleError,
-    _tracked_tree_digest as rc4_tracked_tree_digest,
     verify as verify_gate_bundle,
 )
 
@@ -196,17 +194,26 @@ else:
             isinstance(gate_receipt["untracked_path_count_at_run"], int),
             gate_receipt.get("untracked_path_count_at_run"),
         )
-        check(
-            FINDING,
-            "the recorded tree digest matches the current candidate tree",
-            gate_receipt["tracked_tree_sha256"]
-            == rc4_tracked_tree_digest(
-                exclude=(
-                    str(RC4_GATE_RECEIPT_PATH.relative_to(ROOT)),
-                    str(RC4_GATE_LOG_PATH.relative_to(ROOT)),
-                )
-            ),
-        )
+        try:
+            with patch(
+                "rc4_gate_bundle._tracked_tree_digest",
+                return_value="0" * 64,
+            ):
+                verify_gate_bundle()
+        except GateBundleError as exc:
+            check(
+                FINDING,
+                "a receipt with a stale candidate-tree digest is rejected",
+                str(exc)
+                == "RC4 gate receipt is stale for the current tracked candidate tree",
+                exc,
+            )
+        else:
+            check(
+                FINDING,
+                "a receipt with a stale candidate-tree digest is rejected",
+                False,
+            )
 
 disposition_schemas = sorted(
     path

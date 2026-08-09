@@ -37,8 +37,9 @@ and any presentation omission is counted without changing the complete
 projection or JSON state. Tight panes reserve the highest-priority live identity
 before terminal history and issues; those footer sections shrink with explicit
 hidden counts. TTY output uses a small semantic ANSI palette.
-`--no-color`, non-TTY output, and `--once` stay plain; one-shot output is not
-screen-height truncated.
+`--no-color` and non-TTY output carry no semantic color. `--once` is escape-free
+and is not screen-height truncated; continuous mode always emits the redraw
+clear sequence.
 
 One dispatch renders as one tree. Verification children, review parents, and
 review rounds are nested under the compiled step that executes them, resolved
