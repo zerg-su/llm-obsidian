@@ -239,6 +239,10 @@ test-v267-stabilization:
 	@python3 tests/test_v267_stabilization.py
 	@echo "=== test_rc1_gate_preflight.py ==="
 	@python3 tests/test_rc1_gate_preflight.py
+	@echo "=== test_rc1_streak_binding.py ==="
+	@python3 tests/test_rc1_streak_binding.py
+	@echo "=== test_rc1_gate_facade.py ==="
+	@python3 tests/test_rc1_gate_facade.py
 
 test-live-acceptance-runner:
 	@echo "=== test_live_acceptance_runner.py ==="
