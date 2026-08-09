@@ -307,6 +307,31 @@ def await_initial_start_acknowledged(
     return "unconfirmed"
 
 
+def resolve_recognized_provider_prompt(
+    port: ContinuationPort,
+    *,
+    surface_id: str,
+    runtime: str,
+) -> str:
+    """Confirm one already-allowlisted native prompt without task replay.
+
+    The caller invokes this only after the task submit boundary.  Unknown or
+    changed dialogs remain fail-closed, and this helper never sends task text.
+    The returned family is a bounded content-free diagnostic token.
+    """
+
+    screen = port.read(surface_id)
+    prompt = classify(runtime, screen)
+    if not prompt.interactive or not prompt.recognized or not prompt.family:
+        return ""
+    try:
+        for key in prompt.keys:
+            port.send_key(surface_id, key)
+    except Exception:
+        return ""
+    return prompt.family
+
+
 def deliver_continuation(
     port: ContinuationPort,
     *,

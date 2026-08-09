@@ -22,6 +22,7 @@ from .runtime_session_continuation import (
     await_initial_input_ready,
     await_initial_input_visible,
     await_initial_start_acknowledged,
+    resolve_recognized_provider_prompt,
 )
 from .runtime_worker_control import RuntimeWorkerControlMixin
 from .runtime_worker_fix import RuntimeWorkerFixMixin
@@ -158,6 +159,7 @@ class RuntimeWorkerExecution(
             else {"observation_limit": initial_start_observation_limit}
         )
         stream: RuntimeProviderEventStream | None = None
+        failure_reason = "initial-input-error"
         try:
             raw_input = initial_input.read_bytes()
             if not raw_input or len(raw_input) > MAX_PROMPT_BYTES:
@@ -216,6 +218,32 @@ class RuntimeWorkerExecution(
                 checkpoint_probe=self.checkpoint_probe or _no_checkpoint,
                 **initial_start_budget,
             )
+            if acknowledgement == "permission":
+                family = resolve_recognized_provider_prompt(
+                    self.cmux_adapter,
+                    surface_id=self.spec["surface_id"],
+                    runtime=self.spec["runtime"],
+                )
+                if family:
+                    acknowledgement = await_initial_start_acknowledged(
+                        self.cmux_adapter,
+                        surface_id=self.spec["surface_id"],
+                        runtime=self.spec["runtime"],
+                        anchor=_prompt_anchor(delivery_text),
+                        paste_screen_sha256=paste_screen_sha256,
+                        artifact_ready=self.spec["callback_pointer"].is_file,
+                        checkpoint_probe=(
+                            self.checkpoint_probe or _no_checkpoint
+                        ),
+                        **initial_start_budget,
+                    )
+                    failure_reason = (
+                        f"post-submit-{family}-{acknowledgement}"
+                    )
+                else:
+                    failure_reason = "post-submit-prompt-unresolved"
+            else:
+                failure_reason = f"initial-start-{acknowledgement}"
             if acknowledgement != "started":
                 raise RuntimeWorkerError(
                     "initial provider start was not acknowledged: "
@@ -243,6 +271,7 @@ class RuntimeWorkerExecution(
                     "schema_version": 1,
                     "status": "input-unconfirmed",
                     "exit_code": 2,
+                    "reason": failure_reason,
                 },
             )
             return False

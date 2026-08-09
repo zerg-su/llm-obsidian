@@ -4608,6 +4608,40 @@ class InitialStartWorkerCmux(FakeCmux):
         return self.post_submit[0]
 
 
+class PostSubmitTrustCmux(InitialStartWorkerCmux):
+    """A recognized workspace dialog that appears only after task submit."""
+
+    def __init__(self) -> None:
+        super().__init__([ACTIVE_CLAUDE_220_SCREEN])
+        self.dialog_acknowledged = False
+
+    def read(self, surface_id: str) -> str:
+        assert surface_id == SURFACE
+        if not self.sent:
+            return "❯\n"
+        self.transport_visible = True
+        prompt = self.sent[-1][1]
+        anchor = next(
+            (" ".join(line.split()) for line in prompt.splitlines() if line.strip()),
+            "",
+        )
+        if self.submit_count == self.submits_at_last_send:
+            return f"❯ {anchor}\n"
+        if not self.dialog_acknowledged:
+            return CLAUDE_TRUST_SCREEN
+        self.post_submit_reads += 1
+        return ACTIVE_CLAUDE_220_SCREEN
+
+    def send_key(self, surface_id: str, key: str) -> None:
+        if self.submit_count == self.submits_at_last_send:
+            super().send_key(surface_id, key)
+            return
+        assert surface_id == SURFACE and key == "Enter"
+        self.events.append("provider-dialog-confirm")
+        self.submit_count += 1
+        self.dialog_acknowledged = True
+
+
 def _initial_start_worker(
     root: Path, name: str, cmux: FakeCmux, *, limit: int = 4
 ) -> tuple[int | None, SurfaceLaunch, OperationStore, Path]:
@@ -4730,6 +4764,7 @@ def check_worker_contains_unconfirmed_initial_start() -> None:
             "an unconfirmed initial start fails closed into existing containment",
             code == 2
             and exit_record["status"] == "input-unconfirmed"
+            and exit_record["reason"] == "initial-start-unconfirmed"
             and record.state == "attention-required",
             (code, exit_record, record.state),
         )
@@ -4769,6 +4804,33 @@ def check_worker_accepts_acknowledged_initial_start() -> None:
         )
 
 
+def check_worker_handles_recognized_post_submit_prompt() -> None:
+    """A safe native prompt after Enter must not lose or replay the task."""
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        cmux = PostSubmitTrustCmux()
+        code, launch, _store, _callback = _initial_start_worker(
+            root, "post-submit-trust", cmux
+        )
+        kinds, delivery = _initial_start_delivery(launch)
+        check(
+            "a recognized post-submit dialog preserves one task delivery",
+            code == 0
+            and len(cmux.sent) == 1
+            and cmux.submit_count == 2
+            and cmux.dialog_acknowledged,
+            (code, cmux.sent, cmux.submit_count),
+        )
+        check(
+            "a recognized post-submit dialog reaches exact input acceptance",
+            kinds[:2] == ["provider-started", "input-accepted"]
+            and kinds.count("input-accepted") == 1
+            and delivery["send_status"] == "accepted",
+            (kinds, delivery),
+        )
+
+
 def check_worker_crash_after_enter_stays_replay_free() -> None:
     """A crash between Enter and acknowledgement stays ambiguous, never accepted."""
 
@@ -4801,6 +4863,7 @@ _INITIAL_START_FIXTURES = (
     check_initial_start_observes_within_budget,
     check_worker_contains_unconfirmed_initial_start,
     check_worker_accepts_acknowledged_initial_start,
+    check_worker_handles_recognized_post_submit_prompt,
     check_worker_crash_after_enter_stays_replay_free,
 )
 
