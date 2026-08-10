@@ -1,0 +1,20 @@
+{
+  "cell_id": "rc1-corridor-run-3",
+  "findings": [
+    {
+      "finding_id": "ahol-c3-01-diff-check-red-at-head",
+      "severity": "important",
+      "summary": "The declared exact-range diff hygiene check failed because both new files ended with an extra blank line."
+    },
+    {
+      "finding_id": "ahol-c3-02-untested-per-component-overflow-branch",
+      "severity": "minor",
+      "summary": "The initial tests did not exercise the parser's per-component overflow guard."
+    }
+  ],
+  "head_sha": "d2dc94c02e1b5b0e776f8e2dcd0afcd585ae74ec",
+  "review_cycle": 1,
+  "reviewed_head": "d2dc94c02e1b5b0e776f8e2dcd0afcd585ae74ec",
+  "schema_version": 1,
+  "type": "findings"
+}
