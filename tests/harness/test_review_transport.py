@@ -598,6 +598,48 @@ raise SystemExit(9 if calls == 1 else 0)
         current.returncode == 0
         and json.loads(current.stdout)["status"] == "already-current",
     )
+    legacy_page = archived_page.read_text(encoding="utf-8") + (
+        "\n- Legacy reviewer prose: [[1, 3], [2, 5]]\n"
+    )
+    archived_page.write_text(legacy_page, encoding="utf-8")
+    legacy_marker = json.loads(
+        (operation / ".review-archive.json").read_text(encoding="utf-8")
+    )
+    legacy_marker.pop("renderer_version", None)
+    legacy_marker["content_sha256"] = hashlib.sha256(
+        legacy_page.encode()
+    ).hexdigest()
+    (operation / ".review-archive.json").write_text(
+        json.dumps(legacy_marker), encoding="utf-8"
+    )
+    repaired = subprocess.run(
+        [
+            sys.executable,
+            str(ARCHIVE),
+            "--worktree",
+            str(worktree),
+            "--operation-dir",
+            str(operation),
+            "--vault-root",
+            str(vault),
+            "--json",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    repaired_marker = json.loads(
+        (operation / ".review-archive.json").read_text(encoding="utf-8")
+    )
+    check(
+        "legacy archive bytes are regenerated through the canonical writer",
+        repaired.returncode == 0
+        and json.loads(repaired.stdout)["status"] == "archived"
+        and repaired_marker["renderer_version"] == 2
+        and "[[1, 3]" not in archived_page.read_text(encoding="utf-8")
+        and json.loads((vault / ".writer-count").read_text(encoding="utf-8"))
+        == 2,
+    )
     (operation / ".review-meta.json").write_text(
         json.dumps({**meta, "review_id": "different-review"}), encoding="utf-8"
     )

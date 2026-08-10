@@ -30,6 +30,7 @@ class ArchiveError(ValueError):
 
 
 EMPTY_RESOLUTION_SHA256 = hashlib.sha256(b"[]").hexdigest()
+RENDERER_VERSION = 2
 
 
 def fail(message: str) -> int:
@@ -319,6 +320,8 @@ def current_archive(
     operation: Path,
     vault: Path,
     expected: dict[str, Any],
+    review: dict[str, Any],
+    resolutions: tuple[ReviewResolutionEvidence, ...],
 ) -> dict[str, Any] | None:
     """Return a verified replay result without repeating the vault mutation."""
 
@@ -356,13 +359,39 @@ def current_archive(
     except ValueError as exc:
         raise ArchiveError("existing review archive page escapes the vault") from exc
     digest = str(marker.get("content_sha256") or "")
+    page_bytes = page.read_bytes() if page.is_file() and not page.is_symlink() else b""
     if (
         not page.is_file()
         or page.is_symlink()
         or not re.fullmatch(r"[0-9a-f]{64}", digest)
-        or hashlib.sha256(page.read_bytes()).hexdigest() != digest
+        or hashlib.sha256(page_bytes).hexdigest() != digest
     ):
         raise ArchiveError("existing review archive page is unavailable")
+    if marker.get("renderer_version") != RENDERER_VERSION:
+        page_text = page_bytes.decode("utf-8")
+        address_match = re.search(
+            r'^address:\s*["\']?(c-\d{6})["\']?\s*$',
+            page_text,
+            flags=re.MULTILINE,
+        )
+        if address_match is None:
+            raise ArchiveError("existing review archive address is unavailable")
+        body = render_page(
+            str(expected["title"]),
+            str(expected["review_id"]),
+            review,
+            address_match.group(1),
+            resolutions,
+        )
+        return {
+            **marker,
+            "status": "render-drift",
+            "renderer_version": RENDERER_VERSION,
+            "address": address_match.group(1),
+            "previous_content_sha256": digest,
+            "content_sha256": hashlib.sha256(body.encode()).hexdigest(),
+            "body": body,
+        }
     return {**marker, "status": "already-current"}
 
 
@@ -482,6 +511,7 @@ def archived_result(intent: dict[str, Any]) -> dict[str, Any]:
     return {
         "schema_version": 1,
         "status": "archived",
+        "renderer_version": RENDERER_VERSION,
         **{field: intent[field] for field in ARCHIVE_IDENTITY_FIELDS},
         "content_sha256": intent["content_sha256"],
     }
@@ -523,6 +553,7 @@ def main() -> int:
         result = {
             "schema_version": 1,
             "status": "dry-run" if args.dry_run else "archived",
+            "renderer_version": RENDERER_VERSION,
             "review_id": review_id,
             "operation_id": operation_id,
             "run_id": review["run_id"],
@@ -543,8 +574,8 @@ def main() -> int:
             "content_sha256": hashlib.sha256(body.encode()).hexdigest(),
         }
         if not args.dry_run:
-            replay = current_archive(operation, vault, result)
-            if replay is not None:
+            replay = current_archive(operation, vault, result, review, resolutions)
+            if replay is not None and replay["status"] == "already-current":
                 (operation / ".review-archive-intent.json").unlink(
                     missing_ok=True
                 )
@@ -554,14 +585,42 @@ def main() -> int:
                     else replay["wikilink"]
                 )
                 return 0
-            intent, body = prepared_archive(
-                operation,
-                vault,
-                result,
-                review,
-                resolutions,
-            )
-            if not committed_archive(vault, intent):
+            if replay is not None:
+                body = str(replay.pop("body"))
+                previous_content_sha256 = str(
+                    replay.pop("previous_content_sha256")
+                )
+                intent = {
+                    **result,
+                    "status": "prepared",
+                    "address": replay["address"],
+                    "content_sha256": replay["content_sha256"],
+                    "request_id": (
+                        f"review-archive-repair:{short}:"
+                        f"{replay['content_sha256'][:12]}"
+                    ),
+                }
+                atomic_json(operation / ".review-archive-intent.json", intent)
+                page_operation = {
+                    "op": "update",
+                    "path": relative.as_posix(),
+                    "expected_sha256": previous_content_sha256,
+                    "content": body,
+                }
+            else:
+                intent, body = prepared_archive(
+                    operation,
+                    vault,
+                    result,
+                    review,
+                    resolutions,
+                )
+                page_operation = {
+                    "op": "create",
+                    "path": relative.as_posix(),
+                    "content": body,
+                }
+            if replay is not None or not committed_archive(vault, intent):
                 writer = subprocess.run(
                     [
                         sys.executable,
@@ -576,13 +635,7 @@ def main() -> int:
                             "request_id": intent["request_id"],
                             "actor": "harness-review-archive",
                             "session": "unknown",
-                            "pages": [
-                                {
-                                    "op": "create",
-                                    "path": relative.as_posix(),
-                                    "content": body,
-                                }
-                            ],
+                            "pages": [page_operation],
                         }
                     ),
                     text=True,
