@@ -48,6 +48,7 @@ from harness.runtime_worker_review_bridge import (
     RuntimeWorkerReviewBridgeMixin,
     _review_drive_failure_receipt,
 )
+from harness.runtime_callback_io import record_review_drive_failure
 from harness.store import OperationStore
 from harness.supervisor import OperationSupervisor
 from harness.verification import load_profiles
@@ -147,6 +148,45 @@ def assert_review_drive_failure_receipt_is_content_free() -> None:
         "unrecognized runner failures keep the generic typed reason",
         generic["reason_code"] == "runner-exit-nonzero",
         generic,
+    )
+
+
+def assert_review_drive_failure_receipts_are_cycle_scoped(root: Path) -> None:
+    """A later review cycle must not collide with an earlier failure receipt."""
+
+    state = root / "review-drive-receipts"
+
+    first = _review_drive_failure_receipt(
+        subprocess.CompletedProcess(
+            ("task-review-runner.py", "run"),
+            3,
+            stdout="",
+            stderr="task-review-runner: review checkpoint cannot be resurrected",
+        ),
+        drive_sha256="1" * 64,
+    )
+    second = _review_drive_failure_receipt(
+        subprocess.CompletedProcess(
+            ("task-review-runner.py", "run"),
+            3,
+            stdout="",
+            stderr="task-review-runner: review checkpoint cannot be resurrected",
+        ),
+        drive_sha256="2" * 64,
+    )
+    record_review_drive_failure(state, first)
+    record_review_drive_failure(state, second)
+    record_review_drive_failure(state, second)
+    archive = state / "review-drive-failures"
+    latest = json.loads(
+        (state / "review-drive-failure.json").read_text(encoding="utf-8")
+    )
+    check(
+        "distinct review cycles retain immutable failure receipts",
+        latest == second
+        and json.loads((archive / f"{'1' * 64}.json").read_text()) == first
+        and json.loads((archive / f"{'2' * 64}.json").read_text()) == second,
+        (latest, sorted(path.name for path in archive.iterdir())),
     )
 
 
@@ -1777,6 +1817,7 @@ def run_case(
 with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
     root = Path(raw)
     assert_review_drive_failure_receipt_is_content_free()
+    assert_review_drive_failure_receipts_are_cycle_scoped(root)
     assert_summary_refresh_notification_replays_without_effect(root)
     assert_review_resolution_notification_crashes_fail_closed(root)
     assert_resolved_changed_head_gates_review_on_exact_head_receipt(root)

@@ -15,7 +15,7 @@ from .runtime_worker import (
     _research_input_provenance,
     _review_resolution_handoff_ready,
 )
-from .runtime_callback_io import publish_callback_wake, wake_resume_once
+from . import runtime_callback_io
 from review_contract import ReviewContractError, axis_finding_id
 
 
@@ -325,12 +325,12 @@ class RuntimeWorkerReviewBridgeMixin:
                     "status": "duplicate" if acceptance.duplicate else "accepted",
                 },
             )
-            if not publish_callback_wake(
+            if not runtime_callback_io.publish_callback_wake(
                 self.spec,
                 self.spec_path.parent,
                 envelope.callback_id,
                 self.cmux_adapter,
-                resume_uncertain=wake_resume_once(self, envelope.callback_id),
+                resume_uncertain=runtime_callback_io.wake_resume_once(self, envelope.callback_id),
             ):
                 self.summary_attention("callback-wake-effect-uncertain")
                 return
@@ -643,8 +643,8 @@ class RuntimeWorkerReviewBridgeMixin:
                     receipt = _review_drive_failure_receipt(
                         launched, drive_sha256=input_sha256
                     )
-                    self.write_immutable_json(
-                        self.spec_path.parent / "review-drive-failure.json",
+                    runtime_callback_io.record_review_drive_failure(
+                        self.spec_path.parent,
                         receipt,
                     )
                     if (
@@ -997,12 +997,12 @@ class RuntimeWorkerReviewBridgeMixin:
             }
             wake_root = self.spec_path.parent / "review-resolution-wake"
             wake_root.mkdir(parents=True, exist_ok=True, mode=0o700)
-            if not publish_callback_wake(
+            if not runtime_callback_io.publish_callback_wake(
                 wake_spec,
                 wake_root,
                 wake_id,
                 self.cmux_adapter,
-                resume_uncertain=wake_resume_once(self, wake_id),
+                resume_uncertain=runtime_callback_io.wake_resume_once(self, wake_id),
             ):
                 raise RuntimeWorkerError(
                     "review resolution rebind notification effect is uncertain"
@@ -1028,12 +1028,12 @@ class RuntimeWorkerReviewBridgeMixin:
         }
         wake_root = self.spec_path.parent / "review-resolution-wake"
         wake_root.mkdir(parents=True, exist_ok=True, mode=0o700)
-        if not publish_callback_wake(
+        if not runtime_callback_io.publish_callback_wake(
             wake_spec,
             wake_root,
             packet_sha256,
             self.cmux_adapter,
-            resume_uncertain=wake_resume_once(self, packet_sha256),
+            resume_uncertain=runtime_callback_io.wake_resume_once(self, packet_sha256),
         ):
             raise RuntimeWorkerError(
                 "review resolution notification effect is uncertain"

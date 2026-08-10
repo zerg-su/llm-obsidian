@@ -113,6 +113,55 @@ def _atomic_json(path: Path, value: object) -> None:
         tmp.unlink(missing_ok=True)
 
 
+def record_review_drive_failure(
+    runtime_root: Path, receipt: dict[str, object]
+) -> None:
+    """Preserve every failed review drive and refresh its latest projection.
+
+    Review findings can produce several exact-HEAD cycles.  A single immutable
+    failure path makes a later drive collide with an earlier receipt, so every
+    drive is archived by its bound digest while the legacy path remains a
+    replaceable, content-free latest projection.
+    """
+
+    latest = runtime_root / "review-drive-failure.json"
+
+    def archive(value: dict[str, object]) -> None:
+        drive_sha256 = value.get("drive_sha256")
+        if (
+            value.get("schema_version") != 1
+            or not isinstance(drive_sha256, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", drive_sha256)
+        ):
+            raise RuntimeWorkerError(
+                "review drive failure receipt identity is invalid"
+            )
+        archive_root = runtime_root / "review-drive-failures"
+        archive_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        _write_once_json(archive_root / f"{drive_sha256}.json", value)
+
+    if latest.is_symlink():
+        raise RuntimeWorkerError(
+            "review drive failure projection cannot be a symlink"
+        )
+    if latest.is_file():
+        try:
+            existing = json.loads(latest.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RuntimeWorkerError(
+                "review drive failure projection is invalid"
+            ) from exc
+        if not isinstance(existing, dict):
+            raise RuntimeWorkerError(
+                "review drive failure projection is invalid"
+            )
+        archive(existing)
+    elif latest.exists():
+        raise RuntimeWorkerError("review drive failure projection is invalid")
+    archive(receipt)
+    _atomic_json(latest, receipt)
+
+
 @contextmanager
 def _callback_wake_lock(state_root: Path):
     lock_path = state_root / ".callback-wake.lock"
