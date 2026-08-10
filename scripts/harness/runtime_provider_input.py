@@ -46,9 +46,9 @@ def interactive_provider_input(
     prompt_path: Path,
     prompt: str,
 ) -> str:
-    """Keep Codex's interactive editor compact without weakening prompt identity."""
+    """Keep supported interactive editors compact without weakening identity."""
 
-    if runtime != "codex":
+    if runtime not in {"claude", "codex"}:
         return prompt
     if not prompt_path.is_absolute():
         raise RuntimeSessionError("interactive prompt pointer must be absolute")

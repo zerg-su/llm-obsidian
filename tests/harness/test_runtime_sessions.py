@@ -423,10 +423,16 @@ check(
     and review_prompt not in codex_delivery,
     codex_delivery,
 )
+claude_delivery = interactive_provider_input(
+    "claude", review_pointer, review_prompt
+)
 check(
-    "Claude retains the complete interactive prompt",
-    interactive_provider_input("claude", review_pointer, review_prompt)
-    == review_prompt,
+    "Claude receives one compact pointer bound to the complete prompt digest",
+    "\n" not in claude_delivery
+    and str(review_pointer) in claude_delivery
+    and review_digest in claude_delivery
+    and review_prompt not in claude_delivery,
+    claude_delivery,
 )
 
 collapsed_claude_paste = InitialReadyPort(
@@ -1082,6 +1088,9 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
     cwd.mkdir()
     (cwd / "prompt.md").write_text("perform the bounded task", encoding="utf-8")
     (cwd / "continue.md").write_text("verify the bounded fix", encoding="utf-8")
+    expected_claude_continuation = interactive_provider_input(
+        "claude", (cwd / "continue.md").resolve(), "verify the bounded fix"
+    )
     (cwd / "continue-no-checkpoint.md").write_text(
         "verify through the retained Claude process", encoding="utf-8"
     )
@@ -1743,7 +1752,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         and continued.record.deadline_at
         == continuation_started + request.time_budget_seconds
         and cmux.opens == 1
-        and cmux.sent[-1] == (SURFACE, "verify the bounded fix"),
+        and cmux.sent[-1] == (SURFACE, expected_claude_continuation),
         cmux.sent,
     )
     checkpointless_cwd = root / "checkpointless-scratch"
@@ -1752,6 +1761,11 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
     (checkpointless_cwd / "prompt.md").write_text("review", encoding="utf-8")
     (checkpointless_cwd / "continue.md").write_text(
         "verify through the retained Claude process", encoding="utf-8"
+    )
+    expected_checkpointless_continuation = interactive_provider_input(
+        "claude",
+        (checkpointless_cwd / "continue.md").resolve(),
+        "verify through the retained Claude process",
     )
     checkpointless_product = root / "checkpointless-product"
     checkpointless_product.mkdir()
@@ -1799,7 +1813,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         checkpointless.record.state == "running"
         and checkpointless.checkpoint == ""
         and checkpointless_cmux.sent[-1]
-        == (SURFACE, "verify through the retained Claude process"),
+        == (SURFACE, expected_checkpointless_continuation),
     )
 
     class CodexContinuationCmux(FakeCmux):
@@ -1914,6 +1928,11 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         "# Harness-owned review verification\nInspect exact HEAD.",
         encoding="utf-8",
     )
+    expected_stuck_continuation = interactive_provider_input(
+        "claude",
+        (stuck_root / "continue.md").resolve(),
+        "# Harness-owned review verification\nInspect exact HEAD.",
+    )
     stuck_store = OperationStore(root / "stuck-store")
     stuck_cmux = RetainedPromptCmux([], acknowledge=False)
     stuck_manager = RuntimeSessionManager(
@@ -1953,7 +1972,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         and len(stuck_receipts) == 1
         and json.loads(stuck_receipts[0].read_text(encoding="utf-8"))["status"]
         == "unconfirmed"
-        and sum(text.startswith("# Harness-owned") for _surface, text in stuck_cmux.sent)
+        and sum(text == expected_stuck_continuation for _surface, text in stuck_cmux.sent)
         == 1,
     )
 
@@ -2411,7 +2430,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         raise AssertionError("checkpoint mismatch must fail closed")
     check(
         "checkpoint mismatch sends no prompt",
-        cmux.sent[-1] == (SURFACE, "verify the bounded fix"),
+        cmux.sent[-1] == (SURFACE, expected_claude_continuation),
     )
     cmux.checkpoint = "checkpoint-1"
 
@@ -3252,7 +3271,15 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
             "result-published",
             "process-exited",
         ]
-        and worker_cmux.sent[-1] == (SURFACE, "perform the bounded task"),
+        and worker_cmux.sent[-1]
+        == (
+            SURFACE,
+            interactive_provider_input(
+                "claude",
+                (cwd / "prompt.md").resolve(),
+                "perform the bounded task",
+            ),
+        ),
         (provider_events, worker_cmux.sent),
     )
 
