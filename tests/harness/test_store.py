@@ -93,6 +93,13 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
         check("durable operation identity cannot be rebound by save", True)
     else:
         check("durable operation identity cannot be rebound by save", False)
+    current = store.read("owner-1", "op-1")
+    try:
+        store.save(current, expected_revision=current.revision + 1)
+    except StoreError:
+        check("stale operation revision fails closed", True)
+    else:
+        check("stale operation revision fails closed", False)
     try:
         store.create(
             OperationSpec(
@@ -314,6 +321,32 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
         check("corrupt durable state fails closed through the store seam", True)
     else:
         check("corrupt durable state fails closed through the store seam", False)
+
+    non_object_spec = OperationSpec(
+        "op-non-object",
+        "key-non-object",
+        "dispatch",
+        "owner-non-object",
+        route,
+        "packet.json",
+        "scoped",
+    )
+    store.create(
+        non_object_spec,
+        lane_id="lane-non-object",
+        run_id="run-non-object",
+    )
+    non_object_path = (
+        root
+        / "state/owners/owner-non-object/operations/op-non-object.json"
+    )
+    non_object_path.write_text("[]\n", encoding="utf-8")
+    try:
+        store.read("owner-non-object", "op-non-object")
+    except StoreError:
+        check("non-object durable state fails closed through the store seam", True)
+    else:
+        check("non-object durable state fails closed through the store seam", False)
 
     cli = subprocess.run(
         [
