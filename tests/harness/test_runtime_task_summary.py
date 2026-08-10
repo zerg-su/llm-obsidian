@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -531,6 +532,278 @@ def assert_resolved_changed_head_gates_review_on_exact_head_receipt(
         untouched,
     )
     print("OK   resolved changed HEAD gates review on the exact-HEAD receipt")
+
+
+def assert_rejected_drive_with_live_review_stays_waiting(root: Path) -> None:
+    """The live RC3 false-attention latch: a started review is not a failure.
+
+    Live ordering: verification complete, the runner partially launches the
+    exact reviewer, rehydration emits the constant checkpoint error, and the
+    current code latches the root attention-required although the bound
+    review attempt exists, the reviewer's ready ownership is alive, and the
+    review parent/round are awaiting their callback.  The drive must classify
+    this durable review-in-progress and leave the root waiting; every
+    absent/dead/mismatched/changed shape stays fail-closed.
+    """
+
+    task_id = "93939393-9393-4393-8393-939393939393"
+    state = root / "live-review-latch"
+    state.mkdir()
+    vault = root / "live-review-vault"
+    (vault / "scripts").mkdir(parents=True)
+    runner = vault / "scripts" / "task-review-runner.py"
+    runner.write_text(
+        "#!/usr/bin/env python3\n"
+        "import sys\n"
+        'sys.stderr.write("task-review-runner: review attempt checkpoint '
+        'cannot be resurrected\\n")\n'
+        "sys.exit(3)\n",
+        encoding="utf-8",
+    )
+    product = root / "live-review-product"
+    product.mkdir()
+    for argv in (
+        ("init", "-b", "main"),
+        ("config", "user.email", "review@example.invalid"),
+        ("config", "user.name", "Review Latch Test"),
+    ):
+        subprocess.run(
+            ["git", "-C", str(product), *argv], check=True, capture_output=True
+        )
+    (product / "product.txt").write_text("ready\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "-C", str(product), "add", "product.txt"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(product), "commit", "-m", "ready"],
+        check=True,
+        capture_output=True,
+    )
+    head = subprocess.run(
+        ["git", "-C", str(product), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    store = OperationStore(vault / ".vault-meta" / "harness")
+    review_root = (
+        vault / ".vault-meta" / "harness" / "review-data" / task_id / task_id
+    )
+    runtime = TypedReviewRuntime(store, "owner-1")
+    gate = ReviewGateController(review_root, runtime, store)
+    scratch = review_root / "runtime-scratch"
+    scratch.mkdir(parents=True, exist_ok=True)
+    preset = ReviewPreset.from_flags(model="sol", effort="medium")
+    policy = preset.request(
+        f"{task_id}-review",
+        purpose="implementation",
+        selected_provider="openai",
+    )
+    run = gate.begin_attempt(
+        dispatch_operation_id=task_id,
+        finalization_lineage_id=task_id,
+        cycle=1,
+        plan_sha256="8" * 64,
+        outcome_sha256="9" * 64,
+        request=ReviewOperationRequest(
+            policy,
+            "owner-1",
+            RuntimeRoute(
+                "codex", "gpt-5.6-sol", "medium", "reviewer-callback", "4" * 64
+            ),
+            ReviewContext(
+                "packets/task/manifest.json", head, "scoped", "5" * 64
+            ),
+        ),
+        origin_surface=ORIGIN,
+        cwd=scratch,
+        product_root=product,
+        prompt_pointer=".task-prompt.md",
+        callback_root="callbacks/review",
+    )
+    lane = run.execution.lanes[0]
+    for step in ("preflight", "starting", "running", "awaiting-callback"):
+        store.transition("owner-1", lane.operation_id, step)
+    reviewer = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(120)"],
+        start_new_session=True,
+    )
+    try:
+        identity = ProcessAdapter.capture_identity(
+            reviewer.pid, process_group=reviewer.pid
+        )
+        supervisor_identity = ProcessAdapter.capture_identity(os.getpid())
+        parent = store.read("owner-1", lane.operation_id)
+        bound = replace(
+            parent,
+            resources=OwnedResources(
+                surface_id=CHILD,
+                process_group=reviewer.pid,
+                supervisor_pid=os.getpid(),
+                process_identity=identity,
+                supervisor_identity=supervisor_identity,
+            ),
+            revision=parent.revision + 1,
+        )
+        store.save(bound, expected_revision=parent.revision)
+        write_json(
+            vault
+            / ".vault-meta"
+            / "harness"
+            / "owners"
+            / "owner-1"
+            / "runtime"
+            / lane.operation_id
+            / "ready.json",
+            {
+                "schema_version": 1,
+                "status": "ready",
+                "pid": reviewer.pid,
+                "process_group": reviewer.pid,
+                "supervisor_pid": os.getpid(),
+                "process_identity": identity,
+                "supervisor_identity": supervisor_identity,
+            },
+        )
+        dispatch_spec = OperationSpec(
+            task_id,
+            f"key-{task_id}",
+            "dispatch",
+            "owner-1",
+            RuntimeRoute("claude", "sonnet", "medium", "executor", "6" * 64),
+            "packets/task.json",
+            "scoped",
+        )
+        store.create(dispatch_spec, lane_id="latch-lane", run_id="latch-run")
+        for step in ("preflight", "starting", "running", "awaiting-callback"):
+            store.transition("owner-1", task_id, step)
+        attention: list[tuple[str, object]] = []
+
+        class LatchWorker(RuntimeWorkerReviewBridgeMixin):
+            def __init__(self) -> None:
+                self.spec_path = state / "runtime.json"
+                self.spec = {
+                    "operation_id": task_id,
+                    "owner_id": "owner-1",
+                    "cwd": product,
+                    "surface_id": CHILD,
+                }
+                self.trusted_vault = vault
+                self.store = store
+                self.process = ProcessAdapter()
+                self.review = SimpleNamespace(gate_root=review_root)
+                self.review_launcher = None
+                self.pipeline = SimpleNamespace(definition_sha256="7" * 64)
+                self.marker_path = state / "pipeline-review-start.json"
+
+            def write_immutable_json(self, path, value) -> None:
+                if not Path(path).exists():
+                    write_json(Path(path), value)
+
+            def summary_attention(self, status, reason=None, **_kw) -> None:
+                attention.append((status, reason))
+
+        worker = LatchWorker()
+        launched = worker.drive_review()
+        marker = json.loads(worker.marker_path.read_text(encoding="utf-8"))
+        record = store.read("owner-1", task_id)
+        check(
+            "a rejected drive over a live durable review stays waiting",
+            launched is True
+            and attention == []
+            and marker["status"] == "started"
+            and record.state == "awaiting-callback",
+            (launched, attention, marker, record.state),
+        )
+        decision = gate.complete_round(
+            run,
+            lane,
+            run.rounds[lane.axis],
+            ReviewResult(lane.axis, "approve"),
+        )
+        check(
+            "the live review completes without any coordinator resume",
+            decision.action == "approved",
+            decision.action,
+        )
+
+        rejections: list[tuple[str, Callable[[], None], Callable[[], None]]] = []
+        ready_path = (
+            vault
+            / ".vault-meta"
+            / "harness"
+            / "owners"
+            / "owner-1"
+            / "runtime"
+            / lane.operation_id
+            / "ready.json"
+        )
+        original_ready = ready_path.read_text(encoding="utf-8")
+
+        def tamper_ready() -> None:
+            value = json.loads(original_ready)
+            value["status"] = "failed"
+            write_json(ready_path, value)
+
+        def restore_ready() -> None:
+            ready_path.write_text(original_ready, encoding="utf-8")
+
+        def tamper_head() -> None:
+            (product / "product.txt").write_text("drift\n", encoding="utf-8")
+            subprocess.run(
+                ["git", "-C", str(product), "commit", "-am", "drift"],
+                check=True,
+                capture_output=True,
+            )
+
+        def restore_head() -> None:
+            subprocess.run(
+                ["git", "-C", str(product), "reset", "--hard", head],
+                check=True,
+                capture_output=True,
+            )
+
+        def tamper_identity() -> None:
+            value = json.loads(original_ready)
+            value["process_identity"] = "0" * 64
+            write_json(ready_path, value)
+
+        rejections = [
+            ("a failed reviewer handshake stays fail-closed", tamper_ready, restore_ready),
+            ("a changed HEAD stays fail-closed", tamper_head, restore_head),
+            ("a mismatched reviewer identity stays fail-closed", tamper_identity, restore_ready),
+        ]
+        for label, tamper, restore in rejections:
+            tamper()
+            try:
+                attention.clear()
+                worker.marker_path.unlink(missing_ok=True)
+                latched = worker.drive_review()
+                check(
+                    label,
+                    latched is False and attention != [],
+                    (label, latched, attention),
+                )
+            finally:
+                restore()
+
+        reviewer.terminate()
+        reviewer.wait(timeout=10)
+        attention.clear()
+        worker.marker_path.unlink(missing_ok=True)
+        dead = worker.drive_review()
+        check(
+            "a dead reviewer process stays fail-closed",
+            dead is False and attention != [],
+            (dead, attention),
+        )
+    finally:
+        if reviewer.poll() is None:
+            reviewer.kill()
+    print("OK   rejected drive over a live durable review stays waiting")
 
 
 def assert_durable_review_packet_generation_can_advance(root: Path) -> None:
@@ -1466,6 +1739,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
     assert_summary_refresh_notification_replays_without_effect(root)
     assert_review_resolution_notification_crashes_fail_closed(root)
     assert_resolved_changed_head_gates_review_on_exact_head_receipt(root)
+    assert_rejected_drive_with_live_review_stays_waiting(root)
     assert_durable_review_packet_generation_can_advance(root)
     assert_resolution_head_drift_wakes_once(root)
     handoff = root / "resolution-handoff"

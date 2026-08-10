@@ -429,6 +429,131 @@ class RuntimeWorkerReviewBridgeMixin:
             and evidence[0].get("head_sha") == current_head
         )
 
+    def _durable_review_in_progress(self) -> bool:
+        """Classify a rejected drive whose exact review is already running.
+
+        The runner's checkpoint-resurrection rejection can race a reviewer it
+        partially launched.  Positive authority is re-derived from durable
+        records only: the bound attempt at the exact current HEAD, every gate
+        lane's parent and round records awaiting their callback (or
+        finalizing), and the reviewer's live ready ownership whose identities
+        match the parent record's owned resources.  Absent, dead, ambiguous,
+        or mismatched identity, a changed HEAD, or a wrong lane/run fails
+        closed to the existing attention boundary.
+        """
+
+        try:
+            gate_state = self.review_gate_state()
+            raw_attempt = gate_state.get("attempt")
+            lanes = gate_state.get("lanes")
+            context = gate_state.get("context")
+            if (
+                not isinstance(raw_attempt, dict)
+                or raw_attempt.get("status") != "awaiting-callback"
+                or not isinstance(lanes, list)
+                or not lanes
+                or not isinstance(context, dict)
+            ):
+                return False
+            identity = raw_attempt.get("identity")
+            if not isinstance(identity, dict):
+                return False
+            head_result = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=self.spec["cwd"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            current_head = head_result.stdout.strip()
+            if (
+                head_result.returncode
+                or not re.fullmatch("[0-9a-f]{40,64}", current_head)
+                or identity.get("exact_head_sha") != current_head
+                or context.get("head_sha") != current_head
+            ):
+                return False
+            process = getattr(self, "process", None) or ProcessAdapter()
+            rows = self.store.list(self.spec["owner_id"])
+            for lane in lanes:
+                if not isinstance(lane, dict):
+                    return False
+                operation_id = str(lane.get("operation_id") or "")
+                run_id = str(lane.get("run_id") or "")
+                lane_id = str(lane.get("lane_id") or "")
+                if not operation_id or not run_id or not lane_id:
+                    return False
+                parent = self.store.read(self.spec["owner_id"], operation_id)
+                if (
+                    not parent.spec.kind.startswith(
+                        ("simple-review-", "deep-review-", "full-review-")
+                    )
+                    or parent.run_id != run_id
+                    or parent.lane_id != lane_id
+                    or parent.state not in {"awaiting-callback", "finalizing"}
+                    or parent.pending_effect
+                ):
+                    return False
+                rounds = [
+                    row
+                    for row in rows
+                    if row.spec.kind == "review-round"
+                    and row.spec.parent_operation_id == operation_id
+                ]
+                if not rounds or any(
+                    row.state not in {"awaiting-callback", "finalizing"}
+                    for row in rounds
+                ):
+                    return False
+                ready_path = (
+                    Path(self.store.root)
+                    / "owners"
+                    / self.spec["owner_id"]
+                    / "runtime"
+                    / operation_id
+                    / "ready.json"
+                )
+                if ready_path.is_symlink() or not ready_path.is_file():
+                    return False
+                ready = json.loads(ready_path.read_text(encoding="utf-8"))
+                process_group = ready.get("process_group")
+                process_identity = str(ready.get("process_identity") or "")
+                if (
+                    not isinstance(ready, dict)
+                    or ready.get("status") != "ready"
+                    or type(process_group) is not int
+                    or process_group <= 1
+                    or not re.fullmatch("[0-9a-f]{64}", process_identity)
+                    or parent.resources.process_group != process_group
+                    or parent.resources.process_identity != process_identity
+                    or process.process_status(process_group, process_identity)
+                    != "alive"
+                ):
+                    return False
+            return True
+        except (
+            OSError,
+            RuntimeWorkerError,
+            StoreError,
+            ValueError,
+            TypeError,
+            KeyError,
+            json.JSONDecodeError,
+        ):
+            return False
+
+    def _review_drive_started_marker(self, input_sha256: str) -> None:
+        _atomic_json(
+            self.marker_path,
+            {
+                "schema_version": 1,
+                "operation_id": self.spec["operation_id"],
+                "definition_sha256": self.pipeline.definition_sha256,
+                "status": "started",
+                "drive_sha256": input_sha256,
+            },
+        )
+
     def drive_review(self) -> bool:
         if not self._resolved_head_verification_ready():
             return False
@@ -467,14 +592,32 @@ class RuntimeWorkerReviewBridgeMixin:
                     timeout=10,
                 )
                 if launched.returncode != 0:
+                    receipt = _review_drive_failure_receipt(
+                        launched, drive_sha256=input_sha256
+                    )
                     self.write_immutable_json(
                         self.spec_path.parent / "review-drive-failure.json",
-                        _review_drive_failure_receipt(
-                            launched, drive_sha256=input_sha256
-                        ),
+                        receipt,
                     )
+                    if (
+                        receipt["reason_code"] == "review-contract-rejected"
+                        and self._durable_review_in_progress()
+                    ):
+                        # The rejected drive raced a reviewer it already
+                        # launched; the durable records prove the exact bound
+                        # review is running, so the root keeps its normal
+                        # waiting state instead of a false attention latch.
+                        self._review_drive_started_marker(input_sha256)
+                        return True
                     raise RuntimeWorkerError("automatic task review drive failed")
-        except (OSError, RuntimeWorkerError, subprocess.TimeoutExpired):
+        except (OSError, RuntimeWorkerError, subprocess.TimeoutExpired) as exc:
+            if (
+                _review_drive_failure_code(str(exc))
+                == "review-contract-rejected"
+                and self._durable_review_in_progress()
+            ):
+                self._review_drive_started_marker(input_sha256)
+                return True
             self.summary_attention(
                 "review-drive-failed", AttentionReason.ATTENTION_REQUIRED
             )
