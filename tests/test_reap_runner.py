@@ -480,6 +480,55 @@ with tempfile.TemporaryDirectory(prefix="reap-runner-test.") as raw:
         and durable.resources == OwnedResources(),
     )
 
+straddle_link = (
+    "[[Cross-model review — f20f7bc1-d469-53bd-91c2-e67758312758 — f1e5dbafe036]]"
+)
+enriched = ("x" * 474) + straddle_link
+excerpt = runner.log_excerpt(enriched)
+check("excerpt never exceeds the log cap", len(excerpt) <= 500)
+check("excerpt never cuts inside a straddling wikilink", excerpt == "x" * 474)
+check(
+    "excerpt keeps wikilinks balanced",
+    excerpt.count("[[") == excerpt.count("]]"),
+)
+check(
+    "short bodies pass through unchanged",
+    runner.log_excerpt("done [[A]]") == "done [[A]]",
+)
+check(
+    "plain text still truncates exactly at the cap",
+    runner.log_excerpt("a" * 600) == "a" * 500,
+)
+check(
+    "unclosed opener in the source never leaks unmatched brackets",
+    "[[" not in runner.log_excerpt(("y" * 100) + "[[unclosed " + ("z" * 500)),
+)
+check(
+    "wikilink closing exactly at the cap is preserved",
+    runner.log_excerpt(("w" * 490) + "[[ABCDEF]]" + ("v" * 100))
+    == ("w" * 490) + "[[ABCDEF]]",
+)
+entry = runner.reap_log_entry(
+    today="2026-08-10",
+    task_name="v267-rc1-cell-1f-interval-merge",
+    address="c-000150",
+    link="[[V267 RC1 Cell 1f - Terra interval-merge corridor]]",
+    body=enriched,
+)
+entry_heading, _, entry_body = entry.partition("\n\n")
+check(
+    "reap log entry preserves the heading and address format",
+    entry_heading == "## [2026-08-10] reap | v267-rc1-cell-1f-interval-merge"
+    and entry_body.startswith(
+        "`c-000150` [[V267 RC1 Cell 1f - Terra interval-merge corridor]]. "
+    ),
+)
+check(
+    "reap log entry body uses the wikilink-safe excerpt",
+    entry_body.endswith("x" * 474)
+    and entry.count("[[") == entry.count("]]"),
+)
+
 if failures:
     raise SystemExit(f"{len(failures)} reap runner test(s) failed")
 print("All reap runner tests passed.")

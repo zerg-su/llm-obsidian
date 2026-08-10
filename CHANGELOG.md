@@ -10,6 +10,28 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.6.7-rc3] - Unreleased
+
+Bounded RC3 acceptance-corridor repairs with their scope reconciliation; no
+new pipeline, dashboard, or lifecycle behavior.
+
+### Fixed
+
+- Reap log rendering truncates long summaries without splitting or orphaning
+  a wikilink, and the registered one-shot `reap-log-repair` through
+  `scripts/vault-write.py` replaces exactly one malformed top reap block
+  under optimistic task/log-SHA-256 binding, failing closed on missing,
+  duplicate, drifted, or unrelated damage.
+
+### Changed
+
+- `tests/rc4_scope_ratchet.py` ceilings raised to exactly 273 files / 95,588
+  lines for the accepted RC3 review-corridor repairs and the reap-log-repair
+  planner; no blanket headroom.
+- `config/code-quality-baseline.json` owns the
+  `runtime_worker_review_bridge.py` file-lines hotspot at its exact
+  1107-line contour with RC3 regression evidence.
+
 ## [2.6.7-rc2] - 2026-08-10
 
 Root-scoped Harness observability: each dispatch opens or reuses one external,

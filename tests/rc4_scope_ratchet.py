@@ -160,6 +160,14 @@ keeps ordinary executors on their original input-before-ready boundary, and
 archives only a callback already accepted by one exact prior terminal attempt.
 The line ceiling is pinned to the resulting 94,532-line candidate with no
 blanket headroom.
+
+The 2.6.7 RC3 acceptance corridor then repairs the live review corridor
+(changed-HEAD ordering, the false-attention stderr latch, the swallowed-Enter
+acknowledgment, and the batched exact-iteration/self-healing/pre-ready
+closure) plus the wikilink-splitting reap log renderer, and adds the
+registered one-shot reap-log-repair planner as the single new production
+script.  The measured growth is one file and 1,056 lines; the ceilings move
+to the exact 273-file, 95,588-line candidate with no blanket headroom.
 """
 
 from __future__ import annotations
@@ -167,11 +175,11 @@ from __future__ import annotations
 from pathlib import Path
 
 
-#: Maximum tracked Python files under ``scripts/`` for the 2.6.7 RC2 candidate.
-SCRIPT_FILE_CEILING = 272
+#: Maximum tracked Python files under ``scripts/`` for the 2.6.7 RC3 candidate.
+SCRIPT_FILE_CEILING = 273
 
-#: Maximum total lines across those files for the 2.6.7 RC2 candidate.
-SCRIPT_LINE_CEILING = 94_532
+#: Maximum total lines across those files for the 2.6.7 RC3 candidate.
+SCRIPT_LINE_CEILING = 95_588
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

@@ -137,6 +137,7 @@ KNOWN_KEYS = MUTATION_KEYS | {
     "schema_version",
     "request_id",
     "exact_binding",
+    "reap_log_repair",
 }
 
 OUTPUT_JSON = False
@@ -296,6 +297,14 @@ def _read_payload(argv: list[str]) -> tuple[dict, int | None]:
         return {}, fail(
             3,
             "exact_binding is reserved for stop-hook-link-repair",
+        )
+    if (
+        "reap_log_repair" in parsed
+        and parsed.get("actor") != "reap-log-repair"
+    ):
+        return {}, fail(
+            3,
+            "reap_log_repair is reserved for the registered reap-log-repair",
         )
     if not parsed.keys() & MUTATION_KEYS:
         return {}, fail(3, "payload has no actionable keys")

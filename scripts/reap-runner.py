@@ -178,6 +178,35 @@ def unique(values: list[str]) -> list[str]:
     return result
 
 
+LOG_EXCERPT_CAP = 500
+
+
+def log_excerpt(body: str, cap: int = LOG_EXCERPT_CAP) -> str:
+    """Truncate to the log cap without splitting or orphaning a wikilink."""
+    if len(body) <= cap:
+        return body
+    cut = cap
+    for opener in re.finditer(r"\[\[", body):
+        start = opener.start()
+        if start >= cut:
+            break
+        close = body.find("]]", opener.end())
+        end = close + 2 if close != -1 else len(body)
+        if end > cut:
+            cut = start
+            break
+    return body[:cut].rstrip()
+
+
+def reap_log_entry(
+    *, today: str, task_name: str, address: str, link: str, body: str
+) -> str:
+    return (
+        f"## [{today}] reap | {task_name}\n\n"
+        f"`{address}` {link}. {log_excerpt(body)}"
+    )
+
+
 def outcome_markdown(summary: dict[str, Any]) -> str:
     if summary.get("schema_version") != 2:
         return ""
@@ -402,7 +431,13 @@ def _finalize_reap(vault: Path, worktree: Path, current: str) -> dict[str, Any]:
             "actor": "reap",
             "session": current,
             "pages": [page],
-            "log_entry": f"## [{today}] reap | {meta['task_name']}\n\n`{address}` {link}. {summary['body'][:500]}",
+            "log_entry": reap_log_entry(
+                today=today,
+                task_name=str(meta["task_name"]),
+                address=address,
+                link=link,
+                body=str(summary["body"]),
+            ),
             "hot_bullet": f"{today}: {link} — finalized task result (`{address}`)",
         }
         payload = with_plan_close(

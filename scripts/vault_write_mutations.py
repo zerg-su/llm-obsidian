@@ -44,6 +44,7 @@ class MutationPlanner:
             payload.get("pages"),
             allow_writer_owned_link_repair=(
                 self._exact_writer_owned_link_repair(payload)
+                or self._exact_reap_log_repair(payload)
             ),
         )
         move_writes, move_deletes = self.pages.page_moves(payload.get("moves"))
@@ -106,6 +107,30 @@ class MutationPlanner:
         except ExactBindingError:
             return False
         return repair is not None and payload == repair.payload
+
+    def _exact_reap_log_repair(self, payload: dict) -> bool:
+        """Authorize only one recomputed malformed-reap-block replacement."""
+
+        if payload.get("actor") != "reap-log-repair" or set(payload) != {
+            "schema_version",
+            "request_id",
+            "actor",
+            "pages",
+            "reap_log_repair",
+        }:
+            return False
+        from vault_reap_log_repair import (
+            ReapLogRepairError,
+            build_reap_log_repair_plan,
+            parse_reap_log_binding,
+        )
+
+        try:
+            binding = parse_reap_log_binding(payload.get("reap_log_repair"))
+            repair = build_reap_log_repair_plan(self.repo_root, binding)
+        except ReapLogRepairError:
+            return False
+        return payload == repair.payload
 
     def manifest_write(self, spec: object) -> tuple[Path, str] | None:
         if spec is None:

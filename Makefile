@@ -390,6 +390,8 @@ test-vault:
 test-vault-link-repair:
 	@echo "=== test_vault_link_repair.py ==="
 	@python3 tests/test_vault_link_repair.py
+	@echo "=== test_reap_log_repair.py ==="
+	@python3 tests/test_reap_log_repair.py
 
 test-plan-capture:
 	@echo "=== test_plan_capture.sh ==="
