@@ -1,0 +1,47 @@
+{
+  "authorization": "coordinator decision for escalation ff474a55-2f60-4e36-be6d-f653c70267c3",
+  "canonical_manifest_sha256": "a569b62c4e3536744617ecd553c75ad0173bd0b5bb78a896c45e8d7417bb0c89",
+  "canonical_subject_config_sha256": "6cf4d4c9aca90a2d17cf5e602e4ae36d3236c6e38e7eda44bb85693b1c017105",
+  "created": "2026-08-10",
+  "golden_route": {
+    "executor": "codex/terra/medium",
+    "review": "simple claude/opus/high"
+  },
+  "lifecycle_subject_sha256": "88e91f6dfcc01a3243b66ef42ab5f995f8375727b1a56290018b5a20a797606c",
+  "overlay_manifest": {
+    "path": "docs/acceptance/evidence/v2.6.7/rc3-program/config/acceptance-cells.toml",
+    "sha256": "821c5c738ed412254fa558752ff2baae9e6737f07d6dcda8565136a7af580a2d"
+  },
+  "overlay_subject_config": {
+    "path": "docs/acceptance/evidence/v2.6.7/rc3-program/config/v267-stabilization-subject.json",
+    "sha256": "6cf4d4c9aca90a2d17cf5e602e4ae36d3236c6e38e7eda44bb85693b1c017105"
+  },
+  "parallel_routes": [
+    {
+      "executor": "codex/terra/medium",
+      "review": "simple claude/opus/high"
+    },
+    {
+      "executor": "claude/sonnet/medium",
+      "review": "simple codex/sol/high"
+    }
+  ],
+  "purpose": "Immutable RC3 acceptance-program overlay: user-directed cheaper routes for RC1 streak cells 2-3; acceptance routing metadata outside the lifecycle behavioral subject.",
+  "schema_version": 1,
+  "streak_routes": {
+    "rc1-corridor-run-1": {
+      "executor": "claude/fable/high",
+      "review": "simple claude/fable/high",
+      "status": "completed and recorded (request acb697b0, streak=1)"
+    },
+    "rc1-corridor-run-2": {
+      "executor": "codex/terra/medium",
+      "review": "simple claude/opus/medium"
+    },
+    "rc1-corridor-run-3": {
+      "executor": "claude/sonnet/medium",
+      "review": "simple codex/sol/medium"
+    }
+  },
+  "type": "rc3-acceptance-program"
+}
