@@ -66,6 +66,16 @@
    "cell": "rc1-corridor-run-2",
    "disposition": "success on digest babf41da with one material findings/fix/re-review cycle; required two authorized supported resumes past the pre-repair in-process latch, never autonomous evidence; superseded by 8ba841ed",
    "request": "ee3497d5"
+  },
+  {
+   "cell": "rc1-corridor-run-1",
+   "disposition": "success on digest b41a74d0 (streak=1), fully autonomous corridor; superseded by the cycle-scoped review-drive receipt repair (86ae85c8)",
+   "request": "0bd3d587"
+  },
+  {
+   "cell": "rc1-corridor-run-2",
+   "disposition": "success on digest b41a74d0 with a three-round material findings/fix/re-review cycle; required coordinator recovery after the pre-repair review-drive receipt collision, so it was recorded as non-counted and superseded by 86ae85c8",
+   "request": "3ef86423"
   }
  ],
  "lifecycle_subject_sha256": "3ea52c300378295d40e7db2c2757a3665584100c1a47f882c2600bb13ff71c55",

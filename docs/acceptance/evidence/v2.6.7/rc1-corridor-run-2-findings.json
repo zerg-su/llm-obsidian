@@ -2,19 +2,24 @@
   "cell_id": "rc1-corridor-run-2",
   "findings": [
     {
-      "axis": "openai-holistic",
-      "evidence": "Outcome evidence classification: V267-RC1-C2-E1-code is contradicted. At exact clean HEAD f9f7449c336a7c7bccfd1622a3bff6dbc5a586dc, independent calls produced compare_semver('1.2.3\\n', '1.2.3') == 0, compare_semver('1.2.3-alpha\\n', '1.2.3-alpha') == 1, and compare_semver('1.2.3+build\\n', '1.2.3') == 0. Python's `$` may match immediately before a final newline, and lines 6-8 combine `$`-anchored patterns with match(), so malformed core, prerelease, and build strings pass validation. This violates full SemVer 2.0.0 grammar and the explicit requirement that malformed versions raise ValueError naming the argument. V267-RC1-C2-E2-test is established for the declared categories present in the focused file: all 10 deterministic tests pass independently, but Testing remains deficient because none exercises the trailing-newline branch. V267-RC1-C2-E3-lifecycle is missing at this boundary: the packet establishes executor completion, scoped verification claims corroborated by independent focused-test and read-only compile runs, an accepted prior review finding, its same-corridor resolution, and a typed summary; terminal cleanup and zero remaining owned resources are not yet evidenced and this current review is not yet accepted. Non-goals are clean: facade inspection shows the exact HEAD only on refs/heads/task/v267-rc1-cell-2-semver-compare-r4, a clean worktree, and exactly the two owned files changed from the approved base. Review denominator: Quality has the malformed-input defect above; Implementation is otherwise complete and reachable through compare_semver and its focused caller; Testing is deterministic, shared-state/network/wall-clock independent, and green but misses this validation branch; Simplification is clean (no dependency, configuration, abstraction, or unused variation); Documentation is clean for the disposable prototype and approved plan; Security is clean because parsing is pure and no input reaches shell, SQL, paths, templates, logs, or credentials.",
-      "file": "prototypes/rc267_semver_compare.py",
-      "finding_id": "semver-final-newline-accepted",
-      "line": 6,
-      "recommendation": "Use a true whole-string check for the core and identifier grammars, preferably re.fullmatch (or compiled patterns consumed with fullmatch), rather than match() with `$`. Add focused regressions showing trailing newlines in core, prerelease, and build metadata are rejected, including at least one assertion for each argument name. Rerun the focused test, syntax compilation, and diff check through the Harness-owned resolution cycle.",
+      "finding_id": "semver.invalid-metadata-validation",
       "severity": "important",
-      "summary": "Regex end anchors accept a trailing newline, so malformed SemVer strings return a comparison result instead of raising ValueError."
+      "summary": "Initial implementation accepted malformed metadata and newline-terminated versions."
+    },
+    {
+      "finding_id": "semver.unbounded-numeric-components",
+      "severity": "important",
+      "summary": "Integer conversion imposed a size limit not present in SemVer."
+    },
+    {
+      "finding_id": "semver.ascii-core-digits",
+      "severity": "important",
+      "summary": "Unicode decimal digits were accepted where SemVer requires ASCII digits."
     }
   ],
-  "head_sha": "af8d84c1d5c08df592698c806d357c7fca3a90ea",
-  "review_cycle": null,
-  "reviewed_head": "af8d84c1d5c08df592698c806d357c7fca3a90ea",
+  "head_sha": "5b54733416669578ea07a40a0a07769a31a508c0",
+  "review_cycle": 1,
+  "reviewed_head": "5b54733416669578ea07a40a0a07769a31a508c0",
   "schema_version": 1,
   "type": "findings"
 }
