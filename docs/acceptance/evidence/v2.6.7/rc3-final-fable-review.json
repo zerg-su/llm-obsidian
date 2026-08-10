@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "release": "2.6.7-rc3",
+  "evidence_id": "E267.RELEASE.FABLE_REVIEW",
+  "reviewed_head_sha": "9b12e3453a6cd81da7361e32b7cc60aa3c3187d0",
+  "purpose": "implementation",
+  "runtime": "claude",
+  "model": "fable",
+  "effort": "high",
+  "mode": "simple",
+  "axis": "anthropic-holistic",
+  "verdict": "approve",
+  "result_sha256": "237d9198e65ff5d295a00dfe3deb7e2d777795ce645efd6da285c995c8453ab4",
+  "review_gate_sha256": "236a5698e29118af69291b786326cae91bff848f1e546f4db2b9c6ec6b2bd984",
+  "callback_id": "review-cfc15cce28ce21ae5f1c3bb3",
+  "callback_payload_sha256": "cfc15cce28ce21ae5f1c3bb3b560b781d53ee008b9302c183204dcc64860620a",
+  "independent_verification": {
+    "full_tests": "pass",
+    "harness_coverage": "pass",
+    "store_coverage_percent": 94.5,
+    "quality_and_packaging_gates": "pass"
+  },
+  "findings": [
+    {
+      "finding_id": "v267-rc3-digest-packaging-drift",
+      "severity": "minor",
+      "disposition": "accepted-follow-up",
+      "rationale": "The three post-live changes are version strings only; reconstructing their RC2 pre-images reproduces the accepted live digest exactly. Normalize or pre-bump version carriers before the next live release program."
+    },
+    {
+      "finding_id": "v267-rc3-repair-chain-ledger-gap",
+      "severity": "minor",
+      "disposition": "resolved-evidence-only",
+      "rationale": "rc3-repair-classification-ledger.json now collapses every bound RC3 repair into four typed root-cause classes and records stop-rule treatment."
+    },
+    {
+      "finding_id": "v267-rc3-summary-test-flake",
+      "severity": "minor",
+      "disposition": "accepted-known-mechanism",
+      "rationale": "The load-sensitive fixture is already documented as M267-001, predates part of 2.6.7, passes in isolation and in both exact-candidate full-suite runs, and has no release-authority role."
+    }
+  ]
+}

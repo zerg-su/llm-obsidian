@@ -120,6 +120,61 @@ assert all(row["process_group"] == row["supervisor_pid"] == 0 for row in invento
 assert all(row["surface_id"] == "" for row in inventory)
 assert all(value == 0 for value in cleanup["assertions"].values())
 
+repair_ledger = json.loads(
+    (evidence_root / "rc3-repair-classification-ledger.json").read_text(
+        encoding="utf-8"
+    )
+)
+assert repair_ledger["schema_version"] == 1
+assert repair_ledger["release"] == VERSION
+assert repair_ledger["evidence_id"] == "E267.RC3.REPAIR_CLASSIFICATION"
+assert repair_ledger["stop_rule"] == {
+    "independent_new_lifecycle_class_count": 0,
+    "limit": 3,
+    "verdict": "within-limit",
+}
+classes = repair_ledger["classes"]
+assert isinstance(classes, list) and len(classes) == 4
+assert all(row["counts_against_release_stop"] is False for row in classes)
+classified_commits = {
+    commit for row in classes for commit in row["commits"]
+}
+program_digest = json.loads(
+    (evidence_root / "rc3-program-digest.json").read_text(encoding="utf-8")
+)
+assert classified_commits == {
+    row["commit"] for row in program_digest["bound_repairs"]
+}
+
+final_review = json.loads(
+    (evidence_root / "rc3-final-fable-review.json").read_text(encoding="utf-8")
+)
+assert final_review["schema_version"] == 1
+assert final_review["release"] == VERSION
+assert final_review["evidence_id"] == "E267.RELEASE.FABLE_REVIEW"
+assert final_review["reviewed_head_sha"] == "9b12e3453a6cd81da7361e32b7cc60aa3c3187d0"
+assert final_review["verdict"] == "approve"
+assert all(row["severity"] == "minor" for row in final_review["findings"])
+assert {row["disposition"] for row in final_review["findings"]} == {
+    "accepted-follow-up",
+    "resolved-evidence-only",
+    "accepted-known-mechanism",
+}
+
+release_gate = json.loads(
+    (evidence_root / "rc3-release-gate.json").read_text(encoding="utf-8")
+)
+assert release_gate["schema_version"] == 1
+assert release_gate["release"] == VERSION
+assert release_gate["evidence_id"] == "E267.RELEASE.GATE"
+assert release_gate["verdict"] == "green"
+assert release_gate["attested_candidate_head_sha"] == final_review["reviewed_head_sha"]
+assert release_gate["live_lifecycle_subject_sha256"] == SUBJECT
+assert release_gate["review"]["verdict"] == "approve"
+assert release_gate["review"]["material_finding_count"] == 0
+assert release_gate["review"]["unexplained_deviation_count"] == 0
+assert all(value == "pass" for value in release_gate["verification"].values())
+
 makefile = text("Makefile")
 assert "python3 tests/test_rc4_documentation.py" in makefile
 

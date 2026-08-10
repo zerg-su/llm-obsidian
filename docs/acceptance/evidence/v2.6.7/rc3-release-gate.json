@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "release": "2.6.7-rc3",
+  "evidence_id": "E267.RELEASE.GATE",
+  "verdict": "green",
+  "attested_candidate_head_sha": "9b12e3453a6cd81da7361e32b7cc60aa3c3187d0",
+  "attested_candidate_tree_sha": "f9d7d8cddb49464d209d18abf3bc74fc79e0ce00",
+  "base_sha": "de7d70476db133b4fab4beeaace090a187f26d7d",
+  "approved_plan_sha256": "a2ea732244de387cf241481bd3c0e523f6e56d93832e27d77e5bf212f7eb668d",
+  "outcome_contract_sha256": "bb60c83ef5f352f67eb953b70774545e52926fdf797295e30ce1ab9f0ba15219",
+  "live_lifecycle_subject_sha256": "e0b419fb2a97dde3c4bc321ec170f93997a0063781822caf5d9d81347db9bfd6",
+  "packaged_lifecycle_subject_sha256": "e51c37dd8ecacdffa2b2e16d5423e1eddf10089d4c35cb12521954df1e72f2d0",
+  "packaging_only_subject_delta": [
+    ".claude-plugin/marketplace.json",
+    ".claude-plugin/plugin.json",
+    ".codex-plugin/plugin.json"
+  ],
+  "evidence": [
+    "docs/acceptance/evidence/v2.6.7/rc1-defect-ledger.json",
+    "docs/acceptance/evidence/v2.6.7/rc1-live-streak-receipt.json",
+    "docs/acceptance/evidence/v2.6.7/rc3-sequential-receipt.json",
+    "docs/acceptance/evidence/v2.6.7/rc3-parallel-receipt.json",
+    "docs/acceptance/evidence/v2.6.7/rc3-cleanup-proof.json",
+    "docs/acceptance/evidence/v2.6.7/rc3-repair-classification-ledger.json",
+    "docs/acceptance/evidence/v2.6.7/rc3-final-fable-review.json"
+  ],
+  "verification": {
+    "make test": "pass",
+    "make test-harness-coverage": "pass",
+    "make test-code-quality": "pass",
+    "make test-model-routing": "pass",
+    "make test-skill-budget": "pass",
+    "make test-improve-skills": "pass",
+    "make test-codex-adapter": "pass",
+    "python3 scripts/lint-instructions.py": "pass",
+    "git diff --check": "pass"
+  },
+  "review": {
+    "reviewed_head_sha": "9b12e3453a6cd81da7361e32b7cc60aa3c3187d0",
+    "verdict": "approve",
+    "material_finding_count": 0,
+    "minor_finding_count": 3,
+    "unexplained_deviation_count": 0,
+    "receipt": "docs/acceptance/evidence/v2.6.7/rc3-final-fable-review.json"
+  },
+  "self_reference_note": "This receipt and the evidence-only repair classification cannot be present in the commit they attest. The release tag may point to their direct descendant only if the descendant changes no behavioral subject path and the receipt contract tests pass."
+}

@@ -1,0 +1,119 @@
+{
+  "schema_version": 1,
+  "release": "2.6.7-rc3",
+  "evidence_id": "E267.RC3.REPAIR_CLASSIFICATION",
+  "source": "docs/acceptance/evidence/v2.6.7/rc3-program-digest.json",
+  "stop_rule": {
+    "independent_new_lifecycle_class_count": 0,
+    "limit": 3,
+    "verdict": "within-limit"
+  },
+  "classes": [
+    {
+      "class_id": "RC3-MECH-TRANSPORT",
+      "root_cause_class": "provider-input-transport-handshake",
+      "seam": "mechanism/provider-transport",
+      "commits": [
+        "6930d034",
+        "e4e788f3",
+        "0c88c3a0"
+      ],
+      "symptoms": [
+        "executor ownership readiness was published after semantic input acknowledgement",
+        "one initial submit keystroke could be swallowed without bounded recovery",
+        "Claude prompt delivery was not bound to the exact pointer digest"
+      ],
+      "durable_pre_state": "one reserved start-provider effect with exact process, surface, prompt, and idempotency identities",
+      "expected_owner": "RuntimeSessionManager and the provider-specific process-launch adapter",
+      "expected_transition": "publish process ownership first, then deliver the exact digest-bound prompt once with one same-identity recovery",
+      "effect_ambiguity": "none after the repairs: accepted-input and prompt-digest receipts forbid replay",
+      "focused_regressions": [
+        "tests/harness/test_runtime_sessions.py",
+        "tests/harness/test_runtime_process_launch.py",
+        "tests/harness/test_callback_recovery.py"
+      ],
+      "disposition": "repaired-mechanism",
+      "counts_against_release_stop": false
+    },
+    {
+      "class_id": "RC3-MECH-ACCEPTANCE",
+      "root_cause_class": "live-vs-hermetic-acceptance-authority",
+      "seam": "mechanism/acceptance-evidence",
+      "commits": [
+        "68c8140e",
+        "c7de4fc1",
+        "66fceb5f"
+      ],
+      "symptoms": [
+        "a never-launched reserved RC1 claim had no negative closure path",
+        "live success authority rejected the terminal request-exit cleanup effect",
+        "a changed product HEAD could reach review before exact-HEAD re-verification"
+      ],
+      "durable_pre_state": "a bound acceptance claim or review resolution with preserved exact request, HEAD, effect, and resource records",
+      "expected_owner": "RC1 live authority/gate and the runtime review-drive chokepoint",
+      "expected_transition": "derive authority from durable store facts and require a fresh exact-HEAD verification before review",
+      "effect_ambiguity": "none: failed reservations have zero provider effect and completed corridors retain accepted callbacks plus empty resources",
+      "focused_regressions": [
+        "tests/harness/test_rc1_live_streak_gate.py",
+        "tests/harness/test_runtime_task_summary.py",
+        "tests/harness/test_review_gate.py"
+      ],
+      "disposition": "repaired-mechanism",
+      "counts_against_release_stop": false
+    },
+    {
+      "class_id": "RC3-KNOWN-REVIEW-SEAM",
+      "root_cause_class": "live-review-drive-misclassification",
+      "seam": "callback-finalization",
+      "commits": [
+        "37f563a0",
+        "de4add25",
+        "8ba841ed",
+        "86ae85c8"
+      ],
+      "symptoms": [
+        "a rejected duplicate drive over a live durable review latched false attention",
+        "round iteration and pre-ready launch windows were not classified exactly",
+        "some live nonterminal round states were omitted from the in-progress predicate",
+        "drive-failure receipts were not scoped to the exact review cycle"
+      ],
+      "durable_pre_state": "one bound nonterminal review round with exact lane, run, HEAD, context, and process ownership",
+      "expected_owner": "RuntimeWorkerReviewBridge and the automatic review gate",
+      "expected_transition": "classify the bound live round as in-progress, accept only its exact callback, and keep failure receipts cycle-local",
+      "effect_ambiguity": "none: duplicate drive rejection creates no new reviewer/provider effect",
+      "focused_regressions": [
+        "tests/harness/test_runtime_task_summary.py",
+        "tests/harness/test_review_gate.py",
+        "tests/harness/test_task_review_flow.py"
+      ],
+      "disposition": "repaired-known-seam",
+      "counts_against_release_stop": false
+    },
+    {
+      "class_id": "RC3-MECH-RENDERING",
+      "root_cause_class": "generated-vault-rendering-and-replay",
+      "seam": "mechanism/archive-reap-rendering",
+      "commits": [
+        "2bad5c0f",
+        "cbe77c48",
+        "fe4eee9c"
+      ],
+      "symptoms": [
+        "reviewer prose resembling a wikilink could invalidate an archive page",
+        "an interrupted archive publication needed exact replay recovery",
+        "the bounded reap-log excerpt could truncate inside a wikilink"
+      ],
+      "durable_pre_state": "accepted review and summary callback bytes awaiting deterministic archive/log rendering",
+      "expected_owner": "review_archive, reap-runner, and the registered one-shot vault repair",
+      "expected_transition": "render lint-safe bounded text, publish transactionally, and replay only the exact prepared archive",
+      "effect_ambiguity": "none: rendering and vault publication are local and idempotently content-bound",
+      "focused_regressions": [
+        "tests/harness/test_review_archive.py",
+        "tests/test_reap_runner.py",
+        "tests/test_vault_link_repair.py"
+      ],
+      "disposition": "repaired-mechanism",
+      "counts_against_release_stop": false
+    }
+  ]
+}
