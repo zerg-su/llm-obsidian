@@ -1,58 +1,63 @@
 {
-  "bound_repairs": [
-    {
-      "commit": "6930d034",
-      "seam": "executor early process-ownership readiness"
-    },
-    {
-      "commit": "68c8140e",
-      "seam": "reserved never-launched gate closure"
-    },
-    {
-      "commit": "2bad5c0f",
-      "seam": "review archive wikilink escaping (coordinator)"
-    },
-    {
-      "commit": "cbe77c48",
-      "seam": "archive replay recovery (coordinator)"
-    },
-    {
-      "commit": "c7de4fc1",
-      "seam": "RC1 success authority terminal cleanup effect"
-    },
-    {
-      "commit": "66fceb5f",
-      "seam": "changed-HEAD review launch gated on exact-HEAD receipt"
-    },
-    {
-      "commit": "e4e788f3",
-      "seam": "swallowed initial submit keystroke bounded recovery"
-    },
-    {
-      "commit": "37f563a0",
-      "seam": "rejected drive over live durable review classified in-progress"
-    },
-    {
-      "commit": "37f563a0",
-      "seam": "rejected drive over live durable review classified in-progress"
-    },
-    {
-      "commit": "de4add25",
-      "seam": "exact round iteration in prompts; bounded submission self-healing loop; pre-ready launch window classification"
-    }
-  ],
-  "created": "2026-08-10",
-  "lifecycle_subject_sha256": "01cc96744b39927f3c6554466b08634287fb57f5879b53cd91220dc223fecef9",
-  "overlay_manifest_sha256": "a0940165b430f3c48ec391ac1bb93185b7203705666b6a6ace22c3a9bc9737b1",
-  "program": "three cheap streak cells per rc3-program-v2 overlay, restart from cell 1 with fresh identities; runs requiring coordinator resume are diagnostic only and never autonomous evidence",
-  "schema_version": 1,
-  "superseded_digests": [
-    "6bc5e5dce113120654a1dbc9d9d11110d95b16a57c695fd52c0ec313f31176e7",
-    "08ae0d8890d4dd5e94310a3c758dd4a291b5720e63811f5921c3cf7ae1f9e436",
-    "88e91f6dfcc01a3243b66ef42ab5f995f8375727b1a56290018b5a20a797606c",
-    "3ea52c300378295d40e7db2c2757a3665584100c1a47f882c2600bb13ff71c55",
-    "658439468762bff0edb6689279c440bf7312ebd60331f36252518825748a8a29",
-    "f10285690e9c67fab2513a93ccc5b079c6758899a3503c80da4b21c21f742858"
-  ],
-  "type": "rc3-program-digest-binding"
+ "bound_repairs": [
+  {
+   "commit": "6930d034",
+   "seam": "executor early process-ownership readiness"
+  },
+  {
+   "commit": "68c8140e",
+   "seam": "reserved never-launched gate closure"
+  },
+  {
+   "commit": "2bad5c0f",
+   "seam": "review archive wikilink escaping (coordinator)"
+  },
+  {
+   "commit": "cbe77c48",
+   "seam": "archive replay recovery (coordinator)"
+  },
+  {
+   "commit": "c7de4fc1",
+   "seam": "RC1 success authority terminal cleanup effect"
+  },
+  {
+   "commit": "66fceb5f",
+   "seam": "changed-HEAD review launch gated on exact-HEAD receipt"
+  },
+  {
+   "commit": "e4e788f3",
+   "seam": "swallowed initial submit keystroke bounded recovery"
+  },
+  {
+   "commit": "37f563a0",
+   "seam": "rejected drive over live durable review classified in-progress"
+  },
+  {
+   "commit": "37f563a0",
+   "seam": "rejected drive over live durable review classified in-progress"
+  },
+  {
+   "commit": "de4add25",
+   "seam": "exact round iteration in prompts; bounded submission self-healing loop; pre-ready launch window classification"
+  },
+  {
+   "commit": "fe4eee9c",
+   "seam": "wikilink-safe reap log excerpt; registered one-shot reap-log-repair; RC3 scope/quality ratchet reconciliation"
+  }
+ ],
+ "created": "2026-08-10",
+ "lifecycle_subject_sha256": "babf41dae2b1b27ffe1b4a3d8891b85e84bbbc50fdd6248d842b095b4bf70ef9",
+ "overlay_manifest_sha256": "a0940165b430f3c48ec391ac1bb93185b7203705666b6a6ace22c3a9bc9737b1",
+ "program": "three cheap streak cells per rc3-program-v2 overlay, restart from cell 1 with fresh identities; runs requiring coordinator resume are diagnostic only and never autonomous evidence",
+ "schema_version": 1,
+ "superseded_digests": [
+  "6bc5e5dce113120654a1dbc9d9d11110d95b16a57c695fd52c0ec313f31176e7",
+  "08ae0d8890d4dd5e94310a3c758dd4a291b5720e63811f5921c3cf7ae1f9e436",
+  "88e91f6dfcc01a3243b66ef42ab5f995f8375727b1a56290018b5a20a797606c",
+  "3ea52c300378295d40e7db2c2757a3665584100c1a47f882c2600bb13ff71c55",
+  "658439468762bff0edb6689279c440bf7312ebd60331f36252518825748a8a29",
+  "f10285690e9c67fab2513a93ccc5b079c6758899a3503c80da4b21c21f742858",
+  "01cc96744b39927f3c6554466b08634287fb57f5879b53cd91220dc223fecef9"
+ ],
+ "type": "rc3-program-digest-binding"
 }
