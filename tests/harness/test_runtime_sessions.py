@@ -4903,6 +4903,85 @@ def check_worker_handshakes_before_semantic_initial_ack() -> None:
         )
 
 
+class SwallowedEnterCmux(InitialStartWorkerCmux):
+    """The composer keeps the pasted prompt until a second Enter arrives."""
+
+    def __init__(self, *, recover_after: int = 2) -> None:
+        super().__init__([ACTIVE_CLAUDE_SCREEN])
+        self.recover_after = recover_after
+
+    def read(self, surface_id: str) -> str:
+        assert surface_id == SURFACE
+        if not self.sent:
+            return "❯\n"
+        self.transport_visible = True
+        prompt = self.sent[-1][1]
+        anchor = next(
+            (" ".join(line.split()) for line in prompt.splitlines() if line.strip()),
+            "",
+        )
+        if self.submit_count - self.submits_at_last_send < self.recover_after:
+            return f"❯ {anchor}\n"
+        self.post_submit_reads += 1
+        return ACTIVE_CLAUDE_SCREEN
+
+
+def check_worker_recovers_one_swallowed_initial_enter() -> None:
+    """The live RC3 reviewer shape: paste visible, first Enter swallowed.
+
+    The composer keeps the exact pasted prompt through the whole first
+    acknowledgement window; exactly one second identity-bound Enter (never a
+    prompt resend) must start provider activity and reach exactly one durable
+    input acceptance.
+    """
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        cmux = SwallowedEnterCmux()
+        code, launch, _store, _callback = _initial_start_worker(
+            root, "swallowed", cmux
+        )
+        kinds, delivery = _initial_start_delivery(launch)
+        check(
+            "one swallowed Enter recovers with exactly one second Enter",
+            code == 0
+            and len(cmux.sent) == 1
+            and cmux.submit_count == 2
+            and kinds.count("input-accepted") == 1
+            and kinds[:2] == ["provider-started", "input-accepted"]
+            and delivery["send_status"] == "accepted"
+            and delivery["send_attempts"] == 1,
+            (code, cmux.sent, cmux.submit_count, kinds, delivery),
+        )
+
+
+def check_worker_contains_double_swallowed_initial_enter() -> None:
+    """A composer that never clears stays fail-closed after two Enters."""
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        cmux = SwallowedEnterCmux(recover_after=99)
+        code, launch, store, callback = _initial_start_worker(
+            root, "double-swallowed", cmux
+        )
+        kinds, delivery = _initial_start_delivery(launch)
+        exit_record = json.loads(launch.exit_path.read_text(encoding="utf-8"))
+        record = store.read("owner-double-swallowed", "double-swallowed-op")
+        check(
+            "a still-composing second window stays contained without replay",
+            code == 2
+            and len(cmux.sent) == 1
+            and cmux.submit_count == 2
+            and "input-accepted" not in kinds
+            and delivery["send_status"] == "ambiguous"
+            and exit_record["status"] == "input-unconfirmed"
+            and exit_record["reason"] == "initial-start-still-composing"
+            and record.state == "attention-required"
+            and not callback.is_file(),
+            (code, cmux.submit_count, kinds, delivery, exit_record),
+        )
+
+
 class HeldSemanticFailureCmux(InitialStartWorkerCmux):
     """Hold the first post-submit read, then never acknowledge the start."""
 
@@ -5224,6 +5303,8 @@ _INITIAL_START_FIXTURES = (
     check_worker_contains_unconfirmed_initial_start,
     check_worker_accepts_acknowledged_initial_start,
     check_worker_handshakes_before_semantic_initial_ack,
+    check_worker_recovers_one_swallowed_initial_enter,
+    check_worker_contains_double_swallowed_initial_enter,
     check_executor_handshake_precedes_semantic_ack_and_failure_stays_typed,
     check_late_ready_review_recovery_is_exact_and_replay_free,
     check_worker_handles_recognized_post_submit_prompt,

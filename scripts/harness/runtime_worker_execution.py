@@ -280,6 +280,25 @@ class RuntimeWorkerExecution(
                 checkpoint_probe=self.checkpoint_probe or _no_checkpoint,
                 **initial_start_budget,
             )
+            if acknowledgement == "still-composing":
+                # A swallowed submit keystroke leaves the exact pasted prompt
+                # in an input-ready composer for the whole first window.  One
+                # second identity-bound Enter — never a prompt resend — may
+                # start the turn; every other verdict (permission, unknown,
+                # unconfirmed, missing) keeps its original single-keystroke
+                # fail-closed boundary, and a still-composing second window
+                # stays contained as before.
+                self.cmux_adapter.send_key(self.spec["surface_id"], "Enter")
+                acknowledgement = await_initial_start_acknowledged(
+                    self.cmux_adapter,
+                    surface_id=self.spec["surface_id"],
+                    runtime=self.spec["runtime"],
+                    anchor=_prompt_anchor(delivery_text),
+                    paste_screen_sha256=paste_screen_sha256,
+                    artifact_ready=self.spec["callback_pointer"].is_file,
+                    checkpoint_probe=self.checkpoint_probe or _no_checkpoint,
+                    **initial_start_budget,
+                )
             if acknowledgement == "permission":
                 family = resolve_recognized_provider_prompt(
                     self.cmux_adapter,
