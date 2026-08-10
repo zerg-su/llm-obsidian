@@ -44,9 +44,105 @@ if str(ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts"))
 
 import v267_stabilization as stab
+from harness.contracts import EffectOutcome, OwnedResources
+from harness.store import OperationStore, StoreError
 
 
 CorridorLauncher = Callable[..., dict[str, Any]]
+
+
+def _require_never_launched_negative(
+    root: Path, *, request_id: str, spec_sha256: str
+) -> str:
+    """Fail closed unless durable evidence proves a never-launched negative.
+
+    Re-derives the closure from the exact dispatch-run record and the terminal
+    OperationStore root: the request must be durably failed for the reserved
+    spec bytes, the root must be terminal (cancelled or failed) and
+    resource-free with its start-provider effect resolved failed, and no
+    accepted callback, accepted input, or provider result may exist anywhere
+    in the runtime evidence.  Returns the terminal root state.
+    """
+
+    run_path = root / ".vault-meta" / "dispatch-runs" / f"{request_id}.json"
+    if run_path.is_symlink() or not run_path.is_file():
+        raise stab.StabilizationError(
+            "reserved closure requires the durable dispatch-run record"
+        )
+    try:
+        dispatch = json.loads(run_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise stab.StabilizationError(
+            "reserved closure requires a readable dispatch-run record"
+        ) from exc
+    if (
+        not isinstance(dispatch, dict)
+        or dispatch.get("schema_version") != 1
+        or dispatch.get("request_id") != request_id
+        or dispatch.get("status") != "failed"
+        or dispatch.get("request_sha256") != spec_sha256
+    ):
+        raise stab.StabilizationError(
+            "reserved closure requires a durably failed dispatch-run for the "
+            "exact reserved spec"
+        )
+    store = OperationStore(root / ".vault-meta" / "harness")
+    try:
+        record = store.read(request_id, request_id)
+    except (OSError, StoreError, ValueError) as exc:
+        raise stab.StabilizationError(
+            "reserved closure requires the durable operation root"
+        ) from exc
+    if (
+        record.spec.kind != "dispatch"
+        or record.spec.owner_id != request_id
+        or record.spec.operation_id != request_id
+        or record.state not in {"cancelled", "failed"}
+        or record.pending_effect
+        or record.effect_id != "start-provider"
+        or record.effect_outcome != EffectOutcome.FAILED
+        or record.resources != OwnedResources()
+        or record.accepted_callback_id
+        or record.accepted_callback_kind
+        or record.accepted_callback_sha256
+    ):
+        raise stab.StabilizationError(
+            "reserved closure requires a terminal resource-free root with a "
+            "failed start-provider effect"
+        )
+    runtime_root = store.root / "owners" / request_id / "runtime" / request_id
+    for events_dir in sorted(runtime_root.glob("provider-events/*/events")):
+        for event_path in sorted(events_dir.glob("*.json")):
+            try:
+                event = json.loads(event_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise stab.StabilizationError(
+                    "reserved closure requires readable provider events"
+                ) from exc
+            kind = event.get("kind") if isinstance(event, dict) else None
+            if kind in {"input-accepted", "provider-result"}:
+                raise stab.StabilizationError(
+                    "reserved closure is impossible after an accepted input "
+                    "or provider result"
+                )
+    for delivery_path in sorted(
+        runtime_root.glob("provider-events/*/delivery/delivery-state.json")
+    ):
+        try:
+            delivery = json.loads(delivery_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise stab.StabilizationError(
+                "reserved closure requires readable delivery state"
+            ) from exc
+        cursor = delivery.get("cursor") if isinstance(delivery, dict) else None
+        if isinstance(cursor, dict) and (
+            cursor.get("input_accepted") or cursor.get("result_published")
+        ):
+            raise stab.StabilizationError(
+                "reserved closure is impossible after an accepted input "
+                "or provider result"
+            )
+    return record.state
 
 
 def _atomic_json(path: Path, value: object) -> None:
@@ -463,6 +559,77 @@ class RC1GatePreflight:
             "complete": verdict["complete"],
         }
 
+    def abandon_reserved(
+        self,
+        *,
+        request_id: str,
+        expected_digest: str,
+        state_path: Path,
+        evidence_root: Path | None = None,
+    ) -> dict[str, Any]:
+        """Close one reserved, never-launched claim from durable evidence.
+
+        A pre-launch failure leaves a ``reserved`` claim whose exact dispatch
+        request the runner permanently refuses to respawn, so the claim has no
+        launched corridor for ``record`` to complete.  This closure accepts
+        only an invalidated negative outcome re-derived fail-closed from the
+        durable dispatch-run record and the terminal OperationStore root.  It
+        clears exactly the matching reservation, keeps accepted receipts and
+        sequencing unchanged, advances no streak or material-cycle evidence,
+        retains every failure artifact, and repeating the identical closure
+        within the same digest epoch is idempotent.
+        """
+
+        root = Path(evidence_root) if evidence_root is not None else ROOT
+        with _claim_lock(state_path):
+            state = _read_streak_state(state_path, expected_digest=expected_digest)
+            closures = state.get("reserved_closures")
+            closed = [
+                entry
+                for entry in (closures if isinstance(closures, list) else [])
+                if isinstance(entry, dict)
+                and entry.get("request_id") == request_id
+            ]
+            reservation = state.get("reservation")
+            if reservation is None:
+                if closed:
+                    return dict(closed[-1])
+                raise stab.StabilizationError(
+                    "no reserved RC1 cell matches the requested closure"
+                )
+            if reservation.get("status") != "reserved":
+                raise stab.StabilizationError(
+                    "a launched RC1 reservation must be completed by record, "
+                    "not closed"
+                )
+            if reservation.get("request_id") != request_id:
+                raise stab.StabilizationError(
+                    "closure request does not match the reserved dispatch "
+                    "identity"
+                )
+            cell = self._declaration.cell_by_id(str(reservation["cell_id"]))
+            root_state = _require_never_launched_negative(
+                root,
+                request_id=request_id,
+                spec_sha256=str(reservation["spec_sha256"]),
+            )
+            closure = {
+                "schema_version": 1,
+                "cell_id": cell.cell_id,
+                "request_id": request_id,
+                "spec_sha256": reservation["spec_sha256"],
+                "lifecycle_subject_sha256": expected_digest,
+                "root_state": root_state,
+                "result": "invalidated",
+            }
+            state["reservation"] = None
+            state["reserved_closures"] = [
+                *(closures if isinstance(closures, list) else []),
+                closure,
+            ]
+            _atomic_json(state_path, state)
+        return dict(closure)
+
 
 def dispatch_corridor_driver(
     root: Path,
@@ -594,6 +761,15 @@ def main() -> int:
     record.add_argument("--expected-digest", required=True)
     record.add_argument("--state", type=Path, default=DEFAULT_STATE)
     record.add_argument("--receipt", type=Path, required=True)
+    close_reserved = sub.add_parser(
+        "close-reserved",
+        help="close one reserved never-launched cell from durable negative "
+        "evidence (invalidated outcome only)",
+    )
+    close_reserved.add_argument("--root", type=Path, default=ROOT)
+    close_reserved.add_argument("--expected-digest", required=True)
+    close_reserved.add_argument("--state", type=Path, default=DEFAULT_STATE)
+    close_reserved.add_argument("--request-id", required=True)
     args = parser.parse_args()
     try:
         gate = load_gate(args.root.expanduser().resolve())
@@ -615,6 +791,15 @@ def main() -> int:
                 receipt,
                 expected_digest=args.expected_digest,
                 state_path=args.state,
+            )
+            print(json.dumps(report, ensure_ascii=False, sort_keys=True))
+            return 0
+        if args.command == "close-reserved":
+            report = gate.abandon_reserved(
+                request_id=args.request_id,
+                expected_digest=args.expected_digest,
+                state_path=args.state,
+                evidence_root=args.root.expanduser().resolve(),
             )
             print(json.dumps(report, ensure_ascii=False, sort_keys=True))
             return 0

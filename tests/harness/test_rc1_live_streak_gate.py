@@ -271,9 +271,291 @@ def build_negative_dispatch(
     return vault, store, launch
 
 
+def build_reserved_never_launched(
+    root: Path,
+    task_id: str,
+    *,
+    name: str,
+    spec_sha256: str,
+    root_state: str = "cancelled",
+    effect_outcome: object = None,
+    dispatch_status: str = "failed",
+    extra_event_kind: str = "",
+    resources: OwnedResources | None = None,
+) -> tuple[Path, OperationStore, Path]:
+    """One durable pre-launch failure: reserved claim, failed run, closed root."""
+
+    from harness.contracts import EffectOutcome
+
+    vault = root / f"reserved-vault-{name}"
+    write_json(
+        vault / ".vault-meta" / "dispatch-runs" / f"{task_id}.json",
+        {
+            "schema_version": 1,
+            "request_id": task_id,
+            "request_sha256": spec_sha256,
+            "status": dispatch_status,
+            "stage": "provider-runtime",
+            "failure": "provider start requires attention: attention-required",
+        },
+    )
+    store = OperationStore(vault / ".vault-meta" / "harness")
+    store.create(
+        OperationSpec(
+            task_id,
+            f"key-{task_id}",
+            "dispatch",
+            task_id,
+            RuntimeRoute("claude", "fable", "high", "executor", "a" * 64),
+            "packets/task.json",
+            "scoped",
+        ),
+        lane_id=f"lane-{name}",
+        run_id=f"run-{name}",
+    )
+    record = store.read(task_id, task_id)
+    shaped = replace(
+        record,
+        state=root_state,
+        effect_id="start-provider",
+        effect_outcome=(
+            effect_outcome if effect_outcome is not None else EffectOutcome.FAILED
+        ),
+        pending_effect="",
+        resources=resources if resources is not None else OwnedResources(),
+        revision=record.revision + 1,
+    )
+    store.save(shaped, expected_revision=record.revision)
+    events = (
+        store.root
+        / "owners"
+        / task_id
+        / "runtime"
+        / task_id
+        / "provider-events"
+        / "generation-1"
+        / "events"
+    )
+    write_json(events / "0001.json", {"schema_version": 1, "kind": "provider-started"})
+    if extra_event_kind:
+        write_json(
+            events / "0002.json", {"schema_version": 1, "kind": extra_event_kind}
+        )
+    state_path = vault / ".vault-meta/acceptance/rc1-streak-state.json"
+    write_json(
+        state_path,
+        {
+            "schema_version": 1,
+            "expected_digest": DIGEST_A,
+            "receipts": [],
+            "reservation": {
+                "cell_id": "rc1-corridor-run-1",
+                "status": "reserved",
+                "spec_sha256": spec_sha256,
+                "request_id": task_id,
+                "lifecycle_subject_sha256": DIGEST_A,
+            },
+        },
+    )
+    return vault, store, state_path
+
+
+def check_reserved_never_launched_closure(root: Path, gate) -> None:
+    """The exact eecdb3d8 shape closes fail-closed and idempotently."""
+
+    task_id = "cccc0267-0267-4267-8267-000000000031"
+    spec_sha256 = "3" * 64
+    vault, _store, state_path = build_reserved_never_launched(
+        root, task_id, name="closure", spec_sha256=spec_sha256
+    )
+    closure = gate.abandon_reserved(
+        request_id=task_id,
+        expected_digest=DIGEST_A,
+        state_path=state_path,
+        evidence_root=vault,
+    )
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    check(
+        "a never-launched reserved claim closes as an invalidated negative",
+        closure["result"] == "invalidated"
+        and closure["request_id"] == task_id
+        and closure["cell_id"] == "rc1-corridor-run-1"
+        and state["reservation"] is None
+        and state["receipts"] == [],
+        (closure, state),
+    )
+    plan = gate.plan([], expected_digest=DIGEST_A, evidence_root=vault)
+    check(
+        "reserved closure advances no sequence or streak evidence",
+        plan["next_cell"] == "rc1-corridor-run-1" and plan["streak"] == 0,
+        plan,
+    )
+    repeat = gate.abandon_reserved(
+        request_id=task_id,
+        expected_digest=DIGEST_A,
+        state_path=state_path,
+        evidence_root=vault,
+    )
+    check(
+        "repeating the same reserved closure is idempotent",
+        repeat["result"] == "invalidated"
+        and repeat["request_id"] == task_id
+        and json.loads(state_path.read_text(encoding="utf-8"))["reservation"] is None,
+        repeat,
+    )
+    dispatch_run = json.loads(
+        (
+            vault / ".vault-meta" / "dispatch-runs" / f"{task_id}.json"
+        ).read_text(encoding="utf-8")
+    )
+    check(
+        "reserved closure retains the durable failure artifacts",
+        dispatch_run["status"] == "failed"
+        and _store.read(task_id, task_id).state == "cancelled",
+        dispatch_run,
+    )
+
+    def replacement_launcher(*_args: object, **_kwargs: object) -> dict[str, object]:
+        return {
+            "schema_version": 1,
+            "status": "launched",
+            "request_id": "cccc0267-0267-4267-8267-000000000032",
+            "worktree": str(vault),
+            "harness": {
+                "owner_id": "cccc0267-0267-4267-8267-000000000032",
+                "operation_id": "cccc0267-0267-4267-8267-000000000032",
+                "lane_id": "closure-replacement",
+                "run_id": "closure-replacement",
+            },
+        }
+
+    replacement = gate.reserve_and_launch(
+        coordinator_authorized=True,
+        expected_digest="b" * 64,
+        state_path=state_path,
+        launcher=replacement_launcher,
+        spec_path=dispatch_spec(
+            root / "closure-replacement.json",
+            "cccc0267-0267-4267-8267-000000000032",
+        ),
+        evidence_root=vault,
+    )
+    check(
+        "reserved closure permits cell 1 on the post-repair digest",
+        replacement["cell_id"] == "rc1-corridor-run-1"
+        and replacement["request_id"] == "cccc0267-0267-4267-8267-000000000032",
+        replacement,
+    )
+
+
+def check_reserved_closure_rejections(root: Path, gate) -> None:
+    """Every ambiguous or non-negative shape leaves the claim untouched."""
+
+    from harness.contracts import EffectOutcome
+
+    rejections = (
+        (
+            "a live root cannot close a reserved claim",
+            dict(root_state="attention-required"),
+            {},
+        ),
+        (
+            "an accepted input forbids reserved closure",
+            dict(extra_event_kind="input-accepted"),
+            {},
+        ),
+        (
+            "a provider result forbids reserved closure",
+            dict(extra_event_kind="provider-result"),
+            {},
+        ),
+        (
+            "a succeeded start effect forbids reserved closure",
+            dict(effect_outcome=EffectOutcome.SUCCEEDED),
+            {},
+        ),
+        (
+            "owned resources forbid reserved closure",
+            dict(resources=OwnedResources(surface_id="leaked-surface")),
+            {},
+        ),
+        (
+            "a launched dispatch-run record forbids reserved closure",
+            dict(dispatch_status="launched"),
+            {},
+        ),
+        (
+            "a foreign request cannot close the reserved claim",
+            {},
+            dict(request_id="cccc0267-0267-4267-8267-000000000099"),
+        ),
+    )
+    for index, (label, shape, closure_kwargs) in enumerate(rejections, start=41):
+        task_id = f"cccc0267-0267-4267-8267-0000000000{index}"
+        vault, _store, state_path = build_reserved_never_launched(
+            root,
+            task_id,
+            name=f"reject-{index}",
+            spec_sha256="4" * 64,
+            **shape,
+        )
+        unchanged = state_path.read_bytes()
+        try:
+            gate.abandon_reserved(
+                request_id=str(closure_kwargs.get("request_id", task_id)),
+                expected_digest=DIGEST_A,
+                state_path=state_path,
+                evidence_root=vault,
+            )
+        except stab.StabilizationError:
+            check(label, state_path.read_bytes() == unchanged)
+        else:
+            raise AssertionError(label)
+
+    task_id = "cccc0267-0267-4267-8267-000000000039"
+    vault, _store, state_path = build_reserved_never_launched(
+        root, task_id, name="launched-claim", spec_sha256="5" * 64
+    )
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["reservation"]["status"] = "launched"
+    state["reservation"]["launch"] = {
+        "schema_version": 1,
+        "status": "launched",
+        "request_id": task_id,
+        "worktree": str(vault),
+        "harness": {
+            "owner_id": task_id,
+            "operation_id": task_id,
+            "lane_id": "lane-launched-claim",
+            "run_id": "run-launched-claim",
+        },
+    }
+    write_json(state_path, state)
+    unchanged = state_path.read_bytes()
+    try:
+        gate.abandon_reserved(
+            request_id=task_id,
+            expected_digest=DIGEST_A,
+            state_path=state_path,
+            evidence_root=vault,
+        )
+    except stab.StabilizationError:
+        check(
+            "a launched reservation must be completed by record, not closed",
+            state_path.read_bytes() == unchanged,
+        )
+    else:
+        raise AssertionError(
+            "a launched reservation must be completed by record, not closed"
+        )
+
+
 with tempfile.TemporaryDirectory(prefix="rc1-live-streak-gate.") as raw:
     root = Path(raw)
     gate = rc1.load_gate(ROOT)
+
+    check_reserved_never_launched_closure(root, gate)
+    check_reserved_closure_rejections(root, gate)
 
     for terminal_state, result, recovery in (
         ("failed", "failed", False),
