@@ -2,24 +2,19 @@
   "cell_id": "rc1-corridor-run-2",
   "findings": [
     {
-      "finding_id": "semver.invalid-metadata-validation",
+      "finding_id": "semver-unbounded-int-limit",
       "severity": "important",
-      "summary": "Initial implementation accepted malformed metadata and newline-terminated versions."
+      "summary": "Valid unbounded numeric identifiers crashed at Python's integer conversion limit."
     },
     {
-      "finding_id": "semver.unbounded-numeric-components",
+      "finding_id": "semver-invalid-build-identifiers",
       "severity": "important",
-      "summary": "Integer conversion imposed a size limit not present in SemVer."
-    },
-    {
-      "finding_id": "semver.ascii-core-digits",
-      "severity": "important",
-      "summary": "Unicode decimal digits were accepted where SemVer requires ASCII digits."
+      "summary": "The parser accepted empty build identifiers and trailing-newline input."
     }
   ],
-  "head_sha": "5b54733416669578ea07a40a0a07769a31a508c0",
+  "head_sha": "a800ed5826762c5dc6ad8411da14b5676746a201",
   "review_cycle": 1,
-  "reviewed_head": "5b54733416669578ea07a40a0a07769a31a508c0",
+  "reviewed_head": "a800ed5826762c5dc6ad8411da14b5676746a201",
   "schema_version": 1,
   "type": "findings"
 }

@@ -1,7 +1,7 @@
 {
   "cell_id": "rc1-corridor-run-2",
-  "head_sha": "2708dc41db254c4acd32d449a53aa198c56f76ee",
-  "review_cycle": 3,
+  "head_sha": "4fb4a1a86062cbcd674e34cc5bf2f40657441c1f",
+  "review_cycle": 2,
   "schema_version": 1,
   "type": "re-review",
   "verdict": "approve"

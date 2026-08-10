@@ -1,8 +1,8 @@
 {
   "cell_id": "rc1-corridor-run-2",
-  "head_sha": "2708dc41db254c4acd32d449a53aa198c56f76ee",
+  "head_sha": "4fb4a1a86062cbcd674e34cc5bf2f40657441c1f",
   "schema_version": 1,
-  "summary_sha256": "9c6ae034392b77e655ee950e03d55d94c457912191f353c0f84f238aff2c5800",
-  "title": "V267 RC1 Cell 2 semver-compare corridor (sonnet)",
+  "summary_sha256": "770139ec55ca29f3b3a4878f35c8d574eb0b64589efeabf4d30cd953c7f3e4de",
+  "title": "V267 RC1 Cell 2 r9 - Sonnet SemVer corridor",
   "type": "refreshed-summary"
 }
