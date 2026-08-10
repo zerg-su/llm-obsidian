@@ -43,10 +43,14 @@
   {
    "commit": "fe4eee9c",
    "seam": "wikilink-safe reap log excerpt; registered one-shot reap-log-repair; RC3 scope/quality ratchet reconciliation"
+  },
+  {
+   "commit": "8ba841ed",
+   "seam": "rejected review drives classified in-progress over every live non-terminal bound round state"
   }
  ],
  "created": "2026-08-10",
- "lifecycle_subject_sha256": "babf41dae2b1b27ffe1b4a3d8891b85e84bbbc50fdd6248d842b095b4bf70ef9",
+ "lifecycle_subject_sha256": "fb884d8bdbaa062f0a74ec3df8141af82f6d7e0bfd5e5dedae93a973efd5a90a",
  "overlay_manifest_sha256": "a0940165b430f3c48ec391ac1bb93185b7203705666b6a6ace22c3a9bc9737b1",
  "program": "three cheap streak cells per rc3-program-v2 overlay, restart from cell 1 with fresh identities; runs requiring coordinator resume are diagnostic only and never autonomous evidence",
  "schema_version": 1,
@@ -57,7 +61,8 @@
   "3ea52c300378295d40e7db2c2757a3665584100c1a47f882c2600bb13ff71c55",
   "658439468762bff0edb6689279c440bf7312ebd60331f36252518825748a8a29",
   "f10285690e9c67fab2513a93ccc5b079c6758899a3503c80da4b21c21f742858",
-  "01cc96744b39927f3c6554466b08634287fb57f5879b53cd91220dc223fecef9"
+  "01cc96744b39927f3c6554466b08634287fb57f5879b53cd91220dc223fecef9",
+  "babf41dae2b1b27ffe1b4a3d8891b85e84bbbc50fdd6248d842b095b4bf70ef9"
  ],
  "type": "rc3-program-digest-binding"
 }
