@@ -25,7 +25,7 @@ new pipeline, dashboard, or lifecycle behavior.
 
 ### Changed
 
-- `tests/rc4_scope_ratchet.py` ceilings raised to exactly 273 files / 95,588
+- `tests/rc4_scope_ratchet.py` ceilings raised to exactly 273 files / 95,605
   lines for the accepted RC3 review-corridor repairs and the reap-log-repair
   planner; no blanket headroom.
 - `config/code-quality-baseline.json` owns the

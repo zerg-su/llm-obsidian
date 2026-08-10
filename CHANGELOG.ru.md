@@ -31,7 +31,7 @@
 
 ### Изменено
 
-- Потолки `tests/rc4_scope_ratchet.py` подняты ровно до 273 файлов / 95 588
+- Потолки `tests/rc4_scope_ratchet.py` подняты ровно до 273 файлов / 95 605
   строк для принятых RC3-ремонтов review-коридора и планировщика
   reap-log-repair; без запасного headroom.
 - `config/code-quality-baseline.json` берёт во владение file-lines hotspot

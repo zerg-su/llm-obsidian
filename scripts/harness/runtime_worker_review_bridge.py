@@ -19,6 +19,22 @@ from .runtime_callback_io import publish_callback_wake, wake_resume_once
 from review_contract import ReviewContractError, axis_finding_id
 
 
+#: Review-round states that prove live bound progress for a rejected drive.
+#: Terminal, attention-required, and cancelling rounds stay fail-closed.
+_LIVE_ROUND_STATES = frozenset(
+    {
+        "created",
+        "preflight",
+        "starting",
+        "running",
+        "awaiting-callback",
+        "verifying",
+        "finalizing",
+        "exiting",
+    }
+)
+
+
 def _review_drive_failure_code(stderr: str) -> str:
     """Reduce runner stderr to one content-free repository-owned reason code."""
 
@@ -435,10 +451,12 @@ class RuntimeWorkerReviewBridgeMixin:
         The runner's checkpoint-resurrection rejection can race a reviewer it
         partially launched.  Positive authority is re-derived from durable
         records only: the bound attempt at the exact current HEAD, every gate
-        lane's parent and round records awaiting their callback (or
-        finalizing), and the reviewer's live ready ownership whose identities
-        match the parent record's owned resources.  Absent, dead, ambiguous,
-        or mismatched identity, a changed HEAD, or a wrong lane/run fails
+        lane's parent awaiting its callback (or finalizing), every bound
+        round in a live non-terminal progress state (including verifying
+        between resolution steps), and the reviewer's live ready ownership
+        whose identities match the parent record's owned resources.  Absent,
+        dead, ambiguous, or mismatched identity, a changed HEAD, a terminal,
+        attention-latched, or cancelling round, or a wrong lane/run fails
         closed to the existing attention boundary.
         """
 
@@ -532,8 +550,7 @@ class RuntimeWorkerReviewBridgeMixin:
                     and row.spec.parent_operation_id == operation_id
                 ]
                 if not rounds or any(
-                    row.state not in {"awaiting-callback", "finalizing"}
-                    for row in rounds
+                    row.state not in _LIVE_ROUND_STATES for row in rounds
                 ):
                     return False
                 ready_path = (

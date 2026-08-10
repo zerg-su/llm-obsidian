@@ -166,8 +166,9 @@ The 2.6.7 RC3 acceptance corridor then repairs the live review corridor
 acknowledgment, and the batched exact-iteration/self-healing/pre-ready
 closure) plus the wikilink-splitting reap log renderer, and adds the
 registered one-shot reap-log-repair planner as the single new production
-script.  The measured growth is one file and 1,056 lines; the ceilings move
-to the exact 273-file, 95,588-line candidate with no blanket headroom.
+script.  The measured growth is one file and 1,073 lines (including the widened
+live-round classification window for rejected review drives); the ceilings
+move to the exact 273-file, 95,605-line candidate with no blanket headroom.
 """
 
 from __future__ import annotations
@@ -179,7 +180,7 @@ from pathlib import Path
 SCRIPT_FILE_CEILING = 273
 
 #: Maximum total lines across those files for the 2.6.7 RC3 candidate.
-SCRIPT_LINE_CEILING = 95_588
+SCRIPT_LINE_CEILING = 95_605
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

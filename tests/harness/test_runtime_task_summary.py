@@ -718,6 +718,47 @@ def assert_rejected_drive_with_live_review_stays_waiting(root: Path) -> None:
             and record.state == "awaiting-callback",
             (launched, attention, marker, record.state),
         )
+        bound_rounds = [
+            row
+            for row in store.list("owner-1")
+            if row.spec.kind == "review-round"
+            and row.spec.parent_operation_id == lane.operation_id
+        ]
+        round_id = bound_rounds[0].spec.operation_id
+        store.transition("owner-1", round_id, "verifying")
+        attention.clear()
+        worker.marker_path.unlink(missing_ok=True)
+        verifying = worker.drive_review()
+        verifying_record = store.read("owner-1", task_id)
+        check(
+            "a rejected drive while the bound round verifies stays waiting",
+            verifying is True
+            and attention == []
+            and verifying_record.state == "awaiting-callback",
+            (verifying, attention, verifying_record.state),
+        )
+        round_record = store.read("owner-1", round_id)
+        store.save(
+            replace(round_record, state="failed", revision=round_record.revision + 1),
+            expected_revision=round_record.revision,
+        )
+        attention.clear()
+        worker.marker_path.unlink(missing_ok=True)
+        terminal_round = worker.drive_review()
+        check(
+            "a terminal bound round stays fail-closed",
+            terminal_round is False and attention != [],
+            (terminal_round, attention),
+        )
+        failed_record = store.read("owner-1", round_id)
+        store.save(
+            replace(
+                failed_record,
+                state="awaiting-callback",
+                revision=failed_record.revision + 1,
+            ),
+            expected_revision=failed_record.revision,
+        )
         decision = gate.complete_round(
             run,
             lane,
