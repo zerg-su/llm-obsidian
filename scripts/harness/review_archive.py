@@ -204,6 +204,12 @@ def title_component(value: str) -> str:
     return (normalized or "review")[:100].strip(" .-") or "review"
 
 
+def markdown_prose(value: str) -> str:
+    """Keep reviewer prose from becoming an Obsidian wikilink or embed."""
+
+    return value.replace("[[", r"\[\[").replace("]]", r"\]\]")
+
+
 def render_page(
     title: str,
     review_id: str,
@@ -258,10 +264,10 @@ def render_page(
             )
             lines.extend(
                 [
-                    f"- **{finding['finding_id']} · {finding['severity']} · {finding['summary']}**",
+                    f"- **{finding['finding_id']} · {finding['severity']} · {markdown_prose(finding['summary'])}**",
                     f"  - File: `{location}`",
-                    f"  - Evidence: {finding['evidence']}",
-                    f"  - Recommendation: {finding['recommendation']}",
+                    f"  - Evidence: {markdown_prose(finding['evidence'])}",
+                    f"  - Recommendation: {markdown_prose(finding['recommendation'])}",
                 ]
             )
     for heading, key in (
@@ -271,7 +277,7 @@ def render_page(
     ):
         lines.extend(["", f"## {heading}", ""])
         values = review[key]
-        lines.extend(f"- {value}" for value in values) if values else lines.append("- None")
+        lines.extend(f"- {markdown_prose(value)}" for value in values) if values else lines.append("- None")
     lines.extend(["", "## Executor resolutions", ""])
     if not resolutions:
         lines.append("- None required")
@@ -290,11 +296,13 @@ def render_page(
             lines.extend(
                 [
                     f"- **{finding_id} · {resolution.disposition}**",
-                    f"  - Rationale: {resolution.rationale}",
+                    f"  - Rationale: {markdown_prose(resolution.rationale)}",
                 ]
             )
             if resolution.follow_up:
-                lines.append(f"  - Follow-up: {resolution.follow_up}")
+                lines.append(
+                    f"  - Follow-up: {markdown_prose(resolution.follow_up)}"
+                )
     lines.extend(
         [
             "",

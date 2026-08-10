@@ -467,6 +467,42 @@ with tempfile.TemporaryDirectory(prefix="harness-review-transport.") as raw:
         and "F-round-1 · rejected" in dry_page
         and "reported path is unreachable" in dry_page,
     )
+    wikilink_shaped_review = {
+        **review,
+        "axes": [
+            {
+                "axis": "openai-holistic",
+                "verdict": "approve",
+                "verification_iteration": 0,
+                "findings": [
+                    {
+                        "finding_id": "F-wikilink-shape",
+                        "severity": "minor",
+                        "file": "prototype.py",
+                        "line": 1,
+                        "summary": "List-shaped input [[1, 3], [2, 5]]",
+                        "evidence": "Observed [[not a wiki target]]",
+                        "recommendation": "Keep [[1, 3], [2, 5]] as data",
+                    }
+                ],
+            }
+        ],
+        "verification_gaps": ["Gap [[not a page]]"],
+        "notes_for_executor": [],
+        "residual_risks": [],
+    }
+    escaped_page = render_page(
+        "Archive wikilink-shaped prose",
+        "operation-1",
+        wikilink_shaped_review,
+        "c-000123",
+    )
+    check(
+        "archive escapes reviewer prose that resembles Obsidian wikilinks",
+        "[[" not in escaped_page
+        and "]]" not in escaped_page
+        and r"\[\[1, 3], [2, 5\]\]" in escaped_page,
+    )
     scripts = vault / "scripts"
     scripts.mkdir()
     allocator = scripts / "allocate-address.sh"
