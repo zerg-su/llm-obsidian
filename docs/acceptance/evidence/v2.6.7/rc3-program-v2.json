@@ -1,0 +1,62 @@
+{
+  "authorization": [
+    "coordinator decision for escalation b1ca8a95-026a-442c-ae8a-c683d504777a",
+    "coordinator decision for escalation 758767c3-cb57-4901-b04d-bba82afecae5 (option i, representation normalization)"
+  ],
+  "canonical_subject_config_sha256": "6cf4d4c9aca90a2d17cf5e602e4ae36d3236c6e38e7eda44bb85693b1c017105",
+  "created": "2026-08-10",
+  "form_note": "Executor fields use canonical resolved registry ids (the OperationStore route form); review fields use registered alias form (the task review-policy form). Alias map: terra->gpt-5.6-terra, opus->claude-opus-5, sol->gpt-5.6-sol, sonnet canonical.",
+  "invalidated_history": [
+    {
+      "cell": "rc1-corridor-run-1",
+      "disposition": "invalidated: pre-repair launch failure (executor-ready race), cancelled",
+      "request": "eecdb3d8"
+    },
+    {
+      "cell": "rc1-corridor-run-1",
+      "disposition": "success on digest 08ae0d88, superseded by gate repair digest change",
+      "request": "92573279"
+    },
+    {
+      "cell": "rc1-corridor-run-1",
+      "disposition": "success on digest 88e91f6d (streak=1), superseded by changed-HEAD ordering repair",
+      "request": "acb697b0"
+    },
+    {
+      "cell": "rc1-corridor-run-2",
+      "disposition": "invalidated: changed-HEAD ordering defect mid-corridor; root cancelled; material finding/fix evidence preserved",
+      "request": "9131d543"
+    }
+  ],
+  "lifecycle_subject_sha256": "3ea52c300378295d40e7db2c2757a3665584100c1a47f882c2600bb13ff71c55",
+  "overlays": {
+    "rc3-program": {
+      "acceptance_cells_sha256": "821c5c738ed412254fa558752ff2baae9e6737f07d6dcda8565136a7af580a2d",
+      "subject_config_sha256": "6cf4d4c9aca90a2d17cf5e602e4ae36d3236c6e38e7eda44bb85693b1c017105"
+    },
+    "rc3-program-v1r": {
+      "acceptance_cells_sha256": "43f6438e08b0d7da87e38f856aa54935e5b4263692698d7d2ea48e001c053900",
+      "subject_config_sha256": "6cf4d4c9aca90a2d17cf5e602e4ae36d3236c6e38e7eda44bb85693b1c017105"
+    },
+    "rc3-program-v2": {
+      "acceptance_cells_sha256": "a0940165b430f3c48ec391ac1bb93185b7203705666b6a6ace22c3a9bc9737b1",
+      "subject_config_sha256": "6cf4d4c9aca90a2d17cf5e602e4ae36d3236c6e38e7eda44bb85693b1c017105"
+    }
+  },
+  "schema_version": 1,
+  "streak_routes": {
+    "rc1-corridor-run-1": {
+      "executor": "codex/gpt-5.6-terra/medium",
+      "review": "simple claude/opus/medium"
+    },
+    "rc1-corridor-run-2": {
+      "executor": "claude/sonnet/medium",
+      "review": "simple codex/sol/medium"
+    },
+    "rc1-corridor-run-3": {
+      "executor": "codex/gpt-5.6-terra/medium",
+      "review": "simple claude/opus/medium"
+    }
+  },
+  "type": "rc3-acceptance-program-v2"
+}

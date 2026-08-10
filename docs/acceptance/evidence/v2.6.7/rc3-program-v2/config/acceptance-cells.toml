@@ -1,0 +1,155 @@
+# RC3 acceptance-program overlay v2 (2026-08-10): coordinator-approved
+# cheap-route restart of the three-cell RC1 streak on post-repair digest
+# 3ea52c300378295d40e7db2c2757a3665584100c1a47f882c2600bb13ff71c55.
+# Executor model identifiers use the canonical resolved registry form the
+# OperationStore persists (terra -> gpt-5.6-terra; sonnet is canonical);
+# review routes keep the registered alias form task review policy
+# persists (opus -> claude-opus-5, sol -> gpt-5.6-sol at runtime). Same
+# authorized routes; acceptance routing metadata outside the lifecycle
+# behavioral subject; canonical config/acceptance-cells.toml unchanged.
+schema_version = 2
+required_cells = [
+  "claude-lifecycle",
+  "codex-lifecycle",
+  "cross-runtime-composition",
+  "deep-review",
+]
+
+[release]
+driver = "scripts/live_acceptance_driver.py"
+dependencies = [
+  "config/acceptance-cells.toml",
+  "scripts/release-acceptance.py",
+  "scripts/release_acceptance_support.py",
+  "scripts/live-acceptance-runner.py",
+  "scripts/live_acceptance_driver.py",
+  "Makefile",
+  "AGENTS.md",
+  "CLAUDE.md",
+  "docs/runtime-capabilities.md",
+  "docs/task-sessions.md",
+]
+dependency_roots = [
+  "scripts",
+  "skills",
+  "hooks",
+  "schemas",
+  "config",
+  ".claude",
+  ".codex",
+  ".agents",
+  ".codex-plugin",
+  ".claude-plugin",
+  "docs/skill-references",
+]
+
+[environment]
+requires = ["git", "cmux", "claude", "codex"]
+report = ".vault-meta/acceptance/latest-live.json"
+state = ".vault-meta/acceptance/live-state.json"
+report_schema = 3
+state_schema = 3
+preflight_schema = 1
+failed_cell_classifications = ["runtime-contract", "mechanism-failure"]
+
+# 2.6.7 RC1 live streak: three strictly sequential fresh runs of the one
+# supported engineering/change corridor, consumed in production by
+# scripts/live_acceptance_rc1_gate.py (preflight facade) with receipts bound
+# to lifecycle_subject_sha256 via scripts/v267_stabilization.py (streak
+# subcommand), never to raw Git HEAD. Each run must use new
+# request/owner/store/worktree/provider-session identities, at least one run
+# must complete the real material-finding/fix/re-review path, and the three
+# live cells are coordinator-authorized one at a time.
+[rc1]
+schema_version = 1
+streak_target = 3
+corridor = "engineering/change"
+subject_config = "config/v267-stabilization-subject.json"
+evidence_root = "docs/acceptance/evidence/v2.6.7"
+required_material_cycle_runs = 1
+
+[rc1.cells.rc1-corridor-run-1]
+kind = "engineering-change-corridor"
+sequence = 1
+executor = { runtime = "codex", model = "gpt-5.6-terra", effort = "medium" }
+review = { mode = "simple", runtime = "claude", model = "opus", effort = "medium" }
+expected = [
+  "dispatch", "summary", "scoped-verify", "simple-review",
+  "findings", "fix", "refreshed-summary", "scoped-verify-2", "re-review-approve",
+  "reap", "cleanup",
+]
+
+[rc1.cells.rc1-corridor-run-2]
+kind = "engineering-change-corridor"
+sequence = 2
+executor = { runtime = "claude", model = "sonnet", effort = "medium" }
+review = { mode = "simple", runtime = "codex", model = "sol", effort = "medium" }
+expected = [
+  "dispatch", "summary", "scoped-verify", "simple-review",
+  "findings", "fix", "refreshed-summary", "scoped-verify-2", "re-review-approve",
+  "reap", "cleanup",
+]
+
+[rc1.cells.rc1-corridor-run-3]
+kind = "engineering-change-corridor"
+sequence = 3
+executor = { runtime = "codex", model = "gpt-5.6-terra", effort = "medium" }
+review = { mode = "simple", runtime = "claude", model = "opus", effort = "medium" }
+expected = [
+  "dispatch", "summary", "scoped-verify", "simple-review",
+  "findings", "fix", "refreshed-summary", "scoped-verify-2", "re-review-approve",
+  "reap", "cleanup",
+]
+
+[cells.claude-lifecycle]
+kind = "runtime-lifecycle"
+runtimes = ["claude"]
+route = "simple"
+expected = ["open", "callback", "same-run-continue", "exit", "close"]
+dependencies = [
+  "config/model-routing.toml",
+  "scripts/harness/adapters/cmux.py",
+  "scripts/harness/adapters/claude.py",
+  "scripts/harness/callbacks.py",
+  "scripts/harness/reconciliation.py",
+]
+
+[cells.codex-lifecycle]
+kind = "runtime-lifecycle"
+runtimes = ["codex"]
+route = "simple"
+expected = ["open", "callback", "same-run-continue", "exit", "close"]
+dependencies = [
+  "config/model-routing.toml",
+  "scripts/harness/adapters/cmux.py",
+  "scripts/harness/adapters/codex.py",
+  "scripts/harness/callbacks.py",
+  "scripts/harness/reconciliation.py",
+]
+
+[cells.cross-runtime-composition]
+kind = "workflow-composition"
+runtimes = ["codex", "claude"]
+route = "simple"
+expected = ["dispatch", "simple-review", "reap"]
+dependencies = [
+  "scripts/dispatch-runner.py",
+  "scripts/review-runner.py",
+  "scripts/reap-runner.py",
+  "scripts/harness/workflows/dispatch.py",
+  "scripts/harness/workflows/review.py",
+  "scripts/harness/workflows/reap.py",
+]
+
+[cells.deep-review]
+kind = "deep-review"
+runtimes = ["claude", "codex"]
+route = "deep"
+expected = ["anthropic-holistic", "openai-holistic", "bounded-callback", "terminal-cleanup"]
+dependencies = [
+  "config/model-routing.toml",
+  "scripts/review-runner.py",
+  "scripts/harness/workflows/review.py",
+  "scripts/harness/review_submit.py",
+  "scripts/harness/review_archive.py",
+]
