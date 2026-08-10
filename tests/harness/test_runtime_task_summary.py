@@ -409,6 +409,130 @@ def assert_review_resolution_notification_crashes_fail_closed(root: Path) -> Non
     print("OK   review resolution cmux crash windows never replay effects")
 
 
+def assert_resolved_changed_head_gates_review_on_exact_head_receipt(
+    root: Path,
+) -> None:
+    """The live RC3 sequence: a resolved changed HEAD must be verified first.
+
+    Durable shape from the live cell: review terminal changes-requested at the
+    reviewed HEAD, the fix commit moved the product HEAD, and the automatic
+    review drive launched the bounded iteration before any scoped verification
+    receipt existed at that HEAD.  The drive must instead hand progress to the
+    verification owner and launch only after a complete receipt names exactly
+    the current HEAD.
+    """
+
+    operation_id = "92929292-9292-4292-8292-929292929292"
+    state = root / "resolved-head-gate"
+    state.mkdir()
+    product = root / "resolved-head-product"
+    product.mkdir()
+    for argv in (
+        ("init", "-b", "main"),
+        ("config", "user.email", "corridor@example.invalid"),
+        ("config", "user.name", "Corridor World"),
+    ):
+        subprocess.run(
+            ["git", "-C", str(product), *argv], check=True, capture_output=True
+        )
+
+    def commit(name: str) -> str:
+        (product / "product.txt").write_text(name + "\n", encoding="utf-8")
+        subprocess.run(
+            ["git", "-C", str(product), "add", "product.txt"],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(product), "commit", "-m", name],
+            check=True,
+            capture_output=True,
+        )
+        return subprocess.run(
+            ["git", "-C", str(product), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+    reviewed_head = commit("reviewed")
+    fix_head = commit("fix")
+    write_json(
+        state / "pipeline-review-resolution-notify.json",
+        {
+            "schema_version": 1,
+            "operation_id": operation_id,
+            "reviewed_head_sha": reviewed_head,
+            "summary_sha256": "b" * 64,
+            "status": "sent",
+        },
+    )
+    calls: list[object] = []
+    receipt_box: list[object] = [None]
+
+    class GateWorker(RuntimeWorkerReviewBridgeMixin):
+        def __init__(self) -> None:
+            self.spec_path = state / "runtime.json"
+            self.spec = {"operation_id": operation_id, "cwd": product}
+            self.profile = object()
+            self.verification_head = reviewed_head
+            self.pipeline = SimpleNamespace(
+                definition=SimpleNamespace(
+                    steps=(SimpleNamespace(primitive_id="verify"),)
+                )
+            )
+
+        def _bind_verification_attempt(self, index: int) -> None:
+            calls.append(("bind", index))
+
+        def verification_receipt(self) -> object:
+            return receipt_box[0]
+
+        def run_verification(self) -> None:
+            calls.append(("verify",))
+
+    worker = GateWorker()
+    launched = worker.drive_review()
+    check(
+        "a resolved changed HEAD drives verification before any review launch",
+        launched is False
+        and ("verify",) in calls
+        and ("bind", 0) in calls
+        and worker.verification_head == fix_head,
+        (launched, calls, worker.verification_head),
+    )
+    receipt_box[0] = {
+        "status": "complete",
+        "evidence": [{"head_sha": reviewed_head}],
+    }
+    stale_ready = worker._resolved_head_verification_ready()
+    check(
+        "a receipt for the reviewed HEAD cannot authorize the changed-HEAD review",
+        stale_ready is False,
+        stale_ready,
+    )
+    receipt_box[0] = {
+        "status": "complete",
+        "evidence": [{"head_sha": fix_head}],
+    }
+    ready = worker._resolved_head_verification_ready()
+    check(
+        "a complete exact-HEAD receipt at the fix HEAD releases the review drive",
+        ready is True,
+        ready,
+    )
+    (state / "pipeline-review-resolution-notify.json").unlink()
+    bare = GateWorker()
+    del bare.profile
+    untouched = bare._resolved_head_verification_ready()
+    check(
+        "corridors without a changed-HEAD resolution stay untouched",
+        untouched is True,
+        untouched,
+    )
+    print("OK   resolved changed HEAD gates review on the exact-HEAD receipt")
+
+
 def assert_durable_review_packet_generation_can_advance(root: Path) -> None:
     """A durably notified review packet may advance to one later cycle."""
 
@@ -1341,6 +1465,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
     assert_review_drive_failure_receipt_is_content_free()
     assert_summary_refresh_notification_replays_without_effect(root)
     assert_review_resolution_notification_crashes_fail_closed(root)
+    assert_resolved_changed_head_gates_review_on_exact_head_receipt(root)
     assert_durable_review_packet_generation_can_advance(root)
     assert_resolution_head_drift_wakes_once(root)
     handoff = root / "resolution-handoff"

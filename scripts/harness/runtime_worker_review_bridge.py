@@ -361,7 +361,77 @@ class RuntimeWorkerReviewBridgeMixin:
                 digest.update(callback.read_bytes())
         return digest.hexdigest()
 
+    def _resolved_head_verification_ready(self) -> bool:
+        """Gate every bounded review launch on the resolved exact-HEAD receipt.
+
+        A resolved changed HEAD must obtain a successful exact-HEAD
+        verification receipt before any bounded review iteration can launch.
+        When a review resolution moved the product HEAD past the reviewed
+        HEAD, this re-binds the verification identity to the current HEAD and
+        drives the pipeline verification owner instead of the review; only a
+        complete receipt whose evidence names exactly the current HEAD lets
+        the review drive proceed.  Corridors without a changed-HEAD
+        resolution, and pipelines without a verification step, are untouched.
+        """
+
+        resolution_path = (
+            self.spec_path.parent / "pipeline-review-resolution-notify.json"
+        )
+        if resolution_path.is_symlink():
+            raise RuntimeWorkerError(
+                "review resolution notification cannot be a symlink"
+            )
+        if not resolution_path.is_file():
+            return True
+        resolution = json.loads(resolution_path.read_text(encoding="utf-8"))
+        reviewed_head = str(resolution.get("reviewed_head_sha") or "")
+        if not re.fullmatch("[0-9a-f]{40,64}", reviewed_head):
+            return True
+        head_result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=self.spec["cwd"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        current_head = head_result.stdout.strip()
+        if head_result.returncode or not re.fullmatch(
+            "[0-9a-f]{40,64}", current_head
+        ):
+            raise RuntimeWorkerError("pipeline product HEAD is unavailable")
+        if current_head == reviewed_head:
+            return True
+        if not any(
+            step.primitive_id == "verify"
+            for step in self.pipeline.definition.steps
+        ):
+            # Pipelines without a verification step own no exact-HEAD
+            # receipts; their resolution path is untouched.
+            return True
+        if getattr(self, "profile", None) is None:
+            # The verification contract is not bound yet (early drive); hold
+            # the changed-HEAD launch until the summary pipeline binds it,
+            # never launching unverified.
+            return False
+        if self.verification_head != current_head:
+            self.verification_head = current_head
+            self._bind_verification_attempt(0)
+        receipt = self.verification_receipt()
+        if receipt is None:
+            self.run_verification()
+            return False
+        evidence = receipt.get("evidence")
+        return (
+            receipt.get("status") == "complete"
+            and isinstance(evidence, list)
+            and bool(evidence)
+            and isinstance(evidence[0], dict)
+            and evidence[0].get("head_sha") == current_head
+        )
+
     def drive_review(self) -> bool:
+        if not self._resolved_head_verification_ready():
+            return False
         input_sha256 = self.review_drive_sha256()
         _atomic_json(
             self.marker_path,
