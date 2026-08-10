@@ -19,7 +19,7 @@
 ## [2.6.7-rc3] — Unreleased
 
 Ограниченные ремонты acceptance-коридора RC3 вместе с их scope-реконсиляцией;
-без нового pipeline-, dashboard- или lifecycle-поведения.
+без нового pipeline- или dashboard-поведения.
 
 ### Исправлено
 
@@ -28,15 +28,19 @@
   `reap-log-repair` через `scripts/vault-write.py` заменяет ровно один
   повреждённый верхний reap-блок под optimistic-привязкой task/log-SHA-256,
   fail-closed на отсутствие, дубликат, дрейф или постороннее повреждение.
+- Некорректный JSON или schema review-resolution теперь заменяется точным
+  замороженным шаблоном, после чего тот же live executor получает не более
+  двух запросов на исправление. Crash-safe wake не перезапускает review и не
+  повторяет уже выполненную продуктовую работу.
 
 ### Изменено
 
-- Потолки `tests/rc4_scope_ratchet.py` подняты ровно до 273 файлов / 95 605
-  строк для принятых RC3-ремонтов review-коридора и планировщика
-  reap-log-repair; без запасного headroom.
+- Потолки `tests/rc4_scope_ratchet.py` подняты ровно до 273 файлов / 95 891
+  строк для принятых RC3-ремонтов review-коридора, ограниченной коррекции
+  resolution и планировщика reap-log-repair; без запасного headroom.
 - `config/code-quality-baseline.json` берёт во владение file-lines hotspot
-  `runtime_worker_review_bridge.py` на точном контуре 1107 строк с
-  RC3-регрессионными доказательствами.
+  `runtime_worker_review_bridge.py` с RC3-регрессионными доказательствами;
+  логика коррекции resolution вынесена в callback I/O.
 
 ## [2.6.7-rc2] — 2026-08-10
 

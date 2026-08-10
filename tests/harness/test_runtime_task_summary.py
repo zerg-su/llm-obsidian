@@ -38,6 +38,7 @@ from harness.pipeline_builtins import (
 )
 from harness.pipelines import compile_pipeline
 from harness.runtime_sessions import RuntimeSessionManager, RuntimeSessionRequest
+from harness.runtime_worker_contracts import RuntimeWorkerError
 from harness.runtime_worker_execution import RuntimeWorkerExecution
 from harness.runtime_worker import (
     _pipeline_verify_identity,
@@ -448,6 +449,164 @@ def assert_review_resolution_notification_crashes_fail_closed(root: Path) -> Non
         )
         assert marker["status"] == "effect-uncertain", marker
     print("OK   review resolution cmux crash windows never replay effects")
+
+
+def assert_malformed_review_resolution_self_heals_boundedly(root: Path) -> None:
+    """A live executor gets two schema corrections, never a review replay."""
+
+    worktree = root / "resolution-correction-product"
+    worktree.mkdir()
+    state = root / "resolution-correction-runtime"
+    state.mkdir()
+    packet = {
+        "schema_version": 1,
+        "operation_id": TASK,
+        "review_operation_id": "review-cycle-1",
+        "review_callbacks": [],
+        "review_identity_sha256": "b" * 64,
+        "reviewed_head_sha": "a" * 40,
+        "allowed_dispositions": ["applied", "out-of-scope", "rejected"],
+        "resolution_path": ".task-review-resolution.json",
+        "material_finding_ids": ["F-1"],
+        "findings": [],
+    }
+    findings = [{"finding_id": "F-1"}]
+    resolution_path = worktree / ".task-review-resolution.json"
+    cmux = FakeCmux()
+    worker = SimpleNamespace(
+        spec_path=state / "runtime.json",
+        spec={"operation_id": TASK, "surface_id": CHILD, "cwd": worktree},
+        cmux_adapter=cmux,
+        resumed_wake_identities=set(),
+    )
+    malformed = {
+        "schema_version": 1,
+        "review_operation_id": "review-cycle-1",
+        "reviewed_head_sha": "a" * 40,
+        "resolved_head_sha": "c" * 40,
+        "resolutions": [
+            {
+                "finding_id": "F-1",
+                "disposition": "applied",
+                "rationale": "fixed",
+                "commit_sha": "c" * 40,
+            }
+        ],
+        "resolution_summary": "fixed",
+    }
+    resolution_path.write_text("{\n", encoding="utf-8")
+    first = RuntimeWorkerReviewBridgeMixin.ensure_review_resolution_template(
+        worker, packet=packet, material_findings=findings
+    )
+    restored = json.loads(first.read_text(encoding="utf-8"))
+    write_json(resolution_path, malformed | {"resolution_summary": "fixed twice"})
+    second = RuntimeWorkerReviewBridgeMixin.ensure_review_resolution_template(
+        worker, packet=packet, material_findings=findings
+    )
+    write_json(resolution_path, malformed | {"resolution_summary": "fixed thrice"})
+    try:
+        RuntimeWorkerReviewBridgeMixin.ensure_review_resolution_template(
+            worker, packet=packet, material_findings=findings
+        )
+    except RuntimeWorkerError as exc:
+        exhausted = "correction budget exhausted" in str(exc)
+    else:
+        exhausted = False
+    receipts = sorted((state / "review-resolution-corrections").glob("*.json"))
+    check(
+        "malformed review resolution gets two bounded same-session corrections",
+        first == resolution_path
+        and second == resolution_path
+        and set(restored)
+        == {
+            "schema_version",
+            "operation_id",
+            "review_identity_sha256",
+            "reviewed_head_sha",
+            "resolved_head_sha",
+            "resolutions",
+        }
+        and restored["operation_id"] == TASK
+        and set(restored["resolutions"][0])
+        == {"finding_id", "disposition", "rationale", "follow_up"}
+        and len(cmux.sent) == 2
+        and cmux.keys == [(CHILD, "Enter"), (CHILD, "Enter")]
+        and all("exact template" in message for _, message in cmux.sent)
+        and len(receipts) == 2
+        and [json.loads(path.read_text())["attempt"] for path in receipts]
+        == [1, 2]
+        and exhausted,
+        (restored, cmux.sent, receipts, exhausted),
+    )
+
+
+def assert_resolution_correction_crash_resumes_once(root: Path) -> None:
+    """A torn correction wake resumes from its pending durable receipt."""
+
+    class CrashAfterSend:
+        def send(self, _surface_id: str, _message: str) -> None:
+            raise RuntimeError("crash after correction paste")
+
+        def send_key(self, _surface_id: str, _key: str) -> None:
+            raise AssertionError("Enter cannot follow a failed paste")
+
+    worktree = root / "resolution-correction-crash-product"
+    worktree.mkdir()
+    state = root / "resolution-correction-crash-runtime"
+    state.mkdir()
+    packet = {
+        "schema_version": 1,
+        "operation_id": TASK,
+        "review_operation_id": "review-cycle-1",
+        "review_callbacks": [],
+        "review_identity_sha256": "b" * 64,
+        "reviewed_head_sha": "a" * 40,
+        "allowed_dispositions": ["applied", "out-of-scope", "rejected"],
+        "resolution_path": ".task-review-resolution.json",
+        "material_finding_ids": ["F-1"],
+        "findings": [],
+    }
+    findings = [{"finding_id": "F-1"}]
+    resolution_path = worktree / ".task-review-resolution.json"
+    write_json(resolution_path, {"schema_version": 1, "wrong": True})
+    crashed = SimpleNamespace(
+        spec_path=state / "runtime.json",
+        spec={"operation_id": TASK, "surface_id": CHILD, "cwd": worktree},
+        cmux_adapter=CrashAfterSend(),
+        resumed_wake_identities=set(),
+    )
+    try:
+        RuntimeWorkerReviewBridgeMixin.ensure_review_resolution_template(
+            crashed, packet=packet, material_findings=findings
+        )
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("correction wake crash was hidden")
+    receipt_path = state / "review-resolution-corrections/attempt-1.json"
+    pending = json.loads(receipt_path.read_text(encoding="utf-8"))
+    cmux = FakeCmux()
+    restarted = SimpleNamespace(
+        spec_path=state / "runtime.json",
+        spec={"operation_id": TASK, "surface_id": CHILD, "cwd": worktree},
+        cmux_adapter=cmux,
+        resumed_wake_identities=set(),
+    )
+    RuntimeWorkerReviewBridgeMixin.ensure_review_resolution_template(
+        restarted, packet=packet, material_findings=findings
+    )
+    settled = json.loads(receipt_path.read_text(encoding="utf-8"))
+    check(
+        "torn review resolution correction resumes once without a new attempt",
+        pending["status"] == "pending"
+        and settled["status"] == "sent"
+        and settled["attempt"] == 1
+        and len(cmux.sent) == 1
+        and cmux.keys == [(CHILD, "Enter")]
+        and len(list((state / "review-resolution-corrections").glob("attempt-*.json")))
+        == 1,
+        (pending, settled, cmux.sent, cmux.keys),
+    )
 
 
 def assert_resolved_changed_head_gates_review_on_exact_head_receipt(
@@ -1820,6 +1979,8 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
     assert_review_drive_failure_receipts_are_cycle_scoped(root)
     assert_summary_refresh_notification_replays_without_effect(root)
     assert_review_resolution_notification_crashes_fail_closed(root)
+    assert_malformed_review_resolution_self_heals_boundedly(root)
+    assert_resolution_correction_crash_resumes_once(root)
     assert_resolved_changed_head_gates_review_on_exact_head_receipt(root)
     assert_rejected_drive_with_live_review_stays_waiting(root)
     assert_durable_review_packet_generation_can_advance(root)

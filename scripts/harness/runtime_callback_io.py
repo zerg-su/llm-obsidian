@@ -17,6 +17,7 @@ from .contracts import CallbackEnvelope
 from .callback_submit_recovery import ArtifactEvidence
 from .runtime_worker_contracts import IDENTIFIER, RuntimeWorkerError
 from research_contract import load_artifact
+from review_resolution import DISPOSITIONS
 
 
 MAX_OUTBOX_BYTES = 70_000
@@ -318,6 +319,271 @@ def publish_callback_wake(
             cmux_adapter,
             resume_uncertain=resume_uncertain,
         )
+
+
+def review_resolution_template(
+    packet: dict[str, object], material_findings: list[dict[str, object]]
+) -> dict[str, object]:
+    """Return the only executor-editable resolution object shape."""
+
+    return {
+        "schema_version": 1,
+        "operation_id": packet["operation_id"],
+        "review_identity_sha256": packet["review_identity_sha256"],
+        "reviewed_head_sha": packet["reviewed_head_sha"],
+        "resolved_head_sha": "",
+        "resolutions": [
+            {
+                "finding_id": str(finding.get("finding_id") or ""),
+                "disposition": "",
+                "rationale": "",
+                "follow_up": "",
+            }
+            for finding in material_findings
+        ],
+    }
+
+
+def _review_resolution_shape_valid(
+    value: object, template: dict[str, object]
+) -> bool:
+    if not isinstance(value, dict) or set(value) != set(template):
+        return False
+    identity_fields = (
+        "schema_version",
+        "operation_id",
+        "review_identity_sha256",
+        "reviewed_head_sha",
+    )
+    if any(value.get(field) != template[field] for field in identity_fields):
+        return False
+    rows = value.get("resolutions")
+    expected = template["resolutions"]
+    fields = {"finding_id", "disposition", "rationale", "follow_up"}
+    if not isinstance(rows, list) or not isinstance(expected, list):
+        return False
+    if len(rows) != len(expected) or any(
+        not isinstance(row, dict)
+        or set(row) != fields
+        or row.get("finding_id") != wanted.get("finding_id")
+        for row, wanted in zip(rows, expected, strict=True)
+    ):
+        return False
+    resolved_head = value.get("resolved_head_sha")
+    if resolved_head == "" and all(
+        not row["disposition"] and not row["rationale"] and not row["follow_up"]
+        for row in rows
+    ):
+        return True
+    return (
+        isinstance(resolved_head, str)
+        and re.fullmatch("[0-9a-f]{40,64}", resolved_head) is not None
+        and all(
+            row["disposition"] in DISPOSITIONS
+            and isinstance(row["rationale"], str)
+            and bool(row["rationale"])
+            and isinstance(row["follow_up"], str)
+            and (row["disposition"] != "out-of-scope" or bool(row["follow_up"]))
+            for row in rows
+        )
+    )
+
+
+def _resolution_correction_message(path: Path, attempt: int) -> str:
+    return (
+        "The review resolution artifact was rejected before continuation. "
+        f"Harness restored the exact template in {path.name}. "
+        "Edit that existing object in place; do not rename, add, or remove fields. "
+        "Set resolved_head_sha to the current committed HEAD. For every listed "
+        "finding, fill only disposition, rationale, and follow_up; follow_up may "
+        "be empty unless disposition is out-of-scope. Keep operation_id, "
+        "review_identity_sha256, reviewed_head_sha, finding ids, and schema_version "
+        f"unchanged. Then refresh .task-summary.json. This is correction {attempt}/2; "
+        "do not relaunch review or repeat already completed product work."
+    )
+
+
+def _resolution_correction_receipts(
+    worker: object, packet: dict[str, object], root: Path
+) -> tuple[list[Path], list[dict[str, object]]]:
+    paths = sorted(root.glob("attempt-*.json"))
+    values = [json.loads(path.read_text(encoding="utf-8")) for path in paths]
+    fields = {
+        "schema_version",
+        "operation_id",
+        "review_identity_sha256",
+        "invalid_sha256",
+        "attempt",
+        "wake_id",
+        "status",
+    }
+    invalid = any(
+        not isinstance(value, dict)
+        or set(value) != fields
+        or value.get("schema_version") != 1
+        or value.get("operation_id") != worker.spec["operation_id"]
+        or value.get("review_identity_sha256")
+        != packet["review_identity_sha256"]
+        or value.get("attempt") != index
+        or value.get("status") not in {"pending", "sent"}
+        or re.fullmatch("[0-9a-f]{64}", str(value.get("invalid_sha256"))) is None
+        or re.fullmatch("[0-9a-f]{64}", str(value.get("wake_id"))) is None
+        for index, value in enumerate(values, start=1)
+    )
+    if invalid:
+        raise RuntimeWorkerError("review resolution correction receipt is invalid")
+    return paths, values
+
+
+def _send_resolution_correction(
+    worker: object,
+    *,
+    root: Path,
+    path: Path,
+    template: dict[str, object],
+    receipt_path: Path,
+    receipt: dict[str, object],
+) -> None:
+    attempt = int(receipt["attempt"])
+    _atomic_json(path, template)
+    wake_root = root / f"attempt-{attempt}-wake"
+    wake_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    wake_id = str(receipt["wake_id"])
+    if not publish_callback_wake(
+        {
+            "origin_surface": worker.spec["surface_id"],
+            "callback_wake": _resolution_correction_message(path, attempt),
+        },
+        wake_root,
+        wake_id,
+        worker.cmux_adapter,
+        resume_uncertain=wake_resume_once(worker, wake_id),
+    ):
+        raise RuntimeWorkerError(
+            "review resolution correction notification effect is uncertain"
+        )
+    _atomic_json(receipt_path, receipt | {"status": "sent"})
+    worker.review_resolution_correction_sent = True
+
+
+def _resume_resolution_correction(
+    worker: object,
+    *,
+    packet: dict[str, object],
+    template: dict[str, object],
+    path: Path,
+) -> bool:
+    root = worker.spec_path.parent / "review-resolution-corrections"
+    paths, values = _resolution_correction_receipts(worker, packet, root)
+    pending = [value for value in values if value["status"] == "pending"]
+    if not pending:
+        return False
+    if len(pending) != 1 or pending[0] is not values[-1]:
+        raise RuntimeWorkerError("review resolution correction receipt order is invalid")
+    _send_resolution_correction(
+        worker,
+        root=root,
+        path=path,
+        template=template,
+        receipt_path=paths[-1],
+        receipt=pending[0],
+    )
+    return True
+
+
+def _publish_resolution_correction(
+    worker: object,
+    *,
+    packet: dict[str, object],
+    template: dict[str, object],
+    path: Path,
+    invalid_sha256: str,
+) -> None:
+    root = worker.spec_path.parent / "review-resolution-corrections"
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    paths, _values = _resolution_correction_receipts(worker, packet, root)
+    if len(paths) >= 2:
+        raise RuntimeWorkerError("review resolution correction budget exhausted")
+    attempt = len(paths) + 1
+    receipt_path = root / f"attempt-{attempt}.json"
+    wake_id = hashlib.sha256(
+        (
+            f"{worker.spec['operation_id']}:{packet['review_identity_sha256']}:"
+            f"{invalid_sha256}:{attempt}"
+        ).encode()
+    ).hexdigest()
+    receipt = {
+        "schema_version": 1,
+        "operation_id": worker.spec["operation_id"],
+        "review_identity_sha256": packet["review_identity_sha256"],
+        "invalid_sha256": invalid_sha256,
+        "attempt": attempt,
+        "wake_id": wake_id,
+        "status": "pending",
+    }
+    _atomic_json(receipt_path, receipt)
+    _send_resolution_correction(
+        worker,
+        root=root,
+        path=path,
+        template=template,
+        receipt_path=receipt_path,
+        receipt=receipt,
+    )
+
+
+def ensure_review_resolution(
+    worker: object,
+    *,
+    packet: dict[str, object],
+    material_findings: list[dict[str, object]],
+) -> Path:
+    """Keep one exact resolution shape and correct it twice in-session."""
+
+    path = worker.spec["cwd"] / ".task-review-resolution.json"
+    if path.is_symlink() or (path.exists() and not path.is_file()):
+        raise RuntimeWorkerError("review resolution response path is invalid")
+    worker.review_resolution_correction_sent = False
+    template = review_resolution_template(packet, material_findings)
+    if _resume_resolution_correction(
+        worker, packet=packet, template=template, path=path
+    ):
+        return path
+    write_template = True
+    if path.exists():
+        raw = path.read_bytes()
+        if len(raw) > MAX_OUTBOX_BYTES:
+            raise RuntimeWorkerError("review resolution response exceeds size cap")
+        try:
+            current = json.loads(raw)
+        except json.JSONDecodeError:
+            current = None
+        recognizable = (
+            isinstance(current, dict)
+            and set(current) == set(template)
+            and current.get("schema_version") == 1
+            and current.get("operation_id") == worker.spec["operation_id"]
+        )
+        if _review_resolution_shape_valid(current, template):
+            write_template = False
+        elif recognizable and (
+            current.get("reviewed_head_sha") != packet["reviewed_head_sha"]
+            or current.get("review_identity_sha256")
+            != packet["review_identity_sha256"]
+        ):
+            write_template = True
+        else:
+            _publish_resolution_correction(
+                worker,
+                packet=packet,
+                template=template,
+                path=path,
+                invalid_sha256=hashlib.sha256(raw).hexdigest(),
+            )
+            return path
+    if write_template:
+        _atomic_json(path, template)
+    return path
 
 
 def _normalize_fetch_errors_at_provider_boundary(

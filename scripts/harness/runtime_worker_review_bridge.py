@@ -830,6 +830,10 @@ class RuntimeWorkerReviewBridgeMixin:
             "material_finding_ids": material_ids,
             "findings": findings,
         }
+        packet["resolution_template"] = runtime_callback_io.review_resolution_template(
+            packet=packet,
+            material_findings=material_findings,
+        )
         encoded = json.dumps(packet, sort_keys=True, separators=(",", ":")).encode()
         if len(encoded) > MAX_OUTBOX_BYTES:
             raise RuntimeWorkerError("review decision packet exceeds size cap")
@@ -884,44 +888,9 @@ class RuntimeWorkerReviewBridgeMixin:
         packet: dict[str, object],
         material_findings: list[dict[str, object]],
     ) -> Path:
-        resolution_path = self.spec["cwd"] / ".task-review-resolution.json"
-        if resolution_path.is_symlink():
-            raise RuntimeWorkerError("review resolution response cannot be a symlink")
-        write_template = True
-        if resolution_path.exists():
-            current = json.loads(resolution_path.read_text(encoding="utf-8"))
-            if (
-                not isinstance(current, dict)
-                or current.get("schema_version") != 1
-                or current.get("operation_id") != self.spec["operation_id"]
-            ):
-                raise RuntimeWorkerError("review resolution response identity changed")
-            write_template = (
-                current.get("reviewed_head_sha") != packet["reviewed_head_sha"]
-                or current.get("review_identity_sha256")
-                != packet["review_identity_sha256"]
-            )
-        if write_template:
-            _atomic_json(
-                resolution_path,
-                {
-                    "schema_version": 1,
-                    "operation_id": self.spec["operation_id"],
-                    "review_identity_sha256": packet["review_identity_sha256"],
-                    "reviewed_head_sha": packet["reviewed_head_sha"],
-                    "resolved_head_sha": "",
-                    "resolutions": [
-                        {
-                            "finding_id": str(finding.get("finding_id") or ""),
-                            "disposition": "",
-                            "rationale": "",
-                            "follow_up": "",
-                        }
-                        for finding in material_findings
-                    ],
-                },
-            )
-        return resolution_path
+        return runtime_callback_io.ensure_review_resolution(
+            self, packet=packet, material_findings=material_findings
+        )
 
     def load_review_notification(self, notify_path: Path) -> object:
         if not notify_path.is_file() or notify_path.is_symlink():
@@ -1060,6 +1029,8 @@ class RuntimeWorkerReviewBridgeMixin:
         resolution_path = self.ensure_review_resolution_template(
             packet=packet, material_findings=material_findings
         )
+        if self.review_resolution_correction_sent:
+            return
         self.send_review_resolution_notification(
             packet=packet,
             packet_path=packet_path,

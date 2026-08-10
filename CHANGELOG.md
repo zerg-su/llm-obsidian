@@ -13,7 +13,7 @@ packages were published for them.
 ## [2.6.7-rc3] - Unreleased
 
 Bounded RC3 acceptance-corridor repairs with their scope reconciliation; no
-new pipeline, dashboard, or lifecycle behavior.
+new pipeline or dashboard behavior.
 
 ### Fixed
 
@@ -22,15 +22,18 @@ new pipeline, dashboard, or lifecycle behavior.
   `scripts/vault-write.py` replaces exactly one malformed top reap block
   under optimistic task/log-SHA-256 binding, failing closed on missing,
   duplicate, drifted, or unrelated damage.
+- Malformed review-resolution JSON or schema now restores the exact frozen
+  template and asks the same live executor for at most two corrections. The
+  crash-safe wake never relaunches review or repeats completed product work.
 
 ### Changed
 
-- `tests/rc4_scope_ratchet.py` ceilings raised to exactly 273 files / 95,605
-  lines for the accepted RC3 review-corridor repairs and the reap-log-repair
-  planner; no blanket headroom.
+- `tests/rc4_scope_ratchet.py` ceilings raised to exactly 273 files / 95,891
+  lines for the accepted RC3 review-corridor repairs, bounded resolution
+  correction, and the reap-log-repair planner; no blanket headroom.
 - `config/code-quality-baseline.json` owns the
-  `runtime_worker_review_bridge.py` file-lines hotspot at its exact
-  1107-line contour with RC3 regression evidence.
+  `runtime_worker_review_bridge.py` file-lines hotspot with RC3 regression
+  evidence; the resolution correction logic is kept in callback I/O instead.
 
 ## [2.6.7-rc2] - 2026-08-10
 
