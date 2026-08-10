@@ -1,0 +1,42 @@
+{
+  "bound_repairs": [
+    {
+      "commit": "6930d034",
+      "seam": "executor early process-ownership readiness"
+    },
+    {
+      "commit": "68c8140e",
+      "seam": "reserved never-launched gate closure"
+    },
+    {
+      "commit": "2bad5c0f",
+      "seam": "review archive wikilink escaping (coordinator)"
+    },
+    {
+      "commit": "cbe77c48",
+      "seam": "archive replay recovery (coordinator)"
+    },
+    {
+      "commit": "c7de4fc1",
+      "seam": "RC1 success authority terminal cleanup effect"
+    },
+    {
+      "commit": "66fceb5f",
+      "seam": "changed-HEAD review launch gated on exact-HEAD receipt"
+    },
+    {
+      "commit": "e4e788f3",
+      "seam": "swallowed initial submit keystroke bounded recovery"
+    },
+    {
+      "commit": "37f563a0",
+      "seam": "rejected drive over live durable review classified in-progress"
+    }
+  ],
+  "created": "2026-08-10",
+  "lifecycle_subject_sha256": "f10285690e9c67fab2513a93ccc5b079c6758899a3503c80da4b21c21f742858",
+  "overlay_manifest_sha256": "a0940165b430f3c48ec391ac1bb93185b7203705666b6a6ace22c3a9bc9737b1",
+  "program": "three cheap streak cells per rc3-program-v2 overlay, restart from cell 1 with fresh identities; runs requiring coordinator resume are diagnostic only and never autonomous evidence",
+  "schema_version": 1,
+  "type": "rc3-program-digest-binding"
+}
