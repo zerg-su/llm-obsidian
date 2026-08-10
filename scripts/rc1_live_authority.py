@@ -150,7 +150,11 @@ def _operation_authority(
         or root_record.state != "complete"
         or root_record.resources != OwnedResources()
         or root_record.pending_effect
-        or root_record.effect_id != "reap-finalize"
+        # A live corridor closes its provider session after the accepted
+        # reap, so the terminal record carries request-exit as its final
+        # effect; the reap itself stays proven by the accepted wiki-summary
+        # callback and the durable reap artifacts, never by effect ordering.
+        or root_record.effect_id not in {"reap-finalize", "request-exit"}
         or root_record.effect_outcome != EffectOutcome.SUCCEEDED
         or root_record.accepted_callback_kind != "wiki-summary"
         or receipt["executor_route"]

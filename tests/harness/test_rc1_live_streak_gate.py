@@ -23,6 +23,7 @@ from harness.contracts import (  # noqa: E402
     RuntimeRoute,
 )
 from harness.store import OperationStore  # noqa: E402
+from harness.supervisor import OperationSupervisor  # noqa: E402
 from harness.workflows.reap import run_reap  # noqa: E402
 from lifecycle_simulator_world import (  # noqa: E402
     build_corridor_world,
@@ -129,6 +130,12 @@ def complete_world(world) -> tuple[object, list[object]]:
         summary=summary,
         finalize=lambda _record: {"schema_version": 1, "status": "filed"},
     )
+    # Live corridors close their provider session through the cleanup owner,
+    # so the terminal record carries request-exit as its final effect; the
+    # accepted reap remains durable in the callback and wiki artifacts.
+    OperationSupervisor(
+        world.store, world.owner_id, world.task_id
+    ).effect("request-exit", lambda _record: None)
     world.store.transition(world.owner_id, world.task_id, "exiting")
     world.store.transition(world.owner_id, world.task_id, "complete")
     terminal = world.record()
@@ -702,6 +709,41 @@ with tempfile.TemporaryDirectory(prefix="rc1-live-streak-gate.") as raw:
             dispatch_spec(root / f"dispatch-{sequence}.json", task_id),
         )
         terminal, rounds = complete_world(world)
+        if sequence == 1:
+            # A complete root whose final effect is neither the accepted reap
+            # nor the expected cleanup effect stays rejected.
+            shaped = replace(
+                terminal,
+                effect_id="start-provider",
+                revision=terminal.revision + 1,
+            )
+            world.store.save(shaped, expected_revision=terminal.revision)
+            foreign_receipt = receipt_for(
+                world,
+                dict(report["receipt_template"]),
+                shaped,
+                rounds,
+            )
+            unchanged = state_path.read_bytes()
+            try:
+                gate.record_receipt(
+                    foreign_receipt,
+                    expected_digest=DIGEST_A,
+                    state_path=state_path,
+                    evidence_root=shared_vault,
+                )
+            except stab.StabilizationError:
+                check(
+                    "an unexpected terminal effect identity stays rejected",
+                    state_path.read_bytes() == unchanged,
+                )
+            else:
+                raise AssertionError(
+                    "an unexpected terminal effect identity stays rejected"
+                )
+            restored = replace(shaped, effect_id="request-exit", revision=shaped.revision + 1)
+            world.store.save(restored, expected_revision=shaped.revision)
+            terminal = world.record()
         verdicts.append(
             gate.record_receipt(
                 receipt_for(
