@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "release": "2.6.7-rc3",
+  "evidence_id": "E267.RC1.LIVE_STREAK",
+  "lifecycle_subject_sha256": "e0b419fb2a97dde3c4bc321ec170f93997a0063781822caf5d9d81347db9bfd6",
+  "complete": true,
+  "streak": 3,
+  "coordinator_recovery_count": 0,
+  "packaging_boundary": {
+    "live_subject_is_pre_packaging": true,
+    "post_live_subject_paths_changed": [
+      ".claude-plugin/marketplace.json",
+      ".claude-plugin/plugin.json",
+      ".codex-plugin/plugin.json"
+    ],
+    "change": "version carrier 2.6.7-rc2 to 2.6.7-rc3 only",
+    "runtime_code_changed": false
+  },
+  "cells": [
+    {
+      "sequence": 1,
+      "cell_id": "rc1-corridor-run-1",
+      "request_id": "69a043ec-eaac-4e57-8f97-a0504a90bd2a",
+      "executor": "codex/gpt-5.6-terra/medium",
+      "review": "claude/opus/medium",
+      "result": "success",
+      "resource_free": true,
+      "material_cycle": false
+    },
+    {
+      "sequence": 2,
+      "cell_id": "rc1-corridor-run-2",
+      "request_id": "7c66e3dc-7b77-4ee2-89aa-8656d2beab08",
+      "executor": "claude/sonnet/medium",
+      "review": "codex/sol/medium",
+      "result": "success",
+      "resource_free": true,
+      "material_cycle": true,
+      "fix_head": "4fb4a1a86062cbcd674e34cc5bf2f40657441c1f"
+    },
+    {
+      "sequence": 3,
+      "cell_id": "rc1-corridor-run-3",
+      "request_id": "ae021b67-3689-455a-9c29-c02a6c2e7a37",
+      "executor": "codex/gpt-5.6-terra/medium",
+      "review": "claude/opus/medium",
+      "result": "success",
+      "resource_free": true,
+      "material_cycle": true,
+      "fix_head": "7ec4e12767e80a03c766d450f2e1e96cd4cbbc9e"
+    }
+  ],
+  "source": ".vault-meta/acceptance/rc1-streak-state.json"
+}

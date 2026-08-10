@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "release": "2.6.7-rc3",
+  "evidence_id": "E267.RC3.CLEANUP",
+  "lifecycle_subject_sha256": "e0b419fb2a97dde3c4bc321ec170f93997a0063781822caf5d9d81347db9bfd6",
+  "resource_free": true,
+  "user_owned_observers_excluded": true,
+  "inventory": [
+    {
+      "request_id": "a873a187-341f-4037-be78-edb05da1469b",
+      "state": "complete",
+      "revision": 20,
+      "pending_effect": "",
+      "process_group": 0,
+      "process_identity": "",
+      "supervisor_identity": "",
+      "supervisor_pid": 0,
+      "surface_id": ""
+    },
+    {
+      "request_id": "446af38b-9190-4c4f-85ff-13f9582de5f8",
+      "state": "complete",
+      "revision": 20,
+      "pending_effect": "",
+      "process_group": 0,
+      "process_identity": "",
+      "supervisor_identity": "",
+      "supervisor_pid": 0,
+      "surface_id": ""
+    },
+    {
+      "request_id": "b03ead90-fdd1-4f56-ada6-d76417e041e2",
+      "state": "complete",
+      "revision": 20,
+      "pending_effect": "",
+      "process_group": 0,
+      "process_identity": "",
+      "supervisor_identity": "",
+      "supervisor_pid": 0,
+      "surface_id": ""
+    }
+  ],
+  "assertions": {
+    "provider_resources": 0,
+    "process_resources": 0,
+    "supervisor_resources": 0,
+    "review_lane_resources": 0,
+    "worktree_resources": 0,
+    "pending_callback_effects": 0
+  }
+}

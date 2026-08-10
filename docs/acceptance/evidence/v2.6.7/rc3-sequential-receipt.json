@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "release": "2.6.7-rc3",
+  "evidence_id": "E267.RC3.SEQUENTIAL",
+  "lifecycle_subject_sha256": "e0b419fb2a97dde3c4bc321ec170f93997a0063781822caf5d9d81347db9bfd6",
+  "request_id": "a873a187-341f-4037-be78-edb05da1469b",
+  "run_id": "93f9f63c-948b-50a4-8cda-61a26044a3f0",
+  "executor": "codex/gpt-5.6-terra/medium",
+  "review": "claude/claude-opus-5/high",
+  "worktree": "/Users/zak/Projects/worktrees/v267-rc3-golden-stable-topo",
+  "result_page": "V267 RC3 Golden - Terra stable-topo sequential corridor",
+  "final_product_head": "94e6760f916d1b0e3bbf72060357d7509546df9e",
+  "task_summary_sha256": "e5fcf44d2b4eb327dffc9b3ba06c1636d57cacf3e5cb31ebac1c3ee08c7f8339",
+  "accepted_callback_id": "wiki-summary-edfb4bb3f0bf167784fd1b6f",
+  "accepted_callback_sha256": "edfb4bb3f0bf167784fd1b6f72258ad79fca171291b58a9ad11250e2caebddd1",
+  "verification_count": 2,
+  "review_round_count": 2,
+  "material_cycle": true,
+  "terminal_state": "complete",
+  "terminal_effect": "request-exit/succeeded",
+  "resource_free": true,
+  "dashboard_surface_id": "C82292B1-B0AC-4DDC-8590-949E97669E1D",
+  "task_surface_id": "95768D18-2F78-45DA-8C25-AA436C820779",
+  "observer": {
+    "root_scoped": true,
+    "opened_before_provider_start": true,
+    "harness_owned": false,
+    "user_closed": true
+  },
+  "source_artifact_sha256": {
+    "root_operation": "5151755c9e971fed881172f90baf8da2790da8f9f8813011b65dc22925de7588",
+    "finalization_ledger": "c54f2cea0fb472d6042ecaad89cf7d4d71349ae6f71bbfbe962d1934f6c7fc9e",
+    "launch": "cf8b34d3523d8e5427b8f1827b43c308d969befde3d4f37cc3b7943b24b6ce66",
+    "callback_receipt": "d35a5407b85c6092c376671ac0db00d4d9b07171893a2397f0eb9e4fb04be6ba",
+    "resource_closed": "469b0c3593324233df6531049178a1be07a47914622d7653dc8c31c61907955c"
+  }
+}

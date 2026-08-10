@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "release": "2.6.7-rc3",
+  "evidence_id": "E267.RC3.PARALLEL",
+  "lifecycle_subject_sha256": "e0b419fb2a97dde3c4bc321ec170f93997a0063781822caf5d9d81347db9bfd6",
+  "concurrent": true,
+  "launch_deadline_delta_seconds": 0.249912,
+  "roots": [
+    {
+      "request_id": "446af38b-9190-4c4f-85ff-13f9582de5f8",
+      "run_id": "3bd0da62-6707-5127-acbc-2e6df6b19fc0",
+      "executor": "codex/gpt-5.6-terra/medium",
+      "review": "claude/claude-opus-5/high",
+      "worktree": "/Users/zak/Projects/worktrees/v267-rc3-parallel-a-terra-opus",
+      "dashboard_surface_id": "1269A022-3F4D-417A-8A9E-96996B45F7BF",
+      "task_surface_id": "B375AA47-16A6-47D8-A76F-C2F7F4389127",
+      "launch_deadline_at": 1786400130.044062,
+      "final_product_head": "6c108e854b6340b4dc42047cb98ec15620ad42ac",
+      "task_summary_sha256": "a2684f80e8a8163a2ffe4b5658cf6de8afe4d0fa76291edadbff806dc9528ca3",
+      "accepted_callback_sha256": "4aaf6860117f676af40c0921f32477c37c1141b81863870d6d3399ccfde38f10",
+      "verification_count": 1,
+      "review_round_count": 1,
+      "material_cycle": false,
+      "terminal_state": "complete",
+      "terminal_effect": "request-exit/succeeded",
+      "resource_free": true,
+      "source_artifact_sha256": {
+        "root_operation": "6ffcaf8e249fa44af4f2623b9a478b9826ff1feb3589ea91b7a684be9970feb8",
+        "finalization_ledger": "c037efab125e8413b427c99ab7623643444e0a1e126245944bc59a4c1ece7a8d",
+        "launch": "f972db290f3482b2e8a09330ca72512f876e904b8f195ad301b8456043cc637d",
+        "callback_receipt": "eec84d18417c2e96555ead65f2db6b5d8acd79f6f75590048c77fc5feda07f34",
+        "resource_closed": "d6d04f764736f929f3d51c2b9c02b9f57bc23c4e9e4657364cb193b3d8ac148f"
+      }
+    },
+    {
+      "request_id": "b03ead90-fdd1-4f56-ada6-d76417e041e2",
+      "run_id": "6e0122ff-249d-551e-8616-c8c28bdce40b",
+      "executor": "claude/sonnet/medium",
+      "review": "codex/gpt-5.6-sol/high",
+      "worktree": "/Users/zak/Projects/worktrees/v267-rc3-parallel-b-sonnet-sol",
+      "dashboard_surface_id": "36D6B16F-AD3E-418A-A417-0BBFD7631490",
+      "task_surface_id": "F34781BF-78D5-4D9F-9109-A748B6FF1680",
+      "launch_deadline_at": 1786400130.293974,
+      "final_product_head": "de0238c03465e0d195c76999de2c0375aadff63d",
+      "task_summary_sha256": "e3885491b87404972d0f40e186295f9331baf48d1cfd36d007b827f83d8f8ea7",
+      "accepted_callback_sha256": "0ec172e5dc612c4c74b064238c6ac6a63062e60530acc7c446f9a8d38c6556e6",
+      "verification_count": 2,
+      "review_round_count": 2,
+      "material_cycle": true,
+      "terminal_state": "complete",
+      "terminal_effect": "request-exit/succeeded",
+      "resource_free": true,
+      "source_artifact_sha256": {
+        "root_operation": "b8d83054ace2c89ae3e1b397d32f5be91b56db88644975ce1ac2c30e3588bc87",
+        "finalization_ledger": "8cd1583fd9374ecb065858f08bfdbfb198e8af9d88a4bfe3016eb1f6997b6740",
+        "launch": "6b381abf40843951a10fc96465fc21b05024f9ddf7577fe82037ee8a5194c40d",
+        "callback_receipt": "f055eca066bf3680f7ebbb29b56735151b66a2abb066cb43999b9e32a6a3e47c",
+        "resource_closed": "f9d6efcf9b0984d4fdce52f948535f6467b2b8acd5f05f1ca449dd94f3ae047f"
+      }
+    }
+  ],
+  "identity_checks": {
+    "distinct_request_ids": true,
+    "distinct_run_ids": true,
+    "distinct_worktrees": true,
+    "distinct_task_surfaces": true,
+    "distinct_dashboard_surfaces": true,
+    "opposite_executor_runtimes": true,
+    "opposite_review_runtimes": true
+  }
+}

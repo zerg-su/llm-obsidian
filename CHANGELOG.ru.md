@@ -16,13 +16,26 @@
 внутренними контрольными точками и вошли в следующие публичные релизы; тегов и
 пакетов с этими номерами не выпускалось.
 
-## [2.6.7-rc3] — Unreleased
+## [2.6.7-rc3] — 2026-08-11
 
-Ограниченные ремонты acceptance-коридора RC3 вместе с их scope-реконсиляцией;
-без нового pipeline- или dashboard-поведения.
+Финальный стабилизационный кандидат поддерживаемого коридора
+`engineering/change`. RC3 пакует найденные live acceptance ремонты и
+привязывает три последовательных cell, golden-run и две параллельные
+opposite-runtime линии к одному behavioral digest.
 
 ### Исправлено
 
+- Executor публикует владение процессом до semantic startup, а доставка prompt
+  и одно ограниченное восстановление submit остаются привязаны к identity и
+  digest.
+- Review drive распознаёт все живые состояния bound round и связывает failure
+  receipt с точным cycle, не создавая ложный `attention-required`.
+- После findings новый review не стартует до exact-HEAD verification; ошибочный
+  review resolution получает не более двух попыток коррекции тем же executor.
+- Live success authority принимает terminal cleanup effect, а RC1 gate умеет
+  закрыть never-launched reservation по durable negative evidence.
+- Wikilink-подобный reviewer prose экранируется в archive, а archive replay
+  восстанавливается после ремонта renderer.
 - Рендеринг reap-записи лога усекает длинные summary, не разрезая и не
   оставляя незакрытый wikilink, а зарегистрированный одноразовый
   `reap-log-repair` через `scripts/vault-write.py` заменяет ровно один
@@ -35,12 +48,22 @@
 
 ### Изменено
 
+- Review prompt содержит точный номер итерации, а Claude prompt передаётся
+  через digest-bound pointer.
 - Потолки `tests/rc4_scope_ratchet.py` подняты ровно до 273 файлов / 95 891
   строк для принятых RC3-ремонтов review-коридора, ограниченной коррекции
   resolution и планировщика reap-log-repair; без запасного headroom.
 - `config/code-quality-baseline.json` берёт во владение file-lines hotspot
   `runtime_worker_review_bridge.py` с RC3-регрессионными доказательствами;
   логика коррекции resolution вынесена в callback I/O.
+
+### Проверено
+
+- Три последовательных cheap-model RC1 cell завершились на digest
+  `e0b419fb...`, включая два настоящих findings/fix/re-verify/re-review цикла.
+- После свежего Terra/Opus High golden-run одновременно завершились
+  Terra/Opus High и Sonnet/Sol High; все три root освобождены от Harness-owned
+  ресурсов и получили отдельные root-scoped observer split.
 
 ## [2.6.7-rc2] — 2026-08-10
 

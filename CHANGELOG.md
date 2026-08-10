@@ -10,13 +10,26 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
-## [2.6.7-rc3] - Unreleased
+## [2.6.7-rc3] - 2026-08-11
 
-Bounded RC3 acceptance-corridor repairs with their scope reconciliation; no
-new pipeline or dashboard behavior.
+Final stabilization candidate for the supported `engineering/change`
+corridor. RC3 packages the lifecycle repairs found by live acceptance and
+binds three consecutive sequential cells plus sequential and parallel
+opposite-runtime dogfood to one behavioral digest.
 
 ### Fixed
 
+- Executors publish process ownership before semantic startup, while prompt
+  delivery and one bounded submit recovery remain identity- and digest-bound.
+- Review drive recovery recognizes every live bound round state and scopes
+  failure receipts by exact cycle, avoiding false `attention-required` latches.
+- A product HEAD changed by findings cannot start review until exact-HEAD
+  verification succeeds; malformed review resolutions get at most two
+  same-executor correction attempts instead of terminating the corridor.
+- Live success authority accepts the terminal cleanup effect, and the RC1 gate
+  can close a reserved never-launched claim from durable negative evidence.
+- Wikilink-shaped reviewer prose is escaped in archives and archive replay can
+  recover after a renderer repair.
 - Reap log rendering truncates long summaries without splitting or orphaning
   a wikilink, and the registered one-shot `reap-log-repair` through
   `scripts/vault-write.py` replaces exactly one malformed top reap block
@@ -28,12 +41,22 @@ new pipeline or dashboard behavior.
 
 ### Changed
 
+- Review prompts carry the exact round iteration and Claude prompt bodies are
+  delivered through digest-bound pointers.
 - `tests/rc4_scope_ratchet.py` ceilings raised to exactly 273 files / 95,891
   lines for the accepted RC3 review-corridor repairs, bounded resolution
   correction, and the reap-log-repair planner; no blanket headroom.
 - `config/code-quality-baseline.json` owns the
   `runtime_worker_review_bridge.py` file-lines hotspot with RC3 regression
   evidence; the resolution correction logic is kept in callback I/O instead.
+
+### Verified
+
+- Three consecutive cheap-model RC1 cells completed on lifecycle digest
+  `e0b419fb...`, including two real findings/fix/re-verify/re-review cycles.
+- A fresh sequential Terra/Opus High golden run completed before two concurrent
+  Terra/Opus High and Sonnet/Sol High roots; all three roots reaped with zero
+  Harness-owned resources and distinct root-scoped observer splits.
 
 ## [2.6.7-rc2] - 2026-08-10
 
