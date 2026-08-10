@@ -18,6 +18,11 @@ class RuntimeWorkerLoopMixin:
             self.inspect_research()
         else:
             self.inspect_callback()
+            inspect_rejections = getattr(
+                self, "inspect_submit_rejections", None
+            )
+            if inspect_rejections is not None:
+                inspect_rejections()
 
     def tick_observers(self) -> None:
         wall_clock = getattr(self, "wall_clock", time.time)

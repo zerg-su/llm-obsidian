@@ -27,6 +27,7 @@ test-harness:
 	@echo "=== harness contracts and replay regressions ==="
 	@$(MAKE) --no-print-directory test-lifecycle-simulator
 	@python3 tests/harness/test_contracts.py
+	@python3 tests/harness/test_review_submit_corrections.py
 	@python3 tests/harness/test_contract_boundaries.py
 	@python3 tests/harness/test_contract_state_edge_matrix.py
 	@python3 tests/harness/test_continuation_delivery.py

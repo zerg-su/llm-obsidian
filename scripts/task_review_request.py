@@ -152,6 +152,7 @@ def _prompt(
     context: ReviewContext,
     axis: str,
     verification: bool,
+    verification_iteration: int = 0,
 ) -> str:
     responsibility = review_axis_responsibility(axis)
     name = (
@@ -300,7 +301,9 @@ def _prompt(
                     "Git query; direct Git or shell composition is not permitted."
                 ),
                 "Do not run cd or copy packet files; they are readable in place.",
-                *round_schema_lines(),
+                *round_schema_lines(
+                    verification_iteration=verification_iteration
+                ),
                 f"Write that exact JSON to `{review_input}`.",
                 "Then submit it through this exact command:",
                 "",

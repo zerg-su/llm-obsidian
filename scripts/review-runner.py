@@ -288,7 +288,7 @@ def _materialize_prompts(
                 "Read those pointers, inspect the exact product HEAD, and do not edit it.",
                 "Use Read, Glob, and Grep with absolute paths for inspection.",
                 "Do not run cd or copy packet files; they are readable in place.",
-                *round_schema_lines(),
+                *round_schema_lines(verification_iteration=0),
                 "",
                 f"Write the JSON to this exact scratch file: `{review_input}`.",
                 "Then run this exact scratch-only command:",

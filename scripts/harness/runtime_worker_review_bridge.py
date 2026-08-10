@@ -490,7 +490,38 @@ class RuntimeWorkerReviewBridgeMixin:
                     )
                     or parent.run_id != run_id
                     or parent.lane_id != lane_id
-                    or parent.state not in {"awaiting-callback", "finalizing"}
+                ):
+                    return False
+                launch_in_progress = (
+                    parent.state in {"preflight", "starting", "running"}
+                    or parent.pending_effect == "start-provider"
+                )
+                if launch_in_progress:
+                    # The exact bound reviewer is still inside its launch
+                    # window; readiness may not exist yet, but a failed
+                    # handshake already published stays fail-closed.
+                    ready_path = (
+                        Path(self.store.root)
+                        / "owners"
+                        / self.spec["owner_id"]
+                        / "runtime"
+                        / operation_id
+                        / "ready.json"
+                    )
+                    if ready_path.is_symlink():
+                        return False
+                    if ready_path.is_file():
+                        early = json.loads(
+                            ready_path.read_text(encoding="utf-8")
+                        )
+                        if (
+                            not isinstance(early, dict)
+                            or early.get("status") != "ready"
+                        ):
+                            return False
+                    continue
+                if (
+                    parent.state not in {"awaiting-callback", "finalizing"}
                     or parent.pending_effect
                 ):
                     return False

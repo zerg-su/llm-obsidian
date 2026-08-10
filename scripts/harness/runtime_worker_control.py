@@ -266,6 +266,163 @@ class RuntimeWorkerControlMixin:
                 pass
             self.publish_error_latch("callback-invalid")
 
+    def inspect_submit_rejections(self) -> None:
+        """Drive one bounded correction for a durably rejected review input.
+
+        Callback/schema repair is a separate mechanism loop from semantic
+        finalization cycles: while the exact reviewer session identity is
+        live, each new rejection receipt consumes one existing reviewer
+        attempt through the supervisor boundary and sends one idempotent
+        correction prompt telling the same session to edit only the existing
+        ``.review-input.json`` and rerun the exact submit command — never the
+        original review prompt, never a new provider cycle.  Exhaustion of
+        the attempt budget, a dead or mismatched session, a changed HEAD, or
+        unreadable metadata stays fail-closed attention-required.
+        """
+
+        operation = getattr(self, "operation", None)
+        if (
+            operation is None
+            or operation.spec.route.profile != "reviewer-callback"
+        ):
+            return
+        try:
+            target = _callback_target(self.spec)
+        except RuntimeWorkerError:
+            return
+        _generation, operation_id, run_id, callback_path = target
+        rejections = callback_path.parent / ".review-submit-rejections"
+        if rejections.is_symlink() or not rejections.is_dir():
+            return
+        receipts = sorted(
+            path
+            for path in rejections.glob("*.json")
+            if not path.name.startswith(".") and not path.is_symlink()
+        )
+        if not receipts:
+            return
+        latest_path = receipts[-1]
+        try:
+            latest = json.loads(latest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return
+        if not isinstance(latest, dict) or latest.get("status") != "rejected":
+            return
+        marker = callback_path.parent / f".correction-{latest_path.stem}.json"
+        if marker.is_symlink():
+            self.summary_attention(
+                "review-submit-correction-receipt-invalid",
+                AttentionReason.ATTENTION_REQUIRED,
+            )
+            return
+        if marker.is_file():
+            try:
+                existing = json.loads(marker.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                existing = {}
+            if existing.get("status") == "sent":
+                return
+        record = self.store.read(
+            self.spec["owner_id"], self.spec["operation_id"]
+        )
+        if len(receipts) >= record.attempt_limit:
+            self.summary_attention(
+                "review-submit-rejections-exhausted",
+                AttentionReason.RETRY_EXHAUSTED,
+            )
+            return
+        handle = getattr(self, "handle", None)
+        process = getattr(self, "process", None)
+        if (
+            handle is None
+            or process is None
+            or process.process_status(
+                handle.process_group, handle.process_identity
+            )
+            != "alive"
+        ):
+            self.summary_attention(
+                "review-submit-correction-session-dead",
+                AttentionReason.ATTENTION_REQUIRED,
+            )
+            return
+        meta_path = callback_path.parent / ".review-meta.json"
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            meta = None
+        if (
+            not isinstance(meta, dict)
+            or meta.get("operation_id") != operation_id
+            or meta.get("run_id") != run_id
+            or not isinstance(meta.get("worktree"), str)
+        ):
+            self.summary_attention(
+                "review-submit-correction-identity",
+                AttentionReason.ATTENTION_REQUIRED,
+            )
+            return
+        head_result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=meta["worktree"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if (
+            head_result.returncode
+            or head_result.stdout.strip() != meta.get("head_sha")
+        ):
+            self.summary_attention(
+                "review-submit-correction-head-drift",
+                AttentionReason.CONTRACT_DRIFT,
+            )
+            return
+        try:
+            OperationSupervisor(
+                self.store,
+                self.spec["owner_id"],
+                self.spec["operation_id"],
+            ).consume_attempt()
+        except SupervisorError:
+            self.summary_attention(
+                "review-submit-rejections-exhausted",
+                AttentionReason.RETRY_EXHAUSTED,
+            )
+            return
+        receipt_fields = {
+            "schema_version": 1,
+            "rejection": latest_path.name,
+            "input_sha256": str(latest.get("input_sha256") or ""),
+            "attempt": latest.get("attempt"),
+            "error_code": str(latest.get("error_code") or ""),
+        }
+        _atomic_json(marker, {**receipt_fields, "status": "pending"})
+        input_path = callback_path.parent / ".review-input.json"
+        submit = shlex.join(
+            (
+                str(Path(sys.executable).resolve()),
+                str(self.trusted_vault / "scripts/harness/review_submit.py"),
+                "--worktree",
+                str(meta["worktree"]),
+                "--state-dir",
+                str(callback_path.parent),
+                "--input-file",
+                str(input_path),
+            )
+        )
+        message = (
+            "Correction: your review submission was rejected "
+            f"({latest.get('error_code')}): {str(latest.get('error') or '')[:200]} "
+            f"Expected {latest.get('expected')!r}, actual {latest.get('actual')!r}. "
+            f"Edit only the existing `{input_path}` so it satisfies the stated "
+            "contract - change nothing else and do not restart the review - "
+            f"then rerun exactly: {submit}"
+        )
+        self.cmux_adapter.send(self.spec["surface_id"], message)
+        self.cmux_adapter.send_key(self.spec["surface_id"], "Enter")
+        _atomic_json(marker, {**receipt_fields, "status": "sent"})
+
     def summary_attention(
         self,
         status: str,

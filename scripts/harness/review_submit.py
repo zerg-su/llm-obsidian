@@ -53,16 +53,28 @@ FINDING_FIELDS: tuple[str, ...] = (
 ROUND_STRING_FIELDS: tuple[str, ...] = ("axis", "verdict")
 
 
-def round_schema_lines() -> tuple[str, ...]:
+def round_schema_lines(
+    *, verification_iteration: int | None = None
+) -> tuple[str, ...]:
     """Render the enforced round schema as reviewer-facing prompt lines.
 
     Keys and enforced value vocabularies both come from the code that rejects
     them, so a reviewer cannot satisfy the key set and still fail on a value.
+    When the caller knows the authoritative ``verification_iteration`` for
+    the round it is stated as an exact integer, so a reviewer never has to
+    infer it from surrounding fix-cycle context.
     """
 
     def names(fields: Iterable[str]) -> str:
         return ", ".join(f"`{field}`" for field in fields)
 
+    iteration_lines: tuple[str, ...] = ()
+    if verification_iteration is not None:
+        iteration_lines = (
+            "`verification_iteration` is exactly "
+            f"`{verification_iteration}` for this round; use that integer "
+            "verbatim.",
+        )
     return (
         f"Return exactly one review-round JSON object with fields: {names(ROUND_FIELDS)}.",
         f"Each finding has {names(FINDING_FIELDS)}.",
@@ -71,11 +83,25 @@ def round_schema_lines() -> tuple[str, ...]:
         f"`severity` is exactly one of {names(sorted(SEVERITIES))}.",
         "`line` is null or a positive integer, and `schema_version` is `1`.",
         "A `verdict` of `approve` cannot carry a `critical` or `important` finding.",
+        *iteration_lines,
     ) + finding_constraint_lines()
 
 
 class ReviewSubmitError(ValueError):
-    pass
+    """A rejected submission, optionally typed for the correction loop."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        error_code: str = "invalid-review-submission",
+        expected: object = None,
+        actual: object = None,
+    ) -> None:
+        super().__init__(message)
+        self.error_code = error_code
+        self.expected = expected
+        self.actual = actual
 
 
 class ReviewCallbackPort(Protocol):
@@ -144,7 +170,12 @@ def _round_result(raw: str, meta: dict[str, Any]) -> ReviewResult:
         or iteration != meta.get("verification_iteration")
     ):
         raise ReviewSubmitError(
-            "review round iteration does not match metadata"
+            "review round iteration does not match metadata "
+            f"(expected {meta.get('verification_iteration')!r}, "
+            f"actual {iteration!r})",
+            error_code="verification-iteration-mismatch",
+            expected=meta.get("verification_iteration"),
+            actual=iteration,
         )
     raw_findings = value.get("findings")
     if not isinstance(raw_findings, list) or len(raw_findings) > 50:
@@ -241,6 +272,53 @@ def submit_review(
     return envelope
 
 
+def _record_rejection(state_dir: Path, raw: str, exc: Exception) -> None:
+    """Durably key one rejection by operation, input hash, and attempt.
+
+    Resubmitting identical bytes reuses the existing receipt instead of
+    consuming another attempt; a corrected input hashes differently and
+    receives the next attempt number.  Receipts are bounded, content-free
+    beyond the typed error fields, and never overwritten.
+    """
+
+    if not raw:
+        return
+    try:
+        meta = json.loads(
+            (state_dir / ".review-meta.json").read_text(encoding="utf-8")
+        )
+    except (OSError, json.JSONDecodeError):
+        meta = {}
+    if not isinstance(meta, dict):
+        meta = {}
+    input_sha256 = hashlib.sha256(raw.encode()).hexdigest()
+    rejections = state_dir / ".review-submit-rejections"
+    rejections.mkdir(parents=True, exist_ok=True, mode=0o700)
+    existing = sorted(rejections.glob("*.json"))
+    for path in existing:
+        try:
+            prior = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(prior, dict) and prior.get("input_sha256") == input_sha256:
+            return
+    attempt = len(existing) + 1
+    receipt = {
+        "schema_version": 1,
+        "status": "rejected",
+        "operation_id": str(meta.get("operation_id") or ""),
+        "run_id": str(meta.get("run_id") or ""),
+        "axis": str(meta.get("axis") or ""),
+        "input_sha256": input_sha256,
+        "attempt": attempt,
+        "error_code": getattr(exc, "error_code", "invalid-review-submission"),
+        "error": str(exc)[:500],
+        "expected": getattr(exc, "expected", None),
+        "actual": getattr(exc, "actual", None),
+    }
+    atomic_json(rejections / f"{input_sha256[:12]}-a{attempt}.json", receipt)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--worktree", type=Path, required=True)
@@ -284,6 +362,10 @@ def main() -> int:
         ReviewSubmitError,
         ValueError,
     ) as exc:
+        try:
+            _record_rejection(state_dir, raw if "raw" in dir() else "", exc)
+        except OSError:
+            pass
         print(f"review-submit: invalid outbox: {exc}", file=sys.stderr)
         return 3
     print(
