@@ -933,6 +933,107 @@ ISSUES (1)
         and long_root_line.startswith("● ACTIVE Human-readable"),
     )
 
+    cli_width_projection = replace(
+        root_projection,
+        programs=(
+            replace(
+                root_program,
+                task_name=(
+                    "Human-readable terminal dashboard corrective visual "
+                    "rework candidate with a deliberately long task name"
+                ),
+            ),
+        ),
+        issues=(),
+    )
+    cli_width_frames: dict[tuple[int, bool], str] = {}
+    cli_width_samples: dict[tuple[int, bool], int] = {}
+    cli_width_codes: dict[tuple[int, bool], int] = {}
+    cli_width_spec = importlib.util.spec_from_file_location(
+        "harness_dashboard_cli_width_red",
+        ROOT / "scripts" / "harness-dashboard.py",
+    )
+    assert cli_width_spec is not None and cli_width_spec.loader is not None
+    cli_width_script = importlib.util.module_from_spec(cli_width_spec)
+    sys.modules[cli_width_spec.name] = cli_width_script
+    cli_width_spec.loader.exec_module(cli_width_script)
+    original_project_root = cli_width_script.project_root
+    cli_width_script.project_root = lambda *_args, **_kwargs: cli_width_projection
+    try:
+        for columns in (80, 120):
+            for color in (False, True):
+                size_samples: list[os.terminal_size] = []
+                output: list[str] = []
+
+                def terminal_size_probe(
+                    width: int = columns,
+                ) -> os.terminal_size:
+                    size = os.terminal_size((width, 6))
+                    size_samples.append(size)
+                    return size
+
+                values = [
+                    "--store",
+                    str(store_root),
+                    "--root",
+                    root_program.operation_id,
+                ]
+                if not color:
+                    values.append("--no-color")
+                try:
+                    cli_width_codes[(columns, color)] = cli_width_script.main(
+                        values,
+                        inventory_probe=lambda **_kwargs: None,
+                        sleeper=lambda _interval: (_ for _ in ()).throw(
+                            KeyboardInterrupt()
+                        ),
+                        output=output.append,
+                        tty_probe=lambda: True,
+                        terminal_size=terminal_size_probe,
+                        clock=lambda: 3_723.0,
+                    )
+                except TypeError:
+                    cli_width_codes[(columns, color)] = -1
+                cli_width_samples[(columns, color)] = len(size_samples)
+                cli_width_frames[(columns, color)] = (
+                    output[0].removeprefix(cli_width_script.CLEAR)
+                    if len(output) == 1
+                    else ""
+                )
+    finally:
+        cli_width_script.project_root = original_project_root
+
+    cli_width_plain = {
+        columns: cli_width_frames[(columns, False)]
+        for columns in (80, 120)
+    }
+    cli_width_colored = {
+        columns: cli_width_frames[(columns, True)]
+        for columns in (80, 120)
+    }
+    regression_check(
+        "the live root CLI samples one terminal size and wires 80 and 120 column priority",
+        all(code == 0 for code in cli_width_codes.values())
+        and all(count == 1 for count in cli_width_samples.values())
+        and all(
+            len(frame.splitlines()) <= 6
+            and all(len(line) <= columns for line in frame.splitlines())
+            and root_program.operation_id[:8] in frame
+            and "Review candidate" in frame
+            and "Viewport truncated +" in frame
+            for columns, frame in cli_width_plain.items()
+        )
+        and all(
+            ansi.search(cli_width_plain[columns]) is None
+            and ansi.search(cli_width_colored[columns]) is not None
+            and ansi.sub("", cli_width_colored[columns])
+            == cli_width_plain[columns]
+            for columns in (80, 120)
+        )
+        and max(map(len, cli_width_plain[80].splitlines())) == 80
+        and max(map(len, cli_width_plain[120].splitlines())) > 80,
+    )
+
     captured = io.StringIO()
     with redirect_stdout(captured):
         code = cli_main(
@@ -1403,6 +1504,53 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-terminal-truth.") as 
                 issue.code == f"terminal-{terminal}"
                 for issue in projection.issues
             ),
+        )
+        later_frontier = (
+            replace(steps[0], status="complete"),
+            replace(
+                steps[1],
+                status="stopped",
+                evidence_issue="interrupted-frontier-evidence",
+            ),
+            *(
+                replace(step, status="pending", evidence_issue="")
+                for step in steps[2:]
+            ),
+        )
+        frontier_projection = replace(
+            projection,
+            programs=(
+                replace(projection.programs[0], steps=later_frontier),
+            ),
+        )
+        frontier_plain = render(
+            frontier_projection,
+            scope="root",
+            columns=100,
+        )
+        frontier_colored = render(
+            frontier_projection,
+            scope="root",
+            columns=100,
+            color=True,
+        )
+        stopped_line = next(
+            line for line in frontier_plain.splitlines() if "Verify" in line
+        )
+        future_line = next(
+            line for line in frontier_plain.splitlines() if "Review" in line
+        )
+        colored_stopped_line = next(
+            line for line in frontier_colored.splitlines() if "Verify" in line
+        )
+        regression_check(
+            f"a {terminal} root expands its stopped frontier before future pending work",
+            "stopped  time unavailable" in stopped_line
+            and "interrupted-frontier-evidence" in frontier_plain
+            and "pending" in future_line
+            and "time unavailable" not in future_line
+            and "\x1b[1m" in colored_stopped_line
+            and ansi.sub("", frontier_colored) == frontier_plain,
         )
 
 with tempfile.TemporaryDirectory(prefix="harness-dashboard-tree.") as raw:
@@ -3312,6 +3460,46 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-time.") as raw:
         reaped.programs[0].timing.mode == "duration"
         and reaped.programs[0].timing.seconds == 300
         and reaped.programs[0].task_name == "dashboard-reaped-task",
+    )
+
+    session_path = runtime / "session.json"
+    direct_session = session_path.read_text(encoding="utf-8")
+    cwd_parent_alias = Path(raw) / "cwd-parent-alias"
+    cwd_parent_alias.symlink_to(vault, target_is_directory=True)
+    session = json.loads(direct_session)
+    session["cwd"] = str(cwd_parent_alias / reaped_worktree.name)
+    session_path.write_text(
+        json.dumps(session, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    cwd_parent_projection = project_root(
+        store_root,
+        reaped_root,
+        observed_at=1_800_000_000.0,
+    )
+    session_path.write_text(direct_session, encoding="utf-8")
+    cwd_parent_alias.unlink()
+    regression_check(
+        "task timing rejects a symlinked parent above the original session cwd",
+        cwd_parent_projection.programs[0].timing.mode == "unknown"
+        and cwd_parent_projection.programs[0].task_name == "unknown",
+    )
+
+    store_parent_alias = Path(raw) / "store-parent-alias"
+    store_parent_alias.symlink_to(vault, target_is_directory=True)
+    store_parent_rejected = False
+    try:
+        project_root(
+            store_parent_alias / ".vault-meta" / "harness",
+            reaped_root,
+            observed_at=1_800_000_000.0,
+        )
+    except ValueError:
+        store_parent_rejected = True
+    store_parent_alias.unlink()
+    regression_check(
+        "projection rejects a symlinked parent above the original store boundary",
+        store_parent_rejected,
     )
 
     review_root = "dashboard-review-summary-root"
