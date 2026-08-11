@@ -42,6 +42,9 @@ RFC3339 = re.compile(
     r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}"
     r"(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})\Z"
 )
+NUMERIC_EPOCH = re.compile(
+    r"(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?\Z"
+)
 
 
 def absolute_path_is_safe(path: Path | str) -> bool:
@@ -108,6 +111,21 @@ def _rfc3339_epoch(value: object) -> float | None:
         return None
     try:
         result = datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+    except (OverflowError, ValueError):
+        return None
+    return result if math.isfinite(result) and result >= 0 else None
+
+
+def _verification_epoch(value: object) -> float | None:
+    """Parse one canonical verification timestamp without weakening RFC 3339."""
+
+    rfc3339 = _rfc3339_epoch(value)
+    if rfc3339 is not None:
+        return rfc3339
+    if not isinstance(value, str) or NUMERIC_EPOCH.fullmatch(value) is None:
+        return None
+    try:
+        result = float(value)
     except (OverflowError, ValueError):
         return None
     return result if math.isfinite(result) and result >= 0 else None
@@ -239,6 +257,10 @@ def root_task_name(store: OperationStore, record: OperationRecord) -> str:
         or not value.strip()
         or not value.isascii()
         or len(value) > 160
+        or any(
+            ord(char) < 0x20 or 0x7F <= ord(char) <= 0x9F
+            for char in value
+        )
     ):
         return ""
     return " ".join(value.split())
@@ -589,8 +611,8 @@ def verification_receipt_timing(
             if not isinstance(row, Mapping):
                 receipt_intervals = []
                 break
-            start = _rfc3339_epoch(row.get("started_at"))
-            end = _rfc3339_epoch(row.get("finished_at"))
+            start = _verification_epoch(row.get("started_at"))
+            end = _verification_epoch(row.get("finished_at"))
             if start is None or end is None or end < start or end > observed:
                 receipt_intervals = []
                 break

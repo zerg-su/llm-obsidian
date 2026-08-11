@@ -139,6 +139,23 @@ def _clip(value: str, width: int = DIAGNOSTIC_COLUMNS) -> str:
     return value[: width - 3] + "..."
 
 
+def _fit_named_suffix(
+    prefix: str,
+    name: str,
+    suffix: str,
+    width: int,
+) -> str:
+    """Fit a semantic row by shortening its lower-priority name first."""
+
+    line = f"{prefix}{name}{suffix}"
+    if len(line) <= width:
+        return line
+    available = width - len(prefix) - len(suffix)
+    if available < 4:
+        return line
+    return f"{prefix}{name[: available - 3]}...{suffix}"
+
+
 def _route(route: RouteView) -> str:
     return (
         f"{route.runtime}/{route.model}/{route.effort}  preset {route.preset}"
@@ -586,7 +603,11 @@ def _root_summary(program: ProgramView) -> list[str]:
     ]
 
 
-def _root_step_lines(program: ProgramView) -> list[str]:
+def _root_step_lines(
+    program: ProgramView,
+    *,
+    width: int = ROOT_COLUMNS,
+) -> list[str]:
     current = _current_step(program)
     lines: list[str] = []
     for index, step in enumerate(program.steps):
@@ -602,9 +623,15 @@ def _root_step_lines(program: ProgramView) -> list[str]:
         timing = _compact_timing(
             step.status, step.timing, current=step is current
         )
-        suffix = f"  {timing}" if timing else ""
+        prefix = f"  {branch} {marker} "
+        suffix = f"  {step.status}" + (f"  {timing}" if timing else "")
         lines.append(
-            f"  {branch} {marker} {_human(step.step_id)}  {step.status}{suffix}"
+            _fit_named_suffix(
+                prefix,
+                _human(step.step_id),
+                suffix,
+                width,
+            )
         )
         if step is not current:
             continue
@@ -678,6 +705,7 @@ def _root_lines(
     projection: DashboardProjection,
     *,
     recent: int,
+    width: int = ROOT_COLUMNS,
 ) -> list[str]:
     lines = _root_header(projection)
     if not projection.programs:
@@ -699,7 +727,7 @@ def _root_lines(
             projection.programs[0],
         )
         lines.extend(_root_summary(main))
-        lines.extend(_root_step_lines(main))
+        lines.extend(_root_step_lines(main, width=width))
     lines.append("")
     lines.extend(
         ["RECENT", "  none"]
@@ -830,7 +858,9 @@ def render(
     default_width = ROOT_COLUMNS if scope == "root" else DIAGNOSTIC_COLUMNS
     width = min(max(columns or default_width, 20), MAX_LINE)
     lines = (
-        _bounded_root_lines(_root_lines(projection, recent=recent), rows)
+        _bounded_root_lines(
+            _root_lines(projection, recent=recent, width=width), rows
+        )
         if scope == "root"
         else _diagnostic_lines(
             projection, recent=recent, rows=rows, scope=scope

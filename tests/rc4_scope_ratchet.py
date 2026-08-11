@@ -191,6 +191,13 @@ sampled terminal width through the live CLI, and rejects original store,
 evidence, and session-CWD paths containing any symlink component before
 resolution. The line ceiling moves exactly to 96,905; the 273-file ceiling
 remains unchanged and no speculative headroom is added.
+
+The final Sol findings correction adds no production Python file. Its measured
+52-line delta accepts the verification producer's canonical numeric epochs,
+rejects terminal controls in bound task names, and truncates long current-step
+names before their state and timing suffix. The line ceiling moves exactly to
+96,957; the 273-file ceiling remains unchanged and no speculative headroom is
+added.
 """
 
 from __future__ import annotations
@@ -202,7 +209,7 @@ from pathlib import Path
 SCRIPT_FILE_CEILING = 273
 
 #: Maximum total lines across those files for the 2.6.7 RC4 candidate.
-SCRIPT_LINE_CEILING = 96_905
+SCRIPT_LINE_CEILING = 96_957
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:
