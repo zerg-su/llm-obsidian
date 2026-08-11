@@ -7,6 +7,7 @@ import json
 import math
 import os
 import re
+import stat
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping
@@ -50,7 +51,15 @@ NUMERIC_EPOCH = re.compile(
 def absolute_path_is_safe(path: Path | str) -> bool:
     """Reject any symlink in one original absolute path before resolving it."""
 
-    path = Path(os.path.abspath(Path(path).expanduser()))
+    original = Path(path).expanduser()
+    # Normalization is lexical: it collapses `..` before any component is
+    # inspected, so `<symlink>/../target` would erase the very symlink this
+    # walk exists to reject while the kernel still traverses it.  A raw
+    # absolute path carrying `..` therefore fails closed instead of being
+    # validated as a path nothing will ever open.
+    if original.is_absolute() and ".." in original.parts:
+        return False
+    path = Path(os.path.abspath(original))
     current = Path(path.anchor)
     try:
         if current.is_symlink():
@@ -67,27 +76,64 @@ def absolute_path_is_safe(path: Path | str) -> bool:
 def _evidence_path_is_safe(path: Path, boundary: Path) -> bool:
     """Reject out-of-boundary paths and symlinks from anchor through leaf."""
 
-    path = Path(os.path.abspath(path.expanduser()))
+    if not absolute_path_is_safe(path):
+        return False
+    normalized = Path(os.path.abspath(path.expanduser()))
     boundary = Path(os.path.abspath(boundary.expanduser()))
     try:
-        path.relative_to(boundary)
+        normalized.relative_to(boundary)
     except ValueError:
         return False
-    return absolute_path_is_safe(path)
+    return True
 
 
-def _read_object(path: Path, *, boundary: Path) -> dict[str, Any] | None:
+def _read_snapshot(
+    path: Path, *, boundary: Path
+) -> tuple[dict[str, Any], bytes] | None:
+    """Read one JSON object and its exact bytes from a single opened file.
+
+    Callers that also need a digest must not read the file twice: an atomic
+    replacement between two reads would pair one revision's values with
+    another revision's hash.  One descriptor keeps the mapping and its bytes
+    describing the same revision, and the no-symlink and regular-file checks
+    apply to the file that is actually read.
+    """
+
     if (
         not _evidence_path_is_safe(path, boundary)
         or not path.is_file()
         or path.is_symlink()
     ):
         return None
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        descriptor = os.open(path, flags)
+    except OSError:
         return None
-    return value if isinstance(value, dict) else None
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            return None
+        chunks: list[bytes] = []
+        while True:
+            chunk = os.read(descriptor, 1 << 16)
+            if not chunk:
+                break
+            chunks.append(chunk)
+    except OSError:
+        return None
+    finally:
+        os.close(descriptor)
+    raw = b"".join(chunks)
+    try:
+        value = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    return (value, raw) if isinstance(value, dict) else None
+
+
+def _read_object(path: Path, *, boundary: Path) -> dict[str, Any] | None:
+    snapshot = _read_snapshot(path, boundary=boundary)
+    return None if snapshot is None else snapshot[0]
 
 
 def read_gate(store: OperationStore, owner_id: str) -> dict[str, Any] | None:
@@ -213,15 +259,11 @@ def _bound_task(
     if not absolute_path_is_safe(cwd_path):
         return None
     cwd = cwd_path.resolve()
-    meta_path = cwd / ".task-meta.json"
-    meta = _read_object(meta_path, boundary=cwd)
+    snapshot = _read_snapshot(cwd / ".task-meta.json", boundary=cwd)
     vault = _vault_for_store(store)
-    if meta is None or vault is None:
+    if snapshot is None or vault is None:
         return None
-    try:
-        meta_bytes = meta_path.read_bytes()
-    except OSError:
-        return None
+    meta, meta_bytes = snapshot
     if (
         meta.get("version") not in {3, 4}
         or meta.get("task_id") != record.spec.operation_id

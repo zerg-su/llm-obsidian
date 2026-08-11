@@ -186,7 +186,13 @@ not repeated mechanically across the tree.
 Only durable timestamps bound to the exact owner, operation, run, revision,
 worktree, vault, task metadata digest, and sampled frame are accepted. Invalid
 RFC 3339 values, non-finite or negative epochs, future/reversed intervals,
-leaf or ancestor symlink evidence, and identity drift remain unknown. Review
+leaf or ancestor symlink evidence, and identity drift remain unknown. A raw
+absolute store, evidence, or session-CWD path carrying a `..` component is
+rejected before resolution, because collapsing it would erase a symlink the
+kernel still traverses. Bound task metadata is read once, so its parsed
+mapping and the SHA-256 the reap receipt is matched against always describe
+the same revision; a metadata replacement during a frame leaves the interval
+unknown rather than pairing two revisions. Review
 counts additionally bind the exact gate, reviewed HEAD, axes, lane, run, and
 attempt before display. The one frame clock is display-only: it cannot change
 classification, next action, issues, retry or readiness policy, verification

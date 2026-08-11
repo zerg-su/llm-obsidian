@@ -198,6 +198,14 @@ rejects terminal controls in bound task names, and truncates long current-step
 names before their state and timing suffix. The line ceiling moves exactly to
 96,957; the 273-file ceiling remains unchanged and no speculative headroom is
 added.
+
+The architectural repair adds no production Python file. Its measured 131-line
+delta fails closed on raw absolute paths whose ``..`` component would erase a
+traversed symlink, reads bound task metadata once so its mapping and SHA-256
+describe the same revision, and carries each root row's semantic emphasis and
+viewport priority as projected data instead of re-deriving them from rendered
+prefixes. The line ceiling moves exactly to 97,088; the 273-file ceiling
+remains unchanged and no speculative headroom is added.
 """
 
 from __future__ import annotations
@@ -209,7 +217,7 @@ from pathlib import Path
 SCRIPT_FILE_CEILING = 273
 
 #: Maximum total lines across those files for the 2.6.7 RC4 candidate.
-SCRIPT_LINE_CEILING = 96_957
+SCRIPT_LINE_CEILING = 97_088
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

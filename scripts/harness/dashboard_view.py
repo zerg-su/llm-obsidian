@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import math
 import re
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from .dashboard_projection import (
@@ -65,6 +66,21 @@ SEMANTIC_COLORS = {
 }
 BOLD = "\x1b[1m"
 DIM = "\x1b[2m"
+# The typed semantic role one composed root row carries, so neither emphasis
+# nor viewport priority has to be guessed back out of the rendered text.
+PRIMARY_EMPHASIS = "primary"
+DIM_EMPHASIS = "dim"
+NO_EMPHASIS = "none"
+# Lower survives a smaller viewport first: root and current-work identity, then
+# headings, routes, other steps, issues, frame, bound detail, and history.
+ROOT_PRIORITY_IDENTITY = 0
+ROOT_PRIORITY_HEADING = 1
+ROOT_PRIORITY_ROUTE = 2
+ROOT_PRIORITY_STEP = 3
+ROOT_PRIORITY_ISSUE = 4
+ROOT_PRIORITY_FRAME = 5
+ROOT_PRIORITY_DETAIL = 6
+ROOT_PRIORITY_HISTORY = 7
 MODEL_TOKEN = re.compile(
     r"(?<=/)[A-Za-z0-9][A-Za-z0-9._-]*(?=(?:/| ·))"
 )
@@ -330,25 +346,39 @@ def _issue_lines(projection: DashboardProjection) -> list[str]:
     return lines
 
 
-def _colorize(line: str, *, color: bool) -> str:
+def _emphasis_base(line: str, emphasis: str) -> str:
+    """Style one row from its typed role, inferring only for the dump view.
+
+    The root product view knows which root and which step are current before a
+    single character is formatted, so it states that role explicitly.  Only the
+    owner-wide diagnostic dump, whose `[x]`/`[>]`/`[ ]` markers are
+    unambiguous, still infers emphasis from its own text.
+    """
+
+    if emphasis == PRIMARY_EMPHASIS:
+        return BOLD + SEMANTIC_COLORS["primary"]
+    if emphasis == DIM_EMPHASIS:
+        return DIM + SEMANTIC_COLORS["secondary"]
+    if emphasis:
+        return ""
+    stripped = line.lstrip()
+    if stripped.startswith(
+        ("[>]", "[!]", "● ACTIVE", "├─ ●", "└─ ●", "├─ !", "└─ !")
+    ):
+        return BOLD + SEMANTIC_COLORS["primary"]
+    if stripped.startswith(("[ ]", "├─ ○", "└─ ○")):
+        return DIM + SEMANTIC_COLORS["secondary"]
+    return ""
+
+
+def _colorize(line: str, *, color: bool, emphasis: str = "") -> str:
     if not color:
         return line
     if line.startswith("HARNESS PIPELINES"):
         return f"{SEMANTIC_COLORS['primary']}{line}{RESET}"
     if line and set(line) == {"─"}:
         return f"{SEMANTIC_COLORS['rule']}{line}{RESET}"
-    stripped = line.lstrip()
-    current = stripped.startswith(
-        ("[>]", "[!]", "● ACTIVE", "├─ ●", "└─ ●", "├─ !", "└─ !")
-    )
-    inactive = stripped.startswith(("[ ]", "├─ ○", "└─ ○"))
-    base = (
-        BOLD + SEMANTIC_COLORS["primary"]
-        if current
-        else DIM + SEMANTIC_COLORS["secondary"]
-        if inactive
-        else ""
-    )
+    base = _emphasis_base(line, emphasis)
 
     def paint(role: str, value: str) -> str:
         return f"{SEMANTIC_COLORS[role]}{value}{RESET}{base}"
@@ -555,6 +585,15 @@ def _compact_timing(status: str, timing: TimingView, *, current: bool) -> str:
     return ""
 
 
+@dataclass(frozen=True)
+class RootRow:
+    """One composed root row with its typed emphasis and viewport priority."""
+
+    text: str
+    emphasis: str = NO_EMPHASIS
+    priority: int = ROOT_PRIORITY_DETAIL
+
+
 def _root_identity(program: ProgramView) -> tuple[str, str]:
     if program.state == "complete":
         return "✓", "COMPLETE"
@@ -567,7 +606,7 @@ def _root_identity(program: ProgramView) -> tuple[str, str]:
     return "●", "ACTIVE"
 
 
-def _root_header(projection: DashboardProjection) -> list[str]:
+def _root_header(projection: DashboardProjection) -> list[RootRow]:
     observed = projection.observed_at
     updated = "unknown"
     if (
@@ -578,13 +617,17 @@ def _root_header(projection: DashboardProjection) -> list[str]:
     ):
         updated = datetime.fromtimestamp(observed, timezone.utc).strftime("%H:%M:%S")
     return [
-        "HARNESS PIPELINES  store: .vault-meta/harness  "
-        f"updated {updated}",
-        "─" * 64,
+        RootRow(
+            "HARNESS PIPELINES  store: .vault-meta/harness  "
+            f"updated {updated}",
+            NO_EMPHASIS,
+            ROOT_PRIORITY_HEADING,
+        ),
+        RootRow("─" * 64, NO_EMPHASIS, ROOT_PRIORITY_FRAME),
     ]
 
 
-def _root_summary(program: ProgramView) -> list[str]:
+def _root_summary(program: ProgramView) -> list[RootRow]:
     marker, label = _root_identity(program)
     timing = _compact_timing(
         "complete" if program.state == "complete" else "running",
@@ -595,11 +638,21 @@ def _root_summary(program: ProgramView) -> list[str]:
     route = program.executor
     executor_timing = _known_timing(program.timing)
     return [
-        f"{marker} {label} {_task_name(program)}  "
-        f"dispatch {_short(program.operation_id)}{suffix}",
-        f"  Executor {route.runtime}/{route.model} · {route.effort}  "
-        f"{program.executor_status}"
-        + (f"  {executor_timing}" if executor_timing else ""),
+        RootRow(
+            f"{marker} {label} {_task_name(program)}  "
+            f"dispatch {_short(program.operation_id)}{suffix}",
+            # A root the observer is still watching is the current identity
+            # whatever marker its classification renders, WAITING included.
+            NO_EMPHASIS if program.state in TERMINAL else PRIMARY_EMPHASIS,
+            ROOT_PRIORITY_IDENTITY,
+        ),
+        RootRow(
+            f"  Executor {route.runtime}/{route.model} · {route.effort}  "
+            f"{program.executor_status}"
+            + (f"  {executor_timing}" if executor_timing else ""),
+            NO_EMPHASIS,
+            ROOT_PRIORITY_ROUTE,
+        ),
     ]
 
 
@@ -607,9 +660,9 @@ def _root_step_lines(
     program: ProgramView,
     *,
     width: int = ROOT_COLUMNS,
-) -> list[str]:
+) -> list[RootRow]:
     current = _current_step(program)
-    lines: list[str] = []
+    lines: list[RootRow] = []
     for index, step in enumerate(program.steps):
         branch = "└─" if index == len(program.steps) - 1 else "├─"
         marker = {
@@ -626,11 +679,23 @@ def _root_step_lines(
         prefix = f"  {branch} {marker} "
         suffix = f"  {step.status}" + (f"  {timing}" if timing else "")
         lines.append(
-            _fit_named_suffix(
-                prefix,
-                _human(step.step_id),
-                suffix,
-                width,
+            RootRow(
+                _fit_named_suffix(
+                    prefix,
+                    _human(step.step_id),
+                    suffix,
+                    width,
+                ),
+                # The selected step leads the work even before it starts, so a
+                # pending current row is emphasised while later rows stay dim.
+                PRIMARY_EMPHASIS
+                if step is current
+                else DIM_EMPHASIS
+                if step.status == "pending"
+                else NO_EMPHASIS,
+                ROOT_PRIORITY_IDENTITY
+                if step is current
+                else ROOT_PRIORITY_STEP,
             )
         )
         if step is not current:
@@ -658,7 +723,18 @@ def _root_step_lines(
             )
         if step.evidence_issue:
             details.append(f"! {step.evidence_issue}")
-        lines.extend(f"{pad}  {detail}" for detail in details[:3])
+        lines.extend(
+            RootRow(
+                f"{pad}  {detail}",
+                NO_EMPHASIS,
+                ROOT_PRIORITY_ROUTE
+                if detail.startswith("Reviewer ")
+                else ROOT_PRIORITY_ISSUE
+                if detail.startswith("! ")
+                else ROOT_PRIORITY_DETAIL,
+            )
+            for detail in details[:3]
+        )
     return lines
 
 
@@ -666,38 +742,50 @@ def _root_recent(
     main: ProgramView,
     programs: tuple[ProgramView, ...],
     recent: int,
-) -> list[str]:
+) -> list[RootRow]:
     terminal = tuple(
         program
         for program in programs
         if program is not main and program.state in TERMINAL
     )[:recent]
-    lines = ["RECENT"]
+    lines = [RootRow("RECENT", NO_EMPHASIS, ROOT_PRIORITY_HISTORY)]
     if not terminal:
-        return lines + ["  none"]
+        return lines + [RootRow("  none")]
     for program in terminal:
         marker = "✓" if program.state == "complete" else "!"
         timing = _compact_timing("complete", program.timing, current=False)
         lines.append(
-            f"  {marker} {_task_name(program)}  "
-            f"dispatch {_short(program.operation_id)}  {timing}"
+            RootRow(
+                f"  {marker} {_task_name(program)}  "
+                f"dispatch {_short(program.operation_id)}  {timing}",
+                NO_EMPHASIS,
+                ROOT_PRIORITY_HISTORY
+                if marker == "✓"
+                else ROOT_PRIORITY_ISSUE,
+            )
         )
     return lines
 
 
-def _root_issues(projection: DashboardProjection) -> list[str]:
+def _root_issues(projection: DashboardProjection) -> list[RootRow]:
     dropped = int(projection.truncated.get("issues", 0))
     total = len(projection.issues) + dropped
-    lines = [f"ISSUES ({total})"]
+    lines = [RootRow(f"ISSUES ({total})", NO_EMPHASIS, ROOT_PRIORITY_HEADING)]
     if not projection.issues:
-        return lines + ["  none"]
+        return lines + [RootRow("  none")]
     for issue in projection.issues:
         lines.append(
-            f"  ! {issue.code}  {_short(issue.operation_id)}  "
-            f"{issue.classification}"
+            RootRow(
+                f"  ! {issue.code}  {_short(issue.operation_id)}  "
+                f"{issue.classification}",
+                NO_EMPHASIS,
+                ROOT_PRIORITY_ISSUE,
+            )
         )
     if dropped:
-        lines.append(f"  +{dropped} more")
+        lines.append(
+            RootRow(f"  +{dropped} more", NO_EMPHASIS, ROOT_PRIORITY_HISTORY)
+        )
     return lines
 
 
@@ -706,14 +794,18 @@ def _root_lines(
     *,
     recent: int,
     width: int = ROOT_COLUMNS,
-) -> list[str]:
+) -> list[RootRow]:
     lines = _root_header(projection)
     if not projection.programs:
         lines.extend(
             [
-                f"○ WAITING Dispatch not started  "
-                f"dispatch {_short(projection.owner_id)}",
-                "  Observer waiting for dispatch start.",
+                RootRow(
+                    f"○ WAITING Dispatch not started  "
+                    f"dispatch {_short(projection.owner_id)}",
+                    PRIMARY_EMPHASIS,
+                    ROOT_PRIORITY_IDENTITY,
+                ),
+                RootRow("  Observer waiting for dispatch start."),
             ]
         )
         main = None
@@ -728,60 +820,53 @@ def _root_lines(
         )
         lines.extend(_root_summary(main))
         lines.extend(_root_step_lines(main, width=width))
-    lines.append("")
+    lines.append(RootRow("", NO_EMPHASIS, ROOT_PRIORITY_HISTORY))
     lines.extend(
-        ["RECENT", "  none"]
+        [RootRow("RECENT", NO_EMPHASIS, ROOT_PRIORITY_HISTORY), RootRow("  none")]
         if main is None
         else _root_recent(main, projection.programs, recent)
     )
-    lines.append("")
+    lines.append(RootRow("", NO_EMPHASIS, ROOT_PRIORITY_HISTORY))
     lines.extend(_root_issues(projection))
     lines.extend(
         [
-            "─" * 64,
-            "✓ complete  ● running  ○ pending  ! attention  ↻ retry",
+            RootRow("─" * 64, NO_EMPHASIS, ROOT_PRIORITY_FRAME),
+            RootRow(
+                "✓ complete  ● running  ○ pending  ! attention  ↻ retry",
+                NO_EMPHASIS,
+                ROOT_PRIORITY_FRAME,
+            ),
         ]
     )
     return lines
 
 
-def _root_priority(line: str) -> int:
-    stripped = line.lstrip()
-    if stripped.startswith(("● ACTIVE", "! ATTENTION", "✓ COMPLETE")):
-        return 0
-    if stripped.startswith(("├─ ●", "└─ ●", "├─ !", "└─ !")):
-        return 0
-    if line.startswith("HARNESS PIPELINES") or line.startswith("ISSUES ("):
-        return 1
-    if stripped.startswith("Executor ") or "Reviewer " in line:
-        return 2
-    if stripped.startswith(("├─", "└─")):
-        return 3
-    if stripped.startswith("! "):
-        return 4
-    if line and set(line) == {"─"} or "complete  ● running" in line:
-        return 5
-    if line in {"RECENT", ""} or stripped.startswith(("✓ ", "+")):
-        return 7
-    return 6
-
-
-def _bounded_root_lines(lines: list[str], rows: int | None) -> list[str]:
+def _bounded_root_lines(lines: list[RootRow], rows: int | None) -> list[RootRow]:
     if rows is None or len(lines) <= rows:
         return lines
     if rows <= 0:
         return []
     if rows == 1:
-        return [f"Viewport truncated +{len(lines)} lines"]
+        return [
+            RootRow(
+                f"Viewport truncated +{len(lines)} lines",
+                NO_EMPHASIS,
+                ROOT_PRIORITY_IDENTITY,
+            )
+        ]
     selected = sorted(
         sorted(
             range(len(lines)),
-            key=lambda index: (_root_priority(lines[index]), index),
+            key=lambda index: (lines[index].priority, index),
         )[: rows - 1]
     )
     omitted = len(lines) - len(selected)
     return [lines[index] for index in selected] + [
-        f"Viewport truncated +{omitted} lines"
+        RootRow(
+            f"Viewport truncated +{omitted} lines",
+            NO_EMPHASIS,
+            ROOT_PRIORITY_IDENTITY,
+        )
     ]
 
 
@@ -857,15 +942,19 @@ def render(
 
     default_width = ROOT_COLUMNS if scope == "root" else DIAGNOSTIC_COLUMNS
     width = min(max(columns or default_width, 20), MAX_LINE)
-    lines = (
+    rendered = (
         _bounded_root_lines(
             _root_lines(projection, recent=recent, width=width), rows
         )
         if scope == "root"
-        else _diagnostic_lines(
-            projection, recent=recent, rows=rows, scope=scope
-        )
+        else [
+            RootRow(line, "")
+            for line in _diagnostic_lines(
+                projection, recent=recent, rows=rows, scope=scope
+            )
+        ]
     )
     return "\n".join(
-        _colorize(_clip(line, width), color=color) for line in lines
-    ) + ("\n" if lines else "")
+        _colorize(_clip(row.text, width), color=color, emphasis=row.emphasis)
+        for row in rendered
+    ) + ("\n" if rendered else "")
