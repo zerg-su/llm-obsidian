@@ -52,6 +52,7 @@ from harness.dashboard_projection import (
 )
 from harness.dashboard_view import MAX_LINE, _colorize, render
 from harness.dashboard_policy import (
+    ProgramView,
     ReviewSummaryView,
     RouteView,
     StepView,
@@ -4268,6 +4269,503 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-time.") as raw:
         and ansi.search("".join(plain_live_frames) + terminal_first) is None
         and _tree_bytes(vault) == cli_baseline,
     )
+
+with tempfile.TemporaryDirectory(prefix="harness-dashboard-normalized-path.") as raw:
+    # A raw '..' component is collapsed lexically before any component is
+    # stat'ed, so the guard must fail closed on it: the operating system
+    # resolves the symlink first and reaches a different directory.
+    base = Path(raw).resolve()
+    (base / "nest" / "other").mkdir(parents=True)
+    (base / "nest" / "vault").mkdir()
+    (base / "vault").mkdir()
+    (base / "alias").symlink_to(base / "nest" / "other", target_is_directory=True)
+    _guard = dashboard_receipts.absolute_path_is_safe
+    regression_check(
+        "the path guard fails closed on a raw absolute path whose '..' erases a symlink",
+        _guard(base / "alias" / ".." / "vault") is False
+        and _guard(base / "alias" / ".." / "nest" / "vault") is False
+        and _guard(base / "alias" / "vault") is False
+        and _guard(base / "vault") is True
+        and _guard(base / "vault" / "absent.json") is True
+        and _guard(base / "nest" / "vault") is True,
+    )
+
+    normalized_root = "dashboard-normalized-store-root"
+    store_actual = base / "sdeep" / "svault" / ".vault-meta" / "harness"
+    store_actual.mkdir(parents=True)
+    (base / "svault" / ".vault-meta" / "harness").mkdir(parents=True)
+    (base / "sdeep" / "sother").mkdir(parents=True)
+    (base / "salias").symlink_to(base / "sdeep" / "sother", target_is_directory=True)
+    _create(
+        OperationStore(store_actual),
+        normalized_root,
+        "dispatch",
+        lane_id="normalized-store-lane",
+        owner=normalized_root,
+    )
+    normalized_store = base / "salias" / ".." / "svault" / ".vault-meta" / "harness"
+    normalized_root_rejected = False
+    try:
+        project_root(normalized_store, normalized_root, observed_at=1_800_000_000.0)
+    except ValueError:
+        normalized_root_rejected = True
+    normalized_all_rejected = False
+    try:
+        dashboard_script.snapshot(
+            normalized_store,
+            recent=3,
+            inventory=None,
+            observed_at=1_800_000_000.0,
+        )
+    except ValueError:
+        normalized_all_rejected = True
+    ordinary_store_projection = project_root(
+        store_actual, normalized_root, observed_at=1_800_000_000.0
+    )
+    regression_check(
+        "projection rejects a caller store whose traversed symlink was erased by '..'",
+        normalized_root_rejected
+        and normalized_all_rejected
+        and [
+            program.operation_id for program in ordinary_store_projection.programs
+        ]
+        == [normalized_root],
+    )
+
+    cwd_root = "dashboard-normalized-cwd-root"
+    cwd_vault = base / "cvault"
+    cwd_store_root = cwd_vault / ".vault-meta" / "harness"
+    cwd_store_root.mkdir(parents=True)
+    cwd_store = OperationStore(cwd_store_root)
+    _create(
+        cwd_store,
+        cwd_root,
+        "dispatch",
+        lane_id="normalized-cwd-lane",
+        owner=cwd_root,
+    )
+    cwd_runtime = cwd_store_root / "owners" / cwd_root / "runtime" / cwd_root
+    cwd_runtime.mkdir(parents=True)
+    (base / "cdeep" / "cother").mkdir(parents=True)
+    (base / "calias").symlink_to(base / "cdeep" / "cother", target_is_directory=True)
+    traversed_worktree = base / "cdeep" / "wt"
+    traversed_worktree.mkdir()
+    ordinary_worktree = base / "cwt"
+    ordinary_worktree.mkdir()
+
+    def _write_bound_cwd(cwd_value: Path, worktree: Path) -> None:
+        (cwd_runtime / "session.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "operation_id": cwd_root,
+                    "run_id": f"{cwd_root}-run",
+                    "cwd": str(cwd_value),
+                },
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (worktree / ".task-meta.json").write_text(
+            json.dumps(
+                {
+                    "version": 4,
+                    "task_id": cwd_root,
+                    "task_name": "normalized cwd task",
+                    "worktree": str(worktree),
+                    "vault_root": str(cwd_vault),
+                    "plan_file": str(cwd_vault / "wiki" / "plans" / "plan.md"),
+                    "spawned_at": "2027-01-15T07:00:00Z",
+                },
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    _write_bound_cwd(base / "calias" / ".." / "wt", traversed_worktree)
+    normalized_cwd_projection = project_root(
+        cwd_store_root, cwd_root, observed_at=1_800_000_000.0
+    )
+    _write_bound_cwd(ordinary_worktree, ordinary_worktree)
+    ordinary_cwd_projection = project_root(
+        cwd_store_root, cwd_root, observed_at=1_800_000_000.0
+    )
+    regression_check(
+        "task display evidence rejects a bound session cwd whose '..' erases a symlink",
+        normalized_cwd_projection.programs[0].task_name == "unknown"
+        and normalized_cwd_projection.programs[0].timing.mode == "unknown"
+        and ordinary_cwd_projection.programs[0].task_name == "normalized cwd task"
+        and ordinary_cwd_projection.programs[0].timing == TimingView("elapsed", 3_600),
+    )
+
+with tempfile.TemporaryDirectory(prefix="harness-dashboard-meta-snapshot.") as raw:
+    # One frame must observe exactly one task-metadata revision: the parsed
+    # mapping and its SHA-256 come from the same bytes, or the fact is unknown.
+    base = Path(raw).resolve()
+    vault = base / "vault"
+    store_root = vault / ".vault-meta" / "harness"
+    store_root.mkdir(parents=True)
+    store = OperationStore(store_root)
+    snapshot_root = "dashboard-meta-snapshot-root"
+    _create(
+        store,
+        snapshot_root,
+        "dispatch",
+        lane_id="meta-snapshot-lane",
+        owner=snapshot_root,
+    )
+    _advance(
+        store,
+        snapshot_root,
+        "preflight",
+        "starting",
+        "running",
+        "finalizing",
+        "exiting",
+        "complete",
+        owner=snapshot_root,
+    )
+    snapshot_record = store.read(snapshot_root, snapshot_root)
+    snapshot_runtime = (
+        store_root / "owners" / snapshot_root / "runtime" / snapshot_root
+    )
+    snapshot_runtime.mkdir(parents=True)
+    snapshot_worktree = base / "wt"
+    snapshot_worktree.mkdir()
+    (snapshot_runtime / "session.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "operation_id": snapshot_root,
+                "run_id": f"{snapshot_root}-run",
+                "cwd": str(snapshot_worktree),
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    def _snapshot_meta(spawned_at: str) -> str:
+        return (
+            json.dumps(
+                {
+                    "version": 4,
+                    "task_id": snapshot_root,
+                    "task_name": "meta snapshot task",
+                    "worktree": str(snapshot_worktree),
+                    "vault_root": str(vault),
+                    "plan_file": str(vault / "wiki" / "plans" / "plan.md"),
+                    "spawned_at": spawned_at,
+                },
+                sort_keys=True,
+            )
+            + "\n"
+        )
+
+    first_meta = _snapshot_meta("2027-01-15T00:00:00Z")
+    second_meta = _snapshot_meta("2027-01-15T07:00:00Z")
+    first_meta_sha = hashlib.sha256(first_meta.encode("utf-8")).hexdigest()
+    second_meta_sha = hashlib.sha256(second_meta.encode("utf-8")).hexdigest()
+    snapshot_meta_path = snapshot_worktree / ".task-meta.json"
+    snapshot_meta_path.write_text(first_meta, encoding="utf-8")
+    (snapshot_worktree / ".task-reap-complete.json").write_text(
+        json.dumps(
+            {
+                "validated": True,
+                "completed_at": "2027-01-15T08:00:00Z",
+                "meta_sha256": second_meta_sha,
+                "task_name": "meta snapshot task",
+                "vault_root": str(vault),
+                "plan_path": str(vault / "wiki" / "plans" / "plan.md"),
+                "task_session_status": "archived",
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    original_io_open = io.open
+    original_os_open = os.open
+    meta_opens: list[str] = []
+
+    def _replace_meta() -> None:
+        pending = snapshot_meta_path.parent / ".task-meta.json.next"
+        pending.write_text(second_meta, encoding="utf-8")
+        os.replace(pending, snapshot_meta_path)
+
+    def _observe_meta_open(target: object) -> None:
+        if not isinstance(target, int) and str(target).endswith(".task-meta.json"):
+            meta_opens.append(str(target))
+            if len(meta_opens) == 1:
+                _replace_meta()
+
+    def _racing_io_open(*args: object, **kwargs: object) -> object:
+        handle = original_io_open(*args, **kwargs)
+        _observe_meta_open(args[0])
+        return handle
+
+    def _racing_os_open(*args: object, **kwargs: object) -> int:
+        descriptor = original_os_open(*args, **kwargs)
+        _observe_meta_open(args[0])
+        return descriptor
+
+    def _race_one_frame(call):
+        io.open = _racing_io_open
+        os.open = _racing_os_open
+        try:
+            return call()
+        finally:
+            io.open = original_io_open
+            os.open = original_os_open
+
+    bound_snapshot = _race_one_frame(
+        lambda: dashboard_receipts._bound_task(store, snapshot_record)
+    )
+    bound_opens = list(meta_opens)
+    meta_opens.clear()
+    snapshot_meta_path.write_text(first_meta, encoding="utf-8")
+    racing_timing = _race_one_frame(
+        lambda: dashboard_receipts.root_timing(
+            store, snapshot_record, 1_800_000_000.0
+        )
+    )
+    timing_opens = list(meta_opens)
+    regression_check(
+        "task metadata mapping and digest are derived from one coherent read",
+        len(bound_opens) == 1
+        and bound_snapshot is not None
+        and (str(bound_snapshot[1].get("spawned_at")), bound_snapshot[2])
+        in {
+            ("2027-01-15T00:00:00Z", first_meta_sha),
+            ("2027-01-15T07:00:00Z", second_meta_sha),
+        },
+    )
+    regression_check(
+        "atomically replaced task metadata yields one coherent revision or unknown",
+        len(timing_opens) == 1
+        and (
+            racing_timing.mode == "unknown"
+            or racing_timing == TimingView("duration", 3_600)
+        ),
+    )
+
+    snapshot_meta_path.write_text(first_meta, encoding="utf-8")
+    coherent_timing = dashboard_receipts.root_timing(
+        store, snapshot_record, 1_800_000_000.0
+    )
+    (snapshot_worktree / ".task-reap-complete.json").write_text(
+        json.dumps(
+            {
+                "validated": True,
+                "completed_at": "2027-01-15T08:00:00Z",
+                "meta_sha256": first_meta_sha,
+                "task_name": "meta snapshot task",
+                "vault_root": str(vault),
+                "plan_path": str(vault / "wiki" / "plans" / "plan.md"),
+                "task_session_status": "archived",
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    matched_timing = dashboard_receipts.root_timing(
+        store, snapshot_record, 1_800_000_000.0
+    )
+    real_meta = snapshot_worktree / ".task-meta.real.json"
+    real_meta.write_text(first_meta, encoding="utf-8")
+    snapshot_meta_path.unlink()
+    snapshot_meta_path.symlink_to(real_meta)
+    leaf_symlink_bound = dashboard_receipts._bound_task(store, snapshot_record)
+    snapshot_meta_path.unlink()
+    fifo_rejected = True
+    try:
+        os.mkfifo(snapshot_meta_path)
+    except (AttributeError, NotImplementedError, OSError):
+        fifo_rejected = True
+    else:
+        fifo_rejected = (
+            dashboard_receipts._bound_task(store, snapshot_record) is None
+        )
+        snapshot_meta_path.unlink()
+    regression_check(
+        "one coherent task metadata read keeps digest binding and actual-file rejection",
+        coherent_timing.mode == "unknown"
+        and matched_timing == TimingView("duration", 28_800)
+        and leaf_symlink_bound is None
+        and fifo_rejected,
+    )
+
+# The current semantic role is projected state, never a rendered prefix.
+IDENTITY_BOLD = "\x1b[1m"
+IDENTITY_PRIMARY = "\x1b[38;2;244;244;247m"
+IDENTITY_DIM = "\x1b[2m"
+IDENTITY_SECONDARY = "\x1b[38;2;119;122;140m"
+IDENTITY_WIDTHS = (80, 100, 120)
+IDENTITY_EXECUTOR = RouteView("claude", "claude-opus-5", "medium", "executor")
+
+
+def _identity_steps(first_status: str) -> tuple[StepView, ...]:
+    return (
+        StepView(
+            "reproduce",
+            "engineering-fix@1",
+            "persistent",
+            first_status,
+            0,
+            route=IDENTITY_EXECUTOR,
+            timing=(
+                TimingView("elapsed", 42)
+                if first_status == "running"
+                else TimingView()
+            ),
+        ),
+        StepView("regression-test", "engineering-fix@1", "persistent", "pending", 0),
+        StepView("minimal-fix", "engineering-fix@1", "persistent", "pending", 0),
+    )
+
+
+def _identity_projection(
+    state: str, classification: str, first_status: str
+) -> DashboardProjection:
+    program = ProgramView(
+        "9d2b6c71-2222-4b11-8f11-1a1a1a1a1a1a",
+        "dispatch",
+        state,
+        7,
+        "engineering-fix",
+        "c" * 64,
+        (),
+        _identity_steps(first_status),
+        (),
+        "wait",
+        0,
+        2,
+        "workspace",
+        classification,
+        executor=IDENTITY_EXECUTOR,
+        executor_status="awaiting-callback",
+        timing=TimingView("elapsed", 900),
+        task_name="rc4 dashboard repair",
+    )
+    return DashboardProjection(
+        program.operation_id,
+        classification,
+        "observed",
+        (program,),
+        (),
+        {},
+        observed_at=1_800_000_000.0,
+    )
+
+
+def _identity_frames(
+    projection: DashboardProjection, columns: int
+) -> tuple[list[str], list[str], bool]:
+    colored = render(projection, scope="root", color=True, columns=columns)
+    plain = render(projection, scope="root", color=False, columns=columns)
+    return (
+        colored.splitlines(),
+        plain.splitlines(),
+        ansi.sub("", colored) == plain,
+    )
+
+
+def _identity_row(colored: list[str], plain: list[str], needle: str) -> str:
+    return next(
+        color_line
+        for color_line, plain_line in zip(colored, plain)
+        if needle in plain_line
+    )
+
+
+waiting_identity = _identity_projection("awaiting-callback", WAITING, "running")
+active_identity = _identity_projection("running", ACTIVE, "running")
+pending_identity = _identity_projection("running", ACTIVE, "pending")
+regression_check(
+    "every nonterminal current root identity including WAITING renders primary and bold",
+    all(
+        equivalent
+        and _identity_row(colored, plain, "WAITING").startswith(
+            IDENTITY_BOLD + IDENTITY_PRIMARY
+        )
+        and any(line.startswith("○ WAITING rc4 dashboard repair") for line in plain)
+        for colored, plain, equivalent in (
+            _identity_frames(waiting_identity, columns)
+            for columns in IDENTITY_WIDTHS
+        )
+    )
+    and all(
+        equivalent
+        and _identity_row(colored, plain, "ACTIVE").startswith(
+            IDENTITY_BOLD + IDENTITY_PRIMARY
+        )
+        for colored, plain, equivalent in (
+            _identity_frames(active_identity, columns)
+            for columns in IDENTITY_WIDTHS
+        )
+    ),
+)
+regression_check(
+    "the selected pending pre-start step is primary and bold while later rows stay dim",
+    all(
+        equivalent
+        and _identity_row(colored, plain, "Reproduce").startswith(
+            IDENTITY_BOLD + IDENTITY_PRIMARY
+        )
+        and _identity_row(colored, plain, "Regression test").startswith(
+            IDENTITY_DIM + IDENTITY_SECONDARY
+        )
+        and _identity_row(colored, plain, "Minimal fix").startswith(
+            IDENTITY_DIM + IDENTITY_SECONDARY
+        )
+        and "  ├─ ○ Reproduce  pending  time unavailable" in plain
+        and "  ├─ ○ Regression test  pending" in plain
+        for colored, plain, equivalent in (
+            _identity_frames(pending_identity, columns)
+            for columns in IDENTITY_WIDTHS
+        )
+    )
+    and all(
+        _identity_row(colored, plain, "Reproduce").startswith(
+            IDENTITY_BOLD + IDENTITY_PRIMARY
+        )
+        and _identity_row(colored, plain, "Regression test").startswith(
+            IDENTITY_DIM + IDENTITY_SECONDARY
+        )
+        for colored, plain, equivalent in (
+            _identity_frames(waiting_identity, columns)
+            for columns in IDENTITY_WIDTHS
+        )
+    ),
+)
+identity_height = len(
+    render(waiting_identity, scope="root", color=False, columns=100).splitlines()
+)
+regression_check(
+    "root identity outranks history for every nonterminal root under row pressure",
+    all(
+        (
+            not any(
+                line.lstrip().startswith("● ACTIVE")
+                for line in render(
+                    active_identity, scope="root", rows=rows, columns=100
+                ).splitlines()
+            )
+            or any(
+                line.lstrip().startswith("○ WAITING")
+                for line in render(
+                    waiting_identity, scope="root", rows=rows, columns=100
+                ).splitlines()
+            )
+        )
+        for rows in range(1, identity_height + 1)
+    ),
+)
 
 if REGRESSION_FAILURES:
     raise AssertionError(
