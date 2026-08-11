@@ -184,6 +184,13 @@ human-readable composition, bind review metrics and task names at the durable
 receipt boundary, reject ancestor symlink evidence, and preserve the existing
 one-clock CLI path. The line ceiling therefore moves exactly to 96,872 lines;
 the 273-file ceiling remains unchanged and no speculative headroom is added.
+
+The final RC4 review correction adds no production Python file. Its measured
+33-line delta keeps failed/cancelled work on the stopped frontier, threads one
+sampled terminal width through the live CLI, and rejects original store,
+evidence, and session-CWD paths containing any symlink component before
+resolution. The line ceiling moves exactly to 96,905; the 273-file ceiling
+remains unchanged and no speculative headroom is added.
 """
 
 from __future__ import annotations
@@ -195,7 +202,7 @@ from pathlib import Path
 SCRIPT_FILE_CEILING = 273
 
 #: Maximum total lines across those files for the 2.6.7 RC4 candidate.
-SCRIPT_LINE_CEILING = 96_872
+SCRIPT_LINE_CEILING = 96_905
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:
