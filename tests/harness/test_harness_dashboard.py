@@ -28,7 +28,7 @@ tempfile.tempdir = str(Path(tempfile.gettempdir()).resolve())
 
 from harness.cli import main as cli_main
 from harness.callbacks import CallbackBroker
-from harness import dashboard_receipts
+from harness import dashboard_receipts, verification as harness_verification
 from harness.adapters.cmux import CmuxAdapter, Surface, SurfaceWorkspaceIndex
 from harness.contracts import AttentionReason, CallbackEnvelope, OperationSpec, OwnedResources, RuntimeRoute, VerificationEvidence, to_dict
 from harness.dashboard_projection import (
@@ -934,6 +934,109 @@ ISSUES (1)
         len(long_root_line) == 80
         and "...  dispatch a1b2c3d4  elapsed 5m 00s" in long_root_line
         and long_root_line.startswith("● ACTIVE Human-readable"),
+    )
+
+    maximum_step_id = "step-" + "x" * 123
+    current_step_cases = {
+        "pending": (
+            "running",
+            "pending",
+            TimingView(),
+            "○",
+            "time unavailable",
+        ),
+        "running": (
+            "running",
+            "running",
+            TimingView("elapsed", 75),
+            "●",
+            "elapsed 1m 15s",
+        ),
+        "attention": (
+            "running",
+            "attention",
+            TimingView("elapsed", 75),
+            "!",
+            "elapsed 1m 15s",
+        ),
+        "failed-terminal": (
+            "failed",
+            "stopped",
+            TimingView("duration", 125),
+            "!",
+            "duration 2m 05s",
+        ),
+        "cancelled-terminal": (
+            "cancelled",
+            "stopped",
+            TimingView("duration", 125),
+            "!",
+            "duration 2m 05s",
+        ),
+    }
+    current_step_width_results: list[bool] = []
+    for (
+        case,
+        (program_state, step_status, timing, marker, suffix),
+    ) in current_step_cases.items():
+        long_step = StepView(
+            maximum_step_id,
+            "model_step@1.0.0",
+            "reuse",
+            step_status,
+            1,
+            route=executor_route,
+            timing=timing,
+        )
+        long_step_program = replace(
+            root_program,
+            state=program_state,
+            classification=(
+                ATTENTION
+                if case in {"attention", "failed-terminal", "cancelled-terminal"}
+                else ACTIVE
+            ),
+            executor_status=program_state,
+            steps=(long_step,),
+        )
+        long_step_projection = replace(
+            root_projection,
+            classification=long_step_program.classification,
+            programs=(long_step_program,),
+            issues=(),
+        )
+        for columns in (80, 100, 120):
+            plain = render(
+                long_step_projection,
+                scope="root",
+                columns=columns,
+            )
+            colored_frame = render(
+                long_step_projection,
+                scope="root",
+                columns=columns,
+                color=True,
+            )
+            row = next(
+                line
+                for line in plain.splitlines()
+                if line.lstrip().startswith("└─")
+            )
+            current_step_width_results.append(
+                len(row) <= columns
+                and row.startswith(f"  └─ {marker} ")
+                and f"  {step_status}  {suffix}" in row
+                and "..." in row
+                and maximum_step_id.replace("-", " ").capitalize()
+                not in row
+                and ansi.sub("", colored_frame) == plain
+            )
+    regression_check(
+        "maximum current step identities retain state timing and ANSI equivalence",
+        len(maximum_step_id) == 128
+        and len(current_step_width_results)
+        == len(current_step_cases) * 3
+        and all(current_step_width_results),
     )
 
     cli_width_projection = replace(
@@ -3388,6 +3491,79 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-time.") as raw:
         and verified_step.timing.seconds == 120,
     )
 
+    verify_runtime = (
+        store_root / "owners" / timed_root / "runtime" / timed_root
+    )
+    producer_receipt_path = (
+        verify_runtime
+        / "pipeline-verification"
+        / receipt_operation
+        / "receipt.json"
+    )
+    rfc3339_receipt = json.loads(
+        producer_receipt_path.read_text(encoding="utf-8")
+    )
+    producer_clock = iter((1_700_000_000.25, 1_700_000_002.75))
+    original_verification_clock = harness_verification.time.time
+
+    def verification_runner(
+        command: list[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        if command[:3] == ["git", "rev-parse", "HEAD"]:
+            return subprocess.CompletedProcess(
+                command, 0, "8" * 40 + "\n", ""
+            )
+        return subprocess.CompletedProcess(command, 0, "ok\n", "")
+
+    harness_verification.time.time = lambda: next(producer_clock)
+    try:
+        producer_evidence = harness_verification.run_profile(
+            harness_verification.VerificationProfile(
+                "scoped", ("true",), "7" * 64
+            ),
+            root=worktree,
+            evidence_dir=verify_runtime / "producer-evidence",
+            runner=verification_runner,
+            pointer_root=verify_runtime,
+        )
+    finally:
+        harness_verification.time.time = original_verification_clock
+    producer_receipt = {
+        **rfc3339_receipt,
+        "evidence": [to_dict(item) for item in producer_evidence],
+    }
+    producer_receipt_path.write_text(
+        json.dumps(producer_receipt, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    producer_projected = project_root(
+        store_root,
+        timed_root,
+        observed_at=1_700_000_010.0,
+    )
+    producer_step = next(
+        step
+        for step in producer_projected.programs[0].steps
+        if step.step_id == "verify"
+    )
+    regression_check(
+        "run_profile numeric epoch evidence freezes the accepted verification duration",
+        producer_evidence[0].started_at == "1700000000.25"
+        and producer_evidence[0].finished_at == "1700000002.75"
+        and dashboard_receipts.verification_receipt_status(
+            store,
+            store.read(timed_root, timed_root),
+            verify_runtime,
+            producer_receipt_path,
+        )
+        == "complete"
+        and producer_step.timing == TimingView("duration", 2),
+    )
+    producer_receipt_path.write_text(
+        json.dumps(rfc3339_receipt, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
     reaped_root = "dashboard-reaped-root"
     _create(
         store,
@@ -3463,6 +3639,54 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-time.") as raw:
         reaped.programs[0].timing.mode == "duration"
         and reaped.programs[0].timing.seconds == 300
         and reaped.programs[0].task_name == "dashboard-reaped-task",
+    )
+
+    task_control_points = (
+        *range(0x20),
+        *range(0x7F, 0xA0),
+    )
+    rejected_task_controls: list[int] = []
+    for codepoint in task_control_points:
+        supplied_name = f"dashboard{chr(codepoint)}task"
+        meta_path.write_text(
+            json.dumps(
+                {**meta, "task_name": supplied_name},
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        control_projection = project_root(
+            store_root,
+            reaped_root,
+            observed_at=1_800_000_000.0,
+        )
+        plain_control = render(
+            control_projection,
+            scope="root",
+            columns=120,
+        )
+        colored_control = render(
+            control_projection,
+            scope="root",
+            columns=120,
+            color=True,
+        )
+        if (
+            control_projection.programs[0].task_name == "unknown"
+            and supplied_name not in plain_control
+            and supplied_name not in colored_control
+            and ansi.sub("", colored_control) == plain_control
+        ):
+            rejected_task_controls.append(codepoint)
+    meta_path.write_text(
+        json.dumps(meta, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    regression_check(
+        "task display evidence rejects C0 C1 and DEL before colored or plain rendering",
+        rejected_task_controls == list(task_control_points)
+        and {0x1B, 0x08, 0x0D, 0x7F}.issubset(task_control_points),
     )
 
     session_path = runtime / "session.json"
@@ -3895,6 +4119,24 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-time.") as raw:
             **valid_receipt,
             "evidence": [{**evidence_row, "started_at": "not-rfc3339"}],
         },
+        "malformed numeric start": {
+            **valid_receipt,
+            "evidence": [
+                {**evidence_row, "started_at": "1700000000.25oops"}
+            ],
+        },
+        "non-finite numeric start": {
+            **valid_receipt,
+            "evidence": [{**evidence_row, "started_at": "nan"}],
+        },
+        "infinite numeric finish": {
+            **valid_receipt,
+            "evidence": [{**evidence_row, "finished_at": "inf"}],
+        },
+        "negative numeric start": {
+            **valid_receipt,
+            "evidence": [{**evidence_row, "started_at": "-1.0"}],
+        },
         "reversed interval": {
             **valid_receipt,
             "evidence": [
@@ -3905,9 +4147,25 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-time.") as raw:
                 }
             ],
         },
+        "reversed numeric interval": {
+            **valid_receipt,
+            "evidence": [
+                {
+                    **evidence_row,
+                    "started_at": "1700000002.75",
+                    "finished_at": "1700000000.25",
+                }
+            ],
+        },
         "future finish": {
             **valid_receipt,
             "evidence": [{**evidence_row, "finished_at": "2099-01-01T00:00:00Z"}],
+        },
+        "future numeric finish": {
+            **valid_receipt,
+            "evidence": [
+                {**evidence_row, "finished_at": "1800000001.0"}
+            ],
         },
     }
     rejected_verification = [
