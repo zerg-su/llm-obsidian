@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import re
 from datetime import datetime
 from pathlib import Path
@@ -43,8 +44,34 @@ RFC3339 = re.compile(
 )
 
 
-def _read_object(path: Path) -> dict[str, Any] | None:
-    if not path.is_file() or path.is_symlink():
+def _evidence_path_is_safe(path: Path, boundary: Path) -> bool:
+    """Reject a leaf or in-boundary ancestor symlink without resolving it."""
+
+    path = Path(os.path.abspath(path.expanduser()))
+    boundary = Path(os.path.abspath(boundary.expanduser()))
+    try:
+        relative = path.relative_to(boundary)
+    except ValueError:
+        return False
+    current = boundary
+    try:
+        if current.is_symlink():
+            return False
+        for part in relative.parts:
+            current = current / part
+            if current.is_symlink():
+                return False
+    except OSError:
+        return False
+    return True
+
+
+def _read_object(path: Path, *, boundary: Path) -> dict[str, Any] | None:
+    if (
+        not _evidence_path_is_safe(path, boundary)
+        or not path.is_file()
+        or path.is_symlink()
+    ):
         return None
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
@@ -57,7 +84,8 @@ def read_gate(store: OperationStore, owner_id: str) -> dict[str, Any] | None:
     """Read the one owner review gate without following a symlink."""
 
     return _read_object(
-        store.root / "review-data" / owner_id / owner_id / "review-gate.json"
+        store.root / "review-data" / owner_id / owner_id / "review-gate.json",
+        boundary=store.root,
     )
 
 
@@ -103,7 +131,7 @@ def liveness_timing(
         / "liveness"
         / "state.json"
     )
-    raw = _read_object(path)
+    raw = _read_object(path, boundary=store.root)
     try:
         state = LivenessState(**raw) if raw is not None else None
     except (TypeError, ValueError):
@@ -145,7 +173,7 @@ def _bound_task_start(
         / "runtime"
         / record.spec.operation_id
     )
-    session = _read_object(runtime / "session.json")
+    session = _read_object(runtime / "session.json", boundary=store.root)
     if (
         session is None
         or session.get("schema_version") != 1
@@ -156,9 +184,12 @@ def _bound_task_start(
     cwd_raw = session.get("cwd")
     if not isinstance(cwd_raw, str) or not Path(cwd_raw).is_absolute():
         return None
-    cwd = Path(cwd_raw).expanduser().resolve()
+    cwd_path = Path(cwd_raw).expanduser()
+    if cwd_path.is_symlink():
+        return None
+    cwd = cwd_path.resolve()
     meta_path = cwd / ".task-meta.json"
-    meta = _read_object(meta_path)
+    meta = _read_object(meta_path, boundary=cwd)
     vault = _vault_for_store(store)
     if meta is None or vault is None:
         return None
@@ -198,7 +229,9 @@ def root_timing(
     if bound is None:
         return UNKNOWN_TIMING
     start, cwd, meta, meta_sha256 = bound
-    complete = _read_object(cwd / ".task-reap-complete.json")
+    complete = _read_object(
+        cwd / ".task-reap-complete.json", boundary=cwd
+    )
     if complete is None:
         return UNKNOWN_TIMING
     end = _rfc3339_epoch(complete.get("completed_at"))
@@ -315,7 +348,7 @@ def verification_receipt_status(
 ) -> str:
     """Classify one verification receipt through its accepted durable identity."""
 
-    value = _read_object(path)
+    value = _read_object(path, boundary=runtime)
     evidence = value.get("evidence") if value else None
     try:
         if (
@@ -434,7 +467,7 @@ def verification_receipt_visits(
         )
     observations: list[tuple[VerificationAttempt | None, str, str]] = []
     for path in sorted(root.glob("*/receipt.json")):
-        value = _read_object(path)
+        value = _read_object(path, boundary=runtime)
         try:
             attempt = (
                 _verification_attempt(value, record)
@@ -498,7 +531,7 @@ def verification_receipt_timing(
     intervals: list[tuple[float, float]] = []
     candidates: list[tuple[int, str, Path, dict[str, Any]]] = []
     for path in sorted(root.glob("*/receipt.json")):
-        raw = _read_object(path)
+        raw = _read_object(path, boundary=runtime)
         if raw is None or verification_receipt_status(
             store, record, runtime, path
         ) != "complete":
@@ -592,8 +625,75 @@ def _review_material_count(
     return len(material)
 
 
+def _review_attempt_is_bound(
+    store: OperationStore,
+    record: OperationRecord,
+    gate: Mapping[str, Any],
+    attempt: ReviewAttempt,
+) -> bool:
+    """Bind display metrics to the exact current gate and stored lane rows."""
+
+    identity = attempt.identity
+    context = gate.get("context")
+    raw_lanes = gate.get("lanes")
+    if (
+        gate.get("schema_version") != 1
+        or gate.get("dispatch_operation_id") != record.spec.operation_id
+        or gate.get("owner_id") != record.spec.owner_id
+        or gate.get("active_review_operation_id") != identity.attempt_id
+        or not isinstance(context, Mapping)
+        or context.get("head_sha") != identity.exact_head_sha
+        or not isinstance(raw_lanes, list)
+        or len(raw_lanes) != len(identity.lanes)
+        or any(lane.owner_id != record.spec.owner_id for lane in identity.lanes)
+    ):
+        return False
+    lanes = {lane.axis: lane for lane in identity.lanes}
+    rows: dict[str, Mapping[str, Any]] = {}
+    for raw in raw_lanes:
+        if not isinstance(raw, Mapping):
+            return False
+        axis = raw.get("axis")
+        if not isinstance(axis, str) or axis in rows:
+            return False
+        rows[axis] = raw
+    if set(rows) != set(lanes):
+        return False
+    try:
+        for axis, lane in lanes.items():
+            row = rows[axis]
+            stored = store.read(lane.owner_id, lane.operation_id)
+            if (
+                row.get("operation_id") != lane.operation_id
+                or row.get("lane_id") != lane.lane_id
+                or row.get("run_id") != lane.run_id
+                or row.get("verification_iteration") != 0
+                or stored.spec.owner_id != lane.owner_id
+                or stored.spec.operation_id != lane.operation_id
+                or stored.lane_id != lane.lane_id
+                or stored.run_id != lane.run_id
+                or stored.spec.route.runtime != lane.runtime
+                or stored.spec.route.model != lane.model
+                or stored.spec.route.effort != lane.effort
+                or stored.spec.route.profile != lane.profile
+                or stored.spec.route.routing_sha256 != lane.routing_sha256
+            ):
+                return False
+    except StoreError:
+        return False
+    if attempt.status == "terminal" and attempt.terminal is not None:
+        return gate.get("status") == attempt.terminal.result.value
+    return gate.get("status") in {
+        "pending",
+        "reviewing",
+        "verifying",
+        "awaiting-resolution",
+    }
+
+
 def review_summary(
     store: OperationStore,
+    record: OperationRecord,
     gate: Mapping[str, Any] | None,
     *,
     limit: int,
@@ -608,6 +708,8 @@ def review_summary(
     try:
         attempt = ReviewAttempt.from_mapping(raw)
     except ReviewAttemptError:
+        return ReviewSummaryView(limit=limit)
+    if not _review_attempt_is_bound(store, record, gate, attempt):
         return ReviewSummaryView(limit=limit)
     if attempt.status != "terminal" or attempt.terminal is None:
         return ReviewSummaryView(cycle=attempt.identity.cycle, limit=limit)

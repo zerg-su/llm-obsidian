@@ -95,9 +95,7 @@ def _program_gate(
 
     if gate is None:
         return None
-    subject = str(
-        gate.get("dispatch_operation_id") or record.spec.owner_id
-    )
+    subject = str(gate.get("dispatch_operation_id") or "")
     return gate if subject == record.spec.operation_id else None
 
 
@@ -403,7 +401,7 @@ def _step_view(
         if elapsed:
             timing = max(elapsed, key=lambda item: item.seconds or 0)
     if step.primitive_id == "review":
-        review = review_summary(store, gate, limit=review_limit)
+        review = review_summary(store, record, gate, limit=review_limit)
     return (
         StepView(
             step_id=step.step_id,

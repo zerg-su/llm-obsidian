@@ -3168,12 +3168,86 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-time.") as raw:
         step for step in reviewed.programs[0].steps if step.step_id == "review"
     )
     regression_check(
-        "terminal review summary validates cycle limit and unique findings",
+        "stale review HEAD axes lanes runs and attempt expose no summary metrics",
+        review_step.review.cycle is None
+        and review_step.review.limit == 2
+        and review_step.review.findings is None
+        and review_step.review.material_findings is None,
+    )
+
+    for lane in lanes:
+        store.create(
+            OperationSpec(
+                lane.operation_id,
+                f"{lane.operation_id}-key",
+                "implementation-review",
+                review_root,
+                RuntimeRoute(
+                    lane.runtime,
+                    lane.model,
+                    lane.effort,
+                    lane.profile,
+                    lane.routing_sha256,
+                ),
+                "packets/review.json",
+                "scoped",
+                parent_operation_id=review_root,
+            ),
+            lane_id=lane.lane_id,
+            run_id=lane.run_id,
+        )
+    gate.update(
+        active_review_operation_id=identity.attempt_id,
+        context={
+            **gate["context"],
+            "head_sha": identity.exact_head_sha,
+        },
+        lanes=[
+            {
+                "axis": lane.axis,
+                "operation_id": lane.operation_id,
+                "lane_id": lane.lane_id,
+                "run_id": lane.run_id,
+                "surface_id": "",
+                "checkpoint": "",
+                "verification_iteration": 0,
+                "state": "complete",
+            }
+            for lane in lanes
+        ],
+    )
+    gate_path.write_text(json.dumps(gate, sort_keys=True) + "\n", encoding="utf-8")
+    reviewed = project_root(store_root, review_root, observed_at=observed_at)
+    review_step = next(
+        step for step in reviewed.programs[0].steps if step.step_id == "review"
+    )
+    regression_check(
+        "terminal review summary validates exact gate HEAD axes lanes runs and attempt",
         review_step.review.cycle == 2
         and review_step.review.limit == 2
         and review_step.review.findings == 3
         and review_step.review.material_findings == 0,
     )
+
+    gate_directory = gate_path.parent
+    real_gate_directory = gate_directory.with_name(gate_directory.name + "-real")
+    gate_directory.rename(real_gate_directory)
+    gate_directory.symlink_to(real_gate_directory, target_is_directory=True)
+    symlinked_gate = project_root(
+        store_root, review_root, observed_at=observed_at
+    )
+    symlinked_review = next(
+        step
+        for step in symlinked_gate.programs[0].steps
+        if step.step_id == "review"
+    )
+    regression_check(
+        "review summary rejects a gate reached through a symlinked ancestor",
+        symlinked_review.review.cycle is None
+        and symlinked_review.review.findings is None,
+    )
+    gate_directory.unlink()
+    real_gate_directory.rename(gate_directory)
 
     bad_liveness = _liveness(
         store,
@@ -3188,6 +3262,263 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-time.") as raw:
         rejected.programs[0].timing.mode == "unknown",
     )
     bad_liveness.unlink()
+
+    liveness_path = _liveness(
+        store,
+        timed_root,
+        timed_root,
+        started_at=1_000.0,
+        last_progress_at=1_100.0,
+    )
+    valid_liveness = json.loads(liveness_path.read_text(encoding="utf-8"))
+    liveness_cases = {
+        "malformed object": "[]\n",
+        "non-finite start": json.dumps(
+            {**valid_liveness, "started_at": float("nan")}
+        ) + "\n",
+        "negative start": json.dumps(
+            {**valid_liveness, "started_at": -1.0}
+        ) + "\n",
+        "reversed progress": json.dumps(
+            {**valid_liveness, "last_progress_at": 900.0}
+        ) + "\n",
+        "future progress": json.dumps(
+            {**valid_liveness, "last_progress_at": 1_301.0}
+        ) + "\n",
+        "revision ahead": json.dumps(
+            {
+                **valid_liveness,
+                "operation_revision": store.read(timed_root, timed_root).revision + 1,
+            }
+        ) + "\n",
+    }
+    rejected_liveness: list[str] = []
+    for label, payload in liveness_cases.items():
+        liveness_path.write_text(payload, encoding="utf-8")
+        if project_root(
+            store_root, timed_root, observed_at=observed_at
+        ).programs[0].timing.mode == "unknown":
+            rejected_liveness.append(label)
+    liveness_path.write_text(
+        json.dumps(valid_liveness, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    liveness_real = liveness_path.parent.with_name("liveness-real")
+    liveness_path.parent.rename(liveness_real)
+    liveness_path.parent.symlink_to(liveness_real, target_is_directory=True)
+    ancestor_symlink_rejected = project_root(
+        store_root, timed_root, observed_at=observed_at
+    ).programs[0].timing.mode == "unknown"
+    liveness_path.parent.unlink()
+    liveness_real.rename(liveness_path.parent)
+    liveness_leaf_real = liveness_path.with_name("state-real.json")
+    liveness_path.rename(liveness_leaf_real)
+    liveness_path.symlink_to(liveness_leaf_real)
+    leaf_symlink_rejected = project_root(
+        store_root, timed_root, observed_at=observed_at
+    ).programs[0].timing.mode == "unknown"
+    liveness_path.unlink()
+    liveness_leaf_real.rename(liveness_path)
+    regression_check(
+        "liveness rejects the complete malformed timestamp revision and symlink matrix",
+        rejected_liveness == list(liveness_cases)
+        and ancestor_symlink_rejected
+        and leaf_symlink_rejected,
+    )
+
+    reaped_runtime = (
+        store_root / "owners" / reaped_root / "runtime" / reaped_root
+    )
+    session_path = reaped_runtime / "session.json"
+    valid_session = json.loads(session_path.read_text(encoding="utf-8"))
+    meta_path = reaped_worktree / ".task-meta.json"
+    valid_meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    complete_path = reaped_worktree / ".task-reap-complete.json"
+    valid_complete = json.loads(complete_path.read_text(encoding="utf-8"))
+
+    def root_duration_unknown(path: Path, payload: str) -> bool:
+        original = path.read_text(encoding="utf-8")
+        path.write_text(payload, encoding="utf-8")
+        try:
+            return project_root(
+                store_root, reaped_root, observed_at=1_800_000_000.0
+            ).programs[0].timing.mode == "unknown"
+        finally:
+            path.write_text(original, encoding="utf-8")
+
+    bound_task_cases = {
+        "session malformed": (session_path, "{\n"),
+        "session operation": (
+            session_path,
+            json.dumps({**valid_session, "operation_id": "wrong-operation"}),
+        ),
+        "session run": (
+            session_path,
+            json.dumps({**valid_session, "run_id": "wrong-run"}),
+        ),
+        "session cwd": (
+            session_path,
+            json.dumps({**valid_session, "cwd": "relative-worktree"}),
+        ),
+        "meta task": (
+            meta_path,
+            json.dumps({**valid_meta, "task_id": "wrong-task"}),
+        ),
+        "meta worktree": (
+            meta_path,
+            json.dumps({**valid_meta, "worktree": str(vault)}),
+        ),
+        "meta vault": (
+            meta_path,
+            json.dumps({**valid_meta, "vault_root": str(worktree)}),
+        ),
+        "meta timestamp": (
+            meta_path,
+            json.dumps({**valid_meta, "spawned_at": "not-rfc3339"}),
+        ),
+        "reap malformed": (complete_path, "[]\n"),
+        "reap reversed": (
+            complete_path,
+            json.dumps(
+                {**valid_complete, "completed_at": "2026-08-10T23:59:59Z"}
+            ),
+        ),
+        "reap future": (
+            complete_path,
+            json.dumps(
+                {**valid_complete, "completed_at": "2099-08-11T00:05:00Z"}
+            ),
+        ),
+        "reap digest": (
+            complete_path,
+            json.dumps({**valid_complete, "meta_sha256": "0" * 64}),
+        ),
+        "reap task": (
+            complete_path,
+            json.dumps({**valid_complete, "task_name": "wrong-task"}),
+        ),
+        "reap vault": (
+            complete_path,
+            json.dumps({**valid_complete, "vault_root": str(worktree)}),
+        ),
+        "reap plan": (
+            complete_path,
+            json.dumps({**valid_complete, "plan_path": str(worktree)}),
+        ),
+        "reap status": (
+            complete_path,
+            json.dumps({**valid_complete, "task_session_status": "active"}),
+        ),
+        "reap validation": (
+            complete_path,
+            json.dumps({**valid_complete, "validated": False}),
+        ),
+    }
+    rejected_bound_task = [
+        label
+        for label, (path, payload) in bound_task_cases.items()
+        if root_duration_unknown(path, payload + ("" if payload.endswith("\n") else "\n"))
+    ]
+
+    meta_real = meta_path.with_name(".task-meta-real.json")
+    meta_path.rename(meta_real)
+    meta_path.symlink_to(meta_real)
+    meta_leaf_rejected = project_root(
+        store_root, reaped_root, observed_at=1_800_000_000.0
+    ).programs[0].timing.mode == "unknown"
+    meta_path.unlink()
+    meta_real.rename(meta_path)
+    worktree_real = reaped_worktree.with_name("reaped-worktree-real")
+    reaped_worktree.rename(worktree_real)
+    reaped_worktree.symlink_to(worktree_real, target_is_directory=True)
+    session_path.write_text(
+        json.dumps({**valid_session, "cwd": str(reaped_worktree)}) + "\n",
+        encoding="utf-8",
+    )
+    meta_ancestor_rejected = project_root(
+        store_root, reaped_root, observed_at=1_800_000_000.0
+    ).programs[0].timing.mode == "unknown"
+    reaped_worktree.unlink()
+    worktree_real.rename(reaped_worktree)
+    session_path.write_text(
+        json.dumps(valid_session, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    regression_check(
+        "task timing rejects the complete malformed identity timestamp and symlink matrix",
+        rejected_bound_task == list(bound_task_cases)
+        and meta_leaf_rejected
+        and meta_ancestor_rejected,
+    )
+
+    verify_runtime = (
+        store_root / "owners" / timed_root / "runtime" / timed_root
+    )
+    receipt_path = (
+        verify_runtime
+        / "pipeline-verification"
+        / receipt_operation
+        / "receipt.json"
+    )
+    valid_receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+
+    def verification_duration_unknown(payload: dict[str, object]) -> bool:
+        receipt_path.write_text(
+            json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        projected = project_root(
+            store_root, timed_root, observed_at=1_800_000_000.0
+        )
+        step = next(
+            item for item in projected.programs[0].steps if item.step_id == "verify"
+        )
+        return step.timing.mode == "unknown"
+
+    evidence_row = valid_receipt["evidence"][0]
+    verification_time_cases = {
+        "malformed start": {
+            **valid_receipt,
+            "evidence": [{**evidence_row, "started_at": "not-rfc3339"}],
+        },
+        "reversed interval": {
+            **valid_receipt,
+            "evidence": [
+                {
+                    **evidence_row,
+                    "started_at": evidence_row["finished_at"],
+                    "finished_at": evidence_row["started_at"],
+                }
+            ],
+        },
+        "future finish": {
+            **valid_receipt,
+            "evidence": [{**evidence_row, "finished_at": "2099-01-01T00:00:00Z"}],
+        },
+    }
+    rejected_verification = [
+        label
+        for label, payload in verification_time_cases.items()
+        if verification_duration_unknown(payload)
+    ]
+    receipt_path.write_text(
+        json.dumps(valid_receipt, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    receipt_directory = receipt_path.parent
+    receipt_real = verify_runtime / ".verification-receipt-real"
+    receipt_directory.rename(receipt_real)
+    receipt_directory.symlink_to(receipt_real, target_is_directory=True)
+    projected = project_root(
+        store_root, timed_root, observed_at=1_800_000_000.0
+    )
+    verification_ancestor_mode = next(
+        item for item in projected.programs[0].steps if item.step_id == "verify"
+    ).timing.mode
+    verification_ancestor_rejected = verification_ancestor_mode != "duration"
+    receipt_directory.unlink()
+    receipt_real.rename(receipt_directory)
+    regression_check(
+        "verification timing rejects malformed reversed future and ancestor symlink evidence",
+        rejected_verification == list(verification_time_cases)
+        and verification_ancestor_rejected,
+    )
 
 if REGRESSION_FAILURES:
     raise AssertionError(
