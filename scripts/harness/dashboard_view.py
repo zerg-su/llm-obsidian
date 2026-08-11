@@ -19,6 +19,7 @@ from .dashboard_projection import (
     ProgramView,
     RouteView,
 )
+from .dashboard_policy import ReviewSummaryView, TimingView
 from .state_machine import TERMINAL
 
 MAX_LINE = 96
@@ -47,14 +48,21 @@ NEXT_ACTION_TEXT = {
 }
 RESET = "\x1b[0m"
 SEMANTIC_COLORS = {
-    "complete": "\x1b[32m",
-    "running": "\x1b[36m",
-    "waiting": "\x1b[33m",
-    "retry": "\x1b[38;5;208m",
-    "attention": "\x1b[31m",
-    "model": "\x1b[35m",
+    "primary": "\x1b[38;2;244;244;247m",
+    "secondary": "\x1b[38;2;119;122;140m",
+    "rule": "\x1b[38;2;68;71;88m",
+    "complete": "\x1b[38;2;85;230;139m",
+    "running": "\x1b[38;2;91;217;238m",
+    "waiting": "\x1b[38;2;240;196;84m",
+    "retry": "\x1b[38;2;255;156;74m",
+    "attention": "\x1b[38;2;255;101;122m",
+    "model": "\x1b[38;2;216;120;238m",
+    "identity": "\x1b[38;2;112;168;255m",
 }
+BOLD = "\x1b[1m"
+DIM = "\x1b[2m"
 MODEL_TOKEN = re.compile(r"(?<=/)[A-Za-z0-9][A-Za-z0-9._-]*(?=/)")
+RUNTIME_TOKEN = re.compile(r"(?<![A-Za-z0-9_-])(?:claude|codex)(?![A-Za-z0-9_-])")
 SEMANTIC_TOKENS = {
     "verification-receipt-failed": "retry",
     "fix-receipt-failed": "retry",
@@ -68,6 +76,9 @@ SEMANTIC_TOKENS = {
     "[!]": "attention",
     "[>]": "running",
     "[x]": "complete",
+    "[-]": "attention",
+    "[?]": "attention",
+    "[ ]": "secondary",
 }
 SEMANTIC_TOKEN = re.compile(
     r"(?<![A-Za-z0-9_-])(?:"
@@ -102,6 +113,31 @@ def _route(route: RouteView) -> str:
     )
 
 
+def _timing(timing: TimingView) -> str:
+    if timing.mode == "unknown" or timing.seconds is None:
+        return "time unknown"
+    seconds = timing.seconds
+    if seconds < 60:
+        value = f"{seconds}s"
+    elif seconds < 3600:
+        value = f"{seconds // 60}m {seconds % 60:02d}s"
+    else:
+        value = f"{seconds // 3600}h {(seconds % 3600) // 60:02d}m"
+    return f"{timing.mode} {value}"
+
+
+def _scalar(value: int | None) -> str:
+    return "unknown" if value is None else str(value)
+
+
+def _review(summary: ReviewSummaryView) -> str:
+    return (
+        f"review cycle {_scalar(summary.cycle)}/{_scalar(summary.limit)}  "
+        f"findings {_scalar(summary.findings)}  "
+        f"material {_scalar(summary.material_findings)}"
+    )
+
+
 def _child_lines(children: tuple[ChildView, ...], indent: int) -> list[str]:
     """Render one nested operation subtree under the step that runs it."""
 
@@ -112,25 +148,60 @@ def _child_lines(children: tuple[ChildView, ...], indent: int) -> list[str]:
         identity = _identity(child.operation_id)
         lines.append(
             f"{pad}{marker} {identity:<{CHILD_ID}} {child.kind:<22} "
-            f"{child.state}"
+            f"{child.status}  {_timing(child.timing)}"
         )
-        lines.append(f"{pad}    route {_route(child.route)}")
+        lines.append(f"{pad}    state {child.state}  route {_route(child.route)}")
         lines.extend(_child_lines(child.children, indent + 4))
     return lines
+
+
+def _compact_step(step: object, *, summarize_child: bool = False) -> str:
+    marker = STEP_MARKERS.get(step.status, STEP_MARKERS["unknown"])
+    route = ""
+    if step.route != RouteView():
+        route = (
+            f" {step.route.runtime}/{step.route.model}/{step.route.effort}"
+        )
+    child = ""
+    if summarize_child and step.children:
+        item = step.children[0]
+        child = (
+            f" {STEP_MARKERS.get(item.status, '[?]')} "
+            f"{_short(item.operation_id)} {item.state}"
+        )
+    primitive = step.primitive.split("@", 1)[0]
+    return (
+        f"    {marker} {step.step_id} {primitive} {step.status}"
+        f"{child}{route} {_timing(step.timing)}"
+    )
+
+
+def _current_step(program: ProgramView) -> object | None:
+    for status in ("running", "attention", "unknown"):
+        selected = next((step for step in program.steps if step.status == status), None)
+        if selected is not None:
+            return selected
+    return next((step for step in program.steps if step.status == "pending"), None)
 
 
 def _step_lines(program: ProgramView) -> list[str]:
     if not program.steps:
         return ["  steps    none projected"]
     lines = ["  steps"]
+    current = _current_step(program)
     for step in program.steps:
-        marker = STEP_MARKERS.get(step.status, STEP_MARKERS["unknown"])
+        lines.append(_compact_step(step, summarize_child=step is not current))
+        if step is not current:
+            continue
         lines.append(
-            f"    {marker} {step.step_id:<16} {step.primitive:<18} "
-            f"{step.session_mode:<13} visits {step.visits}"
+            f"        route {_route(step.route)}  session {step.session_mode}  "
+            f"visits {step.visits}"
         )
-        lines.append(f"        route {_route(step.route)}")
         lines.extend(_child_lines(step.children, 8))
+        if step.review != ReviewSummaryView():
+            lines.append(f"        {_review(step.review)}")
+        if step.evidence_issue:
+            lines.append(f"        evidence {step.evidence_issue}")
     return lines
 
 
@@ -167,12 +238,12 @@ def _program_lines(program: ProgramView) -> list[str]:
     )
     lines = [
         header,
-        f"  pipeline {program.pipeline}  definition {_short(program.definition_sha256) or 'none'}",
-        f"  controls {controls}",
-        f"  loop     {loop}",
-        f"  next     {NEXT_ACTION_TEXT.get(program.next_action, program.next_action)}",
-        f"  surface  {program.surface}",
+        f"  classification {program.classification}  pipeline {program.pipeline}",
+        f"  progress {sum(step.status == 'complete' for step in program.steps)}/{len(program.steps)}  root {_timing(program.timing)}",
+        f"  next {NEXT_ACTION_TEXT.get(program.next_action, program.next_action)}",
+        f"  surface {program.surface}  definition {_short(program.definition_sha256) or 'none'}",
         f"  executor {_route(program.executor)}  {program.executor_status}",
+        f"  controls {controls}  loop {loop}",
     ]
     lines.extend(_step_lines(program))
     if program.children:
@@ -207,30 +278,42 @@ def _issue_lines(projection: DashboardProjection) -> list[str]:
 def _colorize(line: str, *, color: bool) -> str:
     if not color:
         return line
+    if line == "HARNESS PIPELINES":
+        return f"{SEMANTIC_COLORS['primary']}{line}{RESET}"
+    stripped = line.lstrip()
+    base = BOLD if stripped.startswith("[>]") else (
+        DIM if stripped.startswith("[ ]") else ""
+    )
+
+    def paint(role: str, value: str) -> str:
+        return f"{SEMANTIC_COLORS[role]}{value}{RESET}{base}"
+
     rendered = MODEL_TOKEN.sub(
-        lambda match: f"{SEMANTIC_COLORS['model']}{match.group()}{RESET}",
+        lambda match: paint("model", match.group()),
         line,
     )
-    return SEMANTIC_TOKEN.sub(
-        lambda match: (
-            f"{SEMANTIC_COLORS[SEMANTIC_TOKENS[match.group()]]}"
-            f"{match.group()}{RESET}"
-        ),
+    rendered = RUNTIME_TOKEN.sub(
+        lambda match: paint("identity", match.group()), rendered
+    )
+    rendered = SEMANTIC_TOKEN.sub(
+        lambda match: paint(SEMANTIC_TOKENS[match.group()], match.group()),
         rendered,
     )
+    return f"{base}{rendered}{RESET}" if base else rendered
 
 
 def _history_line(program: ProgramView) -> str:
     return (
         f"  {program.operation_id}  {program.kind}  {program.state}  "
-        f"pipeline {program.pipeline}  rev {program.revision}"
+        f"pipeline {program.pipeline}  {_timing(program.timing)}"
     )
 
 
 def _compact_program_line(program: ProgramView) -> str:
     return (
         f"  {program.operation_id}  {program.kind}  {program.state}  "
-        f"pipeline {program.pipeline}  {program.classification}"
+        f"pipeline {program.pipeline}  {program.classification}  "
+        f"{_timing(program.timing)}"
     )
 
 
@@ -263,7 +346,14 @@ def _bounded_program_lines(
         (
             [
                 _program_lines(program)[0],
-                f"  status   {program.classification}  details compacted",
+                next(
+                    line
+                    for line in _step_lines(program)
+                    if line.lstrip().startswith(tuple(STEP_MARKERS.values()))
+                    and _current_step(program) is not None
+                    and _current_step(program).step_id in line
+                ),
+                f"  Viewport truncated +{max(len(_program_lines(program)) - 2, 0)} lines",
             ]
             if _presentation_priority(program) < 2
             else [_compact_program_line(program)]
@@ -299,7 +389,7 @@ def _bounded_program_lines(
         visible = max(len(groups[index]), len(groups[index]) + remaining - 1)
         omitted = len(full) - visible
         groups[index] = full[:visible] + [
-            f"  viewport details truncated +{omitted} lines"
+            f"  Viewport truncated +{omitted} lines"
         ]
         remaining = 0
     return [line for group in groups for line in group]
@@ -365,7 +455,7 @@ def _program_floor(programs: tuple[ProgramView, ...]) -> int:
     if not programs:
         return 0
     first = min(programs, key=_presentation_priority)
-    identity_rows = 2 if _presentation_priority(first) < 2 else 1
+    identity_rows = 3 if _presentation_priority(first) < 2 else 1
     return identity_rows + (1 if len(programs) > 1 else 0)
 
 
@@ -388,11 +478,12 @@ def render(
         program for program in projection.programs if program.state in TERMINAL
     )[:recent]
     header = [
+        "HARNESS PIPELINES",
         f"Harness dashboard - {scope} {projection.owner_id}",
-        f"Classification: {projection.classification}",
-        f"cmux surface probe: {projection.surface_probe}",
-        f"Programs: {len(projection.programs)}{suffix}",
+        f"Classification: {projection.classification}  "
+        f"Programs: {len(projection.programs)}{suffix}  "
         f"Active pipelines: {len(active)}",
+        f"cmux surface probe: {projection.surface_probe}",
         "",
     ]
     footer = _footer_lines(terminal, projection)
@@ -425,4 +516,6 @@ def render(
         lines = lines[: max(rows - 1, 0)]
         if rows:
             lines.append(f"Viewport truncated +{omitted} lines")
+    if rows is not None and rows <= 0:
+        return ""
     return "\n".join(_colorize(_clip(line), color=color) for line in lines) + "\n"

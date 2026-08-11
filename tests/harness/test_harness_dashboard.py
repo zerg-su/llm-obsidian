@@ -48,6 +48,7 @@ from harness.dashboard_projection import (
     project_root,
 )
 from harness.dashboard_view import MAX_LINE, _colorize, render
+from harness.dashboard_policy import TimingView
 from harness.custom_pipelines import (
     CustomPipelinePolicy,
     ExplicitPipelineApproval,
@@ -629,21 +630,82 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard.") as raw:
     retry_colored = render(retry_projection, color=True)
     ansi = re.compile(r"\x1b\[[0-9;]*m")
     regression_check(
-        "the TTY renderer uses the restrained semantic palette without changing plain bytes",
-        "\x1b[32m[x]\x1b[0m" in colored
-        and "\x1b[36m[>]\x1b[0m" in colored
-        and "\x1b[33mwaiting\x1b[0m" in colored
-        and "\x1b[38;5;208mverification-receipt-failed\x1b[0m"
+        "the TTY renderer uses the approved truecolor palette without changing plain bytes",
+        "\x1b[38;2;85;230;139m[x]\x1b[0m" in colored
+        and "\x1b[38;2;91;217;238m[>]\x1b[0m" in colored
+        and "\x1b[38;2;240;196;84mwaiting\x1b[0m" in colored
+        and "\x1b[38;2;255;156;74mverification-receipt-failed\x1b[0m"
         in retry_colored
-        and "\x1b[31mattention-required\x1b[0m" in attention_colored
-        and "\x1b[35mclaude-opus-5\x1b[0m" in colored
+        and "\x1b[38;2;255;101;122mattention-required\x1b[0m" in attention_colored
+        and "\x1b[38;2;216;120;238mclaude-opus-5\x1b[0m" in colored
+        and "\x1b[38;2;244;244;247mHARNESS PIPELINES\x1b[0m" in colored
+        and "\x1b[1m" in colored
+        and "\x1b[48;" not in colored
         and _colorize("awaiting-transition", color=True)
-        == "\x1b[33mawaiting-transition\x1b[0m"
+        == "\x1b[38;2;240;196;84mawaiting-transition\x1b[0m"
         and _colorize("awaiting-callback", color=True)
-        == "\x1b[33mawaiting-callback\x1b[0m"
+        == "\x1b[38;2;240;196;84mawaiting-callback\x1b[0m"
         and ansi.sub("", colored) == text
         and ansi.sub("", attention_colored) == render(attention_projection)
         and ansi.sub("", retry_colored) == render(retry_projection),
+    )
+    text_lines = text.splitlines()
+    regression_check(
+        "the approved hierarchy expands only current work and keeps timing on every row",
+        text_lines[0] == "HARNESS PIPELINES"
+        and text_lines.index("  steps")
+        < next(index for index, line in enumerate(text_lines) if "lanes" in line)
+        and sum(
+            line.lstrip().startswith("[x] minimal-fix") for line in text_lines
+        ) == 1
+        and sum("review" in line for line in text_lines) >= 2
+        and "time unknown" in text
+        and "review cycle unknown/3" in text,
+    )
+    viewport_matrix = {
+        rows: (
+            render(projection, rows=rows),
+            render(projection, rows=rows, color=True),
+        )
+        for rows in range(len(text_lines) + 1)
+    }
+    narrow = viewport_matrix[10][0]
+    regression_check(
+        "every viewport budget is bounded, equivalent, and truthfully prioritized",
+        all(
+            len(plain.splitlines()) <= rows
+            and all(len(line) <= MAX_LINE for line in plain.splitlines())
+            and ansi.sub("", colored) == plain
+            for rows, (plain, colored) in viewport_matrix.items()
+        )
+        and DISPATCH in narrow
+        and "[>] review" in narrow
+        and "Viewport truncated +" in narrow,
+    )
+    formatted = tuple(
+        render(
+            replace(
+                projection,
+                programs=(
+                    replace(
+                        projection.programs[0],
+                        timing=TimingView("elapsed", seconds),
+                    ),
+                ),
+            )
+        )
+        for seconds in (0, 59, 60, 3600)
+    )
+    regression_check(
+        "display timing uses deterministic whole-second terminal formatting",
+        all(
+            expected in frame
+            for expected, frame in zip(
+                ("elapsed 0s", "elapsed 59s", "elapsed 1m 00s", "elapsed 1h 00m"),
+                formatted,
+                strict=True,
+            )
+        ),
     )
 
     captured = io.StringIO()
@@ -1227,8 +1289,8 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-tree.") as raw:
         "the rendered tree shows one program with nested route-annotated steps",
         all(len(line) <= MAX_LINE for line in text.splitlines())
         and "Programs: 1" in text
-        and "route claude/claude-opus-5/high  preset reviewer-callback" in text
-        and "review-round" in text
+        and "claude/claude-opus-5/high" in text
+        and "[ ] review" in text
         and "executor claude/claude-opus-5/medium" in text
         and "awaiting-transition" in text,
     )
@@ -1740,7 +1802,7 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-viewport.") as raw:
         exact_fit == full_live
         and len(one_short.splitlines()) == exact_rows - 1
         and live_owner in one_short
-        and "viewport details truncated" in one_short,
+        and "Viewport truncated" in one_short,
     )
 
     second_live = replace(live_program, operation_id="dashboard-y-second-live")
