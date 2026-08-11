@@ -16,6 +16,34 @@
 внутренними контрольными точками и вошли в следующие публичные релизы; тегов и
 пакетов с этими номерами не выпускалось.
 
+## [2.6.7-rc4] — 2026-08-11
+
+Кандидат terminal-only панели Harness. RC4 улучшает существующий read-only,
+root-scoped observer, не меняя authority dispatch, review, verification,
+recovery, callback, cleanup или reap.
+
+### Добавлено
+
+- Durable display timing для root, verification-step и точных active child.
+  Отсутствующее или отклонённое timestamp evidence выводится как
+  `time unknown`.
+- Валидированные terminal-счётчики review cycle/limit/findings без чтения
+  review prose и без вывода severity.
+
+### Изменено
+
+- Высококонтрастная root card, компактное дерево compiled steps, ограниченные
+  recent roots и утверждённая semantic truecolor foreground palette.
+- Один display-only sample frame clock на root- или owner-wide diagnostic
+  frame; `--no-color` остаётся byte-equivalent после удаления ANSI.
+
+### Граница кандидата
+
+- Observer split остаётся external и user-owned, owner-wide view — только
+  diagnostic. У dashboard нет lifecycle authority.
+- Локальный кандидат требует independent review. Эта работа не создаёт tag и
+  ничего не публикует.
+
 ## [2.6.7-rc3] — 2026-08-11
 
 Финальный стабилизационный кандидат поддерживаемого коридора

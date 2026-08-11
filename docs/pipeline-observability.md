@@ -170,6 +170,28 @@ are recorded in
 and its
 [superseding ADR](decisions/v2.4-state-free-executable-lifecycle.md).
 
+## Terminal dashboard timing
+
+The terminal dashboard is a read-only projection, not a telemetry or lifecycle
+writer. Root elapsed time uses the task's bound `spawned_at`, with exact
+liveness start as a bounded fallback. A terminal duration freezes only when a
+validated reap completion binds the same task metadata. Verification duration
+uses the earliest accepted start and latest accepted finish from the exact
+verification evidence already selected by the receipt policy. Other terminal
+model, review, and fix rows have no authoritative end timestamp and display
+`time unknown`.
+
+Only durable timestamps bound to the exact owner, operation, run, revision,
+worktree, vault, task metadata digest, and sampled frame are accepted. Invalid
+RFC 3339 values, non-finite or negative epochs, future/reversed intervals,
+symlinks, and identity drift remain unknown. The one frame clock is
+display-only: it cannot change classification, next action, issues, retry or
+readiness policy, verification truth, or persisted state.
+
+Best-effort telemetry in `.vault-meta/pipeline-events.jsonl` remains a numeric
+operations report. Its timestamps, record mtimes, deadlines, screen text, and
+list order are never promoted into root elapsed or terminal duration facts.
+
 LLM Obsidian 2.5 adds approved custom definitions without changing that
 ownership. Raw `PipelineSpec` data stays in owner-only runtime scratch. The
 shared event stream sees only the normalized definition hash, custom/built-in

@@ -169,6 +169,14 @@ review-resolution schema correction.  It also adds the registered one-shot
 reap-log-repair planner as the single new production script.  The measured
 growth is one file and 1,359 lines; the ceilings move to the exact 273-file,
 95,891-line candidate with no blanket headroom.
+
+The 2.6.7 RC4 terminal dashboard candidate adds no production Python file. Its
+531 measured lines are confined to the existing dashboard policy, durable
+receipt ingress, projection, view, standalone adapter, and read-only diagnostic
+adapter. They implement bound timing/review display values, the truecolor
+terminal hierarchy, and one sampled display-only frame clock. The line ceiling
+moves by exactly those 531 lines to the 96,422-line candidate with no blanket
+headroom; the file ceiling remains unchanged.
 """
 
 from __future__ import annotations
@@ -176,11 +184,11 @@ from __future__ import annotations
 from pathlib import Path
 
 
-#: Maximum tracked Python files under ``scripts/`` for the 2.6.7 RC3 candidate.
+#: Maximum tracked Python files under ``scripts/`` for the 2.6.7 RC4 candidate.
 SCRIPT_FILE_CEILING = 273
 
-#: Maximum total lines across those files for the 2.6.7 RC3 candidate.
-SCRIPT_LINE_CEILING = 95_891
+#: Maximum total lines across those files for the 2.6.7 RC4 candidate.
+SCRIPT_LINE_CEILING = 96_422
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

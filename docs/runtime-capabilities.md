@@ -20,6 +20,7 @@ must not be inferred from another runtime.
 | `PostToolUse[ExitPlanMode]` plan capture | Automatic | Not provided by this plugin | Use `/save-plan` equivalent explicitly |
 | Compaction recovery | PostCompact adapter + host context behavior | Valid PostCompact hint; `SessionStart(source=compact)` reloads hot cache | Manual |
 | Harness operations | Shared owner-scoped ledger; `status`, `inspect`, `resume`, `reconcile`, `cancel`, `close`, `doctor` | Same | Read-only inspection works; visible provider lifecycle requires a supported host |
+| Harness terminal observer | External root-scoped terminal observer; user-owned cmux split | Same root-scoped terminal observer and split ownership | Owner-wide diagnostic only; no provider lifecycle |
 | cmux workspace progress | Exact live controller programs in the coordinator origin workspace; idle clears | Same content-free label and cleanup semantics | Not projected |
 | Operation telemetry | Shared scripts emit `pipeline-events.jsonl`; task/review lifecycle adds numeric latency and outcome counters | Same | Same for explicit scripts |
 | Durable review history | Unified simple/deep operation archives exact HEAD/profile evidence at reap | Same | Explicit exact-operation archive from the coordinator vault |
@@ -53,6 +54,16 @@ path; never hand-edit OperationStore records. Terminal controllers are
 authoritative over stale descendants, and an empty selection issues
 workspace-scoped `clear-progress`. Claude and Codex use the same content-free
 label and the same `set-progress`/`clear-progress` transport.
+
+The Harness dashboard is also read-only but has a different scope. Normal live
+mode is a root-scoped terminal observer bound to exactly one dispatch root; its
+cmux split is external and user-owned. `--all` and `harness dashboard` remain an
+explicit owner-wide diagnostic, never the default observer. The renderer uses
+foreground-only semantic truecolor plus ASCII and English redundancy.
+`--no-color` unconditionally removes every escape byte while preserving the
+same text. Projection, timing, and rendering have no lifecycle authority: they
+cannot start, stop, acknowledge, transition, recover, verify, submit, reap, or
+clean up an operation.
 
 Durable review pages are intentionally separate from telemetry. In unattended
 final reap, the lifecycle contract hashes the coordinator-generated marker,

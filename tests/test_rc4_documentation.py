@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Executable documentation, packaging, and live evidence contract for RC3."""
+"""Executable RC4 packaging contract with immutable RC3 acceptance evidence."""
 
 from __future__ import annotations
 
@@ -8,7 +8,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "2.6.7-rc3"
+VERSION = "2.6.7-rc4"
+HISTORICAL_VERSION = "2.6.7-rc3"
 SUBJECT = "e0b419fb2a97dde3c4bc321ec170f93997a0063781822caf5d9d81347db9bfd6"
 
 
@@ -24,13 +25,57 @@ assert codex["version"] == VERSION
 assert marketplace["metadata"]["version"] == VERSION
 assert marketplace["plugins"][0]["version"] == VERSION
 
-assert "## [2.6.7-rc3] - 2026-08-11" in text("CHANGELOG.md")
-assert "## [2.6.7-rc3] — 2026-08-11" in text("CHANGELOG.ru.md")
+assert "## [2.6.7-rc4] - 2026-08-11" in text("CHANGELOG.md")
+assert "## [2.6.7-rc4] — 2026-08-11" in text("CHANGELOG.ru.md")
 for relative in ("README.md", "README.ru.md"):
-    assert "docs/releases/v2.6.7-rc3.md" in text(relative)
+    assert "docs/releases/v2.6.7-rc4.md" in text(relative)
 
-notes = text("docs/releases/v2.6.7-rc3.md")
+historical_notes = text("docs/releases/v2.6.7-rc3.md")
+normalized_historical = " ".join(historical_notes.split()).lower()
+notes = text("docs/releases/v2.6.7-rc4.md")
 normalized_notes = " ".join(notes.split()).lower()
+for required in (
+    "terminal-only",
+    "root-scoped",
+    "owner-wide diagnostic",
+    "user-owned",
+    "--no-color",
+    "durable timestamps",
+    "time unknown",
+    "display-only",
+    "no lifecycle authority",
+    "independent review",
+    "not tagged or published",
+):
+    assert required in normalized_notes
+for forbidden_claim in (
+    "this release is published",
+    "published as the prerelease",
+    "tagged as v2.6.7-rc4",
+    "was pushed",
+    "was merged",
+    "has been released",
+):
+    assert forbidden_claim not in normalized_notes
+
+observability = " ".join(text("docs/pipeline-observability.md").split()).lower()
+runtime = " ".join(text("docs/runtime-capabilities.md").split()).lower()
+for required in (
+    "root elapsed",
+    "terminal duration",
+    "durable timestamps",
+    "time unknown",
+    "best-effort telemetry",
+):
+    assert required in observability
+for required in (
+    "root-scoped terminal observer",
+    "owner-wide diagnostic",
+    "user-owned",
+    "--no-color",
+    "no lifecycle authority",
+):
+    assert required in runtime
 readiness = text("docs/acceptance/v2.6.6-rc4-release-readiness.md")
 for evidence_number in range(1, 11):
     assert f"RC4-E{evidence_number}-" in readiness
@@ -42,11 +87,11 @@ for required in (
 ):
     assert required in readiness
 assert "single holistic Opus" in readiness
-assert "final stabilization candidate" in normalized_notes
-assert "three consecutive rc1 cells" in normalized_notes
-assert "distinct concurrent roots" in normalized_notes
-assert "observer splits remain external and user-owned" in normalized_notes
-assert "published as the prerelease tag" in normalized_notes
+assert "final stabilization candidate" in normalized_historical
+assert "three consecutive rc1 cells" in normalized_historical
+assert "distinct concurrent roots" in normalized_historical
+assert "observer splits remain external and user-owned" in normalized_historical
+assert "published as the prerelease tag" in normalized_historical
 
 evidence_root = ROOT / "docs" / "acceptance" / "evidence" / "v2.6.7"
 
@@ -54,7 +99,7 @@ evidence_root = ROOT / "docs" / "acceptance" / "evidence" / "v2.6.7"
 def evidence(name: str, evidence_id: str) -> dict[str, object]:
     value = json.loads((evidence_root / name).read_text(encoding="utf-8"))
     assert value["schema_version"] == 1
-    assert value["release"] == VERSION
+    assert value["release"] == HISTORICAL_VERSION
     assert value["evidence_id"] == evidence_id
     assert value["lifecycle_subject_sha256"] == SUBJECT
     return value
@@ -126,7 +171,7 @@ repair_ledger = json.loads(
     )
 )
 assert repair_ledger["schema_version"] == 1
-assert repair_ledger["release"] == VERSION
+assert repair_ledger["release"] == HISTORICAL_VERSION
 assert repair_ledger["evidence_id"] == "E267.RC3.REPAIR_CLASSIFICATION"
 assert repair_ledger["stop_rule"] == {
     "independent_new_lifecycle_class_count": 0,
@@ -150,7 +195,7 @@ final_review = json.loads(
     (evidence_root / "rc3-final-fable-review.json").read_text(encoding="utf-8")
 )
 assert final_review["schema_version"] == 1
-assert final_review["release"] == VERSION
+assert final_review["release"] == HISTORICAL_VERSION
 assert final_review["evidence_id"] == "E267.RELEASE.FABLE_REVIEW"
 assert final_review["reviewed_head_sha"] == "9b12e3453a6cd81da7361e32b7cc60aa3c3187d0"
 assert final_review["verdict"] == "approve"
@@ -165,7 +210,7 @@ release_gate = json.loads(
     (evidence_root / "rc3-release-gate.json").read_text(encoding="utf-8")
 )
 assert release_gate["schema_version"] == 1
-assert release_gate["release"] == VERSION
+assert release_gate["release"] == HISTORICAL_VERSION
 assert release_gate["evidence_id"] == "E267.RELEASE.GATE"
 assert release_gate["verdict"] == "green"
 assert release_gate["attested_candidate_head_sha"] == final_review["reviewed_head_sha"]
@@ -178,4 +223,4 @@ assert all(value == "pass" for value in release_gate["verification"].values())
 makefile = text("Makefile")
 assert "python3 tests/test_rc4_documentation.py" in makefile
 
-print("v2.6.7 RC3 documentation, packaging, and live evidence contracts passed")
+print("v2.6.7 RC4 packaging and immutable RC3 evidence contracts passed")

@@ -10,6 +10,33 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.6.7-rc4] - 2026-08-11
+
+Terminal-only Harness dashboard candidate. RC4 refines the existing read-only,
+root-scoped observer without changing dispatch, review, verification, recovery,
+callback, cleanup, or reap authority.
+
+### Added
+
+- Durable display timing for roots, verification steps, and exact active
+  children. Missing or rejected timestamp evidence renders `time unknown`.
+- Validated terminal review cycle/limit/finding counts without reading review
+  prose or inferring severity.
+
+### Changed
+
+- A high-contrast root card, compact compiled step tree, bounded recent roots,
+  and the approved semantic truecolor foreground palette.
+- One display-only frame-clock sample per root or owner-wide diagnostic frame;
+  `--no-color` remains byte-equivalent after ANSI stripping.
+
+### Candidate boundary
+
+- Observer splits remain external and user-owned, and the owner-wide view is
+  diagnostic only. The dashboard has no lifecycle authority.
+- This local candidate requires independent review. It is not tagged or
+  published by this work.
+
 ## [2.6.7-rc3] - 2026-08-11
 
 Final stabilization candidate for the supported `engineering/change`
