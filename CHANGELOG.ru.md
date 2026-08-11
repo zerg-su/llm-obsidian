@@ -25,15 +25,19 @@ recovery, callback, cleanup или reap.
 ### Добавлено
 
 - Durable display timing для root, verification-step и точных active child.
-  Отсутствующее или отклонённое timestamp evidence выводится как
-  `time unknown`.
+  Отсутствующее evidence для current выводится как `time unavailable`,
+  compact terminal row использует тире, pending row не выводит timing.
 - Валидированные terminal-счётчики review cycle/limit/findings без чтения
-  review prose и без вывода severity.
+  review prose и без вывода severity, с точной привязкой gate, reviewed HEAD,
+  axes, lane, run и attempt.
 
 ### Изменено
 
-- Высококонтрастная root card, компактное дерево compiled steps, ограниченные
-  recent roots и утверждённая semantic truecolor foreground palette.
+- Отдельная human-readable, task-name-first root-композиция: compact completed/
+  future steps, ровно один expanded current step, ограниченные recent roots и
+  issues, утверждённая semantic truecolor foreground palette.
+- Evidence отклоняется как для symlink leaf, так и для symlink ancestor;
+  owner-wide diagnostic facts скрыты в обычном root view.
 - Один display-only sample frame clock на root- или owner-wide diagnostic
   frame; `--no-color` остаётся byte-equivalent после удаления ANSI.
 

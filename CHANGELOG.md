@@ -19,14 +19,19 @@ callback, cleanup, or reap authority.
 ### Added
 
 - Durable display timing for roots, verification steps, and exact active
-  children. Missing or rejected timestamp evidence renders `time unknown`.
+  children. Missing current evidence renders `time unavailable`; compact
+  terminal rows use a dash and pending rows omit timing.
 - Validated terminal review cycle/limit/finding counts without reading review
-  prose or inferring severity.
+  prose or inferring severity, bound to the exact gate, reviewed HEAD, axes,
+  lane, run, and attempt.
 
 ### Changed
 
-- A high-contrast root card, compact compiled step tree, bounded recent roots,
-  and the approved semantic truecolor foreground palette.
+- A dedicated human-readable, task-name-first root composition with compact
+  completed/future steps, exactly current work expanded, bounded recent roots
+  and issues, and the approved semantic truecolor foreground palette.
+- Rejected both leaf and ancestor symlink evidence paths; owner-wide diagnostic
+  facts no longer leak into the ordinary root view.
 - One display-only frame-clock sample per root or owner-wide diagnostic frame;
   `--no-color` remains byte-equivalent after ANSI stripping.
 

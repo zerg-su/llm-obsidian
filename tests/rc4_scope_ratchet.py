@@ -177,6 +177,13 @@ adapter. They implement bound timing/review display values, the truecolor
 terminal hierarchy, and one sampled display-only frame clock. The line ceiling
 moves by exactly those 531 lines to the 96,422-line candidate with no blanket
 headroom; the file ceiling remains unchanged.
+
+The corrective RC4 dashboard rework also adds no production Python file. Its
+450 measured lines replace the ordinary root diagnostic dump with the dedicated
+human-readable composition, bind review metrics and task names at the durable
+receipt boundary, reject ancestor symlink evidence, and preserve the existing
+one-clock CLI path. The line ceiling therefore moves exactly to 96,872 lines;
+the 273-file ceiling remains unchanged and no speculative headroom is added.
 """
 
 from __future__ import annotations
@@ -188,7 +195,7 @@ from pathlib import Path
 SCRIPT_FILE_CEILING = 273
 
 #: Maximum total lines across those files for the 2.6.7 RC4 candidate.
-SCRIPT_LINE_CEILING = 96_422
+SCRIPT_LINE_CEILING = 96_872
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

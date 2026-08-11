@@ -57,9 +57,14 @@ label and the same `set-progress`/`clear-progress` transport.
 
 The Harness dashboard is also read-only but has a different scope. Normal live
 mode is a root-scoped terminal observer bound to exactly one dispatch root; its
-cmux split is external and user-owned. `--all` and `harness dashboard` remain an
-explicit owner-wide diagnostic, never the default observer. The renderer uses
-foreground-only semantic truecolor plus ASCII and English redundancy.
+cmux split is external and user-owned. The normal composition is task-name-first:
+title/store/update, root and executor summaries, compact steps with exactly
+current work expanded, recent roots, issues, and a legend. `--all` and
+`harness dashboard` remain an explicit owner-wide diagnostic, never the default
+observer. Diagnostic-only fields such as classification/program counts,
+revision/hash/control/loop data, lanes, and unbound-child bookkeeping stay out
+of the root product view. The renderer uses foreground-only semantic truecolor
+plus visible symbols and English redundancy.
 `--no-color` unconditionally removes every escape byte while preserving the
 same text. Projection, timing, and rendering have no lifecycle authority: they
 cannot start, stop, acknowledge, transition, recover, verify, submit, reap, or

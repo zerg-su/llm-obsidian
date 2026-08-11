@@ -179,14 +179,18 @@ validated reap completion binds the same task metadata. Verification duration
 uses the earliest accepted start and latest accepted finish from the exact
 verification evidence already selected by the receipt policy. Other terminal
 model, review, and fix rows have no authoritative end timestamp and display
-`time unknown`.
+one compact dash. An expanded current row with rejected or missing evidence
+displays `time unavailable`; pending rows omit timing, so unavailable time is
+not repeated mechanically across the tree.
 
 Only durable timestamps bound to the exact owner, operation, run, revision,
 worktree, vault, task metadata digest, and sampled frame are accepted. Invalid
 RFC 3339 values, non-finite or negative epochs, future/reversed intervals,
-symlinks, and identity drift remain unknown. The one frame clock is
-display-only: it cannot change classification, next action, issues, retry or
-readiness policy, verification truth, or persisted state.
+leaf or ancestor symlink evidence, and identity drift remain unknown. Review
+counts additionally bind the exact gate, reviewed HEAD, axes, lane, run, and
+attempt before display. The one frame clock is display-only: it cannot change
+classification, next action, issues, retry or readiness policy, verification
+truth, or persisted state.
 
 Best-effort telemetry in `.vault-meta/pipeline-events.jsonl` remains a numeric
 operations report. Its timestamps, record mtimes, deadlines, screen text, and
