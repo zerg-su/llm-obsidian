@@ -162,10 +162,10 @@ def _vault_for_store(store: OperationStore) -> Path | None:
     return root.parents[1]
 
 
-def _bound_task_start(
+def _bound_task(
     store: OperationStore,
     record: OperationRecord,
-) -> tuple[float, Path, dict[str, Any], str] | None:
+) -> tuple[Path, dict[str, Any], str] | None:
     runtime = (
         store.root
         / "owners"
@@ -205,10 +205,36 @@ def _bound_task_start(
         != vault
     ):
         return None
-    started = _rfc3339_epoch(meta.get("spawned_at"))
-    if started is None:
+    return cwd, meta, hashlib.sha256(meta_bytes).hexdigest()
+
+
+def _bound_task_start(
+    store: OperationStore,
+    record: OperationRecord,
+) -> tuple[float, Path, dict[str, Any], str] | None:
+    bound = _bound_task(store, record)
+    if bound is None:
         return None
-    return started, cwd, meta, hashlib.sha256(meta_bytes).hexdigest()
+    cwd, meta, digest = bound
+    started = _rfc3339_epoch(meta.get("spawned_at"))
+    return None if started is None else (started, cwd, meta, digest)
+
+
+def root_task_name(store: OperationStore, record: OperationRecord) -> str:
+    """Return one bounded task name from the exact task-meta binding."""
+
+    bound = _bound_task(store, record)
+    if bound is None:
+        return ""
+    value = bound[1].get("task_name")
+    if (
+        not isinstance(value, str)
+        or not value.strip()
+        or not value.isascii()
+        or len(value) > 160
+    ):
+        return ""
+    return " ".join(value.split())
 
 
 def root_timing(
@@ -625,6 +651,32 @@ def _review_material_count(
     return len(material)
 
 
+def _review_lane_is_bound(
+    store: OperationStore,
+    lane: Any,
+    row: Mapping[str, Any],
+) -> bool:
+    try:
+        stored = store.read(lane.owner_id, lane.operation_id)
+    except StoreError:
+        return False
+    return (
+        row.get("operation_id") == lane.operation_id
+        and row.get("lane_id") == lane.lane_id
+        and row.get("run_id") == lane.run_id
+        and row.get("verification_iteration") == 0
+        and stored.spec.owner_id == lane.owner_id
+        and stored.spec.operation_id == lane.operation_id
+        and stored.lane_id == lane.lane_id
+        and stored.run_id == lane.run_id
+        and stored.spec.route.runtime == lane.runtime
+        and stored.spec.route.model == lane.model
+        and stored.spec.route.effort == lane.effort
+        and stored.spec.route.profile == lane.profile
+        and stored.spec.route.routing_sha256 == lane.routing_sha256
+    )
+
+
 def _review_attempt_is_bound(
     store: OperationStore,
     record: OperationRecord,
@@ -659,27 +711,10 @@ def _review_attempt_is_bound(
         rows[axis] = raw
     if set(rows) != set(lanes):
         return False
-    try:
-        for axis, lane in lanes.items():
-            row = rows[axis]
-            stored = store.read(lane.owner_id, lane.operation_id)
-            if (
-                row.get("operation_id") != lane.operation_id
-                or row.get("lane_id") != lane.lane_id
-                or row.get("run_id") != lane.run_id
-                or row.get("verification_iteration") != 0
-                or stored.spec.owner_id != lane.owner_id
-                or stored.spec.operation_id != lane.operation_id
-                or stored.lane_id != lane.lane_id
-                or stored.run_id != lane.run_id
-                or stored.spec.route.runtime != lane.runtime
-                or stored.spec.route.model != lane.model
-                or stored.spec.route.effort != lane.effort
-                or stored.spec.route.profile != lane.profile
-                or stored.spec.route.routing_sha256 != lane.routing_sha256
-            ):
-                return False
-    except StoreError:
+    if any(
+        not _review_lane_is_bound(store, lane, rows[axis])
+        for axis, lane in lanes.items()
+    ):
         return False
     if attempt.status == "terminal" and attempt.terminal is not None:
         return gate.get("status") == attempt.terminal.result.value

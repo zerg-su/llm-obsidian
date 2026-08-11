@@ -182,6 +182,7 @@ class ProgramView:
     dropped_children: int = 0
     dropped_lanes: int = 0
     timing: TimingView = UNKNOWN_TIMING
+    task_name: str = UNKNOWN
 
 
 @dataclass(frozen=True)
@@ -193,6 +194,7 @@ class DashboardProjection:
     issues: tuple[IssueView, ...] = ()
     truncated: Mapping[str, int] = field(default_factory=dict)
     schema_version: int = 1
+    observed_at: float | None = None
 
 
 def record_activity(record: OperationRecord) -> str:

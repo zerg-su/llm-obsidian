@@ -31,6 +31,7 @@ from .dashboard_receipts import (
     liveness_timing,
     read_gate,
     review_summary,
+    root_task_name,
     root_timing,
     verification_receipt_timing,
     verification_receipt_visits,
@@ -656,6 +657,7 @@ def _uncompiled_program(
         dropped_children=dropped_children,
         dropped_lanes=dropped_lanes,
         timing=root_timing(store, record, observed_at),
+        task_name=root_task_name(store, record),
     )
 
 
@@ -744,6 +746,7 @@ def _program(
         dropped_children=dropped["children"],
         dropped_lanes=dropped_lanes,
         timing=root_timing(store, record, observed_at),
+        task_name=root_task_name(store, record),
     )
 
 
@@ -857,6 +860,7 @@ def _bounded_projection(
     programs: tuple[ProgramView, ...],
     issues: list[IssueView],
     surface_probe: str,
+    observed_at: float | None,
     *,
     empty_classification: str = HEALTHY,
 ) -> DashboardProjection:
@@ -875,17 +879,18 @@ def _bounded_projection(
     for issue in bounded:
         classification = escalate(classification, issue.classification)
     return DashboardProjection(
-        subject_id,
-        classification,
-        surface_probe,
-        programs,
-        tuple(bounded[:MAX_ISSUES]),
-        {
+        owner_id=subject_id,
+        classification=classification,
+        surface_probe=surface_probe,
+        programs=programs,
+        issues=tuple(bounded[:MAX_ISSUES]),
+        truncated={
             "programs": 0,
             "issues": max(len(bounded) - MAX_ISSUES, 0),
             "children": sum(program.dropped_children for program in programs),
             "lanes": sum(program.dropped_lanes for program in programs),
         },
+        observed_at=observed_at,
     )
 
 
@@ -897,15 +902,7 @@ def project_root(
     surface_probe: str = "unavailable",
     observed_at: float | None = None,
 ) -> DashboardProjection:
-    """Project exactly one root operation and its recorded descendants.
-
-    The supported corridor binds ``request_id == owner_id == root
-    operation_id`` before provider launch, so root scope reads one owner
-    directory and never scans another owner's records.  A store that does not
-    know the root yet is the expected pre-start observer state, not a
-    failure, and a recorded identity that is not its own root fails closed
-    instead of rendering the tree it merely belongs to.
-    """
+    """Project one exact root and only its recorded descendants."""
 
     _identifier(root_id, "root operation id")
     store = OperationStore(store_root)
@@ -947,6 +944,7 @@ def project_root(
         programs,
         issues,
         surface_probe,
+        observed_at,
         empty_classification=WAITING,
     )
 
@@ -972,4 +970,6 @@ def project(
     )
     issues.extend(_program_issues(programs))
     issues.extend(_diagnostic_issues(store.root, owner_id))
-    return _bounded_projection(owner_id, programs, issues, surface_probe)
+    return _bounded_projection(
+        owner_id, programs, issues, surface_probe, observed_at
+    )

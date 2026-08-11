@@ -218,12 +218,13 @@ def snapshot(
         unique.append(issue)
     dropped_issues += max(len(unique) - MAX_ISSUES, 0)
     return DashboardProjection(
-        "all",
-        classification,
-        "observed" if inventory is not None else "unavailable",
-        tuple(item[2] for item in selected),
-        tuple(unique[:MAX_ISSUES]),
-        {"programs": dropped_programs, "issues": dropped_issues},
+        owner_id="all",
+        classification=classification,
+        surface_probe="observed" if inventory is not None else "unavailable",
+        programs=tuple(item[2] for item in selected),
+        issues=tuple(unique[:MAX_ISSUES]),
+        truncated={"programs": dropped_programs, "issues": dropped_issues},
+        observed_at=observed_at,
     )
 
 

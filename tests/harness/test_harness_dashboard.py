@@ -48,7 +48,12 @@ from harness.dashboard_projection import (
     project_root,
 )
 from harness.dashboard_view import MAX_LINE, _colorize, render
-from harness.dashboard_policy import TimingView
+from harness.dashboard_policy import (
+    ReviewSummaryView,
+    RouteView,
+    StepView,
+    TimingView,
+)
 from harness.cli_readonly import dashboard as readonly_dashboard
 from harness.custom_pipelines import (
     CustomPipelinePolicy,
@@ -707,6 +712,225 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard.") as raw:
                 strict=True,
             )
         ),
+    )
+
+    executor_route = RouteView("codex", "gpt-5.6-terra", "high", "executor")
+    reviewer_route = RouteView(
+        "codex", "gpt-5.6-sol", "high", "reviewer-callback"
+    )
+    root_steps = (
+        StepView(
+            "implement-dashboard",
+            "model_step@1.0.0",
+            "reuse",
+            "complete",
+            1,
+            route=executor_route,
+            timing=TimingView("duration", 125),
+        ),
+        StepView(
+            "review-candidate",
+            "review@1.0.0",
+            "fresh",
+            "running",
+            1,
+            route=reviewer_route,
+            children=(
+                ChildView(
+                    "review-round-abcdef",
+                    "review-round",
+                    "awaiting-callback",
+                    "running",
+                    reviewer_route,
+                    timing=TimingView("elapsed", 75),
+                ),
+            ),
+            timing=TimingView("elapsed", 75),
+            review=ReviewSummaryView(2, 3, 4, 1),
+        ),
+        StepView(
+            "apply-fixes",
+            "model_step@1.0.0",
+            "reuse",
+            "pending",
+            0,
+        ),
+        StepView(
+            "verify-candidate",
+            "verify@1.0.0",
+            "reuse",
+            "pending",
+            0,
+        ),
+    )
+    root_program = replace(
+        projection.programs[0],
+        operation_id="a1b2c3d4-dispatch",
+        kind="human-readable-dashboard",
+        state="running",
+        classification=ACTIVE,
+        executor=executor_route,
+        executor_status="running",
+        steps=root_steps,
+        children=(),
+        lanes=(),
+        timing=TimingView("elapsed", 300),
+    )
+    recent_program = replace(
+        root_program,
+        operation_id="deadbeef-terminal",
+        kind="prior-dashboard-task",
+        state="complete",
+        classification=HEALTHY,
+        executor_status="complete",
+        steps=(),
+        timing=TimingView("duration", 600),
+    )
+    root_projection = replace(
+        projection,
+        owner_id="a1b2c3d4-dispatch",
+        classification=ATTENTION,
+        programs=(root_program, recent_program),
+        issues=(
+            IssueView(
+                "verification-receipt-failed",
+                root_program.operation_id,
+                "bounded issue detail",
+                ATTENTION,
+            ),
+        ),
+        truncated={},
+        observed_at=3_723.0,
+    )
+    golden_100 = """HARNESS PIPELINES  store: .vault-meta/harness  updated 01:02:03
+────────────────────────────────────────────────────────────────
+● ACTIVE Human readable dashboard  dispatch a1b2c3d4  elapsed 5m 00s
+  Executor codex/gpt-5.6-terra · high  running  elapsed 5m 00s
+  ├─ ✓ Implement dashboard  complete  duration 2m 05s
+  ├─ ● Review candidate  running  elapsed 1m 15s
+  │    Reviewer codex/gpt-5.6-sol · high  cycle 2/3 · findings 4 · material 1
+  │    ↳ review-round-abcdef  review round  awaiting-callback  elapsed 1m 15s
+  ├─ ○ Apply fixes  pending
+  └─ ○ Verify candidate  pending
+
+RECENT
+  ✓ Prior dashboard task  dispatch deadbeef  duration 10m 00s
+
+ISSUES (1)
+  ! verification-receipt-failed  a1b2c3d4  attention-required
+────────────────────────────────────────────────────────────────
+✓ complete  ● running  ○ pending  ! attention  ↻ retry
+"""
+    golden_80 = golden_100
+    golden_frames = {
+        columns: render(
+            root_projection,
+            scope="root",
+            columns=columns,
+            recent=3,
+        )
+        for columns in (80, 100, 120)
+    }
+    regression_check(
+        "the root product view matches the exact 80 100 and 120 column goldens",
+        golden_frames[80] == golden_80
+        and golden_frames[100] == golden_100
+        and golden_frames[120] == golden_100
+        and all(
+            hidden not in golden_frames[100]
+            for hidden in (
+                "classification",
+                "Programs:",
+                "rev ",
+                "definition",
+                "controls",
+                "loop",
+                "lanes",
+                "children with no exact step lineage",
+            )
+        )
+        and golden_frames[100].count("time unavailable") == 0,
+    )
+    colored_root = render(
+        root_projection,
+        scope="root",
+        columns=100,
+        color=True,
+    )
+    regression_check(
+        "the root product maps every semantic RGB role and preserves plain bytes",
+        ansi.sub("", colored_root) == golden_frames[100]
+        and "\x1b[38;2;244;244;247mHARNESS PIPELINES" in colored_root
+        and "\x1b[38;2;68;71;88m────────────────" in colored_root
+        and "\x1b[38;2;85;230;139m✓\x1b[0m" in colored_root
+        and "\x1b[38;2;91;217;238m●\x1b[0m" in colored_root
+        and "\x1b[38;2;119;122;140m○\x1b[0m" in colored_root
+        and "\x1b[38;2;240;196;84mawaiting-callback\x1b[0m" in colored_root
+        and "\x1b[38;2;255;156;74mverification-receipt-failed\x1b[0m"
+        in colored_root
+        and "\x1b[38;2;255;101;122mattention-required\x1b[0m"
+        in colored_root
+        and "\x1b[38;2;216;120;238mgpt-5.6-sol\x1b[0m" in colored_root
+        and "\x1b[38;2;112;168;255ma1b2c3d4\x1b[0m" in colored_root
+        and "\x1b[1m" in next(
+            line for line in colored_root.splitlines() if "Review candidate" in line
+        )
+        and "\x1b[48;" not in colored_root,
+    )
+    root_rows = {
+        rows: (
+            render(root_projection, scope="root", rows=rows, columns=100),
+            render(
+                root_projection,
+                scope="root",
+                rows=rows,
+                columns=100,
+                color=True,
+            ),
+        )
+        for rows in range(len(golden_100.splitlines()) + 1)
+    }
+    regression_check(
+        "the root viewport matrix preserves identity current work and explicit truncation",
+        all(
+            len(plain.splitlines()) <= rows
+            and all(len(line) <= 100 for line in plain.splitlines())
+            and ansi.sub("", colored_frame) == plain
+            and (
+                rows == 0
+                or rows >= len(golden_100.splitlines())
+                or "Viewport truncated +" in plain
+            )
+            for rows, (plain, colored_frame) in root_rows.items()
+        )
+        and root_program.operation_id[:8] in root_rows[6][0]
+        and "Review candidate" in root_rows[6][0],
+    )
+    long_identity_frame = render(
+        replace(
+            root_projection,
+            programs=(
+                replace(
+                    root_program,
+                    task_name=(
+                        "Human-readable terminal dashboard corrective visual "
+                        "rework candidate with a deliberately long task name"
+                    ),
+                ),
+            ),
+            issues=(),
+        ),
+        scope="root",
+        columns=80,
+    )
+    long_root_line = next(
+        line for line in long_identity_frame.splitlines() if "ACTIVE" in line
+    )
+    regression_check(
+        "root clipping retains task marker short identity timing and stable width",
+        len(long_root_line) == 80
+        and "...  dispatch a1b2c3d4  elapsed 5m 00s" in long_root_line
+        and long_root_line.startswith("● ACTIVE Human-readable"),
     )
 
     captured = io.StringIO()
@@ -2165,7 +2389,8 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-root.") as raw:
             not in {ROOT_SCOPE_B, ROOT_SCOPE_HISTORICAL}
             for issue in scoped.issues
         )
-        and f"Harness dashboard - root {ROOT_SCOPE_A}" in scoped_frame
+        and "HARNESS PIPELINES  store: .vault-meta/harness" in scoped_frame
+        and f"dispatch {ROOT_SCOPE_A[:8]}" in scoped_frame
         and scoped_child in scoped_frame
         and ROOT_SCOPE_B not in scoped_frame
         and ROOT_SCOPE_HISTORICAL not in scoped_frame
@@ -2197,7 +2422,7 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-root.") as raw:
         and pre.programs == ()
         and pre.issues == ()
         and pre.classification == WAITING
-        and "root-scope-unseen" in pre_frame
+        and "root-sco" in pre_frame
         and "waiting" in pre_frame.lower()
         and ROOT_SCOPE_A not in pre_frame
         and _tree_bytes(store_root) == baseline,
@@ -2220,7 +2445,7 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-root.") as raw:
         "an early start failure is visible inside its root observer",
         tuple(program.state for program in failed_scope.programs) == ("failed",)
         and any(issue.code == "terminal-failed" for issue in failed_scope.issues)
-        and early in failed_frame,
+        and early[:8] in failed_frame,
     )
 
     unseen_child_scope = project_root(store_root, scoped_child)
@@ -3085,7 +3310,8 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-time.") as raw:
     regression_check(
         "validated reap evidence freezes terminal root duration",
         reaped.programs[0].timing.mode == "duration"
-        and reaped.programs[0].timing.seconds == 300,
+        and reaped.programs[0].timing.seconds == 300
+        and reaped.programs[0].task_name == "dashboard-reaped-task",
     )
 
     review_root = "dashboard-review-summary-root"

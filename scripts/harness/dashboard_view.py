@@ -8,7 +8,9 @@ unknown state into a confident one.
 
 from __future__ import annotations
 
+import math
 import re
+from datetime import datetime, timezone
 
 from .dashboard_projection import (
     ACTIVE,
@@ -22,7 +24,9 @@ from .dashboard_projection import (
 from .dashboard_policy import ReviewSummaryView, TimingView
 from .state_machine import TERMINAL
 
-MAX_LINE = 96
+MAX_LINE = 120
+ROOT_COLUMNS = 100
+DIAGNOSTIC_COLUMNS = 96
 SHORT_ID = 8
 # A nested operation is identified by its own id, so it keeps more of it than a
 # lane label.  Real ids share a long leading UUID and differ only in a derived
@@ -61,8 +65,14 @@ SEMANTIC_COLORS = {
 }
 BOLD = "\x1b[1m"
 DIM = "\x1b[2m"
-MODEL_TOKEN = re.compile(r"(?<=/)[A-Za-z0-9][A-Za-z0-9._-]*(?=/)")
+MODEL_TOKEN = re.compile(
+    r"(?<=/)[A-Za-z0-9][A-Za-z0-9._-]*(?=(?:/| ·))"
+)
 RUNTIME_TOKEN = re.compile(r"(?<![A-Za-z0-9_-])(?:claude|codex)(?![A-Za-z0-9_-])")
+IDENTITY_TOKEN = re.compile(
+    r"(?:(?<=dispatch )|(?<=↳ ))[A-Za-z0-9][A-Za-z0-9._:-]*"
+)
+REVIEW_LABEL = re.compile(r"\bReviewer\b")
 SEMANTIC_TOKENS = {
     "verification-receipt-failed": "retry",
     "fix-receipt-failed": "retry",
@@ -72,6 +82,20 @@ SEMANTIC_TOKENS = {
     "in-progress": "running",
     "reviewing": "waiting",
     "waiting": "waiting",
+    "pending": "secondary",
+    "running": "running",
+    "complete": "complete",
+    "elapsed": "running",
+    "duration": "complete",
+    "ACTIVE": "running",
+    "COMPLETE": "complete",
+    "WAITING": "waiting",
+    "ATTENTION": "attention",
+    "✓": "complete",
+    "●": "running",
+    "○": "secondary",
+    "!": "attention",
+    "↻": "retry",
     "healthy": "complete",
     "[!]": "attention",
     "[>]": "running",
@@ -103,8 +127,16 @@ def _identity(value: str) -> str:
     return f"{value[:CHILD_ID_HEAD]}...{value[-tail:]}"
 
 
-def _clip(value: str) -> str:
-    return value if len(value) <= MAX_LINE else value[: MAX_LINE - 3] + "..."
+def _clip(value: str, width: int = DIAGNOSTIC_COLUMNS) -> str:
+    if len(value) <= width:
+        return value
+    separator = "  dispatch "
+    if separator in value:
+        head, tail = value.rsplit(separator, 1)
+        available = width - len(separator) - len(tail) - 3
+        if available >= 8:
+            return f"{head[:available]}...{separator}{tail}"
+    return value[: width - 3] + "..."
 
 
 def _route(route: RouteView) -> str:
@@ -278,11 +310,19 @@ def _issue_lines(projection: DashboardProjection) -> list[str]:
 def _colorize(line: str, *, color: bool) -> str:
     if not color:
         return line
-    if line == "HARNESS PIPELINES":
+    if line.startswith("HARNESS PIPELINES"):
         return f"{SEMANTIC_COLORS['primary']}{line}{RESET}"
+    if line and set(line) == {"─"}:
+        return f"{SEMANTIC_COLORS['rule']}{line}{RESET}"
     stripped = line.lstrip()
-    base = BOLD if stripped.startswith("[>]") else (
-        DIM if stripped.startswith("[ ]") else ""
+    current = stripped.startswith(("[>]", "● ACTIVE", "├─ ●", "└─ ●"))
+    inactive = stripped.startswith(("[ ]", "├─ ○", "└─ ○"))
+    base = (
+        BOLD + SEMANTIC_COLORS["primary"]
+        if current
+        else DIM + SEMANTIC_COLORS["secondary"]
+        if inactive
+        else ""
     )
 
     def paint(role: str, value: str) -> str:
@@ -294,6 +334,12 @@ def _colorize(line: str, *, color: bool) -> str:
     )
     rendered = RUNTIME_TOKEN.sub(
         lambda match: paint("identity", match.group()), rendered
+    )
+    rendered = IDENTITY_TOKEN.sub(
+        lambda match: paint("identity", match.group()), rendered
+    )
+    rendered = REVIEW_LABEL.sub(
+        lambda match: paint("model", match.group()), rendered
     )
     rendered = SEMANTIC_TOKEN.sub(
         lambda match: paint(SEMANTIC_TOKENS[match.group()], match.group()),
@@ -459,16 +505,257 @@ def _program_floor(programs: tuple[ProgramView, ...]) -> int:
     return identity_rows + (1 if len(programs) > 1 else 0)
 
 
-def render(
+def _human(value: str) -> str:
+    words = " ".join(value.replace("_", "-").replace("-", " ").split())
+    return words[:1].upper() + words[1:] if words else "Unknown"
+
+
+def _task_name(program: ProgramView) -> str:
+    value = program.task_name
+    return value if value and value != "unknown" else _human(program.kind)
+
+
+def _known_timing(timing: TimingView) -> str:
+    return "" if timing.mode == "unknown" else _timing(timing)
+
+
+def _compact_timing(status: str, timing: TimingView, *, current: bool) -> str:
+    known = _known_timing(timing)
+    if known:
+        return known
+    if current:
+        return "time unavailable"
+    if status in {"complete", "stopped", "attention"}:
+        return "—"
+    return ""
+
+
+def _root_identity(program: ProgramView) -> tuple[str, str]:
+    if program.state == "complete":
+        return "✓", "COMPLETE"
+    if program.state in {"failed", "cancelled", "attention-required"}:
+        return "!", "ATTENTION"
+    if program.classification == ATTENTION:
+        return "!", "ATTENTION"
+    if program.classification == WAITING:
+        return "○", "WAITING"
+    return "●", "ACTIVE"
+
+
+def _root_header(projection: DashboardProjection) -> list[str]:
+    observed = projection.observed_at
+    updated = "unknown"
+    if (
+        isinstance(observed, (int, float))
+        and not isinstance(observed, bool)
+        and math.isfinite(observed)
+        and observed >= 0
+    ):
+        updated = datetime.fromtimestamp(observed, timezone.utc).strftime("%H:%M:%S")
+    return [
+        "HARNESS PIPELINES  store: .vault-meta/harness  "
+        f"updated {updated}",
+        "─" * 64,
+    ]
+
+
+def _root_summary(program: ProgramView) -> list[str]:
+    marker, label = _root_identity(program)
+    timing = _compact_timing(
+        "complete" if program.state == "complete" else "running",
+        program.timing,
+        current=program.state not in TERMINAL,
+    )
+    suffix = f"  {timing}" if timing else ""
+    route = program.executor
+    executor_timing = _known_timing(program.timing)
+    return [
+        f"{marker} {label} {_task_name(program)}  "
+        f"dispatch {_short(program.operation_id)}{suffix}",
+        f"  Executor {route.runtime}/{route.model} · {route.effort}  "
+        f"{program.executor_status}"
+        + (f"  {executor_timing}" if executor_timing else ""),
+    ]
+
+
+def _root_step_lines(program: ProgramView) -> list[str]:
+    current = _current_step(program)
+    lines: list[str] = []
+    for index, step in enumerate(program.steps):
+        branch = "└─" if index == len(program.steps) - 1 else "├─"
+        marker = {
+            "complete": "✓",
+            "running": "●",
+            "pending": "○",
+            "attention": "!",
+            "stopped": "!",
+            "unknown": "!",
+        }.get(step.status, "!")
+        timing = _compact_timing(
+            step.status, step.timing, current=step is current
+        )
+        suffix = f"  {timing}" if timing else ""
+        lines.append(
+            f"  {branch} {marker} {_human(step.step_id)}  {step.status}{suffix}"
+        )
+        if step is not current:
+            continue
+        pad = "     " if branch == "└─" else "  │  "
+        details: list[str] = []
+        if step.primitive.split("@", 1)[0] == "review":
+            route = step.route
+            detail = (
+                f"Reviewer {route.runtime}/{route.model} · {route.effort}"
+            )
+            if step.review != ReviewSummaryView():
+                detail += (
+                    f"  cycle {_scalar(step.review.cycle)}/{_scalar(step.review.limit)}"
+                    f" · findings {_scalar(step.review.findings)}"
+                    f" · material {_scalar(step.review.material_findings)}"
+                )
+            details.append(detail)
+        for child in step.children[:2]:
+            child_timing = _known_timing(child.timing)
+            details.append(
+                f"↳ {_identity(child.operation_id)}  {_human(child.kind).lower()}  "
+                f"{child.state}"
+                + (f"  {child_timing}" if child_timing else "")
+            )
+        if step.evidence_issue:
+            details.append(f"! {step.evidence_issue}")
+        lines.extend(f"{pad}  {detail}" for detail in details[:3])
+    return lines
+
+
+def _root_recent(
+    main: ProgramView,
+    programs: tuple[ProgramView, ...],
+    recent: int,
+) -> list[str]:
+    terminal = tuple(
+        program
+        for program in programs
+        if program is not main and program.state in TERMINAL
+    )[:recent]
+    lines = ["RECENT"]
+    if not terminal:
+        return lines + ["  none"]
+    for program in terminal:
+        marker = "✓" if program.state == "complete" else "!"
+        timing = _compact_timing("complete", program.timing, current=False)
+        lines.append(
+            f"  {marker} {_task_name(program)}  "
+            f"dispatch {_short(program.operation_id)}  {timing}"
+        )
+    return lines
+
+
+def _root_issues(projection: DashboardProjection) -> list[str]:
+    dropped = int(projection.truncated.get("issues", 0))
+    total = len(projection.issues) + dropped
+    lines = [f"ISSUES ({total})"]
+    if not projection.issues:
+        return lines + ["  none"]
+    for issue in projection.issues:
+        lines.append(
+            f"  ! {issue.code}  {_short(issue.operation_id)}  "
+            f"{issue.classification}"
+        )
+    if dropped:
+        lines.append(f"  +{dropped} more")
+    return lines
+
+
+def _root_lines(
     projection: DashboardProjection,
     *,
-    recent: int = 3,
-    color: bool = False,
-    rows: int | None = None,
-    scope: str = "owner",
-) -> str:
-    """Render one bounded read-only English dashboard for a terminal."""
+    recent: int,
+) -> list[str]:
+    lines = _root_header(projection)
+    if not projection.programs:
+        lines.extend(
+            [
+                f"○ WAITING Dispatch not started  "
+                f"dispatch {_short(projection.owner_id)}",
+                "  Observer waiting for dispatch start.",
+            ]
+        )
+        main = None
+    else:
+        main = next(
+            (
+                program
+                for program in projection.programs
+                if program.state not in TERMINAL
+            ),
+            projection.programs[0],
+        )
+        lines.extend(_root_summary(main))
+        lines.extend(_root_step_lines(main))
+    lines.append("")
+    lines.extend(
+        ["RECENT", "  none"]
+        if main is None
+        else _root_recent(main, projection.programs, recent)
+    )
+    lines.append("")
+    lines.extend(_root_issues(projection))
+    lines.extend(
+        [
+            "─" * 64,
+            "✓ complete  ● running  ○ pending  ! attention  ↻ retry",
+        ]
+    )
+    return lines
 
+
+def _root_priority(line: str) -> int:
+    stripped = line.lstrip()
+    if stripped.startswith(("● ACTIVE", "! ATTENTION", "✓ COMPLETE")):
+        return 0
+    if stripped.startswith(("├─ ●", "└─ ●", "├─ !", "└─ !")):
+        return 0
+    if line.startswith("HARNESS PIPELINES") or line.startswith("ISSUES ("):
+        return 1
+    if stripped.startswith("Executor ") or "Reviewer " in line:
+        return 2
+    if stripped.startswith(("├─", "└─")):
+        return 3
+    if stripped.startswith("! "):
+        return 4
+    if line and set(line) == {"─"} or "complete  ● running" in line:
+        return 5
+    if line in {"RECENT", ""} or stripped.startswith(("✓ ", "+")):
+        return 7
+    return 6
+
+
+def _bounded_root_lines(lines: list[str], rows: int | None) -> list[str]:
+    if rows is None or len(lines) <= rows:
+        return lines
+    if rows <= 0:
+        return []
+    if rows == 1:
+        return [f"Viewport truncated +{len(lines)} lines"]
+    selected = sorted(
+        sorted(
+            range(len(lines)),
+            key=lambda index: (_root_priority(lines[index]), index),
+        )[: rows - 1]
+    )
+    omitted = len(lines) - len(selected)
+    return [lines[index] for index in selected] + [
+        f"Viewport truncated +{omitted} lines"
+    ]
+
+
+def _diagnostic_lines(
+    projection: DashboardProjection,
+    *,
+    recent: int,
+    rows: int | None,
+    scope: str,
+) -> list[str]:
     dropped = int(projection.truncated.get("programs", 0))
     suffix = f" (+{dropped} more)" if dropped else ""
     active = tuple(
@@ -517,5 +804,30 @@ def render(
         if rows:
             lines.append(f"Viewport truncated +{omitted} lines")
     if rows is not None and rows <= 0:
-        return ""
-    return "\n".join(_colorize(_clip(line), color=color) for line in lines) + "\n"
+        return []
+    return lines
+
+
+def render(
+    projection: DashboardProjection,
+    *,
+    recent: int = 3,
+    color: bool = False,
+    rows: int | None = None,
+    scope: str = "owner",
+    columns: int | None = None,
+) -> str:
+    """Render one bounded read-only English dashboard for a terminal."""
+
+    default_width = ROOT_COLUMNS if scope == "root" else DIAGNOSTIC_COLUMNS
+    width = min(max(columns or default_width, 20), MAX_LINE)
+    lines = (
+        _bounded_root_lines(_root_lines(projection, recent=recent), rows)
+        if scope == "root"
+        else _diagnostic_lines(
+            projection, recent=recent, rows=rows, scope=scope
+        )
+    )
+    return "\n".join(
+        _colorize(_clip(line, width), color=color) for line in lines
+    ) + ("\n" if lines else "")
