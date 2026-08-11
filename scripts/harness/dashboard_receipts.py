@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
+from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from .contracts import (
     ContractError,
@@ -14,6 +16,19 @@ from .contracts import (
     OperationSpec,
     VerificationEvidence,
 )
+from .dashboard_policy import (
+    UNKNOWN_REVIEW,
+    UNKNOWN_TIMING,
+    ReviewSummaryView,
+    TimingView,
+)
+from .liveness import LivenessState
+from .review_attempt import (
+    ReviewAttempt,
+    ReviewAttemptError,
+    ReviewAttemptTerminalResult,
+)
+from .state_machine import TERMINAL
 from .store import OperationStore, StoreError
 from .verification import output_binding_valid
 from .verification_attempt import VerificationAttempt, VerificationAttemptError
@@ -22,6 +37,10 @@ from .workflows.engineering_fix_model import PAYLOAD_FIELDS
 
 
 MAX_VISITS = 16
+RFC3339 = re.compile(
+    r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}"
+    r"(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})\Z"
+)
 
 
 def _read_object(path: Path) -> dict[str, Any] | None:
@@ -32,6 +51,171 @@ def _read_object(path: Path) -> dict[str, Any] | None:
     except (OSError, json.JSONDecodeError):
         return None
     return value if isinstance(value, dict) else None
+
+
+def read_gate(store: OperationStore, owner_id: str) -> dict[str, Any] | None:
+    """Read the one owner review gate without following a symlink."""
+
+    return _read_object(
+        store.root / "review-data" / owner_id / owner_id / "review-gate.json"
+    )
+
+
+def _epoch(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    result = float(value)
+    return result if math.isfinite(result) and result >= 0 else None
+
+
+def _rfc3339_epoch(value: object) -> float | None:
+    if not isinstance(value, str) or RFC3339.fullmatch(value) is None:
+        return None
+    try:
+        result = datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+    except (OverflowError, ValueError):
+        return None
+    return result if math.isfinite(result) and result >= 0 else None
+
+
+def _timing(mode: str, start: float, end: float) -> TimingView:
+    if end < start:
+        return UNKNOWN_TIMING
+    return TimingView(mode, int(end - start))
+
+
+def liveness_timing(
+    store: OperationStore,
+    record: OperationRecord,
+    observed_at: float,
+) -> TimingView:
+    """Return elapsed time from the exact record's valid liveness state."""
+
+    observed = _epoch(observed_at)
+    if observed is None or record.state in TERMINAL:
+        return UNKNOWN_TIMING
+    path = (
+        store.root
+        / "owners"
+        / record.spec.owner_id
+        / "runtime"
+        / record.spec.operation_id
+        / "liveness"
+        / "state.json"
+    )
+    raw = _read_object(path)
+    try:
+        state = LivenessState(**raw) if raw is not None else None
+    except (TypeError, ValueError):
+        state = None
+    if state is None:
+        return UNKNOWN_TIMING
+    start = _epoch(state.started_at)
+    progress = _epoch(state.last_progress_at)
+    revision = state.operation_revision
+    if (
+        start is None
+        or progress is None
+        or isinstance(revision, bool)
+        or not isinstance(revision, int)
+        or revision < 0
+        or revision > record.revision
+        or start > progress
+        or progress > observed
+    ):
+        return UNKNOWN_TIMING
+    return _timing("elapsed", start, observed)
+
+
+def _vault_for_store(store: OperationStore) -> Path | None:
+    root = store.root.expanduser().resolve()
+    if root.name != "harness" or root.parent.name != ".vault-meta":
+        return None
+    return root.parents[1]
+
+
+def _bound_task_start(
+    store: OperationStore,
+    record: OperationRecord,
+) -> tuple[float, Path, dict[str, Any], str] | None:
+    runtime = (
+        store.root
+        / "owners"
+        / record.spec.owner_id
+        / "runtime"
+        / record.spec.operation_id
+    )
+    session = _read_object(runtime / "session.json")
+    if (
+        session is None
+        or session.get("schema_version") != 1
+        or session.get("operation_id") != record.spec.operation_id
+        or session.get("run_id") != record.run_id
+    ):
+        return None
+    cwd_raw = session.get("cwd")
+    if not isinstance(cwd_raw, str) or not Path(cwd_raw).is_absolute():
+        return None
+    cwd = Path(cwd_raw).expanduser().resolve()
+    meta_path = cwd / ".task-meta.json"
+    meta = _read_object(meta_path)
+    vault = _vault_for_store(store)
+    if meta is None or vault is None:
+        return None
+    try:
+        meta_bytes = meta_path.read_bytes()
+    except OSError:
+        return None
+    if (
+        meta.get("version") not in {3, 4}
+        or meta.get("task_id") != record.spec.operation_id
+        or Path(str(meta.get("worktree") or "")).expanduser().resolve() != cwd
+        or Path(str(meta.get("vault_root") or "")).expanduser().resolve()
+        != vault
+    ):
+        return None
+    started = _rfc3339_epoch(meta.get("spawned_at"))
+    if started is None:
+        return None
+    return started, cwd, meta, hashlib.sha256(meta_bytes).hexdigest()
+
+
+def root_timing(
+    store: OperationStore,
+    record: OperationRecord,
+    observed_at: float,
+) -> TimingView:
+    """Project root elapsed/duration with task evidence before liveness."""
+
+    observed = _epoch(observed_at)
+    if observed is None:
+        return UNKNOWN_TIMING
+    bound = _bound_task_start(store, record)
+    if record.state not in TERMINAL:
+        if bound is not None and bound[0] <= observed:
+            return _timing("elapsed", bound[0], observed)
+        return liveness_timing(store, record, observed)
+    if bound is None:
+        return UNKNOWN_TIMING
+    start, cwd, meta, meta_sha256 = bound
+    complete = _read_object(cwd / ".task-reap-complete.json")
+    if complete is None:
+        return UNKNOWN_TIMING
+    end = _rfc3339_epoch(complete.get("completed_at"))
+    if (
+        end is None
+        or end > observed
+        or complete.get("validated") is not True
+        or complete.get("meta_sha256") != meta_sha256
+        or complete.get("task_name") != meta.get("task_name")
+        or Path(str(complete.get("vault_root") or "")).expanduser().resolve()
+        != _vault_for_store(store)
+        or Path(str(complete.get("plan_path") or "")).expanduser().resolve()
+        != Path(str(meta.get("plan_file") or "")).expanduser().resolve()
+        or complete.get("task_session_status") != "archived"
+    ):
+        return UNKNOWN_TIMING
+    return _timing("duration", start, end)
 
 
 def fix_receipt_visits(
@@ -295,3 +479,154 @@ def verification_receipt_visits(
                 else "verification-receipt-invalid"
             )
     return visits, issue
+
+
+def verification_receipt_timing(
+    store: OperationStore,
+    record: OperationRecord,
+    runtime: Path,
+    observed_at: float,
+    *,
+    exact_head_sha: str = "",
+) -> TimingView:
+    """Freeze the accepted verification interval selected for display."""
+
+    observed = _epoch(observed_at)
+    root = runtime / "pipeline-verification"
+    if observed is None or not root.is_dir():
+        return UNKNOWN_TIMING
+    intervals: list[tuple[float, float]] = []
+    candidates: list[tuple[int, str, Path, dict[str, Any]]] = []
+    for path in sorted(root.glob("*/receipt.json")):
+        raw = _read_object(path)
+        if raw is None or verification_receipt_status(
+            store, record, runtime, path
+        ) != "complete":
+            continue
+        try:
+            attempt = _verification_attempt(raw, record)
+        except VerificationAttemptError:
+            continue
+        head = str(raw.get("head_sha") or "")
+        if exact_head_sha and head != exact_head_sha:
+            continue
+        candidates.append((attempt.attempt_index, head, path, raw))
+    if exact_head_sha and candidates:
+        latest = max(item[0] for item in candidates)
+        candidates = [item for item in candidates if item[0] == latest]
+    for _attempt, _head, _path, raw in candidates:
+        evidence = raw.get("evidence")
+        if not isinstance(evidence, list):
+            continue
+        receipt_intervals: list[tuple[float, float]] = []
+        for row in evidence:
+            if not isinstance(row, Mapping):
+                receipt_intervals = []
+                break
+            start = _rfc3339_epoch(row.get("started_at"))
+            end = _rfc3339_epoch(row.get("finished_at"))
+            if start is None or end is None or end < start or end > observed:
+                receipt_intervals = []
+                break
+            receipt_intervals.append((start, end))
+        intervals.extend(receipt_intervals)
+    if not intervals:
+        return UNKNOWN_TIMING
+    return _timing(
+        "duration",
+        min(item[0] for item in intervals),
+        max(item[1] for item in intervals),
+    )
+
+
+def _review_material_count(
+    store: OperationStore,
+    attempt: ReviewAttempt,
+    gate: Mapping[str, Any],
+    finding_ids: set[str],
+) -> int | None:
+    evidence = gate.get("review_notification_evidence")
+    if not isinstance(evidence, Mapping):
+        return None
+    lanes = {lane.axis: lane for lane in attempt.identity.lanes}
+    if set(evidence) != set(lanes):
+        return None
+    material: set[str] = set()
+    try:
+        for axis, lane in lanes.items():
+            row = evidence[axis]
+            if not isinstance(row, Mapping):
+                return None
+            ids = row.get("material_finding_ids")
+            if not isinstance(ids, list) or any(
+                not isinstance(item, str) or not item for item in ids
+            ):
+                return None
+            parent = store.read(lane.owner_id, lane.operation_id)
+            round_id = str(row.get("round_operation_id") or "")
+            round_record = store.read(lane.owner_id, round_id)
+            callback_id = str(row.get("callback_id") or "")
+            callback_sha = str(row.get("callback_sha256") or "")
+            if (
+                row.get("reviewed_head_sha") != attempt.identity.exact_head_sha
+                or row.get("review_operation_id") != lane.operation_id
+                or parent.lane_id != lane.lane_id
+                or parent.run_id != lane.run_id
+                or round_record.spec.parent_operation_id != lane.operation_id
+                or round_record.run_id != row.get("round_run_id")
+                or round_record.state != "complete"
+                or round_record.accepted_callback_id != callback_id
+                or round_record.accepted_callback_sha256 != callback_sha
+                or not re.fullmatch(r"[0-9a-f]{64}", callback_sha)
+            ):
+                return None
+            for finding_id in ids:
+                if finding_id not in finding_ids and not any(
+                    finding_id.endswith(f":{candidate}")
+                    for candidate in finding_ids
+                ):
+                    return None
+                material.add(finding_id)
+    except StoreError:
+        return None
+    return len(material)
+
+
+def review_summary(
+    store: OperationStore,
+    gate: Mapping[str, Any] | None,
+    *,
+    limit: int,
+) -> ReviewSummaryView:
+    """Extract bounded review scalars without reading review prose."""
+
+    if gate is None:
+        return UNKNOWN_REVIEW
+    raw = gate.get("attempt")
+    if not isinstance(raw, Mapping):
+        return ReviewSummaryView(limit=limit)
+    try:
+        attempt = ReviewAttempt.from_mapping(raw)
+    except ReviewAttemptError:
+        return ReviewSummaryView(limit=limit)
+    if attempt.status != "terminal" or attempt.terminal is None:
+        return ReviewSummaryView(cycle=attempt.identity.cycle, limit=limit)
+    findings = {
+        finding_id
+        for lane in attempt.terminal.lane_results
+        for finding_id in lane.finding_ids
+    }
+    result = attempt.terminal.result
+    material = (
+        0
+        if result == ReviewAttemptTerminalResult.APPROVED
+        else _review_material_count(store, attempt, gate, findings)
+        if result == ReviewAttemptTerminalResult.CHANGES_REQUESTED
+        else None
+    )
+    return ReviewSummaryView(
+        cycle=attempt.identity.cycle,
+        limit=limit,
+        findings=len(findings),
+        material_findings=material,
+    )

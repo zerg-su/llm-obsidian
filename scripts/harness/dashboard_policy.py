@@ -6,7 +6,6 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from .contracts import OperationRecord
-from .dashboard_receipts import verification_identity
 from .state_machine import TERMINAL
 from .status_segment import CONTROLLER_KINDS
 from .verification_attempt import (
@@ -70,6 +69,57 @@ UNKNOWN_ROUTE = RouteView()
 
 
 @dataclass(frozen=True)
+class TimingView:
+    """One display-only interval derived from accepted durable timestamps."""
+
+    mode: str = UNKNOWN
+    seconds: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.mode not in {"elapsed", "duration", UNKNOWN}:
+            raise ValueError("dashboard timing mode is invalid")
+        if self.mode == UNKNOWN:
+            if self.seconds is not None:
+                raise ValueError("unknown dashboard timing has no seconds")
+        elif (
+            isinstance(self.seconds, bool)
+            or not isinstance(self.seconds, int)
+            or self.seconds < 0
+        ):
+            raise ValueError("dashboard timing seconds must be non-negative")
+
+
+UNKNOWN_TIMING = TimingView()
+
+
+@dataclass(frozen=True)
+class ReviewSummaryView:
+    """Bounded scalar review evidence; unavailable values stay unknown."""
+
+    cycle: int | None = None
+    limit: int | None = None
+    findings: int | None = None
+    material_findings: int | None = None
+
+    def __post_init__(self) -> None:
+        for value in (
+            self.cycle,
+            self.limit,
+            self.findings,
+            self.material_findings,
+        ):
+            if value is not None and (
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or value < 0
+            ):
+                raise ValueError("dashboard review summary is invalid")
+
+
+UNKNOWN_REVIEW = ReviewSummaryView()
+
+
+@dataclass(frozen=True)
 class ChildView:
     operation_id: str
     kind: str
@@ -77,6 +127,7 @@ class ChildView:
     status: str
     route: RouteView
     children: tuple["ChildView", ...] = ()
+    timing: TimingView = UNKNOWN_TIMING
 
 
 @dataclass(frozen=True)
@@ -89,6 +140,8 @@ class StepView:
     route: RouteView = UNKNOWN_ROUTE
     children: tuple[ChildView, ...] = ()
     evidence_issue: str = ""
+    timing: TimingView = UNKNOWN_TIMING
+    review: ReviewSummaryView = UNKNOWN_REVIEW
 
 
 @dataclass(frozen=True)
@@ -128,6 +181,7 @@ class ProgramView:
     children: tuple[ChildView, ...] = ()
     dropped_children: int = 0
     dropped_lanes: int = 0
+    timing: TimingView = UNKNOWN_TIMING
 
 
 @dataclass(frozen=True)
@@ -207,6 +261,10 @@ def current_verification_ids(
     gate: Mapping[str, Any] | None,
 ) -> frozenset[str]:
     """Derive only verification children bound to the gate's exact attempt."""
+
+    # Local import keeps the immutable value module independent of the
+    # receipt reader that consumes these values.
+    from .dashboard_receipts import verification_identity
 
     context = gate.get("context") if isinstance(gate, Mapping) else None
     if not isinstance(context, Mapping):
@@ -291,3 +349,53 @@ def executor_status(record: OperationRecord, steps: tuple[StepView, ...]) -> str
         if view.primitive.split("@", 1)[0] != "model_step"
     )
     return "awaiting-transition" if downstream else record_activity(record)
+
+
+def program_issues(programs: tuple[ProgramView, ...]) -> list[IssueView]:
+    """Classify bounded issues from already-projected program facts."""
+
+    issues: list[IssueView] = []
+    for program in programs:
+        issues.extend(
+            IssueView(
+                step.evidence_issue,
+                program.operation_id,
+                f"{step.step_id} durable evidence is not accepted",
+                ATTENTION,
+            )
+            for step in program.steps
+            if step.evidence_issue
+        )
+        if program.state in {"failed", "cancelled"}:
+            issues.append(IssueView(
+                f"terminal-{program.state}", program.operation_id,
+                f"operation terminated as {program.state}", ATTENTION,
+            ))
+        if program.pipeline == "unresolved":
+            issues.append(IssueView(
+                "pipeline-contract-unresolved", program.operation_id,
+                "operation contract matches no compiled pipeline", COORDINATOR,
+            ))
+        if (
+            program.surface == "unbound"
+            and program.state in SURFACE_BOUND_STATES
+            and program.executor_status != "awaiting-transition"
+        ):
+            issues.append(IssueView(
+                "operation-resources-absent", program.operation_id,
+                "nonterminal operation owns no recorded runtime resource", ATTENTION,
+            ))
+        if program.surface in {"missing", "ambiguous"}:
+            issues.append(IssueView(
+                f"surface-{program.surface}", program.operation_id,
+                f"recorded surface is {program.surface} in the cmux tree",
+                ATTENTION if program.surface == "missing" else COORDINATOR,
+            ))
+        if program.next_action == "unknown" and program.pipeline not in {
+            "unresolved", "none",
+        }:
+            issues.append(IssueView(
+                "pipeline-progress-unknown", program.operation_id,
+                "durable step evidence does not form a compiled prefix", COORDINATOR,
+            ))
+    return issues

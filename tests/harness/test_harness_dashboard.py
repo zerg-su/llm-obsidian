@@ -67,6 +67,15 @@ from harness.status_segment import LiveInventory
 from harness.store import OperationStore
 from harness.supervisor import OperationSupervisor
 from harness.runtime_worker import _pipeline_verify_identity
+from harness.review_attempt import (
+    ReviewAttempt,
+    ReviewAttemptIdentity,
+    ReviewAttemptLaneIdentity,
+    ReviewAttemptLaneResult,
+    ReviewAttemptPolicy,
+    ReviewAttemptTerminal,
+    ReviewAttemptTerminalResult,
+)
 from harness.verification_attempt import (
     VerificationAttempt,
     verification_input_sha256,
@@ -255,8 +264,11 @@ def _verification_receipt(
     input_char: str = "6",
     head_char: str = "8",
     attempt_index: int = 0,
+    owner: str = OWNER,
+    started_at: str = "2026-08-11T00:01:00Z",
+    finished_at: str = "2026-08-11T00:03:00Z",
 ) -> str:
-    parent_record = store.read(OWNER, parent)
+    parent_record = store.read(owner, parent)
     input_sha = input_char * 64
     operation_id, lane_id, run_id, effect_id = dashboard_receipts.verification_identity(
         parent_record.spec, definition, input_sha, attempt_index
@@ -266,7 +278,7 @@ def _verification_receipt(
             operation_id,
             f"{operation_id}-key",
             "pipeline-verify",
-            OWNER,
+            owner,
             _route(),
             "packets/task.json",
             "scoped",
@@ -282,7 +294,7 @@ def _verification_receipt(
     head_sha = head_char * 40
     evidence = VerificationEvidence(
         "scoped", "7" * 64, head_sha, "scoped-1", ".",
-        0 if status == "complete" else 1, "1", "2",
+        0 if status == "complete" else 1, started_at, finished_at,
         "verification-output.log", hashlib.sha256(b"ok\n").hexdigest(), 3, 2,
     )
     attempt = VerificationAttempt(
@@ -396,6 +408,54 @@ def _tree_bytes(root: Path) -> dict[str, str]:
         for path in sorted(root.rglob("*"))
         if path.is_file()
     }
+
+
+def _liveness(
+    store: OperationStore,
+    owner: str,
+    operation_id: str,
+    *,
+    started_at: float,
+    last_progress_at: float,
+    revision: int | None = None,
+) -> Path:
+    record = store.read(owner, operation_id)
+    path = (
+        store.root
+        / "owners"
+        / owner
+        / "runtime"
+        / operation_id
+        / "liveness"
+        / "state.json"
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "started_at": started_at,
+                "last_progress_at": last_progress_at,
+                "operation_revision": (
+                    record.revision if revision is None else revision
+                ),
+                "operation_state": record.state,
+                "screen_sha256": "",
+                "typed_result_sha256": "",
+                "callback_sha256": "",
+                "receipt_sha256": "",
+                "stable_result_reads": 0,
+                "nudge_count": 0,
+                "restart_count": 0,
+                "callback_submit_binding": "",
+                "callback_submit_status": "",
+                "schema_version": 1,
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return path
 
 
 isolated_import = subprocess.run(
@@ -2716,6 +2776,285 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-open.") as raw:
         and starting_marker["state"] == "ready"
         and starting_marker["surface_id"] == dashboard,
     )
+
+# E267.RC4.DASH.TIME.RED: one fixed frame clock must expose only accepted,
+# identity-bound durable timing and terminal review summary evidence.
+with tempfile.TemporaryDirectory(prefix="harness-dashboard-time.") as raw:
+    vault = Path(raw) / "vault"
+    store_root = vault / ".vault-meta" / "harness"
+    worktree = vault / "task-worktree"
+    worktree.mkdir(parents=True)
+    store = OperationStore(store_root)
+    compiled = compiled_builtin("engineering/change")
+    timed_root = "dashboard-timed-root"
+    _create(
+        store,
+        timed_root,
+        "dispatch",
+        lane_id="timed-root-lane",
+        contract_sha256=compiled.definition_sha256,
+        owner=timed_root,
+    )
+    _advance(
+        store,
+        timed_root,
+        "preflight",
+        "starting",
+        "running",
+        owner=timed_root,
+    )
+    _liveness(
+        store,
+        timed_root,
+        timed_root,
+        started_at=1_000.0,
+        last_progress_at=1_100.0,
+    )
+    timed_child = "dashboard-timed-verify"
+    _create(
+        store,
+        timed_child,
+        "pipeline-verify",
+        lane_id="timed-child-lane",
+        contract_sha256=compiled.definition_sha256,
+        parent=timed_root,
+        owner=timed_root,
+    )
+    _advance(
+        store,
+        timed_child,
+        "preflight",
+        "starting",
+        "running",
+        owner=timed_root,
+    )
+    _liveness(
+        store,
+        timed_root,
+        timed_child,
+        started_at=1_150.0,
+        last_progress_at=1_200.0,
+    )
+    observed_at = 1_300.0
+    timed = project_root(store_root, timed_root, observed_at=observed_at)
+    timed_program = timed.programs[0]
+    timed_verify = next(
+        step for step in timed_program.steps if step.step_id == "verify"
+    )
+    regression_check(
+        "live root and exact active child expose fixed-clock elapsed timing",
+        timed_program.timing.mode == "elapsed"
+        and timed_program.timing.seconds == 300
+        and timed_verify.timing.mode == "elapsed"
+        and timed_verify.timing.seconds == 150
+        and timed_verify.children[0].timing.mode == "elapsed"
+        and timed_verify.children[0].timing.seconds == 150,
+    )
+
+    receipt_operation = _verification_receipt(
+        store,
+        timed_root,
+        store_root / "owners" / timed_root / "runtime" / timed_root,
+        compiled.definition_sha256,
+        owner=timed_root,
+    )
+    _advance(
+        store,
+        receipt_operation,
+        "preflight",
+        "starting",
+        "running",
+        "finalizing",
+        "exiting",
+        "complete",
+        owner=timed_root,
+    )
+    verified = project_root(store_root, timed_root, observed_at=1_800_000_000.0)
+    verified_step = next(
+        step for step in verified.programs[0].steps if step.step_id == "verify"
+    )
+    regression_check(
+        "accepted verification evidence freezes the exact step duration",
+        verified_step.timing.mode == "duration"
+        and verified_step.timing.seconds == 120,
+    )
+
+    reaped_root = "dashboard-reaped-root"
+    _create(
+        store,
+        reaped_root,
+        "dispatch",
+        lane_id="reaped-root-lane",
+        contract_sha256=compiled.definition_sha256,
+        owner=reaped_root,
+    )
+    _advance(
+        store,
+        reaped_root,
+        "preflight",
+        "starting",
+        "running",
+        "finalizing",
+        "exiting",
+        "complete",
+        owner=reaped_root,
+    )
+    reaped_worktree = vault / "reaped-worktree"
+    reaped_worktree.mkdir()
+    plan_path = vault / "plans" / "approved.md"
+    plan_path.parent.mkdir()
+    plan_path.write_text("approved\n", encoding="utf-8")
+    record = store.read(reaped_root, reaped_root)
+    runtime = store_root / "owners" / reaped_root / "runtime" / reaped_root
+    runtime.mkdir(parents=True)
+    (runtime / "session.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "operation_id": reaped_root,
+                "run_id": record.run_id,
+                "cwd": str(reaped_worktree),
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    meta = {
+        "version": 4,
+        "task_id": reaped_root,
+        "task_name": "dashboard-reaped-task",
+        "worktree": str(reaped_worktree),
+        "vault_root": str(vault),
+        "plan_file": str(plan_path),
+        "spawned_at": "2026-08-11T00:00:00Z",
+    }
+    meta_path = reaped_worktree / ".task-meta.json"
+    meta_path.write_text(json.dumps(meta, sort_keys=True) + "\n", encoding="utf-8")
+    (reaped_worktree / ".task-reap-complete.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "task_name": meta["task_name"],
+                "vault_root": str(vault),
+                "plan_path": str(plan_path),
+                "meta_sha256": hashlib.sha256(meta_path.read_bytes()).hexdigest(),
+                "validated": True,
+                "completed_at": "2026-08-11T00:05:00Z",
+                "task_session_status": "archived",
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    reaped = project_root(store_root, reaped_root, observed_at=1_800_000_000.0)
+    regression_check(
+        "validated reap evidence freezes terminal root duration",
+        reaped.programs[0].timing.mode == "duration"
+        and reaped.programs[0].timing.seconds == 300,
+    )
+
+    review_root = "dashboard-review-summary-root"
+    _create(
+        store,
+        review_root,
+        "dispatch",
+        lane_id="review-summary-lane",
+        contract_sha256=compiled.definition_sha256,
+        owner=review_root,
+    )
+    _advance(
+        store,
+        review_root,
+        "preflight",
+        "starting",
+        "running",
+        owner=review_root,
+    )
+    policy = ReviewAttemptPolicy(
+        "deep", False, "codex", "gpt-5.6-sol", "high", 2,
+        "implementation", "openai",
+    )
+    lanes = tuple(
+        ReviewAttemptLaneIdentity(
+            axis,
+            review_root,
+            f"{review_root}-{index}",
+            f"review-lane-{index}",
+            f"review-run-{index}",
+            "codex",
+            "gpt-5.6-sol",
+            "high",
+            "reviewer-callback",
+            str(index + 1) * 64,
+        )
+        for index, axis in enumerate(("openai-intent", "openai-engineering"))
+    )
+    identity = ReviewAttemptIdentity(
+        "review-attempt-2",
+        "review-lineage",
+        2,
+        "a" * 64,
+        "b" * 64,
+        "c" * 40,
+        policy,
+        lanes,
+    )
+    lane_results = tuple(
+        ReviewAttemptLaneResult(
+            lane.axis,
+            "approve",
+            str(index + 3) * 64,
+            ("finding-shared", f"finding-{index}"),
+        )
+        for index, lane in enumerate(lanes)
+    )
+    attempt = ReviewAttempt(
+        identity,
+        "terminal",
+        ReviewAttemptTerminal(
+            ReviewAttemptTerminalResult.APPROVED,
+            identity.exact_head_sha,
+            lane_results,
+        ),
+    )
+    _write_gate(store, "approved", subject=review_root, owner=review_root)
+    gate_path = (
+        store_root
+        / "review-data"
+        / review_root
+        / review_root
+        / "review-gate.json"
+    )
+    gate = json.loads(gate_path.read_text(encoding="utf-8"))
+    gate["attempt"] = attempt.payload()
+    gate_path.write_text(json.dumps(gate, sort_keys=True) + "\n", encoding="utf-8")
+    reviewed = project_root(store_root, review_root, observed_at=observed_at)
+    review_step = next(
+        step for step in reviewed.programs[0].steps if step.step_id == "review"
+    )
+    regression_check(
+        "terminal review summary validates cycle limit and unique findings",
+        review_step.review.cycle == 2
+        and review_step.review.limit == 2
+        and review_step.review.findings == 3
+        and review_step.review.material_findings == 0,
+    )
+
+    bad_liveness = _liveness(
+        store,
+        timed_root,
+        timed_root,
+        started_at=1_400.0,
+        last_progress_at=1_400.0,
+    )
+    rejected = project_root(store_root, timed_root, observed_at=observed_at)
+    regression_check(
+        "future durable liveness is rejected instead of becoming display truth",
+        rejected.programs[0].timing.mode == "unknown",
+    )
+    bad_liveness.unlink()
 
 if REGRESSION_FAILURES:
     raise AssertionError(

@@ -12,7 +12,6 @@ coordinator believe an unknown state is progress.
 
 from __future__ import annotations
 
-import json
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Mapping
@@ -29,6 +28,11 @@ from .status_segment import CONTROLLER_KINDS, LiveInventory
 from .store import OperationStore, StoreError
 from .dashboard_receipts import (
     fix_receipt_visits,
+    liveness_timing,
+    read_gate,
+    review_summary,
+    root_timing,
+    verification_receipt_timing,
     verification_receipt_visits,
 )
 from .dashboard_policy import (
@@ -42,9 +46,10 @@ from .dashboard_policy import (
     MAX_LANES,
     MAX_PROGRAMS,
     REVIEW_OBSERVATIONS,
-    SURFACE_BOUND_STATES,
     UNKNOWN,
+    UNKNOWN_REVIEW,
     UNKNOWN_ROUTE,
+    UNKNOWN_TIMING,
     WAITING,
     ChildView,
     DashboardProjection,
@@ -57,6 +62,7 @@ from .dashboard_policy import (
     current_verification_ids as _current_verification_ids,
     escalate,
     executor_status as _executor_status,
+    program_issues as _program_issues,
     program_classification as _program_classification,
     record_activity as _record_activity,
     route_view as _route_view,
@@ -71,18 +77,6 @@ STEP_PRIMITIVE_KINDS = {
     "review": frozenset(REVIEW_PARENT_KINDS | {"review-round"}),
 }
 
-
-
-def _read_object(path: Path) -> dict[str, Any] | None:
-    if not path.is_file() or path.is_symlink():
-        return None
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    return value if isinstance(value, dict) else None
-
-
 def _runtime_root(store: OperationStore, record: OperationRecord) -> Path:
     return (
         store.root
@@ -90,12 +84,6 @@ def _runtime_root(store: OperationStore, record: OperationRecord) -> Path:
         / record.spec.owner_id
         / "runtime"
         / record.spec.operation_id
-    )
-
-
-def _gate(store: OperationStore, owner_id: str) -> dict[str, Any] | None:
-    return _read_object(
-        store.root / "review-data" / owner_id / owner_id / "review-gate.json"
     )
 
 
@@ -185,6 +173,8 @@ def _child_views(
     tree: Mapping[str, list[OperationRecord]],
     depth: int = 0,
     *,
+    store: OperationStore,
+    observed_at: float,
     current_ids: frozenset[str] = frozenset(),
     dropped: dict[str, int] | None = None,
 ) -> tuple[ChildView, ...]:
@@ -214,9 +204,12 @@ def _child_views(
                 record.spec.operation_id,
                 tree,
                 depth + 1,
+                store=store,
+                observed_at=observed_at,
                 current_ids=current_ids,
                 dropped=dropped,
             ),
+            liveness_timing(store, record, observed_at),
         )
         for record in selected
     )
@@ -347,6 +340,8 @@ def _step_view(
     runtime: Path,
     gate: Mapping[str, Any] | None,
     children: tuple[ChildView, ...],
+    observed_at: float,
+    review_limit: int,
 ) -> tuple[StepView, bool]:
     """Bind one compiled step to durable evidence, or derive it from the record.
 
@@ -393,16 +388,34 @@ def _step_view(
         status = "attention" if issue else (
             "complete" if visits else _model_step_status(record)
         )
+    timing = UNKNOWN_TIMING
+    review = UNKNOWN_REVIEW
+    if step.primitive_id == "verify":
+        timing = verification_receipt_timing(
+            store,
+            record,
+            runtime,
+            observed_at,
+            exact_head_sha=_review_head(gate),
+        )
+    if timing.mode == UNKNOWN and status == "running":
+        elapsed = [child.timing for child in children if child.timing.mode == "elapsed"]
+        if elapsed:
+            timing = max(elapsed, key=lambda item: item.seconds or 0)
+    if step.primitive_id == "review":
+        review = review_summary(store, gate, limit=review_limit)
     return (
         StepView(
-            step.step_id,
-            identity,
-            step.session_mode,
-            status,
-            len(visits),
-            _step_route(step, record, children),
-            children,
-            issue,
+            step_id=step.step_id,
+            primitive=identity,
+            session_mode=step.session_mode,
+            status=status,
+            visits=len(visits),
+            route=_step_route(step, record, children),
+            children=children,
+            evidence_issue=issue,
+            timing=timing,
+            review=review,
         ),
         evidence,
     )
@@ -415,6 +428,7 @@ def _steps(
     runtime: Path,
     gate: Mapping[str, Any] | None,
     children: Mapping[str, list[ChildView]],
+    observed_at: float,
 ) -> tuple[tuple[StepView, ...], str]:
     """Project every compiled step, then ask the compiler for the next action."""
 
@@ -427,6 +441,11 @@ def _steps(
             runtime=runtime,
             gate=gate,
             children=tuple(children.get(step.step_id, ())),
+            observed_at=observed_at,
+            review_limit=max(
+                item.total_pass_limit
+                for item in compiled.definition.completion_policies
+            ),
         )
         for step, identity in zip(
             compiled.definition.steps,
@@ -596,12 +615,14 @@ def _surface(
 
 
 def _uncompiled_program(
+    store: OperationStore,
     record: OperationRecord,
     lanes: tuple[LaneView, ...],
     surface: str,
     children: tuple[ChildView, ...],
     dropped_children: int,
     dropped_lanes: int,
+    observed_at: float,
 ) -> ProgramView:
     """Project an operation that no compiled pipeline currently explains.
 
@@ -612,30 +633,31 @@ def _uncompiled_program(
 
     bound = bool(record.spec.contract_sha256)
     return ProgramView(
-        record.spec.operation_id,
-        record.spec.kind,
-        record.state,
-        record.revision,
-        "unresolved" if bound else "none",
-        record.spec.contract_sha256,
-        (),
-        (),
-        lanes,
-        "unknown" if bound else "none",
-        0,
-        0,
-        surface,
-        _program_classification(
+        operation_id=record.spec.operation_id,
+        kind=record.spec.kind,
+        state=record.state,
+        revision=record.revision,
+        pipeline="unresolved" if bound else "none",
+        definition_sha256=record.spec.contract_sha256,
+        controls=(),
+        steps=(),
+        lanes=lanes,
+        next_action="unknown" if bound else "none",
+        loop_passes=0,
+        loop_limit=0,
+        surface=surface,
+        classification=_program_classification(
             record,
             surface=surface,
             next_action="none",
             pipeline_resolved=not bound,
         ),
-        _route_view(record),
-        _record_activity(record),
-        children,
-        dropped_children,
-        dropped_lanes,
+        executor=_route_view(record),
+        executor_status=_record_activity(record),
+        children=children,
+        dropped_children=dropped_children,
+        dropped_lanes=dropped_lanes,
+        timing=root_timing(store, record, observed_at),
     )
 
 
@@ -647,6 +669,7 @@ def _program(
     gate: Mapping[str, Any] | None,
     inventory: LiveInventory | None,
     tree: Mapping[str, list[OperationRecord]],
+    observed_at: float,
 ) -> ProgramView:
     name, compiled = _compiled(store, record)
     runtime = _runtime_root(store, record)
@@ -657,34 +680,46 @@ def _program(
     direct = _child_views(
         record.spec.operation_id,
         tree,
+        store=store,
+        observed_at=observed_at,
         current_ids=_current_review_ids(gate, tree),
         dropped=dropped,
     )
     by_step, loose = _bind_children(direct, compiled)
     if compiled is None:
         return _uncompiled_program(
+            store,
             record,
             lanes,
             surface,
             loose,
             dropped["children"],
             dropped_lanes,
+            observed_at,
         )
-    steps, next_action = _steps(store, record, compiled, runtime, gate, by_step)
+    steps, next_action = _steps(
+        store,
+        record,
+        compiled,
+        runtime,
+        gate,
+        by_step,
+        observed_at,
+    )
     executor_status = _executor_status(record, steps)
     definition = compiled.definition
     return ProgramView(
-        record.spec.operation_id,
-        record.spec.kind,
-        record.state,
-        record.revision,
-        f"{name}@{definition.version}",
-        compiled.definition_sha256,
-        compiled.resolved_control_primitives,
-        steps,
-        lanes,
-        next_action,
-        (
+        operation_id=record.spec.operation_id,
+        kind=record.spec.kind,
+        state=record.state,
+        revision=record.revision,
+        pipeline=f"{name}@{definition.version}",
+        definition_sha256=compiled.definition_sha256,
+        controls=compiled.resolved_control_primitives,
+        steps=steps,
+        lanes=lanes,
+        next_action=next_action,
+        loop_passes=(
             max(
                 (
                     view.visits
@@ -696,20 +731,21 @@ def _program(
             if _loop_limit(compiled)
             else 0
         ),
-        _loop_limit(compiled),
-        surface,
-        _program_classification(
+        loop_limit=_loop_limit(compiled),
+        surface=surface,
+        classification=_program_classification(
             record,
             surface=surface,
             next_action=next_action,
             pipeline_resolved=True,
             executor_status=executor_status,
         ),
-        _route_view(record),
-        executor_status,
-        loose,
-        dropped["children"],
-        dropped_lanes,
+        executor=_route_view(record),
+        executor_status=executor_status,
+        children=loose,
+        dropped_children=dropped["children"],
+        dropped_lanes=dropped_lanes,
+        timing=root_timing(store, record, observed_at),
     )
 
 
@@ -734,77 +770,6 @@ def _diagnostic_issues(store_root: Path | str, owner_id: str) -> list[IssueView]
         )
         for signal in packet["signals"]
     ]
-
-
-def _program_issues(programs: tuple[ProgramView, ...]) -> list[IssueView]:
-    issues: list[IssueView] = []
-    for program in programs:
-        for step in program.steps:
-            if step.evidence_issue:
-                issues.append(
-                    IssueView(
-                        step.evidence_issue,
-                        program.operation_id,
-                        f"{step.step_id} durable evidence is not accepted",
-                        ATTENTION,
-                    )
-                )
-        if program.state in {"failed", "cancelled"}:
-            issues.append(
-                IssueView(
-                    f"terminal-{program.state}",
-                    program.operation_id,
-                    f"operation terminated as {program.state}",
-                    ATTENTION,
-                )
-            )
-        if program.pipeline == "unresolved":
-            issues.append(
-                IssueView(
-                    "pipeline-contract-unresolved",
-                    program.operation_id,
-                    "operation contract matches no compiled pipeline",
-                    COORDINATOR,
-                )
-            )
-        # Only the states that must already own a live session are held to
-        # this rule; a queued or starting operation has legitimately bound
-        # nothing yet.
-        if (
-            program.surface == "unbound"
-            and program.state in SURFACE_BOUND_STATES
-            and program.executor_status != "awaiting-transition"
-        ):
-            issues.append(
-                IssueView(
-                    "operation-resources-absent",
-                    program.operation_id,
-                    "nonterminal operation owns no recorded runtime resource",
-                    ATTENTION,
-                )
-            )
-        if program.surface in {"missing", "ambiguous"}:
-            issues.append(
-                IssueView(
-                    f"surface-{program.surface}",
-                    program.operation_id,
-                    f"recorded surface is {program.surface} in the cmux tree",
-                    ATTENTION if program.surface == "missing" else COORDINATOR,
-                )
-            )
-        if program.next_action == "unknown" and program.pipeline not in {
-            "unresolved",
-            "none",
-        }:
-            issues.append(
-                IssueView(
-                    "pipeline-progress-unknown",
-                    program.operation_id,
-                    "durable step evidence does not form a compiled prefix",
-                    COORDINATOR,
-                )
-            )
-    return issues
 
 
 def _invalid_records(store: OperationStore, owner_id: str) -> tuple[
@@ -836,6 +801,7 @@ def _programs(
     records: list[OperationRecord],
     owner_id: str,
     inventory: LiveInventory | None,
+    observed_at: float,
 ) -> tuple[list[OperationRecord], tuple[ProgramView, ...]]:
     """Resolve every record to its one root program and project those trees.
 
@@ -844,7 +810,7 @@ def _programs(
     only top-level when its durable lineage really has no owning root.
     """
 
-    gate = _gate(store, owner_id)
+    gate = read_gate(store, owner_id)
     by_id = {record.spec.operation_id: record for record in records}
     roots = {
         record.spec.operation_id: _root_id(record, by_id) for record in records
@@ -869,6 +835,7 @@ def _programs(
             gate=gate,
             inventory=inventory,
             tree=tree,
+            observed_at=observed_at,
         )
         for controller in controllers
     )
@@ -930,6 +897,7 @@ def project_root(
     *,
     inventory: LiveInventory | None = None,
     surface_probe: str = "unavailable",
+    observed_at: float | None = None,
 ) -> DashboardProjection:
     """Project exactly one root operation and its recorded descendants.
 
@@ -951,7 +919,13 @@ def project_root(
     members = [
         record for record in records if roots[record.spec.operation_id] == root_id
     ]
-    _controllers, programs = _programs(store, members, root_id, inventory)
+    _controllers, programs = _programs(
+        store,
+        members,
+        root_id,
+        inventory,
+        float("nan") if observed_at is None else observed_at,
+    )
     if root_id in by_id and not programs:
         issues.append(
             IssueView(
@@ -985,12 +959,19 @@ def project(
     *,
     inventory: LiveInventory | None = None,
     surface_probe: str = "unavailable",
+    observed_at: float | None = None,
 ) -> DashboardProjection:
     """Project one owner's durable harness state as a read-only dashboard."""
 
     store = OperationStore(store_root)
     records, issues = _invalid_records(store, owner_id)
-    controllers, programs = _programs(store, records, owner_id, inventory)
+    controllers, programs = _programs(
+        store,
+        records,
+        owner_id,
+        inventory,
+        float("nan") if observed_at is None else observed_at,
+    )
     issues.extend(_program_issues(programs))
     issues.extend(_diagnostic_issues(store.root, owner_id))
     return _bounded_projection(owner_id, programs, issues, surface_probe)
