@@ -3746,6 +3746,80 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-time.") as raw:
         and verification_ancestor_rejected,
     )
 
+    cli_baseline = _tree_bytes(vault)
+    live_frames: list[str] = []
+    live_clock_values = iter((1_300.0, 1_360.0))
+    live_clock_samples: list[float] = []
+
+    def root_frame_clock() -> float:
+        value = next(live_clock_values)
+        live_clock_samples.append(value)
+        return value
+
+    def stop_root_frames(_interval: float) -> None:
+        if len(live_frames) == 2:
+            raise KeyboardInterrupt
+
+    live_code = dashboard_script.main(
+        [
+            "--store",
+            str(store_root),
+            "--root",
+            timed_root,
+            "--interval",
+            "0.1",
+            "--no-color",
+        ],
+        output=live_frames.append,
+        sleeper=stop_root_frames,
+        tty_probe=lambda: True,
+        terminal_rows=lambda: 40,
+        clock=root_frame_clock,
+    )
+
+    def terminal_once(clock_value: float) -> str:
+        output: list[str] = []
+        code = dashboard_script.main(
+            [
+                "--store",
+                str(store_root),
+                "--root",
+                reaped_root,
+                "--once",
+                "--no-color",
+            ],
+            output=output.append,
+            tty_probe=lambda: True,
+            terminal_rows=lambda: (_ for _ in ()).throw(
+                AssertionError("--once must not inspect terminal rows")
+            ),
+            clock=lambda: clock_value,
+        )
+        return output[0] if code == 0 and len(output) == 1 else ""
+
+    terminal_first = terminal_once(1_800_000_000.0)
+    terminal_same = terminal_once(1_800_000_000.0)
+    terminal_later = terminal_once(1_800_000_060.0)
+    plain_live_frames = [
+        frame.removeprefix(dashboard_script.CLEAR) for frame in live_frames
+    ]
+    regression_check(
+        "root CLI samples one clock per frame while active time advances and terminal duration freezes",
+        live_code == 0
+        and live_clock_samples == [1_300.0, 1_360.0]
+        and len(plain_live_frames) == 2
+        and "updated 00:21:40" in plain_live_frames[0]
+        and "updated 00:22:40" in plain_live_frames[1]
+        and "elapsed 5m 00s" in plain_live_frames[0]
+        and "elapsed 6m 00s" in plain_live_frames[1]
+        and review_root not in "".join(plain_live_frames)
+        and terminal_first == terminal_same
+        and "duration 5m 00s" in terminal_first
+        and "duration 5m 00s" in terminal_later
+        and ansi.search("".join(plain_live_frames) + terminal_first) is None
+        and _tree_bytes(vault) == cli_baseline,
+    )
+
 if REGRESSION_FAILURES:
     raise AssertionError(
         "dashboard regressions failed: " + "; ".join(REGRESSION_FAILURES)
