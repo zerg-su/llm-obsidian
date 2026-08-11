@@ -49,6 +49,7 @@ from harness.dashboard_projection import (
 )
 from harness.dashboard_view import MAX_LINE, _colorize, render
 from harness.dashboard_policy import TimingView
+from harness.cli_readonly import dashboard as readonly_dashboard
 from harness.custom_pipelines import (
     CustomPipelinePolicy,
     ExplicitPipelineApproval,
@@ -1744,6 +1745,13 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-viewport.") as raw:
     OperationSupervisor(store, live_owner, live_owner).bind_resources(
         OwnedResources(surface_id=live_surface)
     )
+    _liveness(
+        store,
+        live_owner,
+        live_owner,
+        started_at=1_000.0,
+        last_progress_at=1_100.0,
+    )
     live_path = (
         store_root / "owners" / live_owner / "operations" / f"{live_owner}.json"
     )
@@ -1907,6 +1915,13 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-viewport.") as raw:
 
     rendered_frames: list[str] = []
     row_values = iter((36, 24))
+    clock_values = iter((1_300.0, 1_360.0))
+    clock_samples: list[float] = []
+
+    def frame_clock() -> float:
+        value = next(clock_values)
+        clock_samples.append(value)
+        return value
 
     def stop_after_two_frames(_interval: float) -> None:
         if len(rendered_frames) == 2:
@@ -1922,6 +1937,7 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-viewport.") as raw:
         output=rendered_frames.append,
         tty_probe=lambda: True,
         terminal_rows=lambda: next(row_values),
+        clock=frame_clock,
     )
     once_output: list[str] = []
     once_code = dashboard_script.main(
@@ -1934,6 +1950,7 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-viewport.") as raw:
         terminal_rows=lambda: (_ for _ in ()).throw(
             AssertionError("--once must not inspect terminal rows")
         ),
+        clock=lambda: 1_300.0,
     )
     frame_counts = [
         len(frame.removeprefix(dashboard_script.CLEAR).splitlines())
@@ -1946,10 +1963,28 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-viewport.") as raw:
         and frame_counts[1] <= 24
         and frame_counts[1] < frame_counts[0]
         and all(live_owner in frame for frame in rendered_frames)
+        and clock_samples == [1_300.0, 1_360.0]
+        and "elapsed 5m 00s" in rendered_frames[0]
+        and "elapsed 6m 00s" in rendered_frames[1]
         and once_code == 0
         and len(once_output) == 1
         and not once_output[0].startswith(dashboard_script.CLEAR)
         and len(once_output[0].splitlines()) > 36
+        and _tree_bytes(store_root) == baseline,
+    )
+    diagnostic_samples: list[float] = []
+    diagnostic = readonly_dashboard(
+        store_root,
+        live_owner,
+        inventory_probe=lambda **_kwargs: LiveInventory(
+            {live_surface.casefold(): "workspace-live"}
+        ),
+        clock=lambda: diagnostic_samples.append(1_330.0) or 1_330.0,
+    )
+    regression_check(
+        "the owner-wide diagnostic samples one display clock without authority",
+        diagnostic_samples == [1_330.0]
+        and diagnostic.programs[0].timing == TimingView("elapsed", 330)
         and _tree_bytes(store_root) == baseline,
     )
 
@@ -2083,6 +2118,13 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-root.") as raw:
             owner=owner,
         )
         _advance(store, owner, "preflight", "starting", owner=owner)
+        _liveness(
+            store,
+            owner,
+            owner,
+            started_at=1_000.0,
+            last_progress_at=1_050.0,
+        )
     scoped_child = f"{ROOT_SCOPE_A}-verify-0"
     _create(
         store,
@@ -2110,7 +2152,7 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-root.") as raw:
     )
 
     baseline = _tree_bytes(store_root)
-    scoped = project_root(store_root, ROOT_SCOPE_A)
+    scoped = project_root(store_root, ROOT_SCOPE_A, observed_at=1_300.0)
     scoped_frame = render(scoped, scope="root")
     check(
         "root projection renders exactly one root with its descendants and no unrelated owner",
@@ -2128,6 +2170,23 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-root.") as raw:
         and ROOT_SCOPE_B not in scoped_frame
         and ROOT_SCOPE_HISTORICAL not in scoped_frame
         and _tree_bytes(store_root) == baseline,
+    )
+    record_path = (
+        store_root
+        / "owners"
+        / ROOT_SCOPE_A
+        / "operations"
+        / f"{ROOT_SCOPE_A}.json"
+    )
+    os.utime(record_path, (9_999, 9_999))
+    mtime_only = project_root(
+        store_root, ROOT_SCOPE_A, observed_at=1_300.0
+    )
+    regression_check(
+        "record mtime never enters displayed timing or lifecycle truth",
+        mtime_only.programs[0].timing == scoped.programs[0].timing
+        == TimingView("elapsed", 300)
+        and mtime_only.classification == scoped.classification,
     )
 
     pre = project_root(store_root, "root-scope-unseen")
@@ -2233,6 +2292,15 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-root.") as raw:
         inventory_probe=lambda **_kwargs: None,
         output=root_once.append,
         tty_probe=lambda: False,
+        clock=lambda: 1_300.0,
+    )
+    root_once_repeat: list[str] = []
+    root_repeat_code = dashboard_script.main(
+        ["--store", str(store_root), "--root", ROOT_SCOPE_A, "--once", "--no-color"],
+        inventory_probe=lambda **_kwargs: None,
+        output=root_once_repeat.append,
+        tty_probe=lambda: True,
+        clock=lambda: 1_300.0,
     )
     all_once: list[str] = []
     all_code = dashboard_script.main(
@@ -2245,6 +2313,9 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-root.") as raw:
         "the CLI renders one root in normal mode while --all keeps the global diagnostic",
         root_code == 0
         and len(root_once) == 1
+        and root_repeat_code == 0
+        and root_once_repeat == root_once
+        and "\x1b[" not in root_once[0]
         and ROOT_SCOPE_A in root_once[0]
         and ROOT_SCOPE_B not in root_once[0]
         and ROOT_SCOPE_HISTORICAL not in root_once[0]

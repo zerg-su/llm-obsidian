@@ -140,6 +140,7 @@ def snapshot(
     *,
     recent: int,
     inventory: LiveInventory | None,
+    observed_at: float | None = None,
 ) -> DashboardProjection:
     """Collect every owner once, retaining all active and recent terminal roots."""
 
@@ -162,6 +163,7 @@ def snapshot(
                 owner,
                 inventory=inventory,
                 surface_probe="observed" if inventory is not None else "unavailable",
+                observed_at=observed_at,
             )
         except (OSError, ValueError):
             issues.append(
@@ -532,6 +534,7 @@ def main(
     output: Callable[[str], None] | None = None,
     tty_probe: Callable[[], bool] | None = None,
     terminal_rows: Callable[[], int] | None = None,
+    clock: Callable[[], float] = time.time,
 ) -> int:
     values = list(sys.argv[1:] if argv is None else argv)
     if values[:1] == ["open"]:
@@ -545,9 +548,15 @@ def main(
     )
     try:
         while True:
+            observed_at = clock()
             inventory = _probe_inventory(inventory_probe)
             projection = (
-                snapshot(args.store, recent=args.recent, inventory=inventory)
+                snapshot(
+                    args.store,
+                    recent=args.recent,
+                    inventory=inventory,
+                    observed_at=observed_at,
+                )
                 if args.all
                 else project_root(
                     args.store,
@@ -556,6 +565,7 @@ def main(
                     surface_probe=(
                         "observed" if inventory is not None else "unavailable"
                     ),
+                    observed_at=observed_at,
                 )
             )
             rows = max(int(row_probe()), 1) if is_tty and not args.once else None

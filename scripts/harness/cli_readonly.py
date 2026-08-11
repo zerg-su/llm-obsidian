@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import os
 import shutil
+import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .contracts import to_dict
 from .dashboard_projection import DashboardProjection, project
@@ -23,6 +24,7 @@ def dashboard(
     owner: str,
     *,
     inventory_probe: object | None = None,
+    clock: Callable[[], float] = time.time,
 ) -> DashboardProjection:
     """Project one owner, annotated by one bounded best-effort cmux probe.
 
@@ -30,6 +32,7 @@ def dashboard(
     probe failure into a failed command that hides the durable ledger too.
     """
 
+    observed_at = clock()
     binary = os.environ.get("CMUX_BUNDLED_CLI_PATH") or "cmux"
     try:
         if inventory_probe is not None:
@@ -47,6 +50,7 @@ def dashboard(
         owner,
         inventory=inventory,
         surface_probe="observed" if inventory is not None else "unavailable",
+        observed_at=observed_at,
     )
 
 
