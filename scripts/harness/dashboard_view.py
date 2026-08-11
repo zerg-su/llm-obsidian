@@ -213,6 +213,12 @@ def _current_step(program: ProgramView) -> object | None:
         selected = next((step for step in program.steps if step.status == status), None)
         if selected is not None:
             return selected
+    if program.state in {"failed", "cancelled"}:
+        selected = next(
+            (step for step in program.steps if step.status == "stopped"), None
+        )
+        if selected is not None:
+            return selected
     return next((step for step in program.steps if step.status == "pending"), None)
 
 
@@ -315,7 +321,9 @@ def _colorize(line: str, *, color: bool) -> str:
     if line and set(line) == {"─"}:
         return f"{SEMANTIC_COLORS['rule']}{line}{RESET}"
     stripped = line.lstrip()
-    current = stripped.startswith(("[>]", "● ACTIVE", "├─ ●", "└─ ●"))
+    current = stripped.startswith(
+        ("[>]", "[!]", "● ACTIVE", "├─ ●", "└─ ●", "├─ !", "└─ !")
+    )
     inactive = stripped.startswith(("[ ]", "├─ ○", "└─ ○"))
     base = (
         BOLD + SEMANTIC_COLORS["primary"]

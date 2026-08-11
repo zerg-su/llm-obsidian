@@ -24,6 +24,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from harness.adapters.cmux import CmuxAdapter, CmuxError, UUID_RE
 from harness.contracts import ID_RE
+from harness.dashboard_receipts import absolute_path_is_safe
 from harness.dashboard_projection import (
     ACTIVE,
     ATTENTION,
@@ -144,6 +145,8 @@ def snapshot(
 ) -> DashboardProjection:
     """Collect every owner once, retaining all active and recent terminal roots."""
 
+    if not absolute_path_is_safe(store):
+        raise ValueError("dashboard store path contains a symlink")
     root = store.expanduser().resolve()
     owners_root = root / "owners"
     owners = (
@@ -535,6 +538,7 @@ def main(
     output: Callable[[str], None] | None = None,
     tty_probe: Callable[[], bool] | None = None,
     terminal_rows: Callable[[], int] | None = None,
+    terminal_size: Callable[[], os.terminal_size] | None = None,
     clock: Callable[[], float] = time.time,
 ) -> int:
     values = list(sys.argv[1:] if argv is None else argv)
@@ -544,8 +548,8 @@ def main(
     emit = output or (lambda value: print(value, end=""))
     is_tty = (tty_probe or sys.stdout.isatty)()
     color = not args.no_color and is_tty
-    row_probe = terminal_rows or (
-        lambda: shutil.get_terminal_size(fallback=(80, 24)).lines
+    size_probe = terminal_size or (
+        lambda: shutil.get_terminal_size(fallback=(80, 24))
     )
     try:
         while True:
@@ -569,13 +573,22 @@ def main(
                     observed_at=observed_at,
                 )
             )
-            rows = max(int(row_probe()), 1) if is_tty and not args.once else None
+            rows = None
+            columns = None
+            if is_tty and not args.once:
+                if terminal_rows is not None and terminal_size is None:
+                    rows = max(int(terminal_rows()), 1)
+                else:
+                    dimensions = size_probe()
+                    rows = max(int(dimensions.lines), 1)
+                    columns = max(int(dimensions.columns), 1)
             text = render(
                 projection,
                 recent=args.recent,
                 color=color,
                 rows=rows,
                 scope="owner" if args.all else "root",
+                columns=columns,
             )
             emit(text if args.once else CLEAR + text)
             if args.once:

@@ -27,6 +27,7 @@ from .state_machine import TERMINAL
 from .status_segment import CONTROLLER_KINDS, LiveInventory
 from .store import OperationStore, StoreError
 from .dashboard_receipts import (
+    absolute_path_is_safe,
     fix_receipt_visits,
     liveness_timing,
     read_gate,
@@ -657,7 +658,7 @@ def _uncompiled_program(
         dropped_children=dropped_children,
         dropped_lanes=dropped_lanes,
         timing=root_timing(store, record, observed_at),
-        task_name=root_task_name(store, record),
+        task_name=root_task_name(store, record) or UNKNOWN,
     )
 
 
@@ -746,7 +747,7 @@ def _program(
         dropped_children=dropped["children"],
         dropped_lanes=dropped_lanes,
         timing=root_timing(store, record, observed_at),
-        task_name=root_task_name(store, record),
+        task_name=root_task_name(store, record) or UNKNOWN,
     )
 
 
@@ -905,6 +906,8 @@ def project_root(
     """Project one exact root and only its recorded descendants."""
 
     _identifier(root_id, "root operation id")
+    if not absolute_path_is_safe(store_root):
+        raise ValueError("dashboard store path contains a symlink")
     store = OperationStore(store_root)
     records, issues = _invalid_records(store, root_id)
     by_id = {record.spec.operation_id: record for record in records}
@@ -959,6 +962,8 @@ def project(
 ) -> DashboardProjection:
     """Project one owner's durable harness state as a read-only dashboard."""
 
+    if not absolute_path_is_safe(store_root):
+        raise ValueError("dashboard store path contains a symlink")
     store = OperationStore(store_root)
     records, issues = _invalid_records(store, owner_id)
     controllers, programs = _programs(

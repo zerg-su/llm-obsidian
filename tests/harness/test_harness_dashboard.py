@@ -22,6 +22,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
+# macOS exposes the default temporary root through /var -> /private/var. Use
+# its canonical spelling so ordinary fixtures exercise the non-symlink path.
+tempfile.tempdir = str(Path(tempfile.gettempdir()).resolve())
 
 from harness.cli import main as cli_main
 from harness.callbacks import CallbackBroker

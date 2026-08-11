@@ -44,26 +44,33 @@ RFC3339 = re.compile(
 )
 
 
-def _evidence_path_is_safe(path: Path, boundary: Path) -> bool:
-    """Reject a leaf or in-boundary ancestor symlink without resolving it."""
+def absolute_path_is_safe(path: Path | str) -> bool:
+    """Reject any symlink in one original absolute path before resolving it."""
 
-    path = Path(os.path.abspath(path.expanduser()))
-    boundary = Path(os.path.abspath(boundary.expanduser()))
-    try:
-        relative = path.relative_to(boundary)
-    except ValueError:
-        return False
-    current = boundary
+    path = Path(os.path.abspath(Path(path).expanduser()))
+    current = Path(path.anchor)
     try:
         if current.is_symlink():
             return False
-        for part in relative.parts:
+        for part in path.parts[1:]:
             current = current / part
             if current.is_symlink():
                 return False
     except OSError:
         return False
     return True
+
+
+def _evidence_path_is_safe(path: Path, boundary: Path) -> bool:
+    """Reject out-of-boundary paths and symlinks from anchor through leaf."""
+
+    path = Path(os.path.abspath(path.expanduser()))
+    boundary = Path(os.path.abspath(boundary.expanduser()))
+    try:
+        path.relative_to(boundary)
+    except ValueError:
+        return False
+    return absolute_path_is_safe(path)
 
 
 def _read_object(path: Path, *, boundary: Path) -> dict[str, Any] | None:
@@ -185,7 +192,7 @@ def _bound_task(
     if not isinstance(cwd_raw, str) or not Path(cwd_raw).is_absolute():
         return None
     cwd_path = Path(cwd_raw).expanduser()
-    if cwd_path.is_symlink():
+    if not absolute_path_is_safe(cwd_path):
         return None
     cwd = cwd_path.resolve()
     meta_path = cwd / ".task-meta.json"
