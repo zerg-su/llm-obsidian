@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -15,12 +16,9 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "pipeline-verification-resubmit.py"
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from harness.artifact_repair import (  # noqa: E402
-    build_verification_escalation,
-    resolve_verification_escalation,
-)
 from harness.verification_attempt import VerificationAttempt  # noqa: E402
-from task_escalation_records import append_raise, append_resolution, load_latest  # noqa: E402
+import task_escalation  # noqa: E402
+from task_escalation_records import load_latest  # noqa: E402
 
 
 with tempfile.TemporaryDirectory(prefix="verification-resubmit.") as raw:
@@ -105,40 +103,64 @@ with tempfile.TemporaryDirectory(prefix="verification-resubmit.") as raw:
         not in blocked.stderr
     ):
         raise AssertionError(blocked)
-    escalation_id = "verification-mechanism-flake-1"
-    typed_escalation = build_verification_escalation(
-        attempt_0, "verify-operation"
+    typed_escalation = {
+        "schema_version": 1,
+        "kind": "same-head-verification-retry",
+        "category": "mechanism-failure",
+        "operation_id": "parent-operation",
+        "verification_operation_id": "verify-operation",
+        "exact_head_sha": failed_head,
+        "failed_attempt_sha256": attempt_0.sha256,
+        "decision": "request-attempt-1",
+        "action": "",
+        "evidence_note": "",
+    }
+    (worktree / ".task-verification-contract.json").write_text(
+        json.dumps(typed_escalation, sort_keys=True) + "\n", encoding="utf-8"
     )
-    append_raise(
+    task_meta = json.loads(
+        (worktree / ".task-meta.json").read_text(encoding="utf-8")
+    )
+    task_meta["task_name"] = "verification resubmit"
+    task_escalation.load_unattended = lambda _worktree: (
+        task_meta,
+        {"interaction_policy": "unattended"},
+    )
+    task_escalation.read_surface = lambda *_args: (
+        "11111111-1111-1111-1111-111111111111"
+    )
+    task_escalation.notify = lambda *_args: None
+    relayed: list[str] = []
+    task_escalation.send = lambda _surface, message, **_kwargs: relayed.append(message)
+    task_escalation.emit_lifecycle_event = lambda *_args, **_kwargs: None
+    os.environ["CODEX_THREAD_ID"] = str(task_meta["origin_session"])
+    task_escalation.raise_escalation(
         worktree,
-        {
-            "version": 1,
-            "id": escalation_id,
-            "status": "pending",
-            "task_name": "verification resubmit",
-            "category": "mechanism-failure",
-            "reason": "verification-mechanism-flake: isolated profile passed",
-            "question": "Authorize one exact same-HEAD verification retry?",
-            "worktree": str(worktree.resolve()),
-            "task_surface": "11111111-1111-1111-1111-111111111111",
-            "raised_at": "2026-08-05T12:00:00Z",
-            "coordinator_policy": "classify-and-auto-repair-if-eligible",
-            "verification_escalation": typed_escalation,
-        },
+        "mechanism-failure",
+        "verification-mechanism-flake: isolated profile passed",
+        "Authorize one exact same-HEAD verification retry?",
     )
-    typed_resolution = resolve_verification_escalation(
-        typed_escalation,
-        action="authorize-one-same-head-retry",
-        evidence_note="Isolated verification proved a zero-product-effect flake.",
-    )
-    resolved = append_resolution(
-        worktree,
-        "authorize-one-same-head-retry",
-        resolved_at="2026-08-05T12:01:00Z",
-        verification_resolution=typed_resolution,
-    )
+    raised = load_latest(worktree)
+    if (
+        raised is None
+        or raised.payload.get("allowed_decisions")
+        != ["retry-mechanism-flake", "stop", "repair-repository-mechanism"]
+        or not relayed
+        or "--decision retry-mechanism-flake" not in relayed[-1]
+    ):
+        raise AssertionError((raised, relayed))
+    escalation_id = str(raised.payload["id"])
+    task_escalation.resolve_escalation(worktree, "retry-mechanism-flake")
+    resolved = load_latest(worktree)
+    if resolved is None:
+        raise AssertionError("typed resolution was not published")
+    typed_resolution = resolved.payload.get("verification_resolution")
     latest = load_latest(worktree)
-    if latest is None or latest.payload.get("verification_resolution") != typed_resolution:
+    if (
+        latest is None
+        or latest.payload.get("decision") != "authorize-one-same-head-retry"
+        or latest.payload.get("verification_resolution") != typed_resolution
+    ):
         raise AssertionError((latest, typed_resolution))
     packet_path.write_text(
         json.dumps(

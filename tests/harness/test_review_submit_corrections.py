@@ -447,32 +447,61 @@ def check_receipt_attempt_order(root: Path) -> None:
 
 
 def check_notification_reservation_restart(root: Path) -> None:
-    worker, cmux, attention, _store, _callbacks = correction_worker(
-        root, "notification-reservation"
-    )
+    for stage in (
+        "correction-reserved",
+        "correction-attempt-consumed",
+        "correction-template-restored",
+        "notification-reserved",
+    ):
+        worker, cmux, attention, store, callbacks = correction_worker(
+            root, f"crash-{stage}"
+        )
 
-    def crash(stage: str) -> None:
+        def crash(observed: str, *, expected: str = stage) -> None:
+            if observed == expected:
+                raise RuntimeError(f"simulated {expected} crash")
+
+        worker.fault_observer = crash
+        try:
+            worker.inspect_submit_rejections()
+        except RuntimeError as exc:
+            if str(exc) != f"simulated {stage} crash":
+                raise
+        else:
+            raise AssertionError(f"{stage} crash was hidden")
+        restarted = type(worker)()
+        restarted.inspect_submit_rejections()
         if stage == "notification-reserved":
-            raise RuntimeError("simulated notification crash")
-
-    worker.fault_observer = crash
-    try:
-        worker.inspect_submit_rejections()
-    except RuntimeError as exc:
-        if str(exc) != "simulated notification crash":
-            raise
-    else:
-        raise AssertionError("notification reservation crash was hidden")
-    restarted = type(worker)()
-    restarted.inspect_submit_rejections()
-    check(
-        "restart before notification publication fails closed without replay",
-        cmux.sent == []
-        and attention
-        and attention[-1][0]
-        == "review-submit-correction-notification-uncertain",
-        (cmux.sent, attention),
-    )
+            valid = (
+                cmux.sent == []
+                and attention
+                and attention[-1][0]
+                == "review-submit-correction-notification-uncertain"
+            )
+        else:
+            restarted.inspect_submit_rejections()
+            template = json.loads(
+                (callbacks / ".review-input.json").read_text(encoding="utf-8")
+            )
+            valid = (
+                len(cmux.sent) == 1
+                and attention == []
+                and store.read(
+                    "owner-1", f"crash-{stage}-review-parent"
+                ).attempt
+                == 1
+                and template["verdict"] == ""
+            )
+        outcome = (
+            "fails closed without notification replay"
+            if stage == "notification-reserved"
+            else "reconciles correction delivery exactly once"
+        )
+        check(
+            f"restart after {stage} {outcome}",
+            valid,
+            (cmux.sent, attention),
+        )
 
 
 def check_correction_fail_closed(root: Path) -> None:

@@ -592,7 +592,7 @@ class RuntimeWorkerVerificationMixin:
         )
         self.cmux_adapter.send(
             self.spec["surface_id"],
-            f"Typed pipeline verification attention is ready in .task-verification.json. For changed-HEAD fix-and-resubmit, commit the fix and run `python3 {self.trusted_vault}/scripts/pipeline-verification-resubmit.py --worktree {self.spec['cwd']}`. A same-HEAD retry requires a resolved mechanism-failure escalation whose exact decision is bound by D-265-VRF-01, then the same command with `--same-head-mechanism-flake <escalation-id>`. Do not create an empty commit, launch review, or invoke reap.",
+            f"Typed pipeline verification attention is ready in .task-verification.json. For changed-HEAD fix-and-resubmit, commit the fix and run `python3 {self.trusted_vault}/scripts/pipeline-verification-resubmit.py --worktree {self.spec['cwd']}`. A same-HEAD retry requires a mechanism-failure escalation resolved by the coordinator with the exact public decision `retry-mechanism-flake`, then the same command with `--same-head-mechanism-flake <escalation-id>`. Do not create an empty commit, launch review, or invoke reap.",
         )
         self.cmux_adapter.send_key(self.spec["surface_id"], "Enter")
         _atomic_json(

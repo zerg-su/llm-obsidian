@@ -541,13 +541,27 @@ class RuntimeWorkerControlMixin:
             )
             invalid_sha256 = str(latest.get("input_sha256") or "")
             reservation = owner.reserve_correction(invalid_sha256)
-            if reservation.created:
+            observer = getattr(self, "fault_observer", None)
+            if reservation.created and observer is not None:
+                observer("correction-reserved")
+            current = self.store.read(
+                self.spec["owner_id"], self.spec["operation_id"]
+            )
+            if current.attempt == reservation.attempt - 1:
                 OperationSupervisor(
                     self.store,
                     self.spec["owner_id"],
                     self.spec["operation_id"],
                 ).consume_attempt()
+                if observer is not None:
+                    observer("correction-attempt-consumed")
+            elif current.attempt != reservation.attempt:
+                raise ArtifactRepairError("review correction attempt authority drifted")
+            notification_state = owner.correction_notification_state(reservation)
+            if notification_state == "unreserved":
                 owner.restore_template()
+                if observer is not None:
+                    observer("correction-template-restored")
 
             def send(wake: str) -> None:
                 self.cmux_adapter.send(self.spec["surface_id"], wake)
@@ -557,7 +571,7 @@ class RuntimeWorkerControlMixin:
                 reservation,
                 message,
                 send,
-                fault_observer=getattr(self, "fault_observer", None),
+                fault_observer=observer,
             )
         except CorrectionBudgetExhausted:
             self.summary_attention(

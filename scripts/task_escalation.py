@@ -144,9 +144,21 @@ def raise_escalation(worktree: Path, category: str, reason: str, question: str) 
                 attempt = VerificationAttempt.from_dict(
                     packet.get("verification_attempt")
                 )
-                marker["verification_escalation"] = build_verification_escalation(
+                expected_escalation = build_verification_escalation(
                     attempt, str(packet.get("verification_operation_id") or "")
                 )
+                contract_path = worktree / ".task-verification-contract.json"
+                if contract_path.is_symlink() or not contract_path.is_file():
+                    die("verification escalation contract is unavailable", 3)
+                contract = read_json(contract_path)
+                if contract != expected_escalation:
+                    die("verification escalation contract identity changed", 3)
+                marker["verification_escalation"] = contract
+                marker["allowed_decisions"] = [
+                    "retry-mechanism-flake",
+                    "stop",
+                    "repair-repository-mechanism",
+                ]
             except VerificationAttemptError as exc:
                 die(f"verification escalation authority is invalid: {exc}", 3)
     marker_path = worktree / ".task-needs-attention.json"
@@ -164,10 +176,15 @@ def raise_escalation(worktree: Path, category: str, reason: str, question: str) 
         )
     else:
         action = "Coordinator decision required. "
+    decision_token = (
+        "retry-mechanism-flake"
+        if "verification_escalation" in marker
+        else "<decision>"
+    )
     body = (
         f"{category}: {marker['reason']} Requested decision: {marker['question']} {action}"
         f"Task remains paused. Resolve with task_escalation.py resolve --worktree "
-        f"{shlex.quote(str(worktree))}."
+        f"{shlex.quote(str(worktree))} --decision {decision_token}."
     )
     wake = (
         "Typed task escalation callback received. "
@@ -176,7 +193,7 @@ def raise_escalation(worktree: Path, category: str, reason: str, question: str) 
         f"Requested decision: {marker['question'][:800]}. "
         f"Inspect {marker_path} and resolve from this originating coordinator "
         f"session with {Path(__file__).name} resolve --worktree "
-        f"{shlex.quote(str(worktree))} --decision <decision>. "
+        f"{shlex.quote(str(worktree))} --decision {decision_token}. "
         "The task remains paused until that decision is relayed."
     )
     if len(wake.encode()) > 4096:
@@ -227,7 +244,14 @@ def resolve_escalation(worktree: Path, decision: str) -> int:
         die("there is no unresolved task escalation", 3)
     marker = latest.payload
     unresolved_status = str(marker.get("status") or "")
-    answer = compact(decision, "decision")
+    public_answer = compact(decision, "decision")
+    typed_escalation = marker.get("verification_escalation")
+    answer = (
+        "authorize-one-same-head-retry"
+        if typed_escalation is not None
+        and public_answer == "retry-mechanism-flake"
+        else public_answer
+    )
     replay = unresolved_status == "resolved" and marker.get("decision") == answer
     if unresolved_status not in {"pending", "delivery-failed"} and not replay:
         die("there is no unresolved task escalation", 3)
@@ -236,7 +260,6 @@ def resolve_escalation(worktree: Path, decision: str) -> int:
         die("only the originating coordinator session may resolve this escalation", 3)
     task_surface = read_surface(worktree, meta, "task_surface", ".task-cmux-surface")
     typed_resolution = None
-    typed_escalation = marker.get("verification_escalation")
     if typed_escalation is not None:
         try:
             typed_resolution = resolve_verification_escalation(
@@ -312,7 +335,14 @@ def main() -> int:
     raised.add_argument("--question", required=True)
     resolved = sub.add_parser("resolve")
     resolved.add_argument("--worktree", default=".")
-    resolved.add_argument("--decision", required=True)
+    resolved.add_argument(
+        "--decision",
+        required=True,
+        help=(
+            "decision text; same-HEAD verification authorization uses the exact "
+            "public token retry-mechanism-flake"
+        ),
+    )
     amendment = sub.add_parser("record-amendment")
     amendment.add_argument("--worktree", default=".")
     amendment.add_argument("--plan-sha256", required=True)

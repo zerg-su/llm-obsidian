@@ -915,17 +915,11 @@ class ContractArtifactOwner:
             "status": status,
         }
 
-    def deliver_correction(
-        self,
-        reservation: CorrectionReservation,
-        message: str,
-        sender: Callable[[str], object],
-        *,
-        fault_observer: Callable[[str], object] | None = None,
-    ) -> bool:
+    def correction_notification_state(
+        self, reservation: CorrectionReservation
+    ) -> str:
         authoritative = [
-            row
-            for row in self._reservations()
+            row for row in self._reservations()
             if row.family is reservation.family
             and row.attempt_id == reservation.attempt_id
             and row.attempt == reservation.attempt
@@ -941,19 +935,40 @@ class ContractArtifactOwner:
             raise ArtifactRepairError("correction reservation is not authoritative")
         reserved = reservation.root / "notification-reserved.json"
         sent = reservation.root / "notification-sent.json"
-        expected_sent = self._notification_event(reservation, "sent")
-        if sent.is_file() and not sent.is_symlink():
-            try:
-                if json.loads(sent.read_bytes()) != expected_sent:
+        states = ((reserved, "reserved"), (sent, "sent"))
+        present: set[str] = set()
+        for path, status in states:
+            if path.exists() or path.is_symlink():
+                try:
+                    if path.is_symlink() or not path.is_file():
+                        raise ArtifactRepairError("correction notification receipt is invalid")
+                    value = json.loads(path.read_bytes())
+                except (OSError, json.JSONDecodeError) as exc:
+                    raise ArtifactRepairError(
+                        "correction notification receipt is unreadable"
+                    ) from exc
+                if value != self._notification_event(reservation, status):
                     raise ArtifactRepairError("correction notification receipt changed")
-            except (OSError, json.JSONDecodeError) as exc:
-                raise ArtifactRepairError(
-                    "correction notification receipt is unreadable"
-                ) from exc
+                present.add(status)
+        if "sent" in present and "reserved" not in present:
+            raise ArtifactRepairError("correction notification receipt order is invalid")
+        return "sent" if "sent" in present else "reserved" if present else "unreserved"
+
+    def deliver_correction(
+        self,
+        reservation: CorrectionReservation,
+        message: str,
+        sender: Callable[[str], object],
+        *,
+        fault_observer: Callable[[str], object] | None = None,
+    ) -> bool:
+        state = self.correction_notification_state(reservation)
+        reserved = reservation.root / "notification-reserved.json"
+        sent = reservation.root / "notification-sent.json"
+        expected_sent = self._notification_event(reservation, "sent")
+        if state == "sent":
             return False
-        if sent.exists() or sent.is_symlink():
-            raise ArtifactRepairError("correction notification receipt is invalid")
-        if reserved.exists() or reserved.is_symlink():
+        if state == "reserved":
             raise CorrectionNotificationUncertain(
                 "correction notification effect is uncertain"
             )
