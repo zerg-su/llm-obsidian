@@ -682,7 +682,7 @@ def rebind_dashboard(
                 "3",
             ]
         )
-        cmux.send_key(surface_id, "C-c")
+        cmux.send_key(surface_id, "ctrl+c")
         cmux.send(surface_id, command)
         cmux.send_key(surface_id, "Enter")
         ready = {

@@ -357,6 +357,7 @@ class CmuxAdapter:
             "Tab",
             "Escape",
             "Backspace",
+            "ctrl+c",
             "ctrl+u",
             "down",
         }:

@@ -358,7 +358,7 @@ with tempfile.TemporaryDirectory(prefix="dashboard-facade.") as raw:
         and adapter.open_count == 1
         and adapter.closed == []
         and len(adapter.sent) == before_rebind_send_count + 1
-        and adapter.keys[-2:] == [(observer, "C-c"), (observer, "Enter")]
+        and adapter.keys[-2:] == [(observer, "ctrl+c"), (observer, "Enter")]
         and len(marker_values) == 1
         and marker_values[0]["scope"] == "root"
         and marker_values[0]["root_id"] == root,

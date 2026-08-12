@@ -178,6 +178,7 @@ check(
 )
 cmux.send(surface, "bounded prompt pointer")
 cmux.send_key(surface, "Enter")
+cmux.send_key(surface, "ctrl+c")
 cmux.send_key(surface, "down")
 cmux.close_exact(surface)
 cmux.close_workspace_exact(workspace, window)
