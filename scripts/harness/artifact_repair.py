@@ -790,7 +790,11 @@ class ContractArtifactOwner:
             if field in self.template.code_owned_fields:
                 repaired[field] = authoritative_fields.get(field, template[field])
             else:
-                repaired[field] = current.get(field, template[field])
+                if field not in current:
+                    raise ArtifactRepairError(
+                        "model-owned artifact field is missing"
+                    )
+                repaired[field] = current[field]
         encoded = _canonical_bytes(repaired)
         changed = encoded != raw
         if changed:

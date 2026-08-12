@@ -605,6 +605,42 @@ def _submit_failure_requires_attention(
     return result.returncode != 0 and not callback_path.is_file()
 
 
+def _pipeline_submit_failure(
+    result: subprocess.CompletedProcess[str], callback_path: Path
+) -> tuple[str, str]:
+    """Classify the submitter's bounded typed rejection without using prose."""
+
+    if result.returncode == 0 or callback_path.is_file():
+        return ("none", "")
+    try:
+        lines = [line for line in result.stderr.splitlines() if line.strip()]
+        payload = json.loads(lines[-1])
+    except (IndexError, json.JSONDecodeError, TypeError, ValueError):
+        return ("mechanism", "submit-failure-untyped")
+    expected = {
+        "schema_version",
+        "status",
+        "failure_class",
+        "error_code",
+        "detail",
+    }
+    failure_class = payload.get("failure_class") if isinstance(payload, dict) else None
+    error_code = payload.get("error_code") if isinstance(payload, dict) else None
+    if (
+        not isinstance(payload, dict)
+        or set(payload) != expected
+        or payload.get("schema_version") != 1
+        or payload.get("status") != "rejected"
+        or failure_class not in {"model-semantic", "code-authority", "mechanism"}
+        or not isinstance(error_code, str)
+        or IDENTIFIER.fullmatch(error_code) is None
+        or not isinstance(payload.get("detail"), str)
+        or len(payload["detail"]) > 500
+    ):
+        return ("mechanism", "submit-failure-invalid")
+    return (failure_class, error_code)
+
+
 def _write_once_json(path: Path, value: object) -> None:
     encoded = (
         json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n"

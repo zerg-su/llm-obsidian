@@ -15,6 +15,7 @@ from .runtime_worker import (
     _review_resolution_handoff_ready,
     _submit_failure_requires_attention,
 )
+from .runtime_callback_io import _pipeline_submit_failure
 from task_escalation_records import EscalationRecordError, append_raise
 from .contracts import ContractFamily, contract_registry
 from .artifact_repair import (
@@ -68,6 +69,48 @@ def _latest_review_rejection(
 
 
 class RuntimeWorkerControlMixin:
+
+    def handle_pipeline_step_submit_failure(
+        self,
+        submitted: subprocess.CompletedProcess[str],
+        callback_path: Path,
+        *,
+        receipt_path: Path,
+        operation_id: str,
+        invalid_sha256: str,
+        stage: str,
+    ) -> bool:
+        """Route typed submit rejections without spending the wrong budget."""
+
+        failure_class, error_code = _pipeline_submit_failure(
+            submitted, callback_path
+        )
+        if failure_class == "none":
+            return False
+        _atomic_json(
+            receipt_path,
+            {
+                "schema_version": 1,
+                "operation_id": operation_id,
+                "returncode": submitted.returncode,
+                "failure_class": failure_class,
+                "error_code": error_code,
+                "status": "attention-required",
+            },
+        )
+        if failure_class == "model-semantic":
+            self.request_pipeline_step_correction(
+                invalid_sha256,
+                stage=stage,
+            )
+        else:
+            self.summary_attention(
+                f"{stage}-{failure_class}",
+                AttentionReason.CONTRACT_DRIFT
+                if failure_class == "code-authority"
+                else AttentionReason.ATTENTION_REQUIRED,
+            )
+        return True
 
     def publish_pipeline_step_contract(
         self, request: dict[str, object]

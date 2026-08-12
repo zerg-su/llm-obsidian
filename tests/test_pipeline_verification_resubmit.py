@@ -134,12 +134,24 @@ with tempfile.TemporaryDirectory(prefix="verification-resubmit.") as raw:
     task_escalation.send = lambda _surface, message, **_kwargs: relayed.append(message)
     task_escalation.emit_lifecycle_event = lambda *_args, **_kwargs: None
     os.environ["CODEX_THREAD_ID"] = str(task_meta["origin_session"])
-    task_escalation.raise_escalation(
-        worktree,
+    prior_argv = sys.argv
+    sys.argv = [
+        "task_escalation.py",
+        "raise",
+        "--worktree",
+        str(worktree),
+        "--category",
         "mechanism-failure",
-        "verification-mechanism-flake: isolated profile passed",
+        "--verification-mechanism-flake",
+        "--reason",
+        "Isolated profile passed after the registered transport failed.",
+        "--question",
         "Authorize one exact same-HEAD verification retry?",
-    )
+    ]
+    try:
+        task_escalation.main()
+    finally:
+        sys.argv = prior_argv
     raised = load_latest(worktree)
     if (
         raised is None

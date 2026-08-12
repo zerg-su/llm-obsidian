@@ -15,7 +15,6 @@ from .runtime_worker import (
     _pipeline_verify_identity,
     _research_input_provenance,
     _review_resolution_handoff_ready,
-    _submit_failure_requires_attention,
 )
 from .workflows.research_contracts import (
     fetch_callback_payload,
@@ -320,25 +319,20 @@ class RuntimeWorkerCustomMixin:
                             capture_output=True,
                             check=False,
                         )
-                        if _submit_failure_requires_attention(submitted, callback_path):
-                            _atomic_json(
+                        self.handle_pipeline_step_submit_failure(
+                            submitted,
+                            callback_path,
+                            receipt_path=(
                                 self.spec_path.parent
                                 / "pipeline-custom"
-                                / "submit-failed.json",
-                                {
-                                    "schema_version": 1,
-                                    "operation_id": round_.spec.operation_id,
-                                    "returncode": submitted.returncode,
-                                    "status": "attention-required",
-                                },
-                            )
-                            current_digest = (
+                                / "submit-failed.json"
+                            ),
+                            operation_id=round_.spec.operation_id,
+                            invalid_sha256=(
                                 _bounded_file_sha256(result_path) or result_digest
-                            )
-                            self.request_pipeline_step_correction(
-                                current_digest,
-                                stage="pipeline-custom-submit",
-                            )
+                            ),
+                            stage="pipeline-custom-submit",
+                        )
                 return
             raw = callback_path.read_bytes()
             if not raw or len(raw) > MAX_OUTBOX_BYTES:

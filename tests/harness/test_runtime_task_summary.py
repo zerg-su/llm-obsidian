@@ -3445,7 +3445,10 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         and failing_commands == [4]
         and failed_cmux.sent
         and failed_cmux.sent[0][0] == CHILD
-        and ".task-verification.json" in failed_cmux.sent[0][1],
+        and ".task-verification.json" in failed_cmux.sent[0][1]
+        and "task_escalation.py raise" in failed_cmux.sent[0][1]
+        and "--verification-mechanism-flake" in failed_cmux.sent[0][1]
+        and "--decision `retry-mechanism-flake`" not in failed_cmux.sent[0][1],
         (
             failed_record,
             failed_verifications,

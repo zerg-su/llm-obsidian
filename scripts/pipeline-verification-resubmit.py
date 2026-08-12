@@ -148,9 +148,6 @@ def _same_head_response(
         or payload.get("id") != escalation_id
         or Path(str(payload.get("worktree") or "")).expanduser().resolve()
         != worktree
-        or not str(payload.get("reason") or "").startswith(
-            "verification-mechanism-flake:"
-        )
         or not verification_resolution_authorizes(
             payload.get("verification_resolution"),
             failed_attempt,

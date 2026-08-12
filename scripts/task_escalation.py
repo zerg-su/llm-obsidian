@@ -118,7 +118,14 @@ def notify(surface: str, title: str, body: str) -> None:
         die((result.stdout + result.stderr).strip() or "cmux notify failed", 3)
 
 
-def raise_escalation(worktree: Path, category: str, reason: str, question: str) -> int:
+def raise_escalation(
+    worktree: Path,
+    category: str,
+    reason: str,
+    question: str,
+    *,
+    verification_mechanism_flake: bool = False,
+) -> int:
     meta, _ = load_unattended(worktree)
     coordinator = read_surface(worktree, meta, "wiki_surface", ".wiki-cmux-surface")
     task_surface = read_surface(worktree, meta, "task_surface", ".task-cmux-surface")
@@ -135,10 +142,14 @@ def raise_escalation(worktree: Path, category: str, reason: str, question: str) 
         "task_surface": task_surface,
         "raised_at": utc_now(),
     }
+    if verification_mechanism_flake and category != "mechanism-failure":
+        die("verification mechanism flake requires category mechanism-failure")
     if category == "mechanism-failure":
         marker["coordinator_policy"] = MECHANISM_REPAIR_POLICY
         packet_path = worktree / ".task-verification.json"
-        if reason.startswith("verification-mechanism-flake:") and packet_path.is_file():
+        if verification_mechanism_flake:
+            if not packet_path.is_file():
+                die("verification attention packet is unavailable", 3)
             try:
                 packet = read_json(packet_path)
                 attempt = VerificationAttempt.from_dict(
@@ -333,6 +344,11 @@ def main() -> int:
     raised.add_argument("--category", choices=sorted(CATEGORIES), required=True)
     raised.add_argument("--reason", required=True)
     raised.add_argument("--question", required=True)
+    raised.add_argument(
+        "--verification-mechanism-flake",
+        action="store_true",
+        help="bind this mechanism-failure raise to the published verification contract",
+    )
     resolved = sub.add_parser("resolve")
     resolved.add_argument("--worktree", default=".")
     resolved.add_argument(
@@ -351,7 +367,13 @@ def main() -> int:
     args = parser.parse_args()
     worktree = Path(args.worktree).expanduser().resolve()
     if args.command == "raise":
-        return raise_escalation(worktree, args.category, args.reason, args.question)
+        return raise_escalation(
+            worktree,
+            args.category,
+            args.reason,
+            args.question,
+            verification_mechanism_flake=args.verification_mechanism_flake,
+        )
     if args.command == "resolve":
         return resolve_escalation(worktree, args.decision)
     return record_amendment(

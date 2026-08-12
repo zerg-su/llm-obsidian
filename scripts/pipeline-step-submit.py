@@ -82,9 +82,39 @@ CUSTOM_RESULT_FIELDS = FIX_RESULT_FIELDS | {"outcome"}
 class SubmitError(RuntimeError):
     """The model-provided phase result is not safe to submit."""
 
+    failure_class = "code-authority"
+    error_code = "submit-authority-rejected"
 
-def die(message: str, code: int = 2) -> NoReturn:
-    print(f"pipeline-step-submit: {message}", file=os.sys.stderr)
+
+class ModelSemanticError(SubmitError):
+    """The request is authoritative but model-owned result semantics are invalid."""
+
+    failure_class = "model-semantic"
+    error_code = "result-semantics-rejected"
+
+
+class SubmitMechanismError(SubmitError):
+    """The submit chokepoint itself violated an invariant."""
+
+    failure_class = "mechanism"
+    error_code = "submit-mechanism-failed"
+
+
+def die(error: SubmitError, code: int = 2) -> NoReturn:
+    print(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "status": "rejected",
+                "failure_class": error.failure_class,
+                "error_code": error.error_code,
+                "detail": str(error)[:500],
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+        file=os.sys.stderr,
+    )
     raise SystemExit(code)
 
 
@@ -407,26 +437,31 @@ def _envelope(
             }
         )
     except ArtifactRepairError as exc:
-        raise SubmitError(f"result contract repair failed: {exc}") from exc
+        raise ModelSemanticError(f"result contract repair failed: {exc}") from exc
     result = dict(repaired.value)
     expected_result_fields = CUSTOM_RESULT_FIELDS if custom else FIX_RESULT_FIELDS
     if set(result) != expected_result_fields:
-        raise SubmitError("result keys changed")
+        raise SubmitMechanismError("result keys changed")
     if result.get("schema_version") != 1:
-        raise SubmitError("result schema is unsupported")
+        raise SubmitMechanismError("result schema is unsupported")
     status = str(result.get("status") or "")
     if status not in ({"complete"} if custom else {"complete", "cannot-reproduce"}):
-        raise SubmitError("result status is invalid")
+        raise ModelSemanticError("result status is invalid")
     if (
         not custom
         and status == "cannot-reproduce"
         and request["step_id"] != "reproduce"
     ):
-        raise SubmitError("cannot-reproduce is valid only for the reproduce phase")
+        raise ModelSemanticError(
+            "cannot-reproduce is valid only for the reproduce phase"
+        )
     if custom:
-        outcome = _identifier(result.get("outcome"), "result outcome")
+        try:
+            outcome = _identifier(result.get("outcome"), "result outcome")
+        except SubmitError as exc:
+            raise ModelSemanticError(str(exc)) from exc
         if outcome not in request["allowed_outcomes"]:
-            raise SubmitError("result outcome is not allowed by the request")
+            raise ModelSemanticError("result outcome is not allowed by the request")
         payload = {
             "schema_version": 1,
             "parent_operation_id": request["parent_operation_id"],
@@ -541,7 +576,7 @@ def main() -> int:
     try:
         envelope = submit(args.worktree)
     except SubmitError as exc:
-        die(str(exc))
+        die(exc)
     print(
         json.dumps(
             {

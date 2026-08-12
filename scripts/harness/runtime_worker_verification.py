@@ -590,9 +590,15 @@ class RuntimeWorkerVerificationMixin:
                 "status": "pending",
             },
         )
+        verification_raise = shlex.join((
+            "python3", str(self.trusted_vault / "scripts" / "task_escalation.py"),
+            "raise", "--worktree", str(self.spec["cwd"]), "--category",
+            "mechanism-failure", "--verification-mechanism-flake", "--reason",
+            "Isolated rerun established a verification mechanism flake.", "--question",
+            "Authorize one exact same-HEAD verification retry?"))
         self.cmux_adapter.send(
             self.spec["surface_id"],
-            f"Typed pipeline verification attention is ready in .task-verification.json. For changed-HEAD fix-and-resubmit, commit the fix and run `python3 {self.trusted_vault}/scripts/pipeline-verification-resubmit.py --worktree {self.spec['cwd']}`. A same-HEAD retry requires a mechanism-failure escalation resolved by the coordinator with the exact public decision `retry-mechanism-flake`, then the same command with `--same-head-mechanism-flake <escalation-id>`. Do not create an empty commit, launch review, or invoke reap.",
+            f"Typed pipeline verification attention is ready in .task-verification.json. For changed-HEAD fix-and-resubmit, commit the fix and run `python3 {self.trusted_vault}/scripts/pipeline-verification-resubmit.py --worktree {self.spec['cwd']}`. If isolated evidence establishes a mechanism flake, run this exact typed raise command: `{verification_raise}`. A same-HEAD retry requires the coordinator's exact public decision `retry-mechanism-flake`, then the resubmit command with `--same-head-mechanism-flake <escalation-id>`. Do not create an empty commit, launch review, or invoke reap.",
         )
         self.cmux_adapter.send_key(self.spec["surface_id"], "Enter")
         _atomic_json(
@@ -766,9 +772,6 @@ class RuntimeWorkerVerificationMixin:
             or payload.get("id") != response["mechanism_flake_decision_id"]
             or Path(str(payload.get("worktree") or "")).expanduser().resolve()
             != self.spec["cwd"]
-            or not str(payload.get("reason") or "").startswith(
-                "verification-mechanism-flake:"
-            )
             or not verification_resolution_authorizes(
                 payload.get("verification_resolution"),
                 failed_attempt,

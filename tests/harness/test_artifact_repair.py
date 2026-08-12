@@ -233,11 +233,75 @@ with tempfile.TemporaryDirectory(prefix="artifact-repair.") as raw:
             "title": "Bounded repair result",
             "session": "session-1",
             "body": "",
-            "outcome_disposition": "partially-achieved",
+            "outcome_disposition": "",
             "outcome_evidence_ids": [],
-            "residual_gap_pointers": ["/vault/wiki/plans/approved.md"],
+            "residual_gap_pointers": [],
         },
     )
+
+    for mode in ("shared", "final"):
+        plan = worktree / f"{mode}-plan.md"
+        plan.write_text(
+            "```json\n"
+            + json.dumps(
+                {
+                    "schema_version": 1,
+                    "desired_outcome": "The registered outcome is established.",
+                    "success_evidence": [
+                        {"evidence_id": "gate-green", "observable": "Gate passes."}
+                    ],
+                    "non_goals": ["No unrelated changes."],
+                }
+            )
+            + "\n```\n",
+            encoding="utf-8",
+        )
+        mode_meta = {
+            **meta,
+            "plan_file": str(plan),
+            "reap_policy": {**meta["reap_policy"], "mode": mode},
+        }
+        mode_target = worktree / f".{mode}-summary.json"
+        mode_owner = ContractArtifactOwner.publish(
+            state_root=state / f"{mode}-summary-state",
+            worktree=worktree,
+            template=task_summary_contract_template(
+                mode_meta, f"{mode}-summary-attempt"
+            ),
+            actual_target=mode_target,
+        )
+        mode_target.write_text(
+            json.dumps(
+                {
+                    "schema_version": 2,
+                    "type": "repo-touch",
+                    "title": "Explicit result",
+                    "session": "session-1",
+                    "body": "Evidence was evaluated.",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        try:
+            mode_owner.repair(authoritative_fields={})
+        except ArtifactRepairError:
+            pass
+        else:
+            raise AssertionError(
+                f"{mode} summary omission synthesized model-owned semantics"
+            )
+        check(
+            f"{mode} summary omission requires semantic correction",
+            json.loads(mode_target.read_text(encoding="utf-8"))
+            == {
+                "schema_version": 2,
+                "type": "repo-touch",
+                "title": "Explicit result",
+                "session": "session-1",
+                "body": "Evidence was evaluated.",
+            },
+        )
 
     class Cmux:
         def __init__(self) -> None:

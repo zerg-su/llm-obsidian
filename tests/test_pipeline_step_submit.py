@@ -17,6 +17,7 @@ from harness.artifact_repair import (  # noqa: E402
     ContractArtifactOwner,
     pipeline_step_contract_template,
 )
+from harness.runtime_callback_io import _pipeline_submit_failure  # noqa: E402
 
 SCRIPT = ROOT / "scripts" / "pipeline-step-submit.py"
 REQUEST = ".task-pipeline-step-request.json"
@@ -64,6 +65,10 @@ def run(worktree: Path) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         check=False,
     )
+
+
+def failure_class(result: subprocess.CompletedProcess[str]) -> str:
+    return _pipeline_submit_failure(result, Path("/missing-callback"))[0]
 
 
 def request(
@@ -261,7 +266,8 @@ with tempfile.TemporaryDirectory(prefix="pipeline-step-submit.") as raw:
         "submitter never overwrites an existing callback outbox",
         second.returncode != 0
         and (worktree / OUTBOX).read_bytes() == original_outbox
-        and "already exists" in second.stderr,
+        and "already exists" in second.stderr
+        and failure_class(second) == "code-authority",
         second.stderr,
     )
 
@@ -299,7 +305,8 @@ with tempfile.TemporaryDirectory(prefix="pipeline-step-submit.") as raw:
         "retry request without a verification packet fails closed",
         missing_verification_result.returncode != 0
         and not (worktree / OUTBOX).exists()
-        and "verification_sha256" in missing_verification_result.stderr,
+        and "verification_sha256" in missing_verification_result.stderr
+        and failure_class(missing_verification_result) == "code-authority",
         missing_verification_result.stderr,
     )
 
@@ -355,7 +362,8 @@ with tempfile.TemporaryDirectory(prefix="pipeline-step-submit.") as raw:
         "request and output pointers cannot escape the generic target repo",
         escaped_result.returncode != 0
         and not (worktree / OUTBOX).exists()
-        and "owner-relative" in escaped_result.stderr,
+        and "owner-relative" in escaped_result.stderr
+        and failure_class(escaped_result) == "code-authority",
         escaped_result.stderr,
     )
 
@@ -379,7 +387,8 @@ with tempfile.TemporaryDirectory(prefix="pipeline-step-submit.") as raw:
         "symlinked result or output evidence fails closed",
         symlink_result.returncode != 0
         and not (worktree / OUTBOX).exists()
-        and "symlink" in symlink_result.stderr,
+        and "symlink" in symlink_result.stderr
+        and failure_class(symlink_result) == "code-authority",
         symlink_result.stderr,
     )
     (worktree / str(symlinked["output_pointer"])).unlink()
@@ -407,7 +416,8 @@ with tempfile.TemporaryDirectory(prefix="pipeline-step-submit.") as raw:
         "cannot-reproduce is rejected for every later phase",
         wrong_phase_result.returncode != 0
         and not (worktree / OUTBOX).exists()
-        and "cannot-reproduce" in wrong_phase_result.stderr,
+        and "cannot-reproduce" in wrong_phase_result.stderr
+        and failure_class(wrong_phase_result) == "model-semantic",
         wrong_phase_result.stderr,
     )
 
@@ -420,8 +430,63 @@ with tempfile.TemporaryDirectory(prefix="pipeline-step-submit.") as raw:
         "unknown request fields fail closed",
         unknown_result.returncode != 0
         and not (worktree / OUTBOX).exists()
-        and "keys" in unknown_result.stderr,
+        and "keys" in unknown_result.stderr
+        and failure_class(unknown_result) == "code-authority",
         unknown_result.stderr,
+    )
+
+    reset_transport(worktree)
+    bad_sidecar = request(worktree)
+    prepare(worktree, bad_sidecar)
+    bad_sidecar["contract_template_pointer"] = str(worktree / "missing-sidecar.json")
+    write_json(worktree / REQUEST, bad_sidecar)
+    bad_sidecar_result = run(worktree)
+    check(
+        "invalid sidecar binding is a code-authority rejection",
+        bad_sidecar_result.returncode != 0
+        and not (worktree / OUTBOX).exists()
+        and failure_class(bad_sidecar_result) == "code-authority",
+        bad_sidecar_result.stderr,
+    )
+
+    reset_transport(worktree)
+    missing_status = request(worktree)
+    prepare(worktree, missing_status)
+    result_without_status = json.loads(
+        (worktree / str(missing_status["result_pointer"])).read_text(
+            encoding="utf-8"
+        )
+    )
+    result_without_status.pop("status")
+    write_json(
+        worktree / str(missing_status["result_pointer"]),
+        result_without_status,
+    )
+    missing_status_result = run(worktree)
+    check(
+        "missing model status is a correctable semantic rejection",
+        missing_status_result.returncode != 0
+        and not (worktree / OUTBOX).exists()
+        and failure_class(missing_status_result) == "model-semantic",
+        missing_status_result.stderr,
+    )
+
+    reset_transport(worktree)
+    missing_git = request(worktree)
+    prepare(worktree, missing_git)
+    git_directory = worktree / ".git"
+    parked_git = worktree / ".git-parked-for-test"
+    git_directory.rename(parked_git)
+    try:
+        missing_git_result = run(worktree)
+    finally:
+        parked_git.rename(git_directory)
+    check(
+        "unavailable Git authority bypasses model correction",
+        missing_git_result.returncode != 0
+        and not (worktree / OUTBOX).exists()
+        and failure_class(missing_git_result) == "code-authority",
+        missing_git_result.stderr,
     )
 
     reset_transport(worktree)
@@ -490,7 +555,8 @@ with tempfile.TemporaryDirectory(prefix="pipeline-step-submit.") as raw:
         "custom outcome outside the frozen request fails closed",
         invalid_custom_result.returncode != 0
         and not (worktree / OUTBOX).exists()
-        and "not allowed" in invalid_custom_result.stderr,
+        and "not allowed" in invalid_custom_result.stderr
+        and failure_class(invalid_custom_result) == "model-semantic",
         invalid_custom_result.stderr,
     )
 

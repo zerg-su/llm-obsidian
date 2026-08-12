@@ -70,19 +70,13 @@ def task_summary_contract_template(
             code_owned_fields={"schema_version", "type", "session"},
             model_owned_fields={"title", "body"},
         )
-    evidence_ids: list[str] = []
-    gaps: list[str] = [plan]
-    disposition = "partially-achieved"
     if mode == "final":
         try:
-            contract = extract_from_bytes(Path(plan).expanduser().read_bytes())
+            extract_from_bytes(Path(plan).expanduser().read_bytes())
         except (OSError, OutcomeContractError) as exc:
             raise RuntimeWorkerError(
                 "task-summary outcome authority is invalid"
             ) from exc
-        evidence_ids = list(contract.evidence_ids)
-        gaps = []
-        disposition = "achieved"
     return CanonicalContractTemplate.create(
         ContractFamily.TASK_SUMMARY,
         attempt_id=attempt_id,
@@ -93,9 +87,9 @@ def task_summary_contract_template(
             "title": title,
             "session": session,
             "body": "",
-            "outcome_disposition": disposition,
-            "outcome_evidence_ids": evidence_ids,
-            "residual_gap_pointers": gaps,
+            "outcome_disposition": "",
+            "outcome_evidence_ids": [],
+            "residual_gap_pointers": [],
         },
         code_owned_fields={"schema_version", "type", "session"},
         model_owned_fields={
@@ -722,7 +716,7 @@ class RuntimeWorkerSummaryMixin:
         try:
             repaired = owner.repair(authoritative_fields={})
         except ArtifactRepairError:
-            self.summary_attention("wiki-summary-invalid")
+            self.request_task_summary_correction(hashlib.sha256(raw).hexdigest())
             return
         if repaired.changed:
             self.summary_digest = repaired.output_sha256

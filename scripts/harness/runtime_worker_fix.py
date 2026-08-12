@@ -10,7 +10,6 @@ from .runtime_worker import (
     _bounded_file_sha256,
     _callback_target,
     _envelope,
-    _submit_failure_requires_attention,
 )
 from .artifact_repair import ContractArtifactOwner
 
@@ -443,20 +442,18 @@ class RuntimeWorkerFixMixin:
             capture_output=True,
             check=False,
         )
-        if _submit_failure_requires_attention(submitted, callback_path):
-            _atomic_json(
-                self.spec_path.parent / "pipeline-fix" / "submit-failed.json",
-                {
-                    "schema_version": 1,
-                    "operation_id": round_.spec.operation_id,
-                    "returncode": submitted.returncode,
-                    "status": "attention-required",
-                },
-            )
-            current_digest = _bounded_file_sha256(result_path) or result_digest
-            self.request_pipeline_step_correction(
-                current_digest, stage="pipeline-fix-submit"
-            )
+        self.handle_pipeline_step_submit_failure(
+            submitted,
+            callback_path,
+            receipt_path=(
+                self.spec_path.parent / "pipeline-fix" / "submit-failed.json"
+            ),
+            operation_id=round_.spec.operation_id,
+            invalid_sha256=(
+                _bounded_file_sha256(result_path) or result_digest
+            ),
+            stage="pipeline-fix-submit",
+        )
 
     def accept_fix_callback(
         self, state: FixTransportState, round_: object, callback_path: Path
