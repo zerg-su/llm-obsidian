@@ -375,6 +375,34 @@ def authorize_review(
         raise ReapError(f"review gate blocked finalization: {exc}") from exc
 
 
+def _public_reap_result(
+    *,
+    result_path: str,
+    result_link: str,
+    plan_close_status: str,
+    duration_ms: int,
+    idempotent: bool = False,
+) -> dict[str, Any]:
+    if plan_close_status not in {"closed", "conflict", "retained"}:
+        raise ReapError("reap marker has an invalid plan close status")
+    result: dict[str, Any] = {
+        "schema_version": 1,
+        "status": "complete",
+        "result_path": result_path,
+        "result_link": result_link,
+        "plan_close_status": plan_close_status,
+        "warnings": (
+            ["plan-close-conflict"]
+            if plan_close_status == "conflict"
+            else []
+        ),
+        "duration_ms": duration_ms,
+    }
+    if idempotent:
+        result["idempotent"] = True
+    return result
+
+
 def _finalize_reap(vault: Path, worktree: Path, current: str) -> dict[str, Any]:
     started = time.monotonic()
     meta = read_json(worktree / ".task-meta.json")
@@ -494,20 +522,12 @@ def _finalize_reap(vault: Path, worktree: Path, current: str) -> dict[str, Any]:
         "verify_ms": round((ended - written_at) * 1000),
         "duration_ms": duration,
     }, vault_root=vault)
-    public_warnings = (
-        ["plan-close-conflict"]
-        if plan_close_status == "conflict"
-        else []
+    return _public_reap_result(
+        result_path=str(result),
+        result_link=link,
+        plan_close_status=plan_close_status,
+        duration_ms=duration,
     )
-    return {
-        "schema_version": 1,
-        "status": "complete",
-        "result_path": str(result),
-        "result_link": link,
-        "plan_close_status": plan_close_status,
-        "warnings": public_warnings,
-        "duration_ms": duration,
-    }
 
 
 def _finish_provider_runtime(
@@ -585,14 +605,13 @@ def apply_reap(
     if lifecycle.result is not None:
         return dict(lifecycle.result)
     prepared = read_json(worktree / ".task-reap-prepared.json")
-    return {
-        "schema_version": 1,
-        "status": "complete",
-        "result_path": str(prepared.get("result_path") or ""),
-        "result_link": str(prepared.get("result_link") or ""),
-        "duration_ms": 0,
-        "idempotent": True,
-    }
+    return _public_reap_result(
+        result_path=str(prepared.get("result_path") or ""),
+        result_link=str(prepared.get("result_link") or ""),
+        plan_close_status=str(prepared.get("plan_close_status") or ""),
+        duration_ms=0,
+        idempotent=True,
+    )
 
 
 def main() -> int:

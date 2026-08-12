@@ -400,6 +400,7 @@ class FinalizationLedger:
         worktree: str,
         provider_policies: Mapping[int, dict[str, Any]],
         predecessor_attempt_id: str = "",
+        supersedes_approved_attempt_id: str = "",
     ) -> CycleDecision:
         requested_identity = {
             "attempt_id": _canonical_uuid(attempt_id, "attempt_id"),
@@ -414,16 +415,32 @@ class FinalizationLedger:
             if predecessor_attempt_id
             else ""
         )
+        approved_predecessor = (
+            _canonical_uuid(
+                supersedes_approved_attempt_id,
+                "supersedes_approved_attempt_id",
+            )
+            if supersedes_approved_attempt_id
+            else ""
+        )
         with self._locked():
             value = self._read(missing_ok=True)
             disposition = value["terminal_disposition"]
             if disposition:
                 latest = value["cycles"][-1] if value["cycles"] else None
-                if not (
+                changed_head = (
                     disposition == "approved"
                     and latest is not None
                     and latest["exact_head"] != requested_identity["exact_head"]
-                ):
+                )
+                amended_boundary = (
+                    disposition == "approved"
+                    and latest is not None
+                    and approved_predecessor == latest["attempt_id"]
+                    and latest["exact_head"] == requested_identity["exact_head"]
+                    and latest["attempt_id"] != requested_identity["attempt_id"]
+                )
+                if not (changed_head or amended_boundary):
                     return _decision(
                         None,
                         allowed=False,
@@ -432,6 +449,10 @@ class FinalizationLedger:
                         disposition=disposition,
                     )
                 value["terminal_disposition"] = ""
+            elif approved_predecessor:
+                raise FinalizationLedgerError(
+                    "approved boundary predecessor is unavailable"
+                )
             retry_cycle = None
             if predecessor:
                 matching_receipts = [
@@ -534,6 +555,7 @@ class FinalizationLedger:
         task_id: str,
         worktree: str,
         provider_policy: Mapping[str, Any],
+        supersedes_approved_attempt_id: str = "",
     ) -> CycleDecision:
         """Reserve the sole active cycle and authorize at most one effect."""
 
@@ -546,6 +568,9 @@ class FinalizationLedger:
             provider_policies={
                 cycle: policy for cycle in range(1, self.max_cycles + 1)
             },
+            supersedes_approved_attempt_id=(
+                supersedes_approved_attempt_id
+            ),
         )
 
     def reserve_from_policy_matrix(
@@ -557,6 +582,7 @@ class FinalizationLedger:
         worktree: str,
         provider_policies: Mapping[int, Mapping[str, Any]],
         predecessor_attempt_id: str = "",
+        supersedes_approved_attempt_id: str = "",
     ) -> CycleDecision:
         """Atomically select the policy for the cycle actually reserved."""
 
@@ -577,6 +603,9 @@ class FinalizationLedger:
             worktree=worktree,
             provider_policies=canonical,
             predecessor_attempt_id=predecessor_attempt_id,
+            supersedes_approved_attempt_id=(
+                supersedes_approved_attempt_id
+            ),
         )
 
     def record_terminal(

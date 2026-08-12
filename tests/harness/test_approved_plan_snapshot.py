@@ -6,8 +6,10 @@ import os
 import stat
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -93,6 +95,62 @@ class ApprovedPlanSnapshotTest(unittest.TestCase):
 
         self.assertEqual(second["_approved_plan_file"], snapshot)
         self.assertEqual(snapshot.read_bytes(), before)
+
+    def test_concurrent_publishers_expose_only_complete_snapshot_bytes(self) -> None:
+        first_at_publish = threading.Event()
+        allow_first_publish = threading.Event()
+        original_link = os.link
+        calls = 0
+        failures: list[BaseException] = []
+
+        def ordered_link(source: object, target: object, **kwargs: object) -> None:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                first_at_publish.set()
+                if not allow_first_publish.wait(2):
+                    raise RuntimeError("second publisher did not run")
+            original_link(source, target, **kwargs)
+
+        def capture() -> None:
+            try:
+                bind_approved_plan_snapshot(self.request)
+            except BaseException as exc:  # capture the worker assertion seam
+                failures.append(exc)
+
+        with mock.patch("approved_plan_snapshot.os.link", side_effect=ordered_link):
+            first = threading.Thread(target=capture)
+            first.start()
+            self.assertTrue(first_at_publish.wait(2))
+            second = threading.Thread(target=capture)
+            second.start()
+            second.join(2)
+            allow_first_publish.set()
+            first.join(2)
+
+        digest = hashlib.sha256(PLAN).hexdigest()
+        snapshot = (
+            self.vault
+            / ".vault-meta/approved-plan-snapshots"
+            / f"{digest}.md"
+        )
+        self.assertFalse(first.is_alive() or second.is_alive())
+        self.assertEqual(failures, [])
+        self.assertEqual(snapshot.read_bytes(), PLAN)
+
+    def test_crash_left_temporary_file_cannot_poison_snapshot_retry(self) -> None:
+        digest = hashlib.sha256(PLAN).hexdigest()
+        root = self.vault / ".vault-meta/approved-plan-snapshots"
+        root.mkdir(mode=0o700)
+        leftover = root / f".{digest}.crash.tmp"
+        leftover.write_bytes(PLAN[:12])
+        leftover.chmod(0o600)
+
+        bound = bind_approved_plan_snapshot(self.request)
+
+        snapshot = bound["_approved_plan_file"]
+        self.assertEqual(snapshot.read_bytes(), PLAN)
+        self.assertEqual(leftover.read_bytes(), PLAN[:12])
 
     def test_tampering_and_noncanonical_identity_fail_closed(self) -> None:
         bound = bind_approved_plan_snapshot(self.request)

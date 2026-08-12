@@ -15,6 +15,7 @@ from harness.review_attempt import (
     LEGACY_CROSS_HEAD_RESUME_DISABLED,
     ReviewAttempt,
     ReviewAttemptError,
+    ReviewAttemptIdentity,
 )
 from harness.pre_model_reviewer_retirement import (
     review_attempt_records_are_quiescent,
@@ -260,6 +261,62 @@ def _review_origin_surface(
         return task_surface
 
 
+def _assert_active_attempt_authority(
+    attempt: ReviewAttempt,
+    candidate: ReviewAttemptIdentity,
+    *,
+    plan_sha256: str,
+    outcome_sha256: str,
+) -> None:
+    amended = (
+        attempt.identity.plan_sha256 != plan_sha256
+        or attempt.identity.outcome_sha256 != outcome_sha256
+    )
+    if not amended:
+        attempt.assert_identity(candidate)
+        return
+    stable_candidate = (
+        candidate.attempt_id,
+        candidate.finalization_lineage_id,
+        candidate.cycle,
+        candidate.exact_head_sha,
+        candidate.policy,
+        tuple(
+            (
+                lane.axis,
+                lane.owner_id,
+                lane.runtime,
+                lane.model,
+                lane.effort,
+                lane.profile,
+                lane.routing_sha256,
+            )
+            for lane in candidate.lanes
+        ),
+    )
+    stable_attempt = (
+        attempt.identity.attempt_id,
+        attempt.identity.finalization_lineage_id,
+        attempt.identity.cycle,
+        attempt.identity.exact_head_sha,
+        attempt.identity.policy,
+        tuple(
+            (
+                lane.axis,
+                lane.owner_id,
+                lane.runtime,
+                lane.model,
+                lane.effort,
+                lane.profile,
+                lane.routing_sha256,
+            )
+            for lane in attempt.identity.lanes
+        ),
+    )
+    if stable_candidate != stable_attempt:
+        raise ReviewAttemptError("review attempt authority changed")
+
+
 def _start_exact_head_review(
     *,
     meta: Mapping[str, Any],
@@ -274,6 +331,7 @@ def _start_exact_head_review(
     gate: ReviewGateController,
     cycle: int,
     origin_surface: str,
+    approved_plan_amendment: bool = False,
 ) -> dict[str, Any]:
     if not preset.enabled:
         raise TaskReviewError(
@@ -327,6 +385,7 @@ def _start_exact_head_review(
         prompt_pointers=prompt_pointers,
         callback_root="callbacks",
         callback_wake=_callback_wake(meta, vault, worktree),
+        approved_plan_amendment=approved_plan_amendment,
         prepare_lane=prepare_lane,
     )
     return _receipt(
@@ -590,6 +649,8 @@ def _run_exact_head_review(
     zero_lane_preflight = False
     predecessor_attempt_id = ""
     reserved_attempt_id = ""
+    supersedes_approved_attempt_id = ""
+    amended_boundary = False
     if gate_exists:
         prior_state = gate.read()
         prior_attempt = ReviewAttempt.from_mapping(prior_state["attempt"])
@@ -604,6 +665,19 @@ def _run_exact_head_review(
         cycle = prior_attempt.identity.cycle
         if prior_attempt.status == "terminal":
             assert prior_attempt.terminal is not None
+            (
+                _,
+                _,
+                active_plan_sha256,
+                active_outcome_sha256,
+            ) = _attempt_binding(
+                meta, task_id, worktree, cycle=cycle
+            )
+            amended_boundary = (
+                prior_attempt.identity.plan_sha256 != active_plan_sha256
+                or prior_attempt.identity.outcome_sha256
+                != active_outcome_sha256
+            )
             ledger = finalization_ledger(meta, vault, task_id, worktree)
             # The one narrow same-HEAD relaxation: an attempt that terminated
             # before the provider launched owns no durable effect, so it may be
@@ -641,6 +715,7 @@ def _run_exact_head_review(
             if (
                 context.head_sha == prior_attempt.identity.exact_head_sha
                 and not zero_lane_preflight
+                and not amended_boundary
             ):
                 return _receipt(
                     status=prior_attempt.terminal.result.value,
@@ -670,6 +745,13 @@ def _run_exact_head_review(
                 predecessor_attempt_id = prior_attempt.identity.attempt_id
             else:
                 cycle = terminal_decision.cycle_number + 1
+                if (
+                    amended_boundary
+                    and prior_attempt.terminal.result.value == "approved"
+                ):
+                    supersedes_approved_attempt_id = (
+                        prior_attempt.identity.attempt_id
+                    )
         else:
             reserved_attempt_id = prior_attempt.identity.attempt_id
 
@@ -682,6 +764,9 @@ def _run_exact_head_review(
         cycle=cycle,
         predecessor_attempt_id=predecessor_attempt_id,
         reserved_attempt_id=reserved_attempt_id,
+        supersedes_approved_attempt_id=(
+            supersedes_approved_attempt_id
+        ),
     )
     _assert_frozen_topology(meta, request)
     if not gate_exists or ReviewAttempt.from_mapping(
@@ -702,6 +787,7 @@ def _run_exact_head_review(
             origin_surface=_review_origin_surface(
                 meta, runtime, allow_fallback=zero_lane_preflight
             ),
+            approved_plan_amendment=amended_boundary,
         )
 
     state = gate.read()
@@ -716,7 +802,12 @@ def _run_exact_head_review(
         plan_sha256=plan_sha256,
         outcome_sha256=outcome_sha256,
     )
-    attempt.assert_identity(candidate)
+    _assert_active_attempt_authority(
+        attempt,
+        candidate,
+        plan_sha256=plan_sha256,
+        outcome_sha256=outcome_sha256,
+    )
     if context.head_sha != attempt.identity.exact_head_sha:
         raise ReviewAttemptError("review attempt cannot bind a changed HEAD")
     status = str(state.get("status") or "")

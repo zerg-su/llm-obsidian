@@ -205,6 +205,43 @@ with tempfile.TemporaryDirectory(prefix="finalization-ledger-approved.") as raw:
         and snapshot["cycles"][1]["terminal_result"] == "",
     )
 
+with tempfile.TemporaryDirectory(
+    prefix="finalization-ledger-amended-boundary."
+) as raw:
+    ledger = FinalizationLedger(
+        Path(raw),
+        lineage_id=attempt(310),
+        origin_task_id=attempt(311),
+        plan_sha256="c" * 64,
+        outcome_contract_sha256="d" * 64,
+    )
+    reserve(ledger, 30)
+    ledger.record_terminal(
+        attempt_id=attempt(30), terminal_result="approved"
+    )
+
+    amended = ledger.reserve(
+        attempt_id=attempt(31),
+        exact_head=f"{30:040x}",
+        task_id=attempt(31),
+        worktree="/tmp/finalization-task-amended",
+        provider_policy={
+            "routes": ["finalization-primary"],
+            "reason": "primary-only",
+        },
+        supersedes_approved_attempt_id=attempt(30),
+    )
+    snapshot = ledger.snapshot()
+    check(
+        "an explicit amended boundary reopens approved same-HEAD lineage",
+        amended.allowed
+        and amended.created
+        and amended.cycle_number == 2
+        and snapshot["terminal_disposition"] == ""
+        and snapshot["cycles"][0]["terminal_result"] == "approved"
+        and snapshot["cycles"][1]["attempt_id"] == attempt(31),
+    )
+
 
 # --- Mechanism-neutral attempt accounting (E267.RC1.PRODUCT_BUDGET) ---------
 #

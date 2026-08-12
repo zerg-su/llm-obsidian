@@ -70,8 +70,6 @@ def _resolution_source_state(
             archived_identity.cycle != cycle
             or archived_identity.finalization_lineage_id
             != identity.finalization_lineage_id
-            or archived_identity.plan_sha256 != identity.plan_sha256
-            or archived_identity.outcome_sha256 != identity.outcome_sha256
             or archived_identity.policy != identity.policy
         ):
             raise ReviewAttemptError("review attempt archive identity drifted")

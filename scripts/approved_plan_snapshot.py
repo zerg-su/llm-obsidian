@@ -6,6 +6,7 @@ import hashlib
 import os
 import re
 import stat
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
@@ -92,19 +93,13 @@ def _snapshot_root(vault_root: Path, *, create: bool) -> Path:
 
 
 def _publish_immutable(path: Path, content: bytes) -> None:
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     try:
         descriptor = os.open(
-            path,
+            temporary,
             os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
             0o600,
         )
-    except FileExistsError:
-        current = _read_regular(path, "approved plan snapshot", owner_only=True)
-        if current != content:
-            raise PlanSnapshotError(
-                "approved plan snapshot digest collision or tampering"
-            )
-        return
     except OSError as exc:
         raise PlanSnapshotError("approved plan snapshot cannot be published") from exc
     try:
@@ -112,15 +107,28 @@ def _publish_immutable(path: Path, content: bytes) -> None:
             handle.write(content)
             handle.flush()
             os.fsync(handle.fileno())
-        path.chmod(0o600)
+        temporary.chmod(0o600)
+        try:
+            os.link(temporary, path, follow_symlinks=False)
+        except FileExistsError:
+            current = _read_regular(
+                path, "approved plan snapshot", owner_only=True
+            )
+            if current != content:
+                raise PlanSnapshotError(
+                    "approved plan snapshot digest collision or tampering"
+                )
+        except OSError as exc:
+            raise PlanSnapshotError(
+                "approved plan snapshot cannot be published"
+            ) from exc
         directory = os.open(path.parent, os.O_RDONLY)
         try:
             os.fsync(directory)
         finally:
             os.close(directory)
-    except BaseException:
-        path.unlink(missing_ok=True)
-        raise
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def bind_approved_plan_snapshot(request: Mapping[str, Any]) -> dict[str, Any]:

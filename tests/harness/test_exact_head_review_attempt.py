@@ -68,6 +68,7 @@ from task_review_flow import (  # noqa: E402
 from approved_plan_snapshot import bind_approved_plan_snapshot  # noqa: E402
 from outcome_contract import extract_from_bytes  # noqa: E402
 from review_resolution import review_transport_identity_sha256  # noqa: E402
+from task_plan_authority import record_plan_amendment  # noqa: E402
 from task_review_transport import _write_round_meta  # noqa: E402
 
 
@@ -1075,6 +1076,9 @@ with tempfile.TemporaryDirectory(prefix="exact-protocol-selector.") as raw:
             "verification_profile_sha256": profile_sha,
         },
     }
+    (product / ".task-meta.json").write_text(
+        json.dumps(meta, sort_keys=True) + "\n", encoding="utf-8"
+    )
     store = OperationStore(vault / ".vault-meta/harness")
     runtime = FakeRuntime(store, owner_id=task_id)
 
@@ -1152,6 +1156,41 @@ with tempfile.TemporaryDirectory(prefix="exact-protocol-selector.") as raw:
         "important",
         "stop at the original HEAD",
         "the production selector must not open a verification child",
+    )
+    amended_plan = vault / "amended-plan.md"
+    amended_plan.write_text(
+        """# Amended exact-HEAD task
+
+## Outcome Contract
+
+```json
+{"schema_version":1,"purpose":"Exercise the amended review path.","desired_outcome":"A schema-valid amendment starts a fresh review boundary.","success_evidence":[{"evidence_id":"exact-review","observable":"The public flow preserves the ledger and binds amended authority."}],"non_goals":["No provider replay."]}
+```
+""",
+        encoding="utf-8",
+    )
+    record_plan_amendment(
+        product,
+        amended_plan,
+        decision="approve the exact review-boundary amendment",
+    )
+    amended_plan_sha = hashlib.sha256(amended_plan.read_bytes()).hexdigest()
+    amended_outcome_sha = extract_from_bytes(amended_plan.read_bytes()).sha256
+    awaiting_amended = _run_review(
+        meta,
+        vault,
+        product,
+        task_id,
+        runtime_root,
+        runtime_manager=runtime,
+        apply_finalizing_recovery=forbidden_finalizing_recovery,
+    )
+    check(
+        "an amendment while awaiting callback preserves the stale lane without replay",
+        awaiting_amended["status"] == "reviewing"
+        and runtime.started == 1
+        and gate.read()["attempt"]["identity"]["plan_sha256"]
+        == meta["approved_plan_sha256"],
     )
     callback_path = Path(str(started["lanes"][0]["callback_path"]))
     callback_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1278,8 +1317,15 @@ with tempfile.TemporaryDirectory(prefix="exact-protocol-selector.") as raw:
         second["status"] == "reviewing"
         and second_state["attempt"]["identity"]["cycle"] == 2
         and len(ledger["cycles"]) == 2
+        and ledger["plan_sha256"] == meta["approved_plan_sha256"]
+        and ledger["outcome_contract_sha256"]
+        == meta["outcome_contract_sha256"]
         and ledger["cycles"][0]["terminal_result"] == "changes-requested"
         and ledger["cycles"][1]["terminal_result"] == ""
+        and second_state["attempt"]["identity"]["plan_sha256"]
+        == amended_plan_sha
+        and second_state["attempt"]["identity"]["outcome_sha256"]
+        == amended_outcome_sha
         and (
             gate.root / "attempts/cycle-1.json"
         ).is_file()

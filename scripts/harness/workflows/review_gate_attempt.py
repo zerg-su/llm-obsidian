@@ -101,6 +101,23 @@ def compile_review_attempt_identity(
     )
 
 
+def _amended_identity_boundary(
+    existing: ReviewAttempt,
+    identity: ReviewAttemptIdentity,
+    *,
+    normal_next: bool,
+    approved_plan_amendment: bool,
+) -> bool:
+    return (
+        approved_plan_amendment
+        and normal_next
+        and (
+            existing.identity.plan_sha256 != identity.plan_sha256
+            or existing.identity.outcome_sha256 != identity.outcome_sha256
+        )
+    )
+
+
 class ReviewGateAttemptMixin:
     """Own the new one-HEAD path without invoking legacy continuation code."""
 
@@ -333,6 +350,7 @@ class ReviewGateAttemptMixin:
         identity: ReviewAttemptIdentity,
         runtime_root: Path | None = None,
         callback_root: str = "",
+        approved_plan_amendment: bool = False,
     ) -> ReviewAttempt:
         preset = ReviewPreset(
             depth=request.policy.depth,
@@ -411,6 +429,12 @@ class ReviewGateAttemptMixin:
                     normal_next or retry_next
                 ):
                     terminal = existing.terminal
+                    amended_identity = _amended_identity_boundary(
+                        existing,
+                        identity,
+                        normal_next=normal_next,
+                        approved_plan_amendment=approved_plan_amendment,
+                    )
                     zero_effect_boundary = (
                         terminal is not None
                         and terminal.result
@@ -476,8 +500,15 @@ class ReviewGateAttemptMixin:
                         terminal is None
                         or existing.identity.finalization_lineage_id
                         != identity.finalization_lineage_id
-                        or existing.identity.plan_sha256 != identity.plan_sha256
-                        or existing.identity.outcome_sha256 != identity.outcome_sha256
+                        or (
+                            not amended_identity
+                            and (
+                                existing.identity.plan_sha256
+                                != identity.plan_sha256
+                                or existing.identity.outcome_sha256
+                                != identity.outcome_sha256
+                            )
+                        )
                         or (
                             retry_next
                             and not (
@@ -492,6 +523,7 @@ class ReviewGateAttemptMixin:
                             existing.identity.exact_head_sha
                             == identity.exact_head_sha
                             and normal_next
+                            and not amended_identity
                         )
                     ):
                         raise ReviewAttemptError(
@@ -588,6 +620,7 @@ class ReviewGateAttemptMixin:
         prompt_pointer: str,
         callback_root: str,
         callback_wake: str = "",
+        approved_plan_amendment: bool = False,
         prompt_pointers: Mapping[str, str] | None = None,
         prepare_lane: (
             Callable[[str, object, object, ReviewRound], None] | None
@@ -610,6 +643,7 @@ class ReviewGateAttemptMixin:
             identity=identity,
             runtime_root=cwd,
             callback_root=callback_root,
+            approved_plan_amendment=approved_plan_amendment,
         )
         return self._start_execution(
             request=request,

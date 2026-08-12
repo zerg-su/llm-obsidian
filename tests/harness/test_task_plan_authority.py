@@ -21,6 +21,10 @@ from task_plan_authority import (  # noqa: E402
     record_plan_amendment,
     resolve_plan_authority,
 )
+from task_review_finalization_attempt import (  # noqa: E402
+    attempt_binding,
+    finalization_ledger,
+)
 from wiki_summary_contract import WikiSummaryError, validate_summary_for_task  # noqa: E402
 
 
@@ -44,6 +48,9 @@ def plan(outcome: str, evidence: str) -> bytes:
     ).encode()
 
 
+TASK_ID = "11111111-1111-4111-8111-111111111111"
+
+
 class TaskPlanAuthorityTest(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory(prefix="task-plan-authority.")
@@ -62,7 +69,7 @@ class TaskPlanAuthorityTest(unittest.TestCase):
         self.meta = {
             "version": 4,
             "project_id": "project-a",
-            "task_id": "task-a",
+            "task_id": TASK_ID,
             "task_name": "authority-fixture",
             "origin_session": "session-a",
             "worktree": str(self.worktree),
@@ -71,6 +78,13 @@ class TaskPlanAuthorityTest(unittest.TestCase):
             "plan_snapshot_file": str(bound["_approved_plan_file"]),
             "approved_plan_sha256": bound["_approved_plan_sha256"],
             "outcome_contract_sha256": extract_from_bytes(self.base).sha256,
+            "finalization_policy": {
+                "max_cycles": 5,
+                "add_independent_model_after": 3,
+                "execution": "ephemeral",
+                "primary_route_alias": "finalization-primary",
+                "independent_route_alias": "finalization-independent",
+            },
         }
         (self.worktree / ".task-meta.json").write_text(
             json.dumps(self.meta, sort_keys=True) + "\n", encoding="utf-8"
@@ -105,8 +119,8 @@ class TaskPlanAuthorityTest(unittest.TestCase):
         self.assertEqual(authority.plan_sha256, hashlib.sha256(second_bytes).hexdigest())
         self.assertEqual(authority.outcome_sha256, extract_from_bytes(second_bytes).sha256)
         self.assertEqual(authority.amendments, (first, second))
-        self.assertEqual(first.payload["task_id"], "task-a")
-        self.assertEqual(first.payload["root_operation_id"], "task-a")
+        self.assertEqual(first.payload["task_id"], TASK_ID)
+        self.assertEqual(first.payload["root_operation_id"], TASK_ID)
         self.assertEqual(first.payload["prior_plan_sha256"], self.meta["approved_plan_sha256"])
         self.assertEqual(first.payload["prior_amendment_id"], "")
         self.assertEqual(second.payload["prior_plan_sha256"], first.payload["new_plan_sha256"])
@@ -190,6 +204,45 @@ class TaskPlanAuthorityTest(unittest.TestCase):
             validate_summary_for_task(
                 {**summary, "outcome_evidence_ids": ["base"]}, self.meta
             )
+
+    def test_amendment_preserves_ledger_lineage_and_rebinds_next_attempt(self) -> None:
+        ledger = finalization_ledger(
+            self.meta, self.vault, TASK_ID, self.worktree
+        )
+        attempt_id = "22222222-2222-4222-8222-222222222222"
+        ledger.reserve(
+            attempt_id=attempt_id,
+            exact_head="a" * 40,
+            task_id=TASK_ID,
+            worktree=str(self.worktree),
+            provider_policy={
+                "routes": ["finalization-primary"],
+                "reason": "primary-only",
+            },
+        )
+        amended = plan("Ledger-safe amended outcome.", "ledger-amended")
+        record_plan_amendment(
+            self.worktree,
+            self.amendment_source("ledger", amended),
+            decision="approve the ledger-safe exact change",
+        )
+
+        reopened = finalization_ledger(
+            self.meta, self.vault, TASK_ID, self.worktree
+        )
+        lineage = reopened.snapshot()
+        _, cycle, active_plan, active_outcome = attempt_binding(
+            self.meta, TASK_ID, self.worktree, cycle=1
+        )
+
+        self.assertEqual(len(lineage["cycles"]), 1)
+        self.assertEqual(lineage["cycles"][0]["attempt_id"], attempt_id)
+        self.assertEqual(
+            lineage["plan_sha256"], self.meta["approved_plan_sha256"]
+        )
+        self.assertEqual(cycle, 1)
+        self.assertEqual(active_plan, hashlib.sha256(amended).hexdigest())
+        self.assertEqual(active_outcome, extract_from_bytes(amended).sha256)
 
     def test_stale_predecessor_and_mixed_outcome_fail_closed(self) -> None:
         changed = plan("Changed outcome.", "changed")

@@ -51,6 +51,15 @@ def _plan_identities(meta: Mapping[str, Any], worktree: Path) -> tuple[str, str]
     return authority.plan_sha256, authority.outcome_sha256
 
 
+def _lineage_plan_identities(meta: Mapping[str, Any]) -> tuple[str, str]:
+    """Keep product-cycle accounting bound to the dispatch-time authority."""
+
+    return (
+        str(meta.get("approved_plan_sha256") or ""),
+        str(meta.get("outcome_contract_sha256") or ""),
+    )
+
+
 def attempt_binding(meta: Mapping[str, Any], task_id: str, worktree: Path, *, cycle: int) -> tuple[str, int, str, str]:
     policy = task_finalization_policy(meta)
     if (
@@ -70,7 +79,7 @@ def finalization_ledger(meta: Mapping[str, Any], vault: Path, task_id: str, work
         raise FinalizationAttemptError(
             "exact-HEAD finalization policy is unavailable"
         )
-    plan_sha256, outcome_sha256 = _plan_identities(meta, worktree)
+    plan_sha256, outcome_sha256 = _lineage_plan_identities(meta)
     return FinalizationLedger(
         vault / ".vault-meta" / "harness" / "finalization-ledger",
         lineage_id=task_id,
@@ -181,6 +190,7 @@ def reserve_exact_head_attempt(
     cycle: int,
     predecessor_attempt_id: str = "",
     reserved_attempt_id: str = "",
+    supersedes_approved_attempt_id: str = "",
 ) -> tuple[ReviewOperationRequest, FinalizationLedger, int]:
     config = load_config(vault)
     ledger = finalization_ledger(meta, vault, task_id, worktree)
@@ -206,6 +216,9 @@ def reserve_exact_head_attempt(
         availability=None,
         now_epoch=int(time.time()),
         predecessor_attempt_id=predecessor_attempt_id,
+        supersedes_approved_attempt_id=(
+            supersedes_approved_attempt_id
+        ),
     )
     if reservation is None or reservation.routes is None:
         raise FinalizationAttemptError(

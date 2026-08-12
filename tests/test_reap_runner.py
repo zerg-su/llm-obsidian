@@ -480,18 +480,28 @@ with tempfile.TemporaryDirectory(prefix="reap-runner-test.") as raw:
 
     class FakeRuntime:
         def request_exit(self, owner_id: str, operation_id: str):
-            runtime_actions.append("request-exit")
             supervisor = OperationSupervisor(
                 runtime_store, owner_id, operation_id
             )
+            current_record = runtime_store.read(owner_id, operation_id)
+            if current_record.state == "complete":
+                return SimpleNamespace(
+                    action="terminal", record=current_record
+                )
+            runtime_actions.append("request-exit")
             record = supervisor.transition("exiting")
             return SimpleNamespace(action="exit-requested", record=record)
 
         def cleanup(self, owner_id: str, operation_id: str):
-            runtime_actions.append("cleanup")
             supervisor = OperationSupervisor(
                 runtime_store, owner_id, operation_id
             )
+            current_record = runtime_store.read(owner_id, operation_id)
+            if current_record.state == "complete":
+                return SimpleNamespace(
+                    action="terminal", record=current_record
+                )
+            runtime_actions.append("cleanup")
             supervisor.bind_resources(OwnedResources())
             record = supervisor.transition("complete")
             return SimpleNamespace(action="cleaned", record=record)
@@ -503,15 +513,23 @@ with tempfile.TemporaryDirectory(prefix="reap-runner-test.") as raw:
     original_plan_state = runner.approved_plan_state
     original_review = runner.authorize_review
     review_actions: list[str] = []
-    runner._finalize_reap = lambda _vault, _worktree, _current: {
-        "schema_version": 1,
-        "status": "complete",
-        "result_path": str(vault / "wiki/meta/sessions/Typed Result.md"),
-        "result_link": "[[Typed Result]]",
-        "plan_close_status": "closed",
-        "warnings": [],
-        "duration_ms": 1,
-    }
+    finalize_calls = [0]
+
+    def fake_finalize(_vault, _worktree, _current):
+        finalize_calls[0] += 1
+        return {
+            "schema_version": 1,
+            "status": "complete",
+            "result_path": str(
+                vault / "wiki/meta/sessions/Typed Result.md"
+            ),
+            "result_link": "[[Typed Result]]",
+            "plan_close_status": "closed",
+            "warnings": [],
+            "duration_ms": 1,
+        }
+
+    runner._finalize_reap = fake_finalize
     runner.validate_summary_wikilinks = lambda *_args, **_kwargs: None
     runner.approved_plan_state = lambda _meta: (
         vault / "wiki/plans/approved.md",
@@ -578,6 +596,28 @@ with tempfile.TemporaryDirectory(prefix="reap-runner-test.") as raw:
             "reap-session",
             runtime_manager=fake_runtime,
         )
+        first_terminal = runtime_store.read(task_id, task_id)
+        replayed: dict[str, dict[str, object]] = {}
+        for close_status in ("closed", "conflict", "retained"):
+            (worktree / ".task-reap-prepared.json").write_text(
+                json.dumps(
+                    {
+                        "result_path": str(
+                            vault / "wiki/meta/sessions/Typed Result.md"
+                        ),
+                        "result_link": "[[Typed Result]]",
+                        "plan_close_status": close_status,
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            replayed[close_status] = runner.apply_reap(
+                vault,
+                worktree,
+                "reap-session",
+                runtime_manager=fake_runtime,
+            )
     finally:
         runner._finalize_reap = original_finalize
         runner.validate_handoff = original_handoff
@@ -599,12 +639,25 @@ with tempfile.TemporaryDirectory(prefix="reap-runner-test.") as raw:
     )
     check(
         "reap authorizes the exact review gate before consuming the callback",
-        review_actions == ["authorized"],
+        review_actions == ["authorized"] * 4,
     )
     check(
         "reap exits provider before exact cleanup and clears ownership",
         runtime_actions == ["request-exit", "cleanup"]
         and durable.resources == OwnedResources(),
+    )
+    check(
+        "idempotent reap preserves every typed plan-close projection",
+        all(
+            replayed[status]["plan_close_status"] == status
+            and replayed[status]["warnings"]
+            == (["plan-close-conflict"] if status == "conflict" else [])
+            and replayed[status]["idempotent"] is True
+            for status in ("closed", "conflict", "retained")
+        )
+        and finalize_calls == [1]
+        and runtime_actions == ["request-exit", "cleanup"]
+        and durable.revision == first_terminal.revision,
     )
 
 straddle_link = (
