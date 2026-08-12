@@ -17,9 +17,10 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from harness.verification_attempt import (  # noqa: E402
     VerificationAttempt,
-    mechanism_flake_decision_text,
+    build_verification_escalation,
+    resolve_verification_escalation,
 )
-from task_escalation_records import append_raise, append_resolution  # noqa: E402
+from task_escalation_records import append_raise, append_resolution, load_latest  # noqa: E402
 
 
 with tempfile.TemporaryDirectory(prefix="verification-resubmit.") as raw:
@@ -105,6 +106,9 @@ with tempfile.TemporaryDirectory(prefix="verification-resubmit.") as raw:
     ):
         raise AssertionError(blocked)
     escalation_id = "verification-mechanism-flake-1"
+    typed_escalation = build_verification_escalation(
+        attempt_0, "verify-operation"
+    )
     append_raise(
         worktree,
         {
@@ -119,13 +123,23 @@ with tempfile.TemporaryDirectory(prefix="verification-resubmit.") as raw:
             "task_surface": "11111111-1111-1111-1111-111111111111",
             "raised_at": "2026-08-05T12:00:00Z",
             "coordinator_policy": "classify-and-auto-repair-if-eligible",
+            "verification_escalation": typed_escalation,
         },
+    )
+    typed_resolution = resolve_verification_escalation(
+        typed_escalation,
+        action="authorize-one-same-head-retry",
+        evidence_note="Isolated verification proved a zero-product-effect flake.",
     )
     resolved = append_resolution(
         worktree,
-        mechanism_flake_decision_text(attempt_0, "verify-operation"),
+        "authorize-one-same-head-retry",
         resolved_at="2026-08-05T12:01:00Z",
+        verification_resolution=typed_resolution,
     )
+    latest = load_latest(worktree)
+    if latest is None or latest.payload.get("verification_resolution") != typed_resolution:
+        raise AssertionError((latest, typed_resolution))
     packet_path.write_text(
         json.dumps(
             {

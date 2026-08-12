@@ -76,7 +76,8 @@ from .verification import (
 from .verification_attempt import (
     VerificationAttempt,
     VerificationAttemptError,
-    mechanism_flake_decision_text,
+    build_verification_escalation,
+    verification_resolution_authorizes,
     pipeline_verify_effect_id,
     pipeline_verify_identity,
     verification_input_sha256,

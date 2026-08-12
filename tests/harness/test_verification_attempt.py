@@ -14,7 +14,9 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from harness.verification_attempt import (  # noqa: E402
     VerificationAttempt,
     VerificationAttemptError,
-    mechanism_flake_decision_text,
+    build_verification_escalation,
+    resolve_verification_escalation,
+    verification_resolution_authorizes,
 )
 
 
@@ -48,14 +50,27 @@ check(
     attempt_1.changed_head("c" * 40).attempt_index == 0
     and attempt_1.changed_head("c" * 40).exact_head_sha == "c" * 40,
 )
+escalation = build_verification_escalation(attempt_0, "verify-operation")
+resolution = resolve_verification_escalation(
+    escalation,
+    action="authorize-one-same-head-retry",
+    evidence_note="Transient local command execution failed before product effect.",
+)
 check(
-    "mechanism-flake decision binds the exact failed attempt and operation",
-    mechanism_flake_decision_text(attempt_0, "verify-operation")
-    == (
-        "authorize-one-same-head-verification-attempt-1:"
-        f"parent={attempt_0.parent_operation_id};"
-        "verification=verify-operation;profile=scoped;"
-        f"head={attempt_0.exact_head_sha};failed_attempt={attempt_0.sha256}"
+    "typed mechanism-flake resolution binds exact identities without copied prose",
+    verification_resolution_authorizes(
+        resolution, attempt_0, "verify-operation"
+    )
+    and resolution["decision"] == "authorize-attempt-1"
+    and resolution["action"] == "authorize-one-same-head-retry",
+    resolution,
+)
+copied_wrong = dict(resolution)
+copied_wrong["exact_head_sha"] = "c" * 40
+check(
+    "typed verification resolution rejects one copied identity token",
+    not verification_resolution_authorizes(
+        copied_wrong, attempt_0, "verify-operation"
     ),
 )
 

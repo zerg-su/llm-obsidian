@@ -16,7 +16,7 @@ from typing import NoReturn
 from harness.verification_attempt import (
     VerificationAttempt,
     VerificationAttemptError,
-    mechanism_flake_decision_text,
+    verification_resolution_authorizes,
 )
 from task_escalation_records import EscalationRecordError, load_latest
 
@@ -143,9 +143,6 @@ def _same_head_response(
             "same-HEAD mechanism-flake authorization is invalid"
         ) from exc
     payload = decision_record.payload if decision_record is not None else {}
-    expected_decision = mechanism_flake_decision_text(
-        failed_attempt, str(packet["verification_operation_id"])
-    )
     if (
         decision_record is None
         or decision_record.record_type != "resolution"
@@ -157,7 +154,11 @@ def _same_head_response(
         or not str(payload.get("reason") or "").startswith(
             "verification-mechanism-flake:"
         )
-        or payload.get("decision") != expected_decision
+        or not verification_resolution_authorizes(
+            payload.get("verification_resolution"),
+            failed_attempt,
+            str(packet["verification_operation_id"]),
+        )
     ):
         raise ResubmitError(
             "same-HEAD mechanism-flake authorization is invalid"

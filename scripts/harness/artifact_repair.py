@@ -236,6 +236,33 @@ def review_resolution_contract_template(
         raise ArtifactRepairError("review-resolution template is invalid") from exc
 
 
+def verification_escalation_contract_template(
+    *, attempt_id: str, value: Mapping[str, object]
+) -> CanonicalContractTemplate:
+    try:
+        return CanonicalContractTemplate.create(
+            ContractFamily.VERIFICATION_ESCALATION,
+            attempt_id=attempt_id,
+            target_pointer=".task-verification-contract.json",
+            value=value,
+            code_owned_fields={
+                "schema_version",
+                "kind",
+                "category",
+                "operation_id",
+                "verification_operation_id",
+                "exact_head_sha",
+                "failed_attempt_sha256",
+                "decision",
+            },
+            model_owned_fields={"action", "evidence_note"},
+        )
+    except ContractError as exc:
+        raise ArtifactRepairError(
+            "verification-escalation template is invalid"
+        ) from exc
+
+
 def _canonical_bytes(value: object) -> bytes:
     return (
         json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -846,4 +873,5 @@ __all__ = (
     "pipeline_step_contract_template",
     "review_input_contract_template",
     "review_resolution_contract_template",
+    "verification_escalation_contract_template",
 )

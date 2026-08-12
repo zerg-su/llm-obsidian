@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 MODEL_JSON_BOUNDARIES = ("verification-escalation",)
+from .artifact_repair import (
+    ContractArtifactOwner,
+    verification_escalation_contract_template,
+)
 from .runtime_worker import *
 from .runtime_worker import (
     _atomic_json,
@@ -542,6 +546,23 @@ class RuntimeWorkerVerificationMixin:
             allow_resubmit=allow_resubmit,
             allow_same_head_retry=allow_same_head_retry,
         )
+        attempt = self.verification_attempt_from_receipt(receipt)
+        escalation = build_verification_escalation(
+            attempt, str(receipt["operation_id"])
+        )
+        escalation_owner = ContractArtifactOwner.publish(
+            state_root=self.spec_path.parent,
+            worktree=self.spec["cwd"],
+            template=verification_escalation_contract_template(
+                attempt_id=str(receipt["operation_id"]),
+                value=escalation,
+            ),
+            actual_target=(
+                self.spec["cwd"] / ".task-verification-contract.json"
+            ),
+        )
+        if escalation_owner.publication_created or not escalation_owner.actual_target.exists():
+            escalation_owner.restore_template()
         packet_path = self.spec["cwd"] / ".task-verification.json"
         if packet_path.is_symlink():
             raise RuntimeWorkerError(
@@ -758,9 +779,10 @@ class RuntimeWorkerVerificationMixin:
             or not str(payload.get("reason") or "").startswith(
                 "verification-mechanism-flake:"
             )
-            or payload.get("decision")
-            != mechanism_flake_decision_text(
-                failed_attempt, str(failed["operation_id"])
+            or not verification_resolution_authorizes(
+                payload.get("verification_resolution"),
+                failed_attempt,
+                str(failed["operation_id"]),
             )
         ):
             raise RuntimeWorkerError(

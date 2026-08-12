@@ -55,7 +55,8 @@ from harness.supervisor import OperationSupervisor
 from harness.verification import load_profiles
 from harness.verification_attempt import (  # noqa: E402
     VerificationAttempt,
-    mechanism_flake_decision_text,
+    build_verification_escalation,
+    resolve_verification_escalation,
     verification_input_sha256,
 )
 from harness.workflows.reap import run_reap
@@ -3474,6 +3475,9 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
                 meta = json.loads(
                     (worktree / ".task-meta.json").read_text(encoding="utf-8")
                 )
+                typed_escalation = build_verification_escalation(
+                    attempt, str(packet["verification_operation_id"])
+                )
                 append_raise(
                     worktree,
                     {
@@ -3495,12 +3499,18 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
                         "coordinator_policy": (
                             "classify-and-auto-repair-if-eligible"
                         ),
+                        "verification_escalation": typed_escalation,
                     },
                 )
                 resolution = append_resolution(
                     worktree,
-                    mechanism_flake_decision_text(
-                        attempt, str(packet["verification_operation_id"])
+                    "authorize-one-same-head-retry",
+                    verification_resolution=resolve_verification_escalation(
+                        typed_escalation,
+                        action="authorize-one-same-head-retry",
+                        evidence_note=(
+                            "Exact isolated verification proved a mechanism flake."
+                        ),
                     ),
                     resolved_at="2026-08-05T12:01:00Z",
                 )

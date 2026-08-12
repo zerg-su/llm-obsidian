@@ -26,6 +26,12 @@ from task_escalation_records import (
     load_latest,
 )
 from harness.adapters.cmux import run_cmux
+from harness.verification_attempt import (
+    VerificationAttempt,
+    VerificationAttemptError,
+    build_verification_escalation,
+    resolve_verification_escalation,
+)
 
 
 CATEGORIES = {
@@ -129,6 +135,18 @@ def raise_escalation(worktree: Path, category: str, reason: str, question: str) 
     }
     if category == "mechanism-failure":
         marker["coordinator_policy"] = MECHANISM_REPAIR_POLICY
+        packet_path = worktree / ".task-verification.json"
+        if reason.startswith("verification-mechanism-flake:") and packet_path.is_file():
+            try:
+                packet = read_json(packet_path)
+                attempt = VerificationAttempt.from_dict(
+                    packet.get("verification_attempt")
+                )
+                marker["verification_escalation"] = build_verification_escalation(
+                    attempt, str(packet.get("verification_operation_id") or "")
+                )
+            except VerificationAttemptError as exc:
+                die(f"verification escalation authority is invalid: {exc}", 3)
     marker_path = worktree / ".task-needs-attention.json"
     try:
         raised = append_raise(worktree, marker)
@@ -215,8 +233,23 @@ def resolve_escalation(worktree: Path, decision: str) -> int:
     if current == "unknown" or current != str(meta.get("origin_session") or ""):
         die("only the originating coordinator session may resolve this escalation", 3)
     task_surface = read_surface(worktree, meta, "task_surface", ".task-cmux-surface")
+    typed_resolution = None
+    typed_escalation = marker.get("verification_escalation")
+    if typed_escalation is not None:
+        try:
+            typed_resolution = resolve_verification_escalation(
+                typed_escalation,
+                action=answer,
+                evidence_note="Coordinator classified the exact verification attempt.",
+            )
+        except VerificationAttemptError as exc:
+            die(f"verification resolution is invalid: {exc}", 3)
     try:
-        resolved = append_resolution(worktree, answer)
+        resolved = append_resolution(
+            worktree,
+            answer,
+            verification_resolution=typed_resolution,
+        )
     except EscalationRecordError as exc:
         die(str(exc), 3)
     send(
