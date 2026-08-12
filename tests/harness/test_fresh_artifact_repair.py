@@ -660,6 +660,138 @@ with tempfile.TemporaryDirectory(prefix="fresh-artifact-reconcile.") as raw:
             and terminal_attention[-1][1] is AttentionReason.RETRY_EXHAUSTED,
         )
 
+        substitution_attempt = f"substitution-{family.value}"
+        substitution_worktree = family_root / "substitution-product"
+        substitution_worktree.mkdir()
+        substitution_target = substitution_worktree / pointer
+        substitution_template = CanonicalContractTemplate.create(
+            family,
+            attempt_id=substitution_attempt,
+            target_pointer=pointer,
+            value=template_value,
+            code_owned_fields=code_fields,
+            model_owned_fields=set(template_value) - code_fields,
+        )
+        substitution_owner = ContractArtifactOwner.publish(
+            state_root=state / "substitution",
+            worktree=substitution_worktree,
+            template=substitution_template,
+            actual_target=substitution_target,
+        )
+        substitution_owner.restore_template()
+        substitution_spec = replace(
+            family_spec,
+            operation_id=substitution_attempt,
+            idempotency_key=f"key-{substitution_attempt}",
+            owner_id=substitution_attempt,
+            root_operation_id=substitution_attempt,
+        )
+        substitution_parent = OperationRecord(
+            substitution_spec,
+            "running",
+            1,
+            f"substitution-lane-{family.value}",
+            f"substitution-run-{family.value}",
+        )
+        substitution = FreshArtifactRepair.reserve(
+            owner=substitution_owner,
+            parent=substitution_parent,
+            invalid_sha256="a" * 64,
+            route=opposite,
+            origin_surface="11111111-1111-4111-8111-111111111111",
+        )
+        substitution_manager = FakeManager()
+        substitution.start(substitution_manager)
+        substitution_request = substitution_manager.requests[0]
+
+        def callback_value(replacement: str) -> tuple[dict[str, object], str]:
+            changed_artifact = dict(artifact)
+            if family is ContractFamily.TASK_SUMMARY:
+                changed_artifact["title"] = replacement
+            else:
+                changed_artifact["outcome"] = replacement
+            changed_payload = {
+                "schema_version": 1,
+                "family": family.value,
+                "repair_id": substitution.repair_id,
+                "artifact": changed_artifact,
+            }
+            changed_sha = hashlib.sha256(
+                json.dumps(
+                    changed_payload, sort_keys=True, separators=(",", ":")
+                ).encode()
+            ).hexdigest()
+            return (
+                {
+                    "schema_version": 1,
+                    "callback_id": f"result-{changed_sha[:24]}",
+                    "operation_id": substitution_request.spec.operation_id,
+                    "run_id": substitution_request.run_id,
+                    "kind": "result",
+                    "payload": changed_payload,
+                    "payload_sha256": changed_sha,
+                },
+                changed_sha,
+            )
+
+        accepted_value, accepted_sha = callback_value("accepted-a")
+        substituted_value, _substituted_sha = callback_value("substituted-b")
+        substitution_callback = (
+            substitution.scratch / substitution_request.callback_pointer
+        )
+        substitution_callback.write_text(
+            json.dumps(accepted_value, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        substitution_child = OperationRecord(
+            substitution_request.spec,
+            "verifying",
+            4,
+            substitution_request.lane_id,
+            substitution_request.run_id,
+            attempt=1,
+            attempt_limit=1,
+            model_restart_limit=0,
+            accepted_callback_id=str(accepted_value["callback_id"]),
+            accepted_callback_kind="result",
+            accepted_callback_sha256=accepted_sha,
+        )
+        substitution_callback.write_text(
+            json.dumps(substituted_value, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        try:
+            substitution.reconcile(substitution_child, lambda value: value)
+        except FreshRepairInvalid:
+            substitution_rejected = True
+        else:
+            substitution_rejected = False
+        substitution_failure = json.loads(
+            (substitution.root / "failed.json").read_text()
+        )
+        substitution_failure_bytes = (
+            substitution.root / "failed.json"
+        ).read_bytes()
+        restarted_substitution = FreshArtifactRepair.load(
+            owner=substitution_owner
+        )
+        try:
+            restarted_substitution.reconcile(
+                substitution_child, lambda value: value
+            )
+        except FreshRepairInvalid:
+            restart_rejected = True
+        else:
+            restart_rejected = False
+        check(
+            f"{family.value} rejects callback substitution across restart",
+            substitution_rejected
+            and restart_rejected
+            and substitution_failure["stage"] == "accepted-callback-mismatch"
+            and (substitution.root / "failed.json").read_bytes()
+            == substitution_failure_bytes
+            and json.loads(substitution_target.read_text())
+            == substitution_owner.template_value,
+        )
+
 with tempfile.TemporaryDirectory(prefix="fresh-artifact-crash.") as raw:
     base = Path(raw)
     tree = base / "product"

@@ -22,6 +22,7 @@ FACADE_KINDS = {
     "pivot",
     "reap",
 }
+DASHBOARD_TIMEOUT_SECONDS = 5.0
 
 
 @dataclass(frozen=True)
@@ -118,6 +119,7 @@ def _run(argv: Sequence[str]) -> None:
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+        timeout=DASHBOARD_TIMEOUT_SECONDS,
     )
 
 
@@ -255,6 +257,7 @@ def launch_bound_facade_dashboard(
 
 
 __all__ = [
+    "DASHBOARD_TIMEOUT_SECONDS",
     "DashboardBinding",
     "DashboardLaunchReceipt",
     "FACADE_KINDS",

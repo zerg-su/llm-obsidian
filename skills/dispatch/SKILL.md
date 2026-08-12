@@ -66,7 +66,7 @@ Bounded review/schema work may use the compiled ephemeral profile below.
    Before built-in validate/start, if cmux is available, idempotently run
    `python3 <vault-root>/scripts/harness-dashboard.py open --vault <vault-root>
    --store <vault-root>/.vault-meta/harness --surface "$CMUX_SURFACE_ID"
-   --root "<request-id>" --facade dispatch` with the exact approved request UUID.
+   --temporary "<request-id>" --facade dispatch` with the exact approved request UUID.
    Every other registered root-producing facade uses the same
    `harness.dashboard_facade` helper. If its durable root is not available yet,
    it opens one `--temporary` request scope and then uses `rebind` on that exact

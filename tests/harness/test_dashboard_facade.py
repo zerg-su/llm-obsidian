@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 
@@ -23,6 +25,7 @@ from harness.dashboard_facade import (  # noqa: E402
     launch_review_facade_dashboard,
     rebind_facade_dashboard,
 )
+import harness.dashboard_facade as facade_module  # noqa: E402
 
 
 def load_dashboard_script() -> object:
@@ -255,6 +258,58 @@ with tempfile.TemporaryDirectory(prefix="dashboard-facade.") as raw:
         contained.status == "degraded"
         and contained.facade == "review"
         and "secret" not in json.dumps(contained.__dict__),
+    )
+
+    dashboard_script = vault / "scripts" / "harness-dashboard.py"
+    dashboard_script.parent.mkdir()
+    child_pids = vault / "dashboard-child-pids"
+    dashboard_script.write_text(
+        "import os\n"
+        "import time\n"
+        f"with open({str(child_pids)!r}, 'a') as handle:\n"
+        "    handle.write(f'{os.getpid()}\\n')\n"
+        "time.sleep(60)\n",
+        encoding="utf-8",
+    )
+    original_timeout = facade_module.DASHBOARD_TIMEOUT_SECONDS
+    facade_module.DASHBOARD_TIMEOUT_SECONDS = 0.2
+    timeout_started = time.monotonic()
+    try:
+        timed_out_launch = launch_facade_dashboard(
+            vault=vault,
+            store=store,
+            caller_surface=caller,
+            facade="verify",
+            request_id=root,
+            root_operation_id=root,
+        )
+        timed_out_rebind = rebind_facade_dashboard(
+            vault=vault,
+            store=store,
+            caller_surface=caller,
+            facade="dispatch",
+            temporary_request_id=request,
+            root_operation_id=root,
+        )
+    finally:
+        facade_module.DASHBOARD_TIMEOUT_SECONDS = original_timeout
+    elapsed = time.monotonic() - timeout_started
+    timed_out_pids = [int(value) for value in child_pids.read_text().splitlines()]
+
+    def child_is_reaped(pid: int) -> bool:
+        try:
+            os.waitpid(pid, os.WNOHANG)
+        except ChildProcessError:
+            return True
+        return False
+
+    check(
+        "blocking dashboard launch and rebind degrade and reap at the timeout",
+        timed_out_launch.status == "degraded"
+        and timed_out_rebind.status == "degraded"
+        and elapsed < 2.0
+        and len(timed_out_pids) == 2
+        and all(child_is_reaped(pid) for pid in timed_out_pids),
     )
 
     observer = "22222222-2222-4222-8222-222222222222"

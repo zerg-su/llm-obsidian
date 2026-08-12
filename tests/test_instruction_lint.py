@@ -238,7 +238,8 @@ assert 'origin_surface=request["origin_surface"]' in dispatch_execution
 assert "identify --surface \"$CMUX_SURFACE_ID\" --no-caller" not in dispatch
 assert "never inspects the globally focused surface" in dispatch
 assert "harness-dashboard.py open" in dispatch
-assert '--root "<request-id>"' in dispatch
+assert '--temporary "<request-id>"' in dispatch
+assert '--root "<request-id>"' not in dispatch
 assert "exact approved request UUID" in dispatch
 assert "`observer.argv` omits `--surface`" in dispatch
 assert "anchored value before execution" in dispatch

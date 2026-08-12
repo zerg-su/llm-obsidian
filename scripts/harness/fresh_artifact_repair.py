@@ -417,7 +417,11 @@ class FreshArtifactRepair:
         )
 
     def accept(
-        self, validator: Callable[[Mapping[str, object]], object]
+        self,
+        validator: Callable[[Mapping[str, object]], object],
+        *,
+        expected_callback_id: str = "",
+        expected_payload_sha256: str = "",
     ) -> FreshRepairReceipt:
         callback_path = self.scratch / ".artifact-repair-callback.json"
         failed_path = self.root / "failed.json"
@@ -443,6 +447,16 @@ class FreshArtifactRepair:
         except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
             self._record_invalid("callback-invalid", callback_sha256)
             raise FreshRepairInvalid("fresh repair callback is invalid") from exc
+        if bool(expected_callback_id) != bool(expected_payload_sha256):
+            raise FreshRepairError("accepted callback evidence is incomplete")
+        if expected_callback_id and (
+            envelope.callback_id != expected_callback_id
+            or envelope.payload_sha256 != expected_payload_sha256
+        ):
+            self._record_invalid("accepted-callback-mismatch", callback_sha256)
+            raise FreshRepairInvalid(
+                "fresh repair callback changed after broker acceptance"
+            )
         payload = envelope.payload
         artifact = payload.get("artifact")
         if (
@@ -533,7 +547,11 @@ class FreshArtifactRepair:
             if child.accepted_callback_kind != "result":
                 self._record_invalid("callback-invalid", "")
                 raise FreshRepairInvalid("fresh repair callback kind is invalid")
-            receipt = self.accept(validator)
+            receipt = self.accept(
+                validator,
+                expected_callback_id=child.accepted_callback_id,
+                expected_payload_sha256=child.accepted_callback_sha256,
+            )
             return FreshRepairReconciliation("adopted", receipt)
         if child.state in {
             "attention-required",
