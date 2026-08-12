@@ -8,12 +8,15 @@ import sys
 import tempfile
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from harness.finalization_ledger import FinalizationLedger  # noqa: E402
+from harness.callbacks import CallbackBroker  # noqa: E402
+from harness.contracts import to_dict  # noqa: E402
 from harness.finalization_pivot import (  # noqa: E402
     FinalizationPivotError,
     compile_pivot_packet,
@@ -31,6 +34,12 @@ from harness.review_finalization import (  # noqa: E402
     StructuralPivotPending,
     reserve_task_finalization_cycle,
 )
+from harness.store import OperationStore  # noqa: E402
+from harness.workflows.review import (  # noqa: E402
+    ReviewResult,
+    ReviewRound,
+    review_round_envelope,
+)
 from model_routing_config import load_tracked_config  # noqa: E402
 from outcome_contract import extract_from_bytes  # noqa: E402
 
@@ -43,6 +52,46 @@ def check(label: str, value: bool) -> None:
 
 def identity(number: int) -> str:
     return str(uuid.UUID(int=number))
+
+
+class PivotRuntime:
+    """Fake provider transport around the real pivot store and callback broker."""
+
+    def __init__(self, store: OperationStore, owner: str):
+        self.store = store
+        self.owner = owner
+        self.starts = 0
+        self.exits = 0
+        self.cleanups = 0
+
+    def start(self, request: object) -> object:
+        record = self.store.read(self.owner, request.spec.operation_id)
+        if record.state == "created":
+            self.starts += 1
+            for state in ("preflight", "starting", "running", "awaiting-callback"):
+                self.store.transition(self.owner, record.spec.operation_id, state)
+            record = self.store.read(self.owner, record.spec.operation_id)
+        return SimpleNamespace(record=record)
+
+    def accept_callback(self, envelope: object) -> object:
+        CallbackBroker(self.store, self.owner).accept(
+            envelope,
+            deadline_operation_id=str(envelope.payload["parent_session_operation_id"]),
+        )
+        return SimpleNamespace(record=self.store.read(self.owner, envelope.operation_id))
+
+    def request_exit(self, owner: str, operation_id: str) -> object:
+        self.exits += 1
+        record = self.store.read(owner, operation_id)
+        if record.state != "finalizing":
+            self.store.transition(owner, operation_id, "finalizing")
+        self.store.transition(owner, operation_id, "exiting")
+        return SimpleNamespace(record=self.store.read(owner, operation_id))
+
+    def cleanup(self, owner: str, operation_id: str) -> object:
+        self.cleanups += 1
+        self.store.transition(owner, operation_id, "complete")
+        return SimpleNamespace(record=self.store.read(owner, operation_id))
 
 
 config = load_tracked_config(ROOT)
@@ -355,6 +404,129 @@ with tempfile.TemporaryDirectory(prefix="finalization-pivot-reserve.") as raw:
         and not sixth.cycle.allowed
         and sixth.cycle.reason == "finalization-budget-exhausted"
         and ledger.path.read_bytes() == before_sixth,
+    )
+
+
+# Production wiring: real workflow construction, store, callback, and continuation.
+with tempfile.TemporaryDirectory(prefix="finalization-pivot-wiring.") as raw:
+    vault = Path(raw)
+    product = vault / "product"
+    product.mkdir()
+    store_root = vault / ".vault-meta" / "harness"
+    lineage = identity(900)
+    wired_ledger = FinalizationLedger(
+        store_root / "finalization-ledger",
+        lineage_id=lineage,
+        origin_task_id=lineage,
+        plan_sha256="e" * 64,
+        outcome_contract_sha256="f" * 64,
+    )
+    wired_meta = {
+        **meta,
+        "task_id": lineage,
+        "vault_root": str(vault),
+        "task_surface": "11111111-1111-4111-8111-111111111111",
+        "approved_plan_sha256": "e" * 64,
+        "outcome_contract_sha256": "f" * 64,
+    }
+    for number in (1, 2, 3):
+        attempt = identity(920 + number)
+        reserved = reserve_task_finalization_cycle(
+            wired_meta,
+            ledger=wired_ledger,
+            config=config,
+            attempt_id=attempt,
+            exact_head=f"{number:040x}",
+            task_id=lineage,
+            worktree=str(product),
+            independent_permitted=True,
+            availability=None,
+            now_epoch=1_000,
+        )
+        assert reserved is not None and reserved.cycle.allowed
+        wired_ledger.record_terminal(
+            attempt_id=attempt, terminal_result="changes-requested"
+        )
+    store = OperationStore(store_root)
+    runtime = PivotRuntime(store, lineage)
+    try:
+        reserve_task_finalization_cycle(
+            wired_meta,
+            ledger=wired_ledger,
+            config=config,
+            attempt_id=identity(924),
+            exact_head=f"{4:040x}",
+            task_id=lineage,
+            worktree=str(product),
+            independent_permitted=True,
+            availability=None,
+            now_epoch=1_000,
+            pivot_runtime=runtime,
+        )
+    except StructuralPivotPending:
+        pass
+    else:
+        raise AssertionError("production pivot wiring did not wait for callback")
+    records = store.list(lineage)
+    parent = next(row for row in records if row.spec.kind == "structural-pivot")
+    child = next(row for row in records if row.spec.kind == "review-round")
+    round_ = ReviewRound(
+        parent.spec.operation_id,
+        child.spec.operation_id,
+        lineage,
+        child.lane_id,
+        child.run_id,
+        "openai-holistic",
+        0,
+        child.spec,
+    )
+    envelope = review_round_envelope(
+        round_, ReviewResult("openai-holistic", "approve", ())
+    )
+    callback = (
+        store_root
+        / "structural-pivots"
+        / lineage
+        / "callbacks"
+        / ".review-callback.json"
+    )
+    callback.write_text(json.dumps(to_dict(envelope), sort_keys=True) + "\n")
+    fourth = reserve_task_finalization_cycle(
+        wired_meta,
+        ledger=wired_ledger,
+        config=config,
+        attempt_id=identity(924),
+        exact_head=f"{4:040x}",
+        task_id=lineage,
+        worktree=str(product),
+        independent_permitted=True,
+        availability=None,
+        now_epoch=1_000,
+        pivot_runtime=runtime,
+    )
+    repeated = reserve_task_finalization_cycle(
+        wired_meta,
+        ledger=wired_ledger,
+        config=config,
+        attempt_id=identity(924),
+        exact_head=f"{4:040x}",
+        task_id=lineage,
+        worktree=str(product),
+        independent_permitted=True,
+        availability=None,
+        now_epoch=1_000,
+        pivot_runtime=runtime,
+    )
+    check(
+        "production pivot wiring opens cycle four exactly once after callback",
+        fourth is not None
+        and fourth.routes is not None
+        and fourth.routes.reason == "structural-pivot"
+        and repeated is not None
+        and repeated.cycle.reason == "already-reserved"
+        and runtime.starts == 1
+        and runtime.exits == 1
+        and runtime.cleanups == 1,
     )
 
 print("\nAll finalization policy tests passed.")

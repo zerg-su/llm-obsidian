@@ -23,6 +23,7 @@ from harness.contracts import (  # noqa: E402
     to_dict,
 )
 from harness.store import OperationStore  # noqa: E402
+from harness.review_finalization import StructuralPivotPending  # noqa: E402
 from harness.review_attempt import ReviewAttemptError  # noqa: E402
 from harness.workflows.review import (  # noqa: E402
     ReviewContext,
@@ -42,6 +43,7 @@ from task_review_flow import (  # noqa: E402
     _ready_result_is_recorded,
     _resolution_source_state,
     _review_origin_surface,
+    _reserve_or_reviewing,
     _resume_bound_attention,
 )
 from task_review_request import _callback_path  # noqa: E402
@@ -91,6 +93,20 @@ check(
         allow_fallback=False,
     )
     == "task-old",
+)
+
+
+def pending_pivot_reservation() -> object:
+    raise StructuralPivotPending("structural pivot is awaiting its callback")
+
+
+check(
+    "pending structural pivot returns a reviewing receipt",
+    _reserve_or_reviewing(
+        pending_pivot_reservation,
+        lambda: {"status": "reviewing"},
+    )
+    == {"status": "reviewing"},
 )
 
 

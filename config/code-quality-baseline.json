@@ -38,10 +38,10 @@
       "operation-uuid": 27,
       "operator-local-path": 2
     },
-    "final_max_production_loc": 14569,
+    "final_max_production_loc": 14583,
     "final_production_file_count": 27,
     "final_max_writable_authorities": 0,
     "final_max_incident_literals": 0,
-    "evidence": "docs/acceptance/v2.6.6-rc1-active-authority-baseline.md plus the separately owned exact 27-file RC5.5 review/recovery authority manifest, including atomic immutable-plan publication, amendment-safe finalization lineage, callback drain, crash replay, acceptance-bound one-time fresh artifact reconciliation, explicit current-review dashboard binding, typed reap-close owners, and the crash-resumable structural-pivot workflow owner, measured at 14569 LOC with zero writable authorities and zero incident literals"
+    "evidence": "docs/acceptance/v2.6.6-rc1-active-authority-baseline.md plus the separately owned exact 27-file RC5.5 review/recovery authority manifest, including atomic immutable-plan publication, amendment-safe finalization lineage, callback drain, crash replay, acceptance-bound one-time fresh artifact reconciliation, explicit current-review dashboard binding, typed reap-close owners, the crash-resumable structural-pivot workflow owner, and the directly tested pending-pivot reviewing-receipt seam, measured at 14583 LOC with zero writable authorities and zero incident literals"
   }
 }

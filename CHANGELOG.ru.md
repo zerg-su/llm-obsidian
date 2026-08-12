@@ -36,18 +36,21 @@ authority.
   provider больше не разрешает independent route.
 - Root-scoped terminal dashboard показывает pivot-descendant, route, callback,
   terminal, timing и cleanup evidence, не получая lifecycle authority.
-- Live scripts ratchet один раз точно перебазирован на 281 Python-файл /
-  103 717 строк для унаследованного RC5-дерева, единственного разрешённого
-  workflow-модуля и исправления frozen historical denominator, без запасного
-  headroom.
-- Отдельно закреплённый контур active review/recovery authority перебазирован
-  на точный знаменатель RC5.5: 27 файлов / 14 569 строк при нуле writable
-  authorities и incident literals.
+- Live scripts ratchet закреплён на 281 Python-файле / 103 731 строке для
+  унаследованного RC5-дерева, единственного разрешённого workflow-модуля,
+  исправления frozen historical denominator и напрямую тестируемого
+  pending-pivot receipt seam, без запасного headroom.
+- Отдельно закреплённый контур active review/recovery authority установлен на
+  точный post-resolution знаменатель RC5.5: 27 файлов / 14 583 строки при нуле
+  writable authorities и incident literals.
 - Code-quality gate фиксирует два точных file-size blocker, унаследованных от
   утверждённой RC5-базы; новый finalization bridge остаётся ниже существующего
   function hard limit.
 - Finalization дочерней structural-pivot operation теперь возобновляется с
   оставшегося durable transition suffix после сбоя между `exiting` и `complete`.
+- Vault-shaped тест production wiring теперь проходит через настоящий pivot
+  constructor, callback, cleanup и продолжение cycle 4; отдельный task-flow
+  тест связывает pending pivot с обычным receipt `reviewing`.
 
 ### Граница кандидата
 

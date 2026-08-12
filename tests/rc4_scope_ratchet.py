@@ -214,8 +214,9 @@ rebaselined. This approved slice adds exactly one production module,
 publication, deterministic operation identity, the registered read-only
 review-input session, callback-to-receipt projection, restart reconciliation,
 and cleanup. Existing ledger, route, runtime, callback, and dashboard owners
-remain in place. The exact post-review tree is 281 files / 103,717 lines; both
-ceilings are pinned there with no blanket headroom.
+remain in place. The exact post-review-resolution tree is 281 files / 103,731
+lines after the narrow pending-pivot receipt seam was made directly testable;
+both ceilings are pinned there with no blanket headroom.
 """
 
 from __future__ import annotations
@@ -227,7 +228,7 @@ from pathlib import Path
 SCRIPT_FILE_CEILING = 281
 
 #: Maximum total lines across those files for the 2.6.7 RC5 candidate.
-SCRIPT_LINE_CEILING = 103_717
+SCRIPT_LINE_CEILING = 103_731
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

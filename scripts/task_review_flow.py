@@ -597,6 +597,17 @@ def _reviewing_receipt(
     )
 
 
+def _reserve_or_reviewing(
+    reserve: Callable[[], Any], reviewing_receipt: Callable[[], dict[str, Any]]
+) -> Any:
+    """Translate a pending structural pivot into the normal reviewing state."""
+
+    try:
+        return reserve()
+    except StructuralPivotPending:
+        return reviewing_receipt()
+
+
 def _run_exact_head_review(
     meta: Mapping[str, Any],
     vault: Path,
@@ -786,8 +797,8 @@ def _run_exact_head_review(
         else:
             reserved_attempt_id = prior_attempt.identity.attempt_id
 
-    try:
-        request, ledger, cycle = reserve_exact_head_attempt(
+    reservation = _reserve_or_reviewing(
+        lambda: reserve_exact_head_attempt(
             meta,
             vault=vault,
             worktree=worktree,
@@ -799,11 +810,14 @@ def _run_exact_head_review(
             supersedes_approved_attempt_id=(
                 supersedes_approved_attempt_id
             ),
-        )
-    except StructuralPivotPending:
-        return _reviewing_receipt(
+        ),
+        lambda: _reviewing_receipt(
             meta, vault, worktree, runtime_root, context_manifest
-        )
+        ),
+    )
+    if isinstance(reservation, dict):
+        return reservation
+    request, ledger, cycle = reservation
     _assert_frozen_topology(meta, request)
     if not gate_exists or ReviewAttempt.from_mapping(
         gate.read()["attempt"]
