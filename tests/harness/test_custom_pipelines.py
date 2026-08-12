@@ -244,8 +244,7 @@ frozen = freeze_custom_pipeline(spec, compiled, approval_receipt, approval)
 check(
     "exact explicit approval freezes the compiled hash",
     frozen.definition_sha256 == compiled.definition_sha256
-    and frozen.approval.approval_card_sha256
-    == approval_receipt.approval_card_sha256
+    and frozen.approval_sha256 == approval_receipt.approval_card_sha256
     and frozen.approval_card == approval,
 )
 route = RuntimeRoute("codex", "sol", "high", "default", "c" * 64)

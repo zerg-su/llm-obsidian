@@ -52,7 +52,7 @@ from .custom_pipeline_contracts import (
     FrozenPipelineStore,
     PipelineSpec,
     PipelineTransition,
-    _approval_sha256,
+    _approval_receipt_sha256,
     _identifier,
     parse_pipeline_spec,
     pipeline_spec_payload,
@@ -360,7 +360,8 @@ def freeze_custom_pipeline(
         approval=approval,
         approval_card=approval_card,
         spec_sha256=spec_sha256,
-        approval_sha256=_approval_sha256(approval),
+        approval_sha256=approval.approval_card_sha256,
+        approval_receipt_sha256=_approval_receipt_sha256(approval),
     )
 
 

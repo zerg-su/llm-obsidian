@@ -19,6 +19,7 @@ from harness.artifact_repair import (  # noqa: E402
     CorrectionNotificationUncertain,
     ContractArtifactOwner,
     observe_stable_artifact,
+    publish_pipeline_step_contract,
 )
 from harness.contracts import CanonicalContractTemplate, ContractFamily  # noqa: E402
 from harness.runtime_worker_summary import (  # noqa: E402
@@ -87,6 +88,48 @@ with tempfile.TemporaryDirectory(prefix="artifact-repair.") as raw:
         and same.sidecar_path.read_bytes() == sidecar_before
         and same.sidecar_path.stat().st_mode & 0o222 == 0,
     )
+
+    step_request = {
+        "operation_id": "step-attempt",
+        "result_pointer": ".task-pipeline-step-result.json",
+    }
+    published, _step_owner = publish_pipeline_step_contract(
+        state_root=state,
+        worktree=worktree,
+        request=step_request,
+    )
+    publish_pipeline_step_contract(
+        state_root=state,
+        worktree=worktree,
+        request=step_request,
+    )
+    request_path = worktree / ".task-pipeline-step-request.json"
+    drifted = dict(published)
+    drifted["extra"] = "changed"
+    request_path.write_text(json.dumps(drifted), encoding="utf-8")
+    try:
+        publish_pipeline_step_contract(
+            state_root=state,
+            worktree=worktree,
+            request=step_request,
+        )
+    except ArtifactRepairError:
+        pass
+    else:
+        raise AssertionError("pipeline-step request replay drift must fail closed")
+    request_path.unlink()
+    request_path.symlink_to(worktree / "redirected-request.json")
+    try:
+        publish_pipeline_step_contract(
+            state_root=state,
+            worktree=worktree,
+            request=step_request,
+        )
+    except ArtifactRepairError:
+        check("pipeline-step publication rejects drift and symlink visibility", True)
+    else:
+        check("pipeline-step publication rejects drift and symlink visibility", False)
+    request_path.unlink()
 
     target.write_text(
         "```json\n"

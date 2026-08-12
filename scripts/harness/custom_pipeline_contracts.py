@@ -314,7 +314,7 @@ class ExplicitPipelineApproval:
         )
 
 
-def _approval_sha256(approval: ExplicitPipelineApproval) -> str:
+def _approval_receipt_sha256(approval: ExplicitPipelineApproval) -> str:
     encoded = json.dumps(
         to_dict(approval),
         sort_keys=True,
@@ -331,6 +331,7 @@ class FrozenCustomPipeline:
     approval_card: str
     spec_sha256: str
     approval_sha256: str
+    approval_receipt_sha256: str
     schema_version: int = 2
 
     @property
@@ -382,7 +383,7 @@ class FrozenPipelineStore:
             "operation_id": operation_id,
             "definition_sha256": frozen.definition_sha256,
             "spec_sha256": frozen.spec_sha256,
-            "approval_sha256": frozen.approval_sha256,
+            "approval_receipt_sha256": frozen.approval_receipt_sha256,
             "approval_card": frozen.approval_card,
             "approval": to_dict(approval),
             "spec": pipeline_spec_payload(spec),
@@ -456,7 +457,7 @@ class FrozenPipelineStore:
                     "operation_id",
                     "definition_sha256",
                     "spec_sha256",
-                    "approval_sha256",
+                    "approval_receipt_sha256",
                     "approval_card",
                     "approval",
                     "spec",
@@ -481,7 +482,7 @@ class FrozenPipelineStore:
             "pipeline approval",
         )
         approval = ExplicitPipelineApproval(**approval_value)
-        if value["approval_sha256"] != _approval_sha256(approval):
+        if value["approval_receipt_sha256"] != _approval_receipt_sha256(approval):
             raise ContractError("frozen custom pipeline approval changed")
         card = value["approval_card"]
         if not isinstance(card, str) or hashlib.sha256(card.encode()).hexdigest() != (

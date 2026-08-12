@@ -41,9 +41,7 @@ RESERVATION_FIELDS = frozenset({
     "schema_version", "family", "attempt_id", "template_sha256",
     "invalid_sha256", "attempt", "correction_id",
 })
-VERIFICATION_ACTIONS = frozenset(
-    {"authorize-one-same-head-retry", "stop", "repair-repository-mechanism"}
-)
+VERIFICATION_ACTIONS = frozenset({"authorize-one-same-head-retry", "stop", "repair-repository-mechanism"})
 
 
 class ArtifactRepairError(RuntimeError):
@@ -127,15 +125,9 @@ _KEY_ALIASES: Mapping[ContractFamily, Mapping[str, str]] = {
 _WRAPPERS: Mapping[ContractFamily, frozenset[str]] = {
     ContractFamily.TASK_SUMMARY: frozenset({"summary", "task_summary"}),
     ContractFamily.REVIEW_INPUT: frozenset({"review", "review_input"}),
-    ContractFamily.REVIEW_RESOLUTION: frozenset(
-        {"resolution", "review_resolution"}
-    ),
-    ContractFamily.PIPELINE_STEP_RESULT: frozenset(
-        {"result", "pipeline_step_result"}
-    ),
-    ContractFamily.VERIFICATION_ESCALATION: frozenset(
-        {"escalation", "verification_escalation"}
-    ),
+    ContractFamily.REVIEW_RESOLUTION: frozenset({"resolution", "review_resolution"}),
+    ContractFamily.PIPELINE_STEP_RESULT: frozenset({"result", "pipeline_step_result"}),
+    ContractFamily.VERIFICATION_ESCALATION: frozenset({"escalation", "verification_escalation"}),
 }
 
 
@@ -364,13 +356,20 @@ def publish_pipeline_step_contract(
         raise ArtifactRepairError("pipeline-step result pointer is invalid")
     enriched, template = dict(request), pipeline_step_contract_template(request)
     owner = ContractArtifactOwner.publish(
-        state_root=state_root, worktree=worktree, template=template,
-        actual_target=worktree / result_pointer,
+        state_root=state_root, worktree=worktree, template=template, actual_target=worktree / result_pointer,
     )
     enriched["contract_template_pointer"] = str(owner.sidecar_path)
-    if owner.publication_created or not owner.actual_target.exists():
-        owner.restore_template()
-    _atomic_write(owner.worktree / ".task-pipeline-step-request.json", enriched)
+    request_path = owner.worktree / ".task-pipeline-step-request.json"
+    if request_path.is_symlink(): raise ArtifactRepairError("pipeline-step request cannot be a symlink")
+    try:
+        current = json.loads(request_path.read_text()) if request_path.is_file() else {}
+    except (OSError, json.JSONDecodeError) as exc: raise ArtifactRepairError("pipeline-step request is invalid") from exc
+    if not isinstance(current, dict) or (
+        current.get("operation_id") == enriched["operation_id"] and current != enriched
+    ):
+        raise ArtifactRepairError("pipeline-step request changed during replay")
+    if owner.publication_created or not owner.actual_target.exists(): owner.restore_template()
+    _atomic_write(request_path, enriched)
     return enriched, owner
 
 
