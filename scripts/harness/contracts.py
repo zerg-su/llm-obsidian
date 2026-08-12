@@ -52,6 +52,298 @@ class EffectOutcome(str, enum.Enum):
     FAILED = "failed"
 
 
+class ContractFamily(str, enum.Enum):
+    """The five frequent model-authored JSON families admitted by RC5."""
+
+    TASK_SUMMARY = "task-summary"
+    REVIEW_INPUT = "review-input"
+    REVIEW_RESOLUTION = "review-resolution"
+    PIPELINE_STEP_RESULT = "pipeline-step-result"
+    VERIFICATION_ESCALATION = "verification-escalation"
+
+
+class ContractDisposition(str, enum.Enum):
+    """Audit disposition for every known model/JSON boundary class."""
+
+    COVERED = "covered"
+    DEFERRED = "deferred"
+    TEST_ONLY = "test-only"
+    FORBIDDEN = "forbidden"
+
+
+@dataclass(frozen=True)
+class ModelContract:
+    """Static family ownership and budget policy; never a runtime adapter."""
+
+    family: ContractFamily
+    target_name: str
+    code_owned_fields: frozenset[str]
+    model_owned_fields: frozenset[str]
+    authority_bindings: frozenset[str]
+    same_session_corrections: int
+    validator_owner: str
+
+    def __post_init__(self) -> None:
+        fields = self.code_owned_fields | self.model_owned_fields
+        if (
+            self.code_owned_fields & self.model_owned_fields
+            or not fields
+            or any(not ID_RE.fullmatch(field) for field in fields)
+            or any(not ID_RE.fullmatch(field) for field in self.authority_bindings)
+            or self.same_session_corrections not in {1, 2}
+            or not self.validator_owner
+        ):
+            raise ContractError("model contract registry entry is invalid")
+        target = PurePosixPath(self.target_name)
+        if (
+            not self.target_name
+            or "\\" in self.target_name
+            or target.is_absolute()
+            or ".." in target.parts
+            or "." in target.parts
+        ):
+            raise ContractError("model contract target is invalid")
+
+
+_CONTRACT_REGISTRY = MappingProxyType(
+    {
+        ContractFamily.TASK_SUMMARY: ModelContract(
+            ContractFamily.TASK_SUMMARY,
+            ".task-summary.json",
+            frozenset({"schema_version", "type", "session"}),
+            frozenset(
+                {
+                    "title",
+                    "body",
+                    "outcome_disposition",
+                    "outcome_evidence_ids",
+                    "residual_gap_pointers",
+                }
+            ),
+            frozenset({"required_evidence_ids", "final_head_sha", "review_state"}),
+            1,
+            "wiki_summary_contract.validate_summary_for_task",
+        ),
+        ContractFamily.REVIEW_INPUT: ModelContract(
+            ContractFamily.REVIEW_INPUT,
+            ".review-input.json",
+            frozenset({"schema_version", "axis", "verification_iteration"}),
+            frozenset({"verdict", "findings"}),
+            frozenset(
+                {
+                    "operation_id",
+                    "run_id",
+                    "lane_id",
+                    "reviewed_head_sha",
+                    "context_sha256",
+                }
+            ),
+            2,
+            "harness.review_submit.submit_review",
+        ),
+        ContractFamily.REVIEW_RESOLUTION: ModelContract(
+            ContractFamily.REVIEW_RESOLUTION,
+            ".task-review-resolution.json",
+            frozenset(
+                {
+                    "schema_version",
+                    "operation_id",
+                    "review_identity_sha256",
+                    "reviewed_head_sha",
+                }
+            ),
+            frozenset({"resolved_head_sha", "resolutions"}),
+            frozenset({"finding_ids", "reviewed_head_sha", "review_identity_sha256"}),
+            2,
+            "review_resolution.validate_resolution",
+        ),
+        ContractFamily.PIPELINE_STEP_RESULT: ModelContract(
+            ContractFamily.PIPELINE_STEP_RESULT,
+            ".task-pipeline-step-result.json",
+            frozenset({"schema_version", "output_sha256", "head_sha"}),
+            frozenset({"status", "outcome"}),
+            frozenset(
+                {
+                    "result_pointer",
+                    "output_digest",
+                    "current_head_sha",
+                    "step_id",
+                    "visit",
+                    "iteration",
+                }
+            ),
+            1,
+            "pipeline-step-submit._envelope",
+        ),
+        ContractFamily.VERIFICATION_ESCALATION: ModelContract(
+            ContractFamily.VERIFICATION_ESCALATION,
+            ".task-verification-contract.json",
+            frozenset(
+                {
+                    "schema_version",
+                    "kind",
+                    "category",
+                    "operation_id",
+                    "verification_operation_id",
+                    "exact_head_sha",
+                    "failed_attempt_sha256",
+                    "decision",
+                }
+            ),
+            frozenset({"action", "evidence_note"}),
+            frozenset(
+                {
+                    "category",
+                    "operation_id",
+                    "verification_operation_id",
+                    "exact_head_sha",
+                    "failed_attempt_sha256",
+                }
+            ),
+            1,
+            "task_escalation typed verification constructors",
+        ),
+    }
+)
+
+
+@dataclass(frozen=True)
+class ContractAuditEntry:
+    name: str
+    disposition: ContractDisposition
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.name, str) or not ID_RE.fullmatch(self.name):
+            raise ContractError("contract audit name must be a bounded identifier")
+
+
+_CONTRACT_AUDIT = tuple(
+    [
+        ContractAuditEntry(family.value, ContractDisposition.COVERED)
+        for family in ContractFamily
+    ]
+    + [
+        ContractAuditEntry(name, ContractDisposition.DEFERRED)
+        for name in (
+            "protected-research",
+            "daily-summary",
+            "custom-pipeline-authoring",
+        )
+    ]
+    + [ContractAuditEntry("live-dispatch-ack", ContractDisposition.TEST_ONLY)]
+    + [
+        ContractAuditEntry(name, ContractDisposition.FORBIDDEN)
+        for name in (
+            "operation-store",
+            "callbacks",
+            "receipts",
+            "task-metadata",
+            "verification-authority",
+            "finalization-ledger",
+            "reap-markers",
+            "archive-authority",
+            "permissions",
+            "dependencies",
+            "external-state",
+        )
+    ]
+)
+
+
+def contract_registry() -> Mapping[ContractFamily, ModelContract]:
+    """Return the immutable, exhaustive supported-family registry."""
+
+    return _CONTRACT_REGISTRY
+
+
+def contract_registry_audit() -> tuple[ContractAuditEntry, ...]:
+    """Return the explicit disposition table for non-family boundaries."""
+
+    return _CONTRACT_AUDIT
+
+
+@dataclass(frozen=True)
+class CanonicalContractTemplate:
+    """Immutable identity-bound template value with no publication behavior."""
+
+    family: ContractFamily
+    attempt_id: str
+    target_pointer: str
+    code_owned_fields: frozenset[str]
+    model_owned_fields: frozenset[str]
+    _canonical_value: bytes = field(repr=False)
+
+    @classmethod
+    def create(
+        cls,
+        family: ContractFamily | str,
+        *,
+        attempt_id: str,
+        target_pointer: str,
+        value: Mapping[str, object],
+        code_owned_fields: set[str] | frozenset[str],
+        model_owned_fields: set[str] | frozenset[str],
+    ) -> "CanonicalContractTemplate":
+        try:
+            selected = ContractFamily(family)
+        except (TypeError, ValueError) as exc:
+            raise ContractError("model contract family is not registered") from exc
+        _identifier(attempt_id, "contract template attempt_id")
+        pointer = _relative_path(target_pointer, "contract template target")
+        registered = _CONTRACT_REGISTRY[selected]
+        if pointer != registered.target_name:
+            raise ContractError("contract template target is not registered")
+        code = frozenset(code_owned_fields)
+        model = frozenset(model_owned_fields)
+        if code & model:
+            raise ContractError("contract template field ownership overlaps")
+        try:
+            canonical = json.dumps(
+                dict(value), ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            ).encode()
+            copied = json.loads(canonical)
+        except (TypeError, ValueError) as exc:
+            raise ContractError("contract template value must be JSON") from exc
+        if (
+            not isinstance(copied, dict)
+            or code | model != set(copied)
+            or not code <= registered.code_owned_fields
+            or not model <= registered.model_owned_fields
+        ):
+            raise ContractError("contract template ownership is not registered")
+        return cls(selected, attempt_id, pointer, code, model, canonical)
+
+    @property
+    def template_sha256(self) -> str:
+        identity = {
+            "schema_version": 1,
+            "family": self.family.value,
+            "attempt_id": self.attempt_id,
+            "target_pointer": self.target_pointer,
+            "code_owned_fields": sorted(self.code_owned_fields),
+            "model_owned_fields": sorted(self.model_owned_fields),
+            "template": json.loads(self._canonical_value),
+        }
+        return hashlib.sha256(
+            json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "schema_version": 1,
+            "family": self.family.value,
+            "attempt_id": self.attempt_id,
+            "target_pointer": self.target_pointer,
+            "code_owned_fields": sorted(self.code_owned_fields),
+            "model_owned_fields": sorted(self.model_owned_fields),
+            "template": json.loads(self._canonical_value),
+            "template_sha256": self.template_sha256,
+        }
+
+    def matches(self, value: object) -> bool:
+        return value == self.as_dict()
+
+
 def _identifier(value: str, label: str) -> str:
     if not isinstance(value, str) or not ID_RE.fullmatch(value):
         raise ContractError(f"{label} must be a bounded identifier")
