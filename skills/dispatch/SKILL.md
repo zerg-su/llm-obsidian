@@ -31,7 +31,7 @@ Bounded review/schema work may use the compiled ephemeral profile below.
    It must return one exact repo and one pending approved plan. Missing or
    ambiguous candidates are shown for selection; never guess. An explicitly
    named cross-session plan is allowed and remains visible as such. It returns
-   at most five ranked context candidates; the model selects semantic relevance.
+   at most five ranked context candidates; the model selects relevance.
    Before echoing/logging a wikilink, verify that its exact target exists under `wiki/`.
 4. Resolve the child route through `scripts/model_routing.py`. No override means
    the exact current-session route; named model/effort is explicit. Unknown
