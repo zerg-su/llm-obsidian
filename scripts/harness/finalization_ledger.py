@@ -102,6 +102,34 @@ def _head(value: Any) -> str:
     return value
 
 
+def predecessor_bound_attempt_id(
+    *,
+    lineage_id: str,
+    predecessor_attempt_id: str,
+    exact_head: str,
+    cycle_number: int,
+) -> str:
+    """Derive one retry generation without changing its product cycle."""
+
+    lineage = _canonical_uuid(lineage_id, "lineage_id")
+    predecessor = _canonical_uuid(
+        predecessor_attempt_id, "predecessor_attempt_id"
+    )
+    head = _head(exact_head)
+    if (
+        isinstance(cycle_number, bool)
+        or not isinstance(cycle_number, int)
+        or not 1 <= cycle_number <= MAX_FINALIZATION_CYCLES
+    ):
+        raise FinalizationLedgerError("retry cycle number is invalid")
+    return str(
+        uuid.uuid5(
+            uuid.UUID(lineage),
+            f"{head}:cycle:{cycle_number}:predecessor:{predecessor}",
+        )
+    )
+
+
 def _worktree(value: Any) -> str:
     if not isinstance(value, str) or not value.strip():
         raise FinalizationLedgerError("worktree must be an absolute path")
@@ -302,7 +330,14 @@ class FinalizationLedger:
                 raise FinalizationLedgerError(
                     "mechanism attempt receipt shape is invalid"
                 )
-            _canonical_uuid(receipt.get("attempt_id"), "attempt_id")
+            attempt_id = _canonical_uuid(
+                receipt.get("attempt_id"), "attempt_id"
+            )
+            if attempt_id in seen_attempts:
+                raise FinalizationLedgerError(
+                    "finalization attempt_id was reused"
+                )
+            seen_attempts.add(attempt_id)
             cycle_number = receipt.get("cycle_number")
             if (
                 isinstance(cycle_number, bool)
@@ -365,6 +400,7 @@ class FinalizationLedger:
         task_id: str,
         worktree: str,
         provider_policies: Mapping[int, dict[str, Any]],
+        predecessor_attempt_id: str = "",
     ) -> CycleDecision:
         requested_identity = {
             "attempt_id": _canonical_uuid(attempt_id, "attempt_id"),
@@ -372,6 +408,13 @@ class FinalizationLedger:
             "task_id": _canonical_uuid(task_id, "task_id"),
             "worktree": _worktree(worktree),
         }
+        predecessor = (
+            _canonical_uuid(
+                predecessor_attempt_id, "predecessor_attempt_id"
+            )
+            if predecessor_attempt_id
+            else ""
+        )
         with self._locked():
             value = self._read(missing_ok=True)
             disposition = value["terminal_disposition"]
@@ -390,6 +433,33 @@ class FinalizationLedger:
                         disposition=disposition,
                     )
                 value["terminal_disposition"] = ""
+            retry_cycle = None
+            if predecessor:
+                matching_receipts = [
+                    receipt
+                    for receipt in value["attempts"]
+                    if receipt["attempt_id"] == predecessor
+                ]
+                if (
+                    len(matching_receipts) != 1
+                    or value["attempts"][-1] is not matching_receipts[0]
+                    or matching_receipts[0]["classification"]
+                    not in MECHANISM_RESULTS
+                ):
+                    raise FinalizationLedgerError(
+                        "retry predecessor mechanism receipt is unavailable"
+                    )
+                retry_cycle = int(matching_receipts[0]["cycle_number"])
+                expected_attempt_id = predecessor_bound_attempt_id(
+                    lineage_id=self.lineage_id,
+                    predecessor_attempt_id=predecessor,
+                    exact_head=requested_identity["exact_head"],
+                    cycle_number=retry_cycle,
+                )
+                if requested_identity["attempt_id"] != expected_attempt_id:
+                    raise FinalizationLedgerError(
+                        "retry attempt identity is not predecessor-bound"
+                    )
             for cycle in value["cycles"]:
                 if cycle["attempt_id"] != requested_identity["attempt_id"]:
                     continue
@@ -412,6 +482,13 @@ class FinalizationLedger:
                     ),
                     disposition="",
                 )
+            if any(
+                receipt["attempt_id"] == requested_identity["attempt_id"]
+                for receipt in value["attempts"]
+            ):
+                raise FinalizationLedgerError(
+                    "finalization attempt_id was reused"
+                )
             if value["cycles"] and not value["cycles"][-1]["terminal_result"]:
                 raise FinalizationLedgerError(
                     "a distinct attempt cannot overlap the active reservation"
@@ -421,6 +498,10 @@ class FinalizationLedger:
                     "finalization cycle ceiling lacks a terminal disposition"
                 )
             cycle_number = len(value["cycles"]) + 1
+            if retry_cycle is not None and retry_cycle != cycle_number:
+                raise FinalizationLedgerError(
+                    "retry predecessor product cycle changed"
+                )
             cycle = {
                 "number": cycle_number,
                 **requested_identity,
@@ -467,6 +548,7 @@ class FinalizationLedger:
         task_id: str,
         worktree: str,
         provider_policies: Mapping[int, Mapping[str, Any]],
+        predecessor_attempt_id: str = "",
     ) -> CycleDecision:
         """Atomically select the policy for the cycle actually reserved."""
 
@@ -486,6 +568,7 @@ class FinalizationLedger:
             task_id=task_id,
             worktree=worktree,
             provider_policies=canonical,
+            predecessor_attempt_id=predecessor_attempt_id,
         )
 
     def record_terminal(

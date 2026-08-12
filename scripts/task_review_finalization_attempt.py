@@ -9,7 +9,10 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from harness.contracts import RuntimeRoute
-from harness.finalization_ledger import FinalizationLedger
+from harness.finalization_ledger import (
+    FinalizationLedger,
+    predecessor_bound_attempt_id,
+)
 from harness.review_finalization import (
     reserve_task_finalization_cycle,
     task_finalization_policy,
@@ -40,7 +43,13 @@ def exact_head_attempt_enabled(meta: Mapping[str, Any]) -> bool:
 def attempt_binding(
     meta: Mapping[str, Any], task_id: str, *, cycle: int
 ) -> tuple[str, int, str, str]:
-    if type(cycle) is not int or cycle < 1:
+    policy = task_finalization_policy(meta)
+    if (
+        type(cycle) is not int
+        or cycle < 1
+        or policy is None
+        or cycle > policy.max_cycles
+    ):
         raise FinalizationAttemptError("exact-HEAD review cycle is invalid")
     return (
         task_id,
@@ -68,13 +77,29 @@ def finalization_ledger(
     )
 
 
-def _attempt_id(task_id: str, exact_head: str, cycle: int) -> str:
+def _attempt_id(
+    task_id: str,
+    exact_head: str,
+    cycle: int,
+    *,
+    predecessor_attempt_id: str = "",
+) -> str:
     try:
         namespace = uuid.UUID(task_id)
     except ValueError as exc:
         raise FinalizationAttemptError(
             "exact-HEAD finalization lineage is invalid"
         ) from exc
+    if predecessor_attempt_id:
+        try:
+            return predecessor_bound_attempt_id(
+                lineage_id=task_id,
+                predecessor_attempt_id=predecessor_attempt_id,
+                exact_head=exact_head,
+                cycle_number=cycle,
+            )
+        except ValueError as exc:
+            raise FinalizationAttemptError(str(exc)) from exc
     return str(uuid.uuid5(namespace, f"{exact_head}:cycle:{cycle}"))
 
 
@@ -150,10 +175,21 @@ def reserve_exact_head_attempt(
     task_id: str,
     request: ReviewOperationRequest,
     cycle: int,
-) -> tuple[ReviewOperationRequest, FinalizationLedger]:
+    predecessor_attempt_id: str = "",
+    reserved_attempt_id: str = "",
+) -> tuple[ReviewOperationRequest, FinalizationLedger, int]:
     config = load_config(vault)
     ledger = finalization_ledger(meta, vault, task_id)
-    attempt_id = _attempt_id(task_id, request.context.head_sha, cycle)
+    attempt_id = reserved_attempt_id or _attempt_id(
+        task_id,
+        request.context.head_sha,
+        cycle,
+        predecessor_attempt_id=predecessor_attempt_id,
+    )
+    if reserved_attempt_id and predecessor_attempt_id:
+        raise FinalizationAttemptError(
+            "reserved attempt cannot also declare a predecessor"
+        )
     reservation = reserve_task_finalization_cycle(
         meta,
         ledger=ledger,
@@ -165,6 +201,7 @@ def reserve_exact_head_attempt(
         independent_permitted=True,
         availability=None,
         now_epoch=int(time.time()),
+        predecessor_attempt_id=predecessor_attempt_id,
     )
     if reservation is None or reservation.routes is None:
         raise FinalizationAttemptError(
@@ -177,13 +214,7 @@ def reserve_exact_head_attempt(
         raise FinalizationAttemptError(
             f"exact-HEAD finalization stopped: {reservation.cycle.reason}"
         )
-    if (
-        reservation.cycle.cycle_number is not None
-        and reservation.cycle.cycle_number > cycle
-    ):
-        # The gate attempt ordinal counts every superseding attempt while the
-        # ledger numbers only product cycles (mechanism outcomes release their
-        # reservation), so the product cycle can trail but never lead.
+    if reservation.cycle.cycle_number != cycle:
         raise FinalizationAttemptError("exact-HEAD finalization cycle changed")
     return (
         _bind_routes(
@@ -193,4 +224,5 @@ def reserve_exact_head_attempt(
             routing_sha256=config.fingerprint,
         ),
         ledger,
+        cycle,
     )

@@ -16,6 +16,9 @@ from harness.review_attempt import (
     ReviewAttempt,
     ReviewAttemptError,
 )
+from harness.pre_model_reviewer_retirement import (
+    review_attempt_records_are_quiescent,
+)
 from harness.runtime_sessions import RuntimeSessionManager
 from harness.store import OperationStore, StoreError
 from harness.workflows.review import (
@@ -585,6 +588,8 @@ def _run_exact_head_review(
 
     cycle = 1
     zero_lane_preflight = False
+    predecessor_attempt_id = ""
+    reserved_attempt_id = ""
     if gate_exists:
         prior_state = gate.read()
         prior_attempt = ReviewAttempt.from_mapping(prior_state["attempt"])
@@ -600,10 +605,6 @@ def _run_exact_head_review(
         if prior_attempt.status == "terminal":
             assert prior_attempt.terminal is not None
             ledger = finalization_ledger(meta, vault, task_id)
-            ledger.record_terminal(
-                attempt_id=prior_attempt.identity.attempt_id,
-                terminal_result=prior_attempt.terminal.result.value,
-            )
             # The one narrow same-HEAD relaxation: an attempt that terminated
             # before the provider launched owns no durable effect, so it may be
             # superseded at an unchanged HEAD instead of replayed as a receipt.
@@ -613,6 +614,29 @@ def _run_exact_head_review(
                 prior_state,
                 prior_attempt.terminal.result.value,
                 prior_attempt.terminal.lane_results,
+            )
+            if (
+                zero_lane_preflight
+                and not review_attempt_records_are_quiescent(
+                    store, prior_attempt
+                )
+            ):
+                raise ReviewAttemptError(
+                    "zero-lane review predecessor may own a provider effect"
+                )
+            if zero_lane_preflight and any(
+                path.exists() or path.is_symlink()
+                for path in (
+                    _callback_path(runtime_root, axis)
+                    for axis in request.policy.axes
+                )
+            ):
+                raise ReviewAttemptError(
+                    "zero-lane review preflight found a callback artifact"
+                )
+            terminal_decision = ledger.record_terminal(
+                attempt_id=prior_attempt.identity.attempt_id,
+                terminal_result=prior_attempt.terminal.result.value,
             )
             if (
                 context.head_sha == prior_attempt.identity.exact_head_sha
@@ -634,23 +658,30 @@ def _run_exact_head_review(
                     prior_state,
                     store,
                 )
-            if zero_lane_preflight and any(
-                path.exists() or path.is_symlink()
-                for path in (_callback_path(runtime_root, axis)
-                             for axis in request.policy.axes)
-            ):
+            if terminal_decision.cycle_number is None:
                 raise ReviewAttemptError(
-                    "zero-lane review preflight found a callback artifact"
+                    "terminal review attempt lacks a product cycle"
                 )
-            cycle += 1
+            if prior_attempt.terminal.result.value in {
+                "attention-required",
+                "blocked",
+            }:
+                cycle = terminal_decision.cycle_number
+                predecessor_attempt_id = prior_attempt.identity.attempt_id
+            else:
+                cycle = terminal_decision.cycle_number + 1
+        else:
+            reserved_attempt_id = prior_attempt.identity.attempt_id
 
-    request, ledger = reserve_exact_head_attempt(
+    request, ledger, cycle = reserve_exact_head_attempt(
         meta,
         vault=vault,
         worktree=worktree,
         task_id=task_id,
         request=request,
         cycle=cycle,
+        predecessor_attempt_id=predecessor_attempt_id,
+        reserved_attempt_id=reserved_attempt_id,
     )
     _assert_frozen_topology(meta, request)
     if not gate_exists or ReviewAttempt.from_mapping(

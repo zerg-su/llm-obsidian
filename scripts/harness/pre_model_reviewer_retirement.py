@@ -13,6 +13,8 @@ from .contracts import (
     OwnedResources,
     TransitionResult,
 )
+from .review_attempt import ReviewAttempt
+from .state_machine import TERMINAL
 from .store import OperationStore, StoreError
 from .supervisor import OperationSupervisor, SupervisorError
 
@@ -24,6 +26,83 @@ EVIDENCE_NAMES = (
     "exit.json",
     "callback-target.json",
 )
+
+
+def review_attempt_records_are_quiescent(
+    store: object,
+    attempt: ReviewAttempt,
+) -> bool:
+    """Prove a retry predecessor has no live or accepted provider effect."""
+
+    rows_by_owner: dict[str, list[object]] = {}
+    try:
+        for lane in attempt.identity.lanes:
+            rows = rows_by_owner.setdefault(
+                lane.owner_id, list(store.list(lane.owner_id))
+            )
+            parents = [
+                row
+                for row in rows
+                if row.spec.operation_id == lane.operation_id
+            ]
+            if len(parents) > 1 or (
+                parents and not _quiescent_parent(parents[0], lane)
+            ):
+                return False
+            children = [
+                row
+                for row in rows
+                if row.spec.parent_operation_id == lane.operation_id
+            ]
+            if len(children) > 1 or any(
+                not _quiescent_child(child, lane) for child in children
+            ):
+                return False
+    except (AttributeError, StoreError, TypeError, ValueError):
+        return False
+    return True
+
+
+def _quiescent_parent(parent: object, lane: object) -> bool:
+    route = parent.spec.route
+    return not any(
+        (
+            parent.spec.owner_id != lane.owner_id,
+            parent.lane_id != lane.lane_id,
+            parent.run_id != lane.run_id,
+            route.runtime != lane.runtime,
+            route.model != lane.model,
+            route.effort != lane.effort,
+            route.profile != lane.profile,
+            route.routing_sha256 != lane.routing_sha256,
+            parent.state not in TERMINAL,
+            parent.resources != OwnedResources(),
+            bool(parent.pending_effect),
+            parent.effect_outcome
+            not in {EffectOutcome.NONE, EffectOutcome.FAILED},
+            parent.effect_id not in {"", "start-provider"},
+            bool(parent.accepted_callback_id),
+            bool(parent.accepted_callback_sha256),
+            bool(parent.accepted_callback_kind),
+        )
+    )
+
+
+def _quiescent_child(child: object, lane: object) -> bool:
+    return not any(
+        (
+            child.spec.kind != "review-round",
+            child.lane_id != lane.lane_id,
+            child.state not in TERMINAL,
+            child.resources != OwnedResources(),
+            bool(child.pending_effect),
+            child.effect_outcome
+            not in {EffectOutcome.NONE, EffectOutcome.FAILED},
+            bool(child.accepted_callback_id),
+            bool(child.accepted_callback_sha256),
+            bool(child.accepted_callback_kind),
+        )
+    )
 
 
 def _regular_json_object(path: Path) -> dict[str, object]:

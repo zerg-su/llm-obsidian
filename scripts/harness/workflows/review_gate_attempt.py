@@ -10,6 +10,13 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Callable, Mapping
 
+from ..finalization_ledger import (
+    MAX_FINALIZATION_CYCLES,
+    predecessor_bound_attempt_id,
+)
+from ..pre_model_reviewer_retirement import (
+    review_attempt_records_are_quiescent,
+)
 from ..store import StoreError
 from ..review_attempt import (
     EXACT_HEAD_REVIEW_PROTOCOL,
@@ -322,6 +329,8 @@ class ReviewGateAttemptMixin:
         request: ReviewOperationRequest,
         product_root: Path,
         identity: ReviewAttemptIdentity,
+        runtime_root: Path | None = None,
+        callback_root: str = "",
     ) -> ReviewAttempt:
         preset = ReviewPreset(
             depth=request.policy.depth,
@@ -371,16 +380,40 @@ class ReviewGateAttemptMixin:
                         "legacy-cross-head-resume-disabled"
                     )
                 existing = ReviewAttempt.from_mapping(raw_attempt)
-                if existing.status == "terminal" and identity.cycle == (
-                    existing.identity.cycle + 1
+                normal_next = (
+                    existing.status == "terminal"
+                    and identity.cycle == existing.identity.cycle + 1
+                    and identity.cycle <= MAX_FINALIZATION_CYCLES
+                )
+                retry_next = False
+                if (
+                    existing.status == "terminal"
+                    and 1 <= identity.cycle <= MAX_FINALIZATION_CYCLES
+                ):
+                    try:
+                        retry_next = identity.attempt_id == (
+                            predecessor_bound_attempt_id(
+                                lineage_id=(
+                                    existing.identity.finalization_lineage_id
+                                ),
+                                predecessor_attempt_id=(
+                                    existing.identity.attempt_id
+                                ),
+                                exact_head=identity.exact_head_sha,
+                                cycle_number=identity.cycle,
+                            )
+                        )
+                    except ValueError:
+                        retry_next = False
+                if existing.status == "terminal" and (
+                    normal_next or retry_next
                 ):
                     terminal = existing.terminal
-                    same_head_preflight = (
+                    zero_effect_boundary = (
                         terminal is not None
                         and terminal.result
                         == ReviewAttemptTerminalResult.ATTENTION_REQUIRED
                         and not terminal.lane_results
-                        and existing.identity.exact_head_sha == identity.exact_head_sha
                         and current.get("status") == "attention-required"
                         and current.get("active_review_operation_id")
                         == existing.identity.attempt_id
@@ -393,10 +426,44 @@ class ReviewGateAttemptMixin:
                             "review_notification_evidence", "awaiting_resolution",
                             "finalizing_recovery",
                         ))
+                        and review_attempt_records_are_quiescent(
+                            self.round_store, existing
+                        )
+                    )
+                    effectful_mechanism_boundary = (
+                        terminal is not None
+                        and terminal.result
+                        in {
+                            ReviewAttemptTerminalResult.ATTENTION_REQUIRED,
+                            ReviewAttemptTerminalResult.BLOCKED,
+                        }
+                        and isinstance(current.get("lanes"), list)
+                        and bool(current.get("lanes"))
+                        and existing.identity.exact_head_sha
+                        != identity.exact_head_sha
+                        and current.get("status") == terminal.result.value
+                        and current.get("active_review_operation_id")
+                        == existing.identity.attempt_id
+                        and current.get("dispatch_operation_id")
+                        == dispatch_operation_id
+                        and current.get("product_root") == str(product_root)
+                    )
+                    retry_callbacks_absent = (
+                        runtime_root is not None
+                        and bool(callback_root)
                         and not any(
-                            self.round_store._operation_path(
-                                lane.owner_id, lane.operation_id
+                            (
+                                runtime_root
+                                / callback_root
+                                / lane.axis
+                                / ".review-callback.json"
                             ).exists()
+                            or (
+                                runtime_root
+                                / callback_root
+                                / lane.axis
+                                / ".review-callback.json"
+                            ).is_symlink()
                             for lane in existing.identity.lanes
                         )
                     )
@@ -406,15 +473,31 @@ class ReviewGateAttemptMixin:
                         != identity.finalization_lineage_id
                         or existing.identity.plan_sha256 != identity.plan_sha256
                         or existing.identity.outcome_sha256 != identity.outcome_sha256
-                        or (existing.identity.exact_head_sha == identity.exact_head_sha
-                            and not same_head_preflight)
+                        or (
+                            retry_next
+                            and not (
+                                (
+                                    zero_effect_boundary
+                                    and retry_callbacks_absent
+                                )
+                                or effectful_mechanism_boundary
+                            )
+                        )
+                        or (
+                            existing.identity.exact_head_sha
+                            == identity.exact_head_sha
+                            and normal_next
+                        )
                     ):
                         raise ReviewAttemptError(
                             "next review attempt lacks a changed-HEAD terminal boundary"
                         )
-                    archive = self.root / "attempts" / (
-                        f"cycle-{existing.identity.cycle}.json"
+                    archive_name = (
+                        f"attempt-{existing.identity.attempt_id}.json"
+                        if retry_next
+                        else f"cycle-{existing.identity.cycle}.json"
                     )
+                    archive = self.root / "attempts" / archive_name
                     archive.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
                     archive.parent.chmod(0o700)
                     encoded = (
@@ -441,6 +524,11 @@ class ReviewGateAttemptMixin:
                             handle.write(encoded)
                             handle.flush()
                             os.fsync(handle.fileno())
+                    self._archive_prior_review_input(
+                        attempt=existing,
+                        runtime_root=runtime_root,
+                        callback_root=callback_root,
+                    )
                     _atomic_json(self.state_path, initial)
                     return attempt
                 existing.assert_identity(identity)
@@ -478,6 +566,200 @@ class ReviewGateAttemptMixin:
             _atomic_json(self.state_path, initial)
         return attempt
 
+    def _archive_prior_review_input(
+        self,
+        *,
+        attempt: ReviewAttempt,
+        runtime_root: Path | None,
+        callback_root: str,
+    ) -> None:
+        """Retire model-writable scratch using only prior round identity."""
+
+        if attempt.status != "terminal" or attempt.terminal is None:
+            raise ReviewAttemptError(
+                "review input rollover requires a terminal attempt"
+            )
+        if runtime_root is None or not callback_root:
+            raise ReviewAttemptError(
+                "review input rollover authority is unavailable"
+            )
+        runtime = runtime_root.expanduser().resolve()
+        relative = Path(callback_root)
+        if (
+            relative.is_absolute()
+            or not relative.parts
+            or relative == Path(".")
+            or ".." in relative.parts
+        ):
+            raise ReviewAttemptError("review input rollover path is invalid")
+        callbacks = runtime / relative
+        current = runtime
+        for component in relative.parts:
+            current /= component
+            if current.is_symlink():
+                raise ReviewAttemptError(
+                    "review input rollover path is invalid"
+                )
+        try:
+            callbacks.resolve(strict=False).relative_to(runtime)
+        except (OSError, ValueError) as exc:
+            raise ReviewAttemptError(
+                "review input rollover path is invalid"
+            ) from exc
+        archive = (
+            self.root
+            / "attempts"
+            / f"attempt-{attempt.identity.attempt_id}-review-input"
+        )
+        if archive.is_symlink() or (
+            archive.exists() and not archive.is_dir()
+        ):
+            raise ReviewAttemptError(
+                "review input rollover archive is invalid"
+            )
+        moves: list[tuple[Path, Path]] = []
+        for lane in attempt.identity.lanes:
+            axis_root = callbacks / lane.axis
+            if axis_root.is_symlink():
+                raise ReviewAttemptError(
+                    "review input rollover path is invalid"
+                )
+            live_meta = axis_root / ".review-meta.json"
+            live_input = axis_root / ".review-input.json"
+            archived_meta = archive / f"{lane.axis}.review-meta.json"
+            archived_input = archive / f"{lane.axis}.review-input.json"
+            if any(
+                left.exists() or left.is_symlink()
+                for left in (live_meta, live_input)
+            ) and any(
+                right.exists() or right.is_symlink()
+                for right in (archived_meta, archived_input)
+            ):
+                # A crash may split the two-file move, but never duplicate one
+                # exact artifact across mutable and immutable locations.
+                if (
+                    (live_meta.exists() or live_meta.is_symlink())
+                    and (archived_meta.exists() or archived_meta.is_symlink())
+                ) or (
+                    (live_input.exists() or live_input.is_symlink())
+                    and (archived_input.exists() or archived_input.is_symlink())
+                ):
+                    raise ReviewAttemptError(
+                        "review input rollover is ambiguous"
+                    )
+            meta_path = (
+                live_meta
+                if live_meta.exists() or live_meta.is_symlink()
+                else archived_meta
+            )
+            input_path = (
+                live_input
+                if live_input.exists() or live_input.is_symlink()
+                else archived_input
+            )
+            meta_present = meta_path.exists() or meta_path.is_symlink()
+            input_present = input_path.exists() or input_path.is_symlink()
+            if not meta_present and not input_present:
+                continue
+            if not meta_present:
+                raise ReviewAttemptError(
+                    "review input rollover metadata is unavailable"
+                )
+            if meta_path.is_symlink() or not meta_path.is_file():
+                raise ReviewAttemptError(
+                    "review input rollover metadata changed"
+                )
+            try:
+                meta = json.loads(meta_path.read_bytes())
+            except (OSError, json.JSONDecodeError) as exc:
+                raise ReviewAttemptError(
+                    "review input rollover metadata changed"
+                ) from exc
+            try:
+                children = [
+                    row
+                    for row in self.round_store.list(lane.owner_id)
+                    if row.spec.kind == "review-round"
+                    and row.spec.parent_operation_id == lane.operation_id
+                    and row.lane_id == lane.lane_id
+                    and row.spec.operation_id == meta.get("operation_id")
+                    and row.run_id == meta.get("run_id")
+                ]
+            except (AttributeError, StoreError) as exc:
+                raise ReviewAttemptError(
+                    "review input rollover round authority is unavailable"
+                ) from exc
+            if (
+                not isinstance(meta, dict)
+                or set(meta) != {
+                    "schema_version",
+                    "transport",
+                    "operation_id",
+                    "run_id",
+                    "review_id",
+                    "parent_session_operation_id",
+                    "review_mode",
+                    "axis",
+                    "verification_iteration",
+                    "started_at",
+                    "worktree",
+                    "task_name",
+                    "head_sha",
+                    "review_purpose",
+                    "review_boundary_input_sha256",
+                    "verification_profile",
+                    "route",
+                }
+                or meta.get("schema_version") != 1
+                or meta.get("transport") != "review-round"
+                or meta.get("axis") != lane.axis
+                or meta.get("parent_session_operation_id")
+                != lane.operation_id
+                or meta.get("head_sha") != attempt.identity.exact_head_sha
+                or meta.get("verification_iteration") != 0
+                or len(children) != 1
+            ):
+                raise ReviewAttemptError(
+                    "review input rollover metadata changed"
+                )
+            if input_present:
+                if input_path.is_symlink() or not input_path.is_file():
+                    raise ReviewAttemptError(
+                        "review input rollover scratch changed"
+                    )
+                try:
+                    value = json.loads(input_path.read_bytes())
+                except (OSError, json.JSONDecodeError) as exc:
+                    raise ReviewAttemptError(
+                        "review input rollover scratch changed"
+                    ) from exc
+                if (
+                    not isinstance(value, dict)
+                    or set(value)
+                    != {
+                        "schema_version",
+                        "axis",
+                        "verdict",
+                        "verification_iteration",
+                        "findings",
+                    }
+                    or value.get("schema_version") != 1
+                    or value.get("axis") != lane.axis
+                    or value.get("verification_iteration") != 0
+                ):
+                    raise ReviewAttemptError(
+                        "review input rollover scratch changed"
+                    )
+            if live_meta.exists():
+                moves.append((live_meta, archived_meta))
+            if live_input.exists():
+                moves.append((live_input, archived_input))
+        if moves:
+            archive.mkdir(parents=True, exist_ok=True, mode=0o700)
+            archive.chmod(0o700)
+        for source, destination in moves:
+            source.replace(destination)
+
     def begin_attempt(
         self,
         *,
@@ -513,6 +795,8 @@ class ReviewGateAttemptMixin:
             request=request,
             product_root=product_root,
             identity=identity,
+            runtime_root=cwd,
+            callback_root=callback_root,
         )
         return self._start_execution(
             request=request,

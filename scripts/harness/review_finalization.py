@@ -157,6 +157,7 @@ def reserve_task_finalization_cycle(
     independent_permitted: bool,
     availability: AvailabilityEvidence | None,
     now_epoch: int,
+    predecessor_attempt_id: str = "",
 ) -> TaskFinalizationReservation | None:
     """Compile all bounded choices, then atomically select the reserved cycle."""
 
@@ -205,6 +206,7 @@ def reserve_task_finalization_cycle(
             cycle: decision.ledger_policy()
             for cycle, decision in decisions.items()
         },
+        predecessor_attempt_id=predecessor_attempt_id,
     )
     selected = (
         decisions[reserved.cycle_number]

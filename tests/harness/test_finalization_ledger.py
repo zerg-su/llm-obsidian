@@ -17,6 +17,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from harness.finalization_ledger import (  # noqa: E402
     FinalizationLedger,
     FinalizationLedgerError,
+    predecessor_bound_attempt_id,
 )
 
 
@@ -280,6 +281,124 @@ with tempfile.TemporaryDirectory(prefix="finalization-ledger-mechanism.") as raw
         and sixth.reason == "finalization-budget-exhausted"
         and ledger.path.read_bytes() == before_sixth,
     )
+
+with tempfile.TemporaryDirectory(
+    prefix="finalization-ledger-predecessor-retry."
+) as raw:
+    lineage_id = attempt(450)
+    ledger = FinalizationLedger(
+        Path(raw),
+        lineage_id=lineage_id,
+        origin_task_id=attempt(451),
+        plan_sha256="1" * 64,
+        outcome_contract_sha256="2" * 64,
+        max_cycles=5,
+    )
+    for number in range(1, 5):
+        reservation = reserve(ledger, 450 + number)
+        check(
+            f"predecessor fixture reserves product cycle {number}",
+            reservation.cycle_number == number,
+        )
+        ledger.record_terminal(
+            attempt_id=attempt(450 + number),
+            terminal_result="changes-requested",
+        )
+    failed_attempt_id = attempt(455)
+    failed = reserve(ledger, 455)
+    check(
+        "predecessor fixture reserves the bounded fifth product cycle",
+        failed.cycle_number == 5,
+    )
+    mechanism = ledger.record_terminal(
+        attempt_id=failed_attempt_id,
+        terminal_result="attention-required",
+    )
+    replacement_head = "f" * 40
+    replacement_id = predecessor_bound_attempt_id(
+        lineage_id=lineage_id,
+        predecessor_attempt_id=failed_attempt_id,
+        exact_head=replacement_head,
+        cycle_number=5,
+    )
+    policies = {
+        cycle: {
+            "routes": ["finalization-primary"],
+            "reason": "primary-only",
+        }
+        for cycle in range(1, 6)
+    }
+    replacement = ledger.reserve_from_policy_matrix(
+        attempt_id=replacement_id,
+        exact_head=replacement_head,
+        task_id=attempt(456),
+        worktree="/tmp/finalization-task-456",
+        provider_policies=policies,
+        predecessor_attempt_id=failed_attempt_id,
+    )
+    snapshot = ledger.snapshot()
+    check(
+        "a predecessor-bound retry retains product cycle five",
+        mechanism.cycle_number == 5
+        and replacement.allowed
+        and replacement.created
+        and replacement.cycle_number == 5
+        and [cycle["number"] for cycle in snapshot["cycles"]]
+        == [1, 2, 3, 4, 5]
+        and snapshot["cycles"][-1]["attempt_id"] == replacement_id
+        and snapshot["attempts"][-1]["attempt_id"] == failed_attempt_id,
+    )
+    replacement_replay = ledger.reserve_from_policy_matrix(
+        attempt_id=replacement_id,
+        exact_head=replacement_head,
+        task_id=attempt(456),
+        worktree="/tmp/finalization-task-456",
+        provider_policies=policies,
+        predecessor_attempt_id=failed_attempt_id,
+    )
+    check(
+        "a predecessor-bound retry reservation replays idempotently",
+        not replacement_replay.allowed
+        and not replacement_replay.created
+        and replacement_replay.reason == "already-reserved"
+        and replacement_replay.cycle_number == 5,
+    )
+    wrong_predecessor = attempt(457)
+    before_rejection = ledger.path.read_bytes()
+    try:
+        ledger.reserve_from_policy_matrix(
+            attempt_id=predecessor_bound_attempt_id(
+                lineage_id=lineage_id,
+                predecessor_attempt_id=wrong_predecessor,
+                exact_head=replacement_head,
+                cycle_number=5,
+            ),
+            exact_head=replacement_head,
+            task_id=attempt(456),
+            worktree="/tmp/finalization-task-456",
+            provider_policies=policies,
+            predecessor_attempt_id=wrong_predecessor,
+        )
+    except FinalizationLedgerError:
+        pass
+    else:
+        raise AssertionError("an unrecorded predecessor authorized a retry")
+    check(
+        "a missing predecessor fails closed with zero ledger effect",
+        ledger.path.read_bytes() == before_rejection,
+    )
+    try:
+        predecessor_bound_attempt_id(
+            lineage_id=lineage_id,
+            predecessor_attempt_id=failed_attempt_id,
+            exact_head=replacement_head,
+            cycle_number=6,
+        )
+    except FinalizationLedgerError:
+        pass
+    else:
+        raise AssertionError("a sixth product cycle identity was synthesized")
+    check("a retry generation cannot synthesize product cycle six", True)
 
 with tempfile.TemporaryDirectory(prefix="finalization-ledger-legacy.") as raw:
     legacy = FinalizationLedger(

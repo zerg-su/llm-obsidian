@@ -38,6 +38,7 @@ from harness.contracts import (
     RuntimeRoute,
     to_dict,
 )
+from harness.finalization_ledger import predecessor_bound_attempt_id
 from harness.state_machine import TERMINAL
 from harness.store import OperationStore
 from harness.verification import load_profiles
@@ -3627,13 +3628,15 @@ with tempfile.TemporaryDirectory(prefix="review-zero-lane-preflight.") as raw:
 
     failed_runtime = PreflightFailureRuntime(store)
     gate = ReviewGateController(base / "gate", failed_runtime, store)
+    lineage_id = "00000000-0000-4000-8000-000000000901"
+    failed_attempt_id = "00000000-0000-4000-8000-000000000902"
     failed_request = request_for(
-        "review-zero-lane-cycle-1", context=context
+        failed_attempt_id, context=context
     )
     try:
         gate.begin_attempt(
             dispatch_operation_id="review-zero-lane-dispatch",
-            finalization_lineage_id="review-zero-lane-lineage",
+            finalization_lineage_id=lineage_id,
             cycle=1,
             plan_sha256="1" * 64,
             outcome_sha256="2" * 64,
@@ -3650,13 +3653,19 @@ with tempfile.TemporaryDirectory(prefix="review-zero-lane-preflight.") as raw:
         raise AssertionError("preflight fixture did not fail")
     failed_state = gate.read()
     late_recovery_rejected = not gate.recover_late_started_attempt()
+    replacement_attempt_id = predecessor_bound_attempt_id(
+        lineage_id=lineage_id,
+        predecessor_attempt_id=failed_attempt_id,
+        exact_head=context.head_sha,
+        cycle_number=1,
+    )
     replacement = request_for(
-        "review-zero-lane-cycle-2", context=context
+        replacement_attempt_id, context=context
     )
     replacement_identity = compile_review_attempt_identity(
         request=replacement,
-        finalization_lineage_id="review-zero-lane-lineage",
-        cycle=2,
+        finalization_lineage_id=lineage_id,
+        cycle=1,
         plan_sha256="1" * 64,
         outcome_sha256="2" * 64,
     )
@@ -3665,12 +3674,16 @@ with tempfile.TemporaryDirectory(prefix="review-zero-lane-preflight.") as raw:
         identity=replacement_identity,
         request=replacement,
         product_root=ROOT,
+        runtime_root=scratch,
+        callback_root="callbacks/review-zero-lane",
     )
     replayed = gate._initialize_attempt(
         dispatch_operation_id="review-zero-lane-dispatch",
         identity=replacement_identity,
         request=replacement,
         product_root=ROOT,
+        runtime_root=scratch,
+        callback_root="callbacks/review-zero-lane",
     )
     recovered_state = gate.read()
     check(
@@ -3684,13 +3697,15 @@ with tempfile.TemporaryDirectory(prefix="review-zero-lane-preflight.") as raw:
         and reopened == replayed
         and reopened.status == "pending"
         and recovered_state["status"] == "pending"
-        and recovered_state["attempt"]["identity"]["cycle"] == 2
+        and recovered_state["attempt"]["identity"]["cycle"] == 1
+        and recovered_state["attempt"]["identity"]["attempt_id"]
+        == replacement_attempt_id
         and not failed_runtime.started,
     )
     recovered_run = gate.begin_attempt(
         dispatch_operation_id="review-zero-lane-dispatch",
-        finalization_lineage_id="review-zero-lane-lineage",
-        cycle=2,
+        finalization_lineage_id=lineage_id,
+        cycle=1,
         plan_sha256="1" * 64,
         outcome_sha256="2" * 64,
         request=replacement,

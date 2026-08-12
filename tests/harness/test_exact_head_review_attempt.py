@@ -67,6 +67,7 @@ from task_review_flow import (  # noqa: E402
 )
 from outcome_contract import extract_from_bytes  # noqa: E402
 from review_resolution import review_transport_identity_sha256  # noqa: E402
+from task_review_transport import _write_round_meta  # noqa: E402
 
 
 def check(label: str, value: bool) -> None:
@@ -598,6 +599,155 @@ with tempfile.TemporaryDirectory(prefix="exact-head-attempt.") as raw:
     else:
         raise AssertionError("review-program accepted a cross-HEAD attempt")
     check("review-program rejects cross-HEAD attempt authority", True)
+
+
+with tempfile.TemporaryDirectory(prefix="exact-head-input-rollover.") as raw:
+    base = Path(raw)
+    store = OperationStore(base / ".vault-meta/harness")
+    runtime = FakeRuntime(store)
+    gate = ReviewGateController(base / "gate", runtime, store)
+
+    def start_with_input(
+        cycle: int, head: str, operation_id: str
+    ) -> object:
+        active_request = request(head, operation_id=operation_id)
+
+        def prepare_lane(
+            _axis: str,
+            _session_request: object,
+            _result: object,
+            round_: object,
+        ) -> None:
+            _write_round_meta(
+                runtime_root=base,
+                vault=base,
+                worktree=ROOT,
+                task_id="task-1",
+                depth="deep",
+                context=active_request.context,
+                lane_operation_id=round_.parent_operation_id,
+                round_=round_,
+            )
+
+        return gate.begin_attempt(
+            dispatch_operation_id="task-1",
+            finalization_lineage_id="task-1",
+            cycle=cycle,
+            plan_sha256="1" * 64,
+            outcome_sha256="2" * 64,
+            request=active_request,
+            origin_surface="11111111-1111-4111-8111-111111111111",
+            cwd=base,
+            product_root=ROOT,
+            prompt_pointer="prompts/review.md",
+            callback_root="callbacks",
+            prepare_lane=prepare_lane,
+        )
+
+    first = start_with_input(1, "a" * 40, "review-rollover-1")
+    original_meta = {}
+    original_input = {}
+    for index, lane in enumerate(first.execution.lanes):
+        axis_root = base / "callbacks" / lane.axis
+        input_path = axis_root / ".review-input.json"
+        value = {
+            "schema_version": 1,
+            "axis": lane.axis,
+            "verdict": "changes-requested" if index == 0 else "approve",
+            "verification_iteration": 0,
+            "findings": [],
+        }
+        input_path.write_text(
+            json.dumps(value, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        original_meta[lane.axis] = (
+            axis_root / ".review-meta.json"
+        ).read_bytes()
+        original_input[lane.axis] = input_path.read_bytes()
+        gate.complete_attempt_round(
+            first,
+            lane,
+            first.rounds[lane.axis],
+            ReviewResult(
+                lane.axis,
+                "changes-requested" if index == 0 else "approve",
+                (
+                    ReviewFinding(
+                        "rollover-finding",
+                        lane.axis,
+                        "important",
+                        "retire the prior attempt scratch",
+                        "the next attempt requires fresh metadata",
+                    ),
+                )
+                if index == 0
+                else (),
+                0,
+            ),
+        )
+
+    axes = tuple(sorted(original_input))
+    paths = {
+        axis: base / "callbacks" / axis / ".review-input.json"
+        for axis in axes
+    }
+    paths[axes[0]].write_bytes(original_input[axes[1]])
+    paths[axes[1]].write_bytes(original_input[axes[0]])
+    starts_before = runtime.started
+    try:
+        start_with_input(2, "b" * 40, "review-rollover-2")
+    except ReviewAttemptError:
+        pass
+    else:
+        raise AssertionError("cross-axis review input substitution rolled over")
+    check(
+        "cross-axis review input substitution fails before provider start",
+        runtime.started == starts_before
+        and gate.read()["attempt"]["identity"]["cycle"] == 1,
+    )
+    for axis in axes:
+        paths[axis].write_bytes(original_input[axis])
+
+    archive = (
+        gate.root
+        / "attempts"
+        / "attempt-review-rollover-1-review-input"
+    )
+    archive.mkdir(parents=True)
+    duplicate = archive / f"{axes[0]}.review-input.json"
+    duplicate.write_bytes(original_input[axes[0]])
+    try:
+        start_with_input(2, "b" * 40, "review-rollover-2")
+    except ReviewAttemptError:
+        pass
+    else:
+        raise AssertionError("same-attempt review input substitution rolled over")
+    check(
+        "same-attempt scratch substitution fails before provider start",
+        runtime.started == starts_before,
+    )
+    duplicate.unlink()
+
+    second = start_with_input(2, "b" * 40, "review-rollover-2")
+    check(
+        "terminal input rollover preserves prior authority and starts fresh",
+        gate.read()["attempt"]["identity"]["cycle"] == 2
+        and runtime.started == starts_before + 2
+        and all(
+            (archive / f"{axis}.review-meta.json").read_bytes()
+            == original_meta[axis]
+            and (archive / f"{axis}.review-input.json").read_bytes()
+            == original_input[axis]
+            for axis in axes
+        )
+        and all(
+            (base / "callbacks" / lane.axis / ".review-meta.json").is_file()
+            and not (
+                base / "callbacks" / lane.axis / ".review-input.json"
+            ).exists()
+            for lane in second.execution.lanes
+        ),
+    )
 
 
 with tempfile.TemporaryDirectory(
@@ -1208,7 +1358,7 @@ with tempfile.TemporaryDirectory(prefix="exact-protocol-selector.") as raw:
         "changed HEAD never reuses a blocked terminal attempt",
         blocked_terminal["status"] == "blocked"
         and after_blocked["status"] == "reviewing"
-        and gate.read()["attempt"]["identity"]["cycle"] == 4
+        and gate.read()["attempt"]["identity"]["cycle"] == 3
         and runtime.started == 4,
     )
 
@@ -1242,7 +1392,7 @@ with tempfile.TemporaryDirectory(prefix="exact-protocol-selector.") as raw:
         "changed HEAD never reuses an attention terminal attempt",
         attention_terminal["status"] == "attention-required"
         and after_attention["status"] == "reviewing"
-        and gate.read()["attempt"]["identity"]["cycle"] == 5
+        and gate.read()["attempt"]["identity"]["cycle"] == 3
         and runtime.started == 5,
     )
 
