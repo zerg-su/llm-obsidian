@@ -314,14 +314,24 @@ class ExplicitPipelineApproval:
         )
 
 
+def _approval_sha256(approval: ExplicitPipelineApproval) -> str:
+    encoded = json.dumps(
+        to_dict(approval),
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
 @dataclass(frozen=True)
 class FrozenCustomPipeline:
     spec: PipelineSpec
     compiled: CompiledPipeline
     approval: ExplicitPipelineApproval
+    approval_card: str
     spec_sha256: str
     approval_sha256: str
-    schema_version: int = 1
+    schema_version: int = 2
 
     @property
     def definition_sha256(self) -> str:
@@ -368,10 +378,12 @@ class FrozenPipelineStore:
             raise ContractError("frozen custom pipeline inputs do not match")
         path = self._path(operation_id)
         payload = {
-            "schema_version": 1,
+            "schema_version": 2,
             "operation_id": operation_id,
             "definition_sha256": frozen.definition_sha256,
             "spec_sha256": frozen.spec_sha256,
+            "approval_sha256": frozen.approval_sha256,
+            "approval_card": frozen.approval_card,
             "approval": to_dict(approval),
             "spec": pipeline_spec_payload(spec),
         }
@@ -421,7 +433,6 @@ class FrozenPipelineStore:
         from .custom_pipelines import (
             compile_custom_spec,
             freeze_custom_pipeline,
-            render_custom_approval,
         )
 
         path = self._path(operation_id)
@@ -445,13 +456,15 @@ class FrozenPipelineStore:
                     "operation_id",
                     "definition_sha256",
                     "spec_sha256",
+                    "approval_sha256",
+                    "approval_card",
                     "approval",
                     "spec",
                 }
             ),
             "frozen custom pipeline",
         )
-        if value["schema_version"] != 1 or value["operation_id"] != operation_id:
+        if value["schema_version"] != 2 or value["operation_id"] != operation_id:
             raise ContractError("frozen custom pipeline identity is invalid")
         approval_value = _object(value["approval"], "pipeline approval")
         _exact_fields(
@@ -468,6 +481,13 @@ class FrozenPipelineStore:
             "pipeline approval",
         )
         approval = ExplicitPipelineApproval(**approval_value)
+        if value["approval_sha256"] != _approval_sha256(approval):
+            raise ContractError("frozen custom pipeline approval changed")
+        card = value["approval_card"]
+        if not isinstance(card, str) or hashlib.sha256(card.encode()).hexdigest() != (
+            approval.approval_card_sha256
+        ):
+            raise ContractError("frozen custom pipeline approval card changed")
         spec = parse_pipeline_spec(_object(value["spec"], "PipelineSpec"))
         compiled = compile_custom_spec(
             spec,
@@ -475,7 +495,6 @@ class FrozenPipelineStore:
             policy=policy,
             capabilities=capabilities,
         )
-        card = render_custom_approval(spec, compiled, policy=policy)
         frozen = freeze_custom_pipeline(spec, compiled, approval, card)
         if (
             value["definition_sha256"] != frozen.definition_sha256

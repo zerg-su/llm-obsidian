@@ -2129,7 +2129,10 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-custom.") as raw:
         policy=policy,
         capabilities=("route:resolved",),
     )
-    card = render_custom_approval(spec, compiled, policy=policy)
+    card = (
+        render_custom_approval(spec, compiled, policy=policy)
+        + "Host-reviewed coordinator authority: exact\n"
+    )
     approval = ExplicitPipelineApproval.for_card(
         definition_sha256=compiled.definition_sha256,
         approval_card=card,

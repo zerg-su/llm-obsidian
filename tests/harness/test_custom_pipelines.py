@@ -244,7 +244,9 @@ frozen = freeze_custom_pipeline(spec, compiled, approval_receipt, approval)
 check(
     "exact explicit approval freezes the compiled hash",
     frozen.definition_sha256 == compiled.definition_sha256
-    and frozen.approval_sha256 == approval_receipt.approval_card_sha256,
+    and frozen.approval.approval_card_sha256
+    == approval_receipt.approval_card_sha256
+    and frozen.approval_card == approval,
 )
 route = RuntimeRoute("codex", "sol", "high", "default", "c" * 64)
 custom_dispatch = DispatchRequest(
@@ -336,11 +338,24 @@ else:
     check("custom dispatch cannot exist before approval", False)
 with tempfile.TemporaryDirectory(prefix="custom-pipeline-store.") as raw:
     store = FrozenPipelineStore(Path(raw) / "runtime")
+    reviewed_card = approval + "Host-reviewed coordinator authority: exact\n"
+    reviewed_approval = ExplicitPipelineApproval.for_card(
+        definition_sha256=compiled.definition_sha256,
+        approval_card=reviewed_card,
+        actor="host-user-dialog",
+        decision="approve",
+    )
+    reviewed_frozen = freeze_custom_pipeline(
+        spec,
+        compiled,
+        reviewed_approval,
+        reviewed_card,
+    )
     stored = store.save(
         operation_id="custom-operation-1",
         spec=spec,
-        frozen=frozen,
-        approval=approval_receipt,
+        frozen=reviewed_frozen,
+        approval=reviewed_approval,
     )
     loaded = store.load(
         operation_id="custom-operation-1",
@@ -350,14 +365,16 @@ with tempfile.TemporaryDirectory(prefix="custom-pipeline-store.") as raw:
     )
     check(
         "owner-only frozen store revalidates the exact approved contract",
-        loaded.definition_sha256 == frozen.definition_sha256
+        loaded.definition_sha256 == reviewed_frozen.definition_sha256
+        and loaded.approval_card == reviewed_card
+        and json.loads(stored.read_text(encoding="utf-8"))["schema_version"] == 2
         and stored.stat().st_mode & 0o077 == 0
         and stored.parent.stat().st_mode & 0o077 == 0,
     )
     baseline_name, executable, extra_commands, executable_spec = resolve_custom_executable(
         store_root=Path(raw) / "runtime",
         operation_id="custom-operation-1",
-        definition_sha256=frozen.definition_sha256,
+        definition_sha256=reviewed_frozen.definition_sha256,
         registry=builtin_registry(),
         policy=policy,
         capabilities=("route:resolved",),
@@ -365,25 +382,58 @@ with tempfile.TemporaryDirectory(prefix="custom-pipeline-store.") as raw:
     check(
         "runtime resolves custom execution through the existing baseline",
         baseline_name == "engineering/change"
-        and executable.definition_sha256 == frozen.definition_sha256
+        and executable.definition_sha256 == reviewed_frozen.definition_sha256
         and extra_commands == ("make test-harness", "git diff --check")
         and executable_spec == spec,
     )
-    tampered = json.loads(stored.read_text(encoding="utf-8"))
-    tampered["definition_sha256"] = "f" * 64
-    stored.write_text(json.dumps(tampered), encoding="utf-8")
-    os.chmod(stored, 0o600)
-    try:
-        store.load(
-            operation_id="custom-operation-1",
-            registry=builtin_registry(),
-            policy=policy,
-            capabilities=("route:resolved",),
-        )
-    except Exception as exc:
-        check("frozen store detects contract tampering", "definition" in str(exc))
-    else:
-        check("frozen store detects contract tampering", False)
+    canonical = json.loads(stored.read_text(encoding="utf-8"))
+    for label, mutation, token in (
+        (
+            "frozen store detects contract tampering",
+            lambda value: value.__setitem__("definition_sha256", "f" * 64),
+            "definition",
+        ),
+        (
+            "frozen store detects approval-card tampering",
+            lambda value: value.__setitem__(
+                "approval_card", value["approval_card"] + "tampered"
+            ),
+            "approval card",
+        ),
+        (
+            "frozen store detects spec tampering",
+            lambda value: value["spec"].__setitem__("spec_id", "tampered-spec"),
+            "definition",
+        ),
+        (
+            "frozen store detects approval tampering",
+            lambda value: value["approval"].__setitem__("actor", "user"),
+            "approval",
+        ),
+        (
+            "frozen store rejects the legacy schema",
+            lambda value: (
+                value.__setitem__("schema_version", 1),
+                value.pop("approval_card"),
+            ),
+            "missing fields",
+        ),
+    ):
+        tampered = deepcopy(canonical)
+        mutation(tampered)
+        stored.write_text(json.dumps(tampered), encoding="utf-8")
+        os.chmod(stored, 0o600)
+        try:
+            store.load(
+                operation_id="custom-operation-1",
+                registry=builtin_registry(),
+                policy=policy,
+                capabilities=("route:resolved",),
+            )
+        except Exception as exc:
+            check(label, token in str(exc))
+        else:
+            check(label, False)
 
 
 def expect_rejection(label: str, mutation, token: str) -> None:
