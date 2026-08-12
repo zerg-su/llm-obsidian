@@ -43,6 +43,12 @@ class PollProbe(RuntimeWorkerLoopMixin):
     def mark_failed_research_runtime(self) -> None:
         self.events.append("classify-exit")
 
+    def mark_failed_task_summary_correction_runtime(self) -> None:
+        self.events.append("classify-summary-correction-exit")
+
+    def mark_failed_pipeline_step_correction_runtime(self) -> None:
+        self.events.append("classify-step-correction-exit")
+
     def needs_provider_restart(self) -> bool:
         self.events.append("restart-decision")
         return False
@@ -65,8 +71,14 @@ check(
 check(
     "production settle_exit_once owns classification and restart/final decision",
     probe.settle_exit_once() is True
-    and probe.events[-3:]
-    == ["classify-exit", "restart-decision", "final-exit-decision"],
+    and probe.events[-5:]
+    == [
+        "classify-exit",
+        "classify-summary-correction-exit",
+        "classify-step-correction-exit",
+        "restart-decision",
+        "final-exit-decision",
+    ],
     probe.events,
 )
 
