@@ -110,7 +110,21 @@ def _open_parser() -> argparse.ArgumentParser:
     parser.add_argument("--vault", type=Path, required=True)
     parser.add_argument("--store", type=Path, required=True)
     parser.add_argument("--surface", required=True)
+    scope = parser.add_mutually_exclusive_group(required=True)
+    scope.add_argument("--root", type=_root_id_argument)
+    scope.add_argument("--temporary", type=_root_id_argument)
+    parser.add_argument("--facade", default="dispatch")
+    return parser
+
+
+def _rebind_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="harness-dashboard rebind")
+    parser.add_argument("--vault", type=Path, required=True)
+    parser.add_argument("--store", type=Path, required=True)
+    parser.add_argument("--surface", required=True)
+    parser.add_argument("--temporary", type=_root_id_argument, required=True)
     parser.add_argument("--root", type=_root_id_argument, required=True)
+    parser.add_argument("--facade", required=True)
     return parser
 
 
@@ -448,7 +462,9 @@ def open_dashboard(
     vault: Path,
     store: Path,
     caller_surface: str,
-    root: str,
+    root: str = "",
+    temporary: str = "",
+    facade: str = "dispatch",
     adapter: CmuxAdapter | None = None,
     marker_root: Path | None = None,
     clock: Callable[[], float] = time.time,
@@ -469,8 +485,15 @@ def open_dashboard(
         raise CmuxError("dashboard store must belong to the exact vault")
     if not UUID_RE.fullmatch(caller_surface):
         raise CmuxError("coordinator surface must be an exact UUID")
-    if not ID_RE.fullmatch(root):
-        raise CmuxError("dashboard root must be one exact operation identity")
+    if bool(root) == bool(temporary):
+        raise CmuxError("dashboard requires one root or temporary identity")
+    selected = root or temporary
+    if not ID_RE.fullmatch(selected):
+        raise CmuxError("dashboard scope must be one exact operation identity")
+    from harness.dashboard_facade import FACADE_KINDS
+
+    if facade not in FACADE_KINDS:
+        raise CmuxError("dashboard facade is not registered")
     cmux = adapter or CmuxAdapter()
     markers = (marker_root or _marker_root()).expanduser().resolve()
     markers.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -483,19 +506,28 @@ def open_dashboard(
         workspace_id = inventory.surface_workspaces.get(caller_key, "")
         if not UUID_RE.fullmatch(workspace_id):
             raise CmuxError("coordinator surface has no exact workspace identity")
-        marker_key = _digest(f"{vault_digest}\0{workspace_id.casefold()}\0{root}")
+        scope = "root" if root else "temporary"
+        marker_key = _digest(
+            f"{vault_digest}\0{workspace_id.casefold()}\0{selected}"
+            if root
+            else f"{vault_digest}\0{workspace_id.casefold()}\0temporary\0{selected}"
+        )
         marker = markers / f"{marker_key}.json"
         expected = {
-            "schema_version": 3,
+            "schema_version": 3 if root else 4,
             "marker_key": marker_key,
             "vault_sha256": vault_digest,
             "store_sha256": _digest(str(resolved_store)),
             "workspace_id": workspace_id,
-            "root_id": root,
+            "root_id": selected,
         }
+        if temporary:
+            expected.update(
+                {"scope": scope, "scope_id": selected, "facade": facade}
+            )
         return _open_dashboard_unlocked(
             resolved_store=resolved_store,
-            root_id=root,
+            root_id=selected,
             caller_surface=caller_surface,
             cmux=cmux,
             inventory=inventory,
@@ -507,19 +539,184 @@ def open_dashboard(
         )
 
 
+def rebind_dashboard(
+    *,
+    vault: Path,
+    store: Path,
+    caller_surface: str,
+    temporary: str,
+    root: str,
+    facade: str,
+    adapter: CmuxAdapter | None = None,
+    marker_root: Path | None = None,
+) -> OpenResult:
+    """Atomically move one live temporary observer marker onto its root.
+
+    The existing split receives a new read-only root command. A crash after the
+    external send leaves a ``rebinding`` marker and is never replayed blindly.
+    """
+
+    resolved_vault = vault.expanduser().resolve()
+    resolved_store = store.expanduser().resolve()
+    if (
+        not resolved_vault.is_dir()
+        or not resolved_store.is_dir()
+        or not resolved_store.is_relative_to(resolved_vault)
+        or not UUID_RE.fullmatch(caller_surface)
+        or not ID_RE.fullmatch(temporary)
+        or not ID_RE.fullmatch(root)
+    ):
+        raise CmuxError("dashboard rebind identity is invalid")
+    from harness.dashboard_facade import FACADE_KINDS
+
+    if facade not in FACADE_KINDS:
+        raise CmuxError("dashboard facade is not registered")
+    cmux = adapter or CmuxAdapter()
+    markers = (marker_root or _marker_root()).expanduser().resolve()
+    markers.mkdir(parents=True, exist_ok=True, mode=0o700)
+    vault_digest = _digest(str(resolved_vault))
+    with _marker_lock(markers / f"{vault_digest}.guard"):
+        inventory = cmux.surface_workspaces()
+        caller_key = caller_surface.casefold()
+        if caller_key in inventory.ambiguous_surfaces:
+            raise CmuxError("coordinator surface placement is ambiguous")
+        workspace_id = inventory.surface_workspaces.get(caller_key, "")
+        if not UUID_RE.fullmatch(workspace_id):
+            raise CmuxError("coordinator surface has no exact workspace identity")
+
+        def marker_identity(scope: str, value: str) -> tuple[str, Path]:
+            key = _digest(
+                f"{vault_digest}\0{workspace_id.casefold()}\0{value}"
+                if scope == "root"
+                else f"{vault_digest}\0{workspace_id.casefold()}\0{scope}\0{value}"
+            )
+            return key, markers / f"{key}.json"
+
+        temporary_key, temporary_marker = marker_identity("temporary", temporary)
+        root_key, root_marker = marker_identity("root", root)
+        if root_marker.exists():
+            value = _read_marker(root_marker)
+            surface_id = str(value.get("surface_id") or "")
+            if (
+                value.get("schema_version") != 3
+                or value.get("marker_key") != root_key
+                or value.get("scope") != "root"
+                or value.get("scope_id") != root
+                or value.get("root_id") != root
+                or value.get("facade") != facade
+                or value.get("workspace_id") != workspace_id
+                or value.get("state") != "ready"
+                or not UUID_RE.fullmatch(surface_id)
+                or surface_id.casefold() in inventory.ambiguous_surfaces
+                or inventory.surface_workspaces.get(surface_id.casefold(), "").casefold()
+                != workspace_id.casefold()
+            ):
+                raise CmuxError("dashboard root rebind marker is ambiguous")
+            temporary_marker.unlink(missing_ok=True)
+            return OpenResult(surface_id, workspace_id, True)
+        if not temporary_marker.exists():
+            raise CmuxError("dashboard temporary marker is unavailable")
+        value = _read_marker(temporary_marker)
+        surface_id = str(value.get("surface_id") or "")
+        if (
+            value.get("schema_version") != 4
+            or value.get("marker_key") != temporary_key
+            or value.get("scope") != "temporary"
+            or value.get("scope_id") != temporary
+            or value.get("root_id") != temporary
+            or value.get("facade") != facade
+            or value.get("workspace_id") != workspace_id
+            or value.get("state") != "ready"
+            or not UUID_RE.fullmatch(surface_id)
+            or surface_id.casefold() in inventory.ambiguous_surfaces
+            or inventory.surface_workspaces.get(surface_id.casefold(), "").casefold()
+            != workspace_id.casefold()
+        ):
+            raise CmuxError("dashboard temporary rebind marker is ambiguous")
+        rebinding = {
+            **value,
+            "state": "rebinding",
+            "target_root_id": root,
+            "target_marker_key": root_key,
+        }
+        _write_marker(temporary_marker, rebinding)
+        command = shlex.join(
+            [
+                sys.executable,
+                str(Path(__file__).resolve()),
+                "--store",
+                str(resolved_store),
+                "--root",
+                root,
+                "--interval",
+                "1",
+                "--recent",
+                "3",
+            ]
+        )
+        cmux.send_key(surface_id, "C-c")
+        cmux.send(surface_id, command)
+        cmux.send_key(surface_id, "Enter")
+        ready = {
+            "schema_version": 3,
+            "marker_key": root_key,
+            "vault_sha256": vault_digest,
+            "store_sha256": _digest(str(resolved_store)),
+            "workspace_id": workspace_id,
+            "scope": "root",
+            "scope_id": root,
+            "root_id": root,
+            "facade": facade,
+            "state": "ready",
+            "surface_id": surface_id,
+            "reserved_at": 0,
+        }
+        _write_marker(temporary_marker, ready)
+        os.replace(temporary_marker, root_marker)
+        return OpenResult(surface_id, workspace_id, False)
+
+
 def _open_main(argv: Sequence[str]) -> int:
     args = _open_parser().parse_args(argv)
     result = open_dashboard(
         vault=args.vault,
         store=args.store,
         caller_surface=args.surface,
-        root=args.root,
+        root=args.root or "",
+        temporary=args.temporary or "",
+        facade=args.facade,
     )
     print(
         json.dumps(
             {
                 "schema_version": 1,
                 "status": "reused" if result.reused else "created",
+                "surface_id": result.surface_id,
+                "workspace_id": result.workspace_id,
+                "root": args.root or "",
+                "temporary": args.temporary or "",
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+def _rebind_main(argv: Sequence[str]) -> int:
+    args = _rebind_parser().parse_args(argv)
+    result = rebind_dashboard(
+        vault=args.vault,
+        store=args.store,
+        caller_surface=args.surface,
+        temporary=args.temporary,
+        root=args.root,
+        facade=args.facade,
+    )
+    print(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "status": "reused" if result.reused else "rebound",
                 "surface_id": result.surface_id,
                 "workspace_id": result.workspace_id,
                 "root": args.root,
@@ -544,6 +741,8 @@ def main(
     values = list(sys.argv[1:] if argv is None else argv)
     if values[:1] == ["open"]:
         return _open_main(values[1:])
+    if values[:1] == ["rebind"]:
+        return _rebind_main(values[1:])
     args = _live_parser().parse_args(values)
     emit = output or (lambda value: print(value, end=""))
     is_tty = (tty_probe or sys.stdout.isatty)()

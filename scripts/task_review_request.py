@@ -131,6 +131,7 @@ def _request(
             primary,
             context,
             axis_routes=axis_routes,
+            root_operation_id=task_id,
         ),
     )
 

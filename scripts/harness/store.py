@@ -124,6 +124,34 @@ class OperationStore:
         record = OperationRecord(spec, "created", 0, lane_id, run_id, OwnedResources())
         with self.locked(spec.owner_id):
             records = self.list(spec.owner_id)
+            if spec.root_operation_id:
+                if spec.parent_operation_id:
+                    parent = next(
+                        (
+                            item
+                            for item in records
+                            if item.spec.operation_id == spec.parent_operation_id
+                        ),
+                        None,
+                    )
+                    if parent is None and not (
+                        spec.parent_operation_id
+                        == spec.root_operation_id
+                        == spec.owner_id
+                    ):
+                        raise StoreError("operation parent lineage is unavailable")
+                    parent_root = (
+                        parent.spec.root_operation_id or parent.spec.operation_id
+                        if parent is not None
+                        else spec.root_operation_id
+                    )
+                    if parent is not None and (
+                        parent.spec.owner_id != spec.owner_id
+                        or parent_root != spec.root_operation_id
+                    ):
+                        raise StoreError("operation root lineage is foreign")
+                elif spec.root_operation_id != spec.operation_id:
+                    raise StoreError("root operation lineage is inconsistent")
             for existing in records:
                 if (
                     existing.run_id == run_id

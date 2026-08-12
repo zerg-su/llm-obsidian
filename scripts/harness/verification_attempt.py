@@ -94,6 +94,7 @@ def pipeline_verify_identity(
         keep_open=False,
         contract_sha256=definition_sha256,
         parent_operation_id=parent.operation_id,
+        root_operation_id=parent.root_operation_id or parent.operation_id,
     )
     lane_id = hashlib.sha256(
         f"{idempotency_key}:lane".encode()

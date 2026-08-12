@@ -481,6 +481,7 @@ class OperationSpec:
     keep_open: bool = False
     contract_sha256: str = ""
     parent_operation_id: str = ""
+    root_operation_id: str = ""
     schema_version: int = 1
 
     def __post_init__(self) -> None:
@@ -501,6 +502,10 @@ class OperationSpec:
             _identifier(self.parent_operation_id, "parent_operation_id")
             if self.parent_operation_id == self.operation_id:
                 raise ContractError("operation cannot be its own parent")
+        if self.root_operation_id:
+            _identifier(self.root_operation_id, "root_operation_id")
+            if not self.parent_operation_id and self.root_operation_id != self.operation_id:
+                raise ContractError("root operation lineage is inconsistent")
 
 
 @dataclass(frozen=True)
@@ -777,6 +782,7 @@ def operation_spec_from_dict(value: Mapping[str, Any]) -> OperationSpec:
         keep_open=value.get("keep_open", False),
         contract_sha256=value.get("contract_sha256", ""),
         parent_operation_id=value.get("parent_operation_id", ""),
+        root_operation_id=value.get("root_operation_id", ""),
         schema_version=value.get("schema_version", 0),
     )
 

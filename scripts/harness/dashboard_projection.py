@@ -157,11 +157,19 @@ def _root_id(
     program instead of silently dropping the operation from the dashboard.
     """
 
+    declared = record.spec.root_operation_id
     current = record
     seen = {current.spec.operation_id}
     while True:
+        if declared and current.spec.operation_id == declared:
+            return declared
         parent_id = _parent_id(current)
         parent = by_id.get(parent_id) if parent_id else None
+        if declared and (
+            parent is None
+            or parent.spec.root_operation_id not in {"", declared}
+        ):
+            return f"invalid-lineage:{record.spec.operation_id}"
         if parent is None or parent.spec.operation_id in seen:
             return current.spec.operation_id
         seen.add(parent.spec.operation_id)

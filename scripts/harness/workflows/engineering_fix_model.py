@@ -351,6 +351,9 @@ def _round_identity(
         keep_open=False,
         contract_sha256=definition_sha256,
         parent_operation_id=parent.spec.operation_id,
+        root_operation_id=(
+            parent.spec.root_operation_id or parent.spec.operation_id
+        ),
     )
     return FixPhaseRound(
         spec=spec,

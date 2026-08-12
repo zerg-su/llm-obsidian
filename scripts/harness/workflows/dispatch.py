@@ -213,6 +213,7 @@ def operation_spec(request: DispatchRequest) -> OperationSpec:
             request.review.verification_profile or "full"
         ),
         contract_sha256=contract.definition_sha256,
+        root_operation_id=request.task_id,
     )
 
 

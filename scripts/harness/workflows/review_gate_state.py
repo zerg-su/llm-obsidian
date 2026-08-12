@@ -632,6 +632,7 @@ class ReviewGateStateMixin:
                 else ""
             ),
             topology_sha256=topology_sha256,
+            root_operation_id=lanes[0].spec.root_operation_id,
         )
         if isinstance(topology, dict) and request.topology.payload() != topology:
             raise ValueError("stored review effective topology changed")

@@ -141,9 +141,14 @@ class ReviewOperationRequest:
     lane_ids: Mapping[str, str] | None = None
     requested_mode: str = ""
     topology_sha256: str = ""
+    root_operation_id: str = ""
     topology: EffectiveReviewTopology = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
+        if self.root_operation_id and not re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", self.root_operation_id
+        ):
+            raise ValueError("review root operation identity is invalid")
         if self.policy.purpose != self.context.purpose:
             raise ValueError("review policy and context purposes must match")
         profiles = {"reviewer-readonly", "reviewer-callback"}
@@ -288,6 +293,12 @@ def operation_spec(request: ReviewOperationRequest) -> OperationSpec:
         route=route,
         context_manifest=request.context.manifest,
         verification_profile=request.context.verification_profile,
+        parent_operation_id=(
+            request.root_operation_id
+            if request.root_operation_id != policy.operation_id
+            else ""
+        ),
+        root_operation_id=request.root_operation_id,
     )
 
 
@@ -524,6 +535,11 @@ def _session_spec(
         idempotency_key=hashlib.sha256(identity).hexdigest(),
         kind=review_parent_kind(axis),
         route=route,
+        parent_operation_id=(
+            base.root_operation_id
+            if base.root_operation_id != operation_id
+            else ""
+        ),
     )
 
 
