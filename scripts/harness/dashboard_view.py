@@ -316,6 +316,17 @@ def _program_lines(program: ProgramView) -> list[str]:
         f"  executor {_route(program.executor)}  {program.executor_status}",
         f"  controls {controls}  loop {loop}",
     ]
+    if program.self_healed_count or program.task_result.status == "complete":
+        lines.append(
+            f"  stage {program.current_stage}  "
+            f"self-healed {program.self_healed_count}"
+        )
+    if program.task_result.status == "complete":
+        result = program.task_result
+        lines.append(
+            f"  result {result.disposition}  evidence {result.evidence_count}  "
+            f"gaps {result.gap_count}  plan {result.plan_close_status}"
+        )
     lines.extend(_step_lines(program))
     if program.children:
         lines.append("  children with no exact step lineage")
@@ -637,7 +648,7 @@ def _root_summary(program: ProgramView) -> list[RootRow]:
     suffix = f"  {timing}" if timing else ""
     route = program.executor
     executor_timing = _known_timing(program.timing)
-    return [
+    rows = [
         RootRow(
             f"{marker} {label} {_task_name(program)}  "
             f"dispatch {_short(program.operation_id)}{suffix}",
@@ -654,6 +665,27 @@ def _root_summary(program: ProgramView) -> list[RootRow]:
             ROOT_PRIORITY_ROUTE,
         ),
     ]
+    if program.self_healed_count or program.task_result.status == "complete":
+        rows.append(
+            RootRow(
+                f"  stage {program.current_stage} · "
+                f"self-healed {program.self_healed_count}",
+                NO_EMPHASIS,
+                ROOT_PRIORITY_DETAIL,
+            )
+        )
+    if program.task_result.status == "complete":
+        result = program.task_result
+        rows.append(
+            RootRow(
+                f"  result {result.disposition} · evidence "
+                f"{result.evidence_count} · gaps {result.gap_count} · "
+                f"plan {result.plan_close_status}",
+                NO_EMPHASIS,
+                ROOT_PRIORITY_DETAIL,
+            )
+        )
+    return rows
 
 
 def _root_step_lines(

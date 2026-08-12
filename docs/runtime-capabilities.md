@@ -20,7 +20,7 @@ must not be inferred from another runtime.
 | `PostToolUse[ExitPlanMode]` plan capture | Automatic | Not provided by this plugin | Use `/save-plan` equivalent explicitly |
 | Compaction recovery | PostCompact adapter + host context behavior | Valid PostCompact hint; `SessionStart(source=compact)` reloads hot cache | Manual |
 | Harness operations | Shared owner-scoped ledger; `status`, `inspect`, `resume`, `reconcile`, `cancel`, `close`, `doctor` | Same | Read-only inspection works; visible provider lifecycle requires a supported host |
-| Harness terminal observer | External root-scoped terminal observer; user-owned cmux split | Same root-scoped terminal observer and split ownership | Owner-wide diagnostic only; no provider lifecycle |
+| Harness terminal observer | Any registered facade opens/reuses one external root-scoped terminal observer; temporary markers rebind without another split | Same root-scoped observer, rebind, and split ownership | Owner-wide diagnostic only; no provider lifecycle |
 | cmux workspace progress | Exact live controller programs in the coordinator origin workspace; idle clears | Same content-free label and cleanup semantics | Not projected |
 | Operation telemetry | Shared scripts emit `pipeline-events.jsonl`; task/review lifecycle adds numeric latency and outcome counters | Same | Same for explicit scripts |
 | Durable review history | Unified simple/deep operation archives exact HEAD/profile evidence at reap | Same | Explicit exact-operation archive from the coordinator vault |
@@ -56,8 +56,13 @@ workspace-scoped `clear-progress`. Claude and Codex use the same content-free
 label and the same `set-progress`/`clear-progress` transport.
 
 The Harness dashboard is also read-only but has a different scope. Normal live
-mode is a root-scoped terminal observer bound to exactly one dispatch root; its
-cmux split is external and user-owned. The normal composition is task-name-first:
+mode is a root-scoped terminal observer bound to exactly one durable root from
+dispatch, plan/review, verify, fix, recovery, pivot, or reap; its cmux split is
+external and user-owned. Before root creation, one request-keyed temporary
+marker may be opened and atomically rebound onto the durable root without a
+second split. Root lineage is explicit in new OperationSpec records; stale,
+foreign, or ambiguous ancestry is excluded rather than inferred. The normal
+composition is task-name-first:
 title/store/update, root and executor summaries, compact steps with exactly
 current work expanded, recent roots, issues, and a legend. `--all` and
 `harness dashboard` remain an explicit owner-wide diagnostic, never the default
@@ -69,6 +74,15 @@ plus visible symbols and English redundancy.
 same text. Projection, timing, and rendering have no lifecycle authority: they
 cannot start, stop, acknowledge, transition, recover, verify, submit, reap, or
 clean up an operation.
+
+The same projection validates content-free fresh-repair receipts and shows only
+their count/current stage. After reap, it binds scalar outcome disposition and
+evidence/gap counts to the exact summary digest and validated result marker;
+summary title/body and repaired artifact content are never rendered. The one
+contract-family registry remains `scripts/harness/contracts.py`. Active plan
+authority remains the immutable dispatch snapshot plus an ordered explicit
+amendment chain; the mutable source plan is only an optimistic reap-close
+target.
 
 Durable review pages are intentionally separate from telemetry. In unattended
 final reap, the lifecycle contract hashes the coordinator-generated marker,

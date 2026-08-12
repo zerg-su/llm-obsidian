@@ -25,6 +25,11 @@ from .artifact_repair import (
 )
 from .contracts import CanonicalContractTemplate, ContractFamily
 from .verification_attempt import verification_input_sha256
+from .fresh_artifact_repair import (
+    FreshArtifactRepair,
+    FreshRepairError,
+    launch_fresh_repair_for_worker,
+)
 
 
 def task_summary_contract_template(
@@ -179,10 +184,15 @@ class RuntimeWorkerSummaryMixin:
             self.summary_digest = ""
             self.summary_stable_reads = 0
         except CorrectionBudgetExhausted:
-            self.summary_attention(
-                "wiki-summary-correction-exhausted",
-                AttentionReason.RETRY_EXHAUSTED,
-            )
+            try:
+                launch_fresh_repair_for_worker(self, owner, invalid_sha256)
+                self.summary_digest = ""
+                self.summary_stable_reads = 0
+            except FreshRepairError:
+                self.summary_attention(
+                    "wiki-summary-correction-exhausted",
+                    AttentionReason.RETRY_EXHAUSTED,
+                )
         except CorrectionNotificationUncertain:
             self.summary_attention(
                 "wiki-summary-correction-notification-uncertain",
@@ -708,9 +718,40 @@ class RuntimeWorkerSummaryMixin:
         )
 
     def finish_task_summary(self, raw: bytes) -> None:
+        owner = getattr(self, "task_summary_artifact_owner", None)
+        if isinstance(owner, ContractArtifactOwner):
+            try:
+                fresh = FreshArtifactRepair.load(owner=owner)
+                callback = fresh.scratch / ".artifact-repair-callback.json"
+                fresh_record = self.store.read(
+                    self.spec["owner_id"],
+                    str(fresh.reservation["operation_id"]),
+                )
+                if (
+                    callback.is_file()
+                    and not callback.is_symlink()
+                    and fresh_record.accepted_callback_kind == "result"
+                ):
+                    meta = json.loads(
+                        (self.spec["cwd"] / ".task-meta.json").read_text(
+                            encoding="utf-8"
+                        )
+                    )
+                    fresh.accept(
+                        lambda value: validate_summary_for_task(
+                            value,
+                            meta,
+                            allow_missing_session=True,
+                            require_schema=True,
+                        )
+                    )
+                    self.summary_digest = ""
+                    self.summary_stable_reads = 0
+                    return
+            except (FreshRepairError, StoreError, OSError, json.JSONDecodeError):
+                pass
         if not self.summary_is_stable(raw):
             return
-        owner = getattr(self, "task_summary_artifact_owner", None)
         if not isinstance(owner, ContractArtifactOwner):
             self.summary_attention("wiki-summary-template-unavailable")
             return

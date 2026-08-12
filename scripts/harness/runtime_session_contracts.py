@@ -169,6 +169,7 @@ def _normalize_core_request(request: RuntimeSessionRequest) -> None:
         "task-summary",
         "research-fetch",
         "research-synth",
+        "artifact-repair",
     }:
         raise RuntimeSessionError("runtime callback mode is invalid")
     if (
@@ -354,6 +355,11 @@ def _normalize_checkpoint_and_product(
         ):
             raise RuntimeSessionError(
                 "review callback scratch must be isolated from product root"
+            )
+    elif request.callback_mode == "artifact-repair":
+        if product_root is not None or not request.cwd.is_dir():
+            raise RuntimeSessionError(
+                "artifact repair requires an isolated scratch root"
             )
     elif request.callback_mode not in {"research-fetch", "research-synth"}:
         if product_root is None:

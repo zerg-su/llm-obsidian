@@ -16,7 +16,13 @@ from .runtime_worker_contracts import (
 
 
 CALLBACK_MODES = frozenset(
-    {"envelope", "task-summary", "research-fetch", "research-synth"}
+    {
+        "envelope",
+        "task-summary",
+        "research-fetch",
+        "research-synth",
+        "artifact-repair",
+    }
 )
 
 
@@ -275,7 +281,8 @@ def load_spec(path: Path) -> dict[str, Any]:
         raise RuntimeWorkerError("reviewer product root is required")
     if (
         not reviewer_sandbox
-        and callback_mode not in {"research-fetch", "research-synth"}
+        and callback_mode
+        not in {"research-fetch", "research-synth", "artifact-repair"}
         and product_root is None
     ):
         raise RuntimeWorkerError("ordinary runtime product root is required")

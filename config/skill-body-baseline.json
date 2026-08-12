@@ -73,11 +73,11 @@
       "token_estimate": 236
     },
     "dispatch": {
-      "body_bytes": 9809,
-      "body_lines": 157,
-      "closure_bytes": 9809,
-      "closure_token_estimate": 2453,
-      "token_estimate": 2453
+      "body_bytes": 11208,
+      "body_lines": 177,
+      "closure_bytes": 11208,
+      "closure_token_estimate": 2802,
+      "token_estimate": 2802
     },
     "distill-runbook": {
       "body_bytes": 4343,
@@ -150,11 +150,11 @@
       "token_estimate": 171
     },
     "reap": {
-      "body_bytes": 3175,
-      "body_lines": 63,
-      "closure_bytes": 3175,
-      "closure_token_estimate": 794,
-      "token_estimate": 794
+      "body_bytes": 3690,
+      "body_lines": 69,
+      "closure_bytes": 3690,
+      "closure_token_estimate": 923,
+      "token_estimate": 923
     },
     "research": {
       "body_bytes": 1183,

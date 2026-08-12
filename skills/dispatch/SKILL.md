@@ -66,7 +66,11 @@ Bounded review/schema work may use the compiled ephemeral profile below.
    Before built-in validate/start, if cmux is available, idempotently run
    `python3 <vault-root>/scripts/harness-dashboard.py open --vault <vault-root>
    --store <vault-root>/.vault-meta/harness --surface "$CMUX_SURFACE_ID"
-   --root "<request-id>"` with the exact approved request UUID. The split sees
+   --root "<request-id>" --facade dispatch` with the exact approved request UUID.
+   Every other registered root-producing facade uses the same
+   `harness.dashboard_facade` helper. If its durable root is not available yet,
+   it opens one `--temporary` request scope and then uses `rebind` on that exact
+   marker/split; it never opens a replacement split. The split sees
    only that request tree. `observer.argv` omits `--surface`; coordinator appends
    its anchored value before execution. Continue after a contained display failure;
    the observer is external to Harness ownership.
@@ -98,8 +102,8 @@ plan into the owner-only content-addressed
 `.vault-meta/approved-plan-snapshots/` store outside the task worktree and
 binds metadata/review context to that exact digest. Later source-plan edits
 affect only future dispatches; an active task changes plan identity only through
-the explicit predecessor-bound amendment constructor. The generic provider
-runtime owns the anchored split/workspace,
+the explicit predecessor-bound amendment constructor. The generic provider runtime
+owns the anchored split/workspace,
 provider launch, callback relay, resume, and exact cleanup. A UUID is
 claimed before mutation; launched requests are idempotent, while preparing or
 failed requests fail closed.
@@ -112,6 +116,13 @@ reported while the result files independently. `shared` retains the pending
 source plan. Metadata binds `interaction_policy`, `plan_snapshot_file`,
 `approved_plan_sha256`,
 `forbidden_actions`, and `watchdog_policy`.
+The five model-owned JSON families and their field ownership/budgets have one
+registry in `scripts/harness/contracts.py`; no skill or facade may invent a
+parallel schema or retry count. After deterministic and registered same-session
+repair are exhausted, only an eligible family may reserve one restart-safe
+XHigh artifact-only session in isolated scratch. It prefers the opposite
+provider, has attempt 1/restart 0, and cannot receive a product or durable-state
+write root. Its receipts contain identities and digests only.
 `engineering/fix` runs one persistent executor
 session through exact harness prompts for `reproduce`, `root-cause`,
 `regression-test`, and `minimal-fix`. The model submits a bounded result through

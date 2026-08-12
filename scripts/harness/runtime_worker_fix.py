@@ -389,6 +389,8 @@ class RuntimeWorkerFixMixin:
     def submit_fix_result(
         self, round_: object, callback_path: Path, result_pointer: str
     ) -> None:
+        if self.adopt_fresh_pipeline_step_result():
+            return
         result_path = self.spec["cwd"] / result_pointer
         result_digest = _bounded_file_sha256(result_path)
         if not result_digest:

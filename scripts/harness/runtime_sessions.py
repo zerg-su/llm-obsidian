@@ -74,6 +74,15 @@ class RuntimeSessionManager(
 ):
     """Drive exact provider resources through one durable OperationRecord."""
 
+    def start_fresh_artifact_repair(self, repair: object) -> object:
+        """Run only the registered typed fresh-artifact repair facade."""
+
+        from .fresh_artifact_repair import FreshArtifactRepair
+
+        if not isinstance(repair, FreshArtifactRepair):
+            raise RuntimeSessionError("fresh artifact repair request is invalid")
+        return repair.start(self)
+
     def __init__(
         self,
         store: OperationStore,

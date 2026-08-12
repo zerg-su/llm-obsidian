@@ -29,6 +29,7 @@ test-harness:
 	@python3 tests/harness/test_contracts.py
 	@python3 tests/harness/test_contract_registry.py
 	@python3 tests/harness/test_artifact_repair.py
+	@python3 tests/harness/test_fresh_artifact_repair.py
 	@python3 tests/harness/test_pipeline_submit_failure_boundary.py
 	@python3 tests/harness/test_review_submit_corrections.py
 	@python3 tests/harness/test_contract_boundaries.py
@@ -109,6 +110,7 @@ test-harness:
 	@python3 tests/harness/test_diagnostics.py
 	@python3 tests/harness/test_dashboard_facade.py
 	@python3 tests/harness/test_root_lineage.py
+	@python3 tests/harness/test_dashboard_observability.py
 	@python3 tests/harness/test_harness_dashboard.py
 	@python3 tests/harness/test_suite_registration.py
 

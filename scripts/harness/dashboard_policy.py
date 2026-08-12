@@ -120,6 +120,33 @@ UNKNOWN_REVIEW = ReviewSummaryView()
 
 
 @dataclass(frozen=True)
+class TaskResultView:
+    """Content-free terminal Wiki Summary projection."""
+
+    status: str = UNKNOWN
+    disposition: str = UNKNOWN
+    evidence_count: int = 0
+    gap_count: int = 0
+    plan_close_status: str = UNKNOWN
+
+    def __post_init__(self) -> None:
+        if (
+            self.status not in {UNKNOWN, "complete"}
+            or self.disposition
+            not in {UNKNOWN, "achieved", "partially-achieved", "not-achieved"}
+            or type(self.evidence_count) is not int
+            or self.evidence_count < 0
+            or type(self.gap_count) is not int
+            or self.gap_count < 0
+            or self.plan_close_status not in {UNKNOWN, "closed", "conflict", "retained"}
+        ):
+            raise ValueError("dashboard task result is invalid")
+
+
+UNKNOWN_TASK_RESULT = TaskResultView()
+
+
+@dataclass(frozen=True)
 class ChildView:
     operation_id: str
     kind: str
@@ -183,6 +210,9 @@ class ProgramView:
     dropped_lanes: int = 0
     timing: TimingView = UNKNOWN_TIMING
     task_name: str = UNKNOWN
+    self_healed_count: int = 0
+    current_stage: str = UNKNOWN
+    task_result: TaskResultView = UNKNOWN_TASK_RESULT
 
 
 @dataclass(frozen=True)

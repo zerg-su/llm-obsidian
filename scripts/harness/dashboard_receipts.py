@@ -19,10 +19,12 @@ from .contracts import (
     VerificationEvidence,
 )
 from .dashboard_policy import (
+    UNKNOWN_TASK_RESULT,
     UNKNOWN_REVIEW,
     UNKNOWN_TIMING,
     ReviewSummaryView,
     TimingView,
+    TaskResultView,
 )
 from .liveness import LivenessState
 from .review_attempt import (
@@ -311,6 +313,102 @@ def root_task_name(store: OperationStore, record: OperationRecord) -> str:
     ):
         return ""
     return " ".join(value.split())
+
+
+def repair_receipt_count(store: OperationStore, record: OperationRecord) -> int:
+    """Count only exact content-free registered self-heal receipts."""
+
+    runtime = (
+        store.root
+        / "owners"
+        / record.spec.owner_id
+        / "runtime"
+        / record.spec.operation_id
+        / "fresh-artifact-repair"
+    )
+    if not runtime.is_dir() or runtime.is_symlink():
+        return 0
+    expected = {
+        "status",
+        "family",
+        "stage",
+        "repair_id",
+        "input_sha256",
+        "output_sha256",
+        "route_sha256",
+    }
+    families = {
+        "task-summary",
+        "review-input",
+        "review-resolution",
+        "pipeline-step-result",
+    }
+    accepted = 0
+    for path in sorted(runtime.glob("*/*/receipt.json")):
+        value = _read_object(path, boundary=runtime)
+        if (
+            value is not None
+            and set(value) == expected
+            and value.get("status") == "self-healed"
+            and value.get("family") in families
+            and value.get("stage") == "fresh-context"
+            and all(
+                re.fullmatch(r"[0-9a-f]{64}", str(value.get(field) or ""))
+                for field in (
+                    "repair_id",
+                    "input_sha256",
+                    "output_sha256",
+                    "route_sha256",
+                )
+            )
+        ):
+            accepted += 1
+    return accepted
+
+
+def root_task_result(
+    store: OperationStore, record: OperationRecord
+) -> TaskResultView:
+    """Bind terminal scalar outcome to the exact reaped summary bytes."""
+
+    if record.state != "complete":
+        return UNKNOWN_TASK_RESULT
+    bound = _bound_task(store, record)
+    if bound is None:
+        return UNKNOWN_TASK_RESULT
+    cwd, _meta, _meta_sha256 = bound
+    complete = _read_object(cwd / ".task-reap-complete.json", boundary=cwd)
+    summary_snapshot = _read_snapshot(cwd / ".task-summary.json", boundary=cwd)
+    if complete is None or summary_snapshot is None:
+        return UNKNOWN_TASK_RESULT
+    summary, summary_bytes = summary_snapshot
+    evidence = summary.get("outcome_evidence_ids")
+    gaps = summary.get("residual_gap_pointers")
+    disposition = summary.get("outcome_disposition")
+    close = complete.get("plan_close_status")
+    result_path = Path(str(complete.get("result_path") or "")).expanduser()
+    vault = _vault_for_store(store)
+    if (
+        complete.get("validated") is not True
+        or complete.get("summary_sha256")
+        != hashlib.sha256(summary_bytes).hexdigest()
+        or summary.get("schema_version") != 2
+        or disposition not in {"achieved", "partially-achieved", "not-achieved"}
+        or not isinstance(evidence, list)
+        or any(not isinstance(item, str) or not item for item in evidence)
+        or not isinstance(gaps, list)
+        or any(not isinstance(item, str) or not item for item in gaps)
+        or close not in {"closed", "conflict", "retained"}
+        or vault is None
+        or not result_path.is_absolute()
+        or not absolute_path_is_safe(result_path)
+        or not result_path.is_file()
+        or not result_path.resolve().is_relative_to(vault / "wiki")
+    ):
+        return UNKNOWN_TASK_RESULT
+    return TaskResultView(
+        "complete", disposition, len(evidence), len(gaps), close
+    )
 
 
 def root_timing(

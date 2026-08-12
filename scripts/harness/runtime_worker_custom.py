@@ -273,6 +273,8 @@ class RuntimeWorkerCustomMixin:
             if operation_id != round_.spec.operation_id or run_id != round_.run_id:
                 raise RuntimeWorkerError("custom callback target changed")
             if not callback_path.exists():
+                if self.adopt_fresh_pipeline_step_result():
+                    return
                 result_path = self.spec["cwd"] / str(request["result_pointer"])
                 result_digest = _bounded_file_sha256(result_path)
                 if result_digest:

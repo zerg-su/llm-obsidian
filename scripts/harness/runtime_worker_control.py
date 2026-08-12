@@ -25,6 +25,11 @@ from .artifact_repair import (
     CorrectionNotificationUncertain,
     pipeline_step_contract_template,
 )
+from .fresh_artifact_repair import (
+    FreshArtifactRepair,
+    FreshRepairError,
+    launch_fresh_repair_for_worker,
+)
 
 
 _REVIEW_REJECTION_FIELDS = frozenset(
@@ -174,10 +179,15 @@ class RuntimeWorkerControlMixin:
             self.custom_output_stable_reads = 0
             self.custom_submit_attempt_digest = ""
         except CorrectionBudgetExhausted:
-            self.summary_attention(
-                f"{stage}-correction-exhausted",
-                AttentionReason.RETRY_EXHAUSTED,
-            )
+            try:
+                launch_fresh_repair_for_worker(self, owner, invalid_sha256)
+                self.fix_result_digest = ""
+                self.custom_result_digest = ""
+            except FreshRepairError:
+                self.summary_attention(
+                    f"{stage}-correction-exhausted",
+                    AttentionReason.RETRY_EXHAUSTED,
+                )
         except CorrectionNotificationUncertain:
             self.summary_attention(
                 f"{stage}-correction-notification-uncertain",
@@ -185,6 +195,43 @@ class RuntimeWorkerControlMixin:
             )
         except ArtifactRepairError:
             self.summary_attention(f"{stage}-template-invalid")
+
+    def adopt_fresh_pipeline_step_result(self) -> bool:
+        owner = getattr(self, "pipeline_step_artifact_owner", None)
+        if not isinstance(owner, ContractArtifactOwner):
+            return False
+        try:
+            fresh = FreshArtifactRepair.load(owner=owner)
+            callback = fresh.scratch / ".artifact-repair-callback.json"
+            record = self.store.read(
+                self.spec["owner_id"],
+                str(fresh.reservation["operation_id"]),
+            )
+            if (
+                not callback.is_file()
+                or callback.is_symlink()
+                or record.accepted_callback_kind != "result"
+            ):
+                return False
+
+            def validate(value: Mapping[str, object]) -> object:
+                if value.get("status") not in {"complete", "cannot-reproduce"}:
+                    raise ValueError("pipeline result status is invalid")
+                outcome = value.get("outcome")
+                if outcome is not None and (
+                    not isinstance(outcome, str) or not outcome
+                ):
+                    raise ValueError("pipeline result outcome is invalid")
+                return value
+
+            fresh.accept(validate)
+            self.fix_result_digest = ""
+            self.fix_result_stable_reads = 0
+            self.custom_result_digest = ""
+            self.custom_result_stable_reads = 0
+            return True
+        except (FreshRepairError, StoreError, OSError, ValueError):
+            return False
 
     def mark_failed_pipeline_step_correction_runtime(self) -> None:
         owner = getattr(self, "pipeline_step_artifact_owner", None)

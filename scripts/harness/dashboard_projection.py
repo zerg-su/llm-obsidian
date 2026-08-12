@@ -33,6 +33,8 @@ from .dashboard_receipts import (
     read_gate,
     review_summary,
     root_task_name,
+    repair_receipt_count,
+    root_task_result,
     root_timing,
     verification_receipt_timing,
     verification_receipt_visits,
@@ -667,6 +669,11 @@ def _uncompiled_program(
         dropped_lanes=dropped_lanes,
         timing=root_timing(store, record, observed_at),
         task_name=root_task_name(store, record) or UNKNOWN,
+        self_healed_count=repair_receipt_count(store, record),
+        current_stage=(
+            "complete" if record.state == "complete" else record.state
+        ),
+        task_result=root_task_result(store, record),
     )
 
 
@@ -717,6 +724,18 @@ def _program(
     )
     executor_status = _executor_status(record, steps)
     definition = compiled.definition
+    self_healed = repair_receipt_count(store, record)
+    current_stage = (
+        "complete"
+        if record.state == "complete"
+        else next(
+            (step.step_id for step in steps if step.status == "running"),
+            next(
+                (step.step_id for step in steps if step.status == "pending"),
+                next_action or UNKNOWN,
+            ),
+        )
+    )
     return ProgramView(
         operation_id=record.spec.operation_id,
         kind=record.spec.kind,
@@ -756,6 +775,9 @@ def _program(
         dropped_lanes=dropped_lanes,
         timing=root_timing(store, record, observed_at),
         task_name=root_task_name(store, record) or UNKNOWN,
+        self_healed_count=self_healed,
+        current_stage=current_stage,
+        task_result=root_task_result(store, record),
     )
 
 
