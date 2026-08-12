@@ -452,32 +452,21 @@ with tempfile.TemporaryDirectory(prefix="task-escalation-legacy.") as raw:
     meta(worktree)
     legacy = raised_payload(worktree, "legacy-escalation", "legacy full marker")
     write_json(worktree / ".task-needs-attention.json", legacy)
-    legacy_view = load_latest(worktree)
+    before = (worktree / ".task-needs-attention.json").read_bytes()
+    expect_error(
+        "legacy full marker fails closed at the current-schema reader",
+        lambda: load_latest(worktree),
+        "current pointer schema",
+    )
+    expect_error(
+        "legacy full marker cannot trigger implicit migration",
+        lambda: append_resolution(worktree, "resolve the legacy escalation"),
+        "current pointer schema",
+    )
     check(
-        "legacy full marker remains read-compatible without implicit mutation",
-        legacy_view.legacy is True
-        and legacy_view.payload == legacy
+        "legacy rejection has zero immutable-store or pointer effect",
+        (worktree / ".task-needs-attention.json").read_bytes() == before
         and not (worktree / ".task-escalation-records").exists(),
-    )
-    resolved = append_resolution(
-        worktree,
-        "resolve the legacy escalation",
-        resolved_at="2026-08-04T12:04:00Z",
-    )
-    legacy_chain = load_chain(worktree)
-    check(
-        "first legacy resolve deterministically backfills before resolution",
-        len(legacy_chain) == 2
-        and legacy_chain[0].legacy is False
-        and legacy_chain[0].record_type == "raise"
-        and legacy_chain[0].payload == legacy
-        and legacy_chain[1].sha256 == resolved.sha256
-        and json.loads((worktree / ".task-needs-attention.json").read_text())
-        == {
-            "schema_version": 2,
-            "record_id": resolved.record_id,
-            "record_sha256": resolved.sha256,
-        },
     )
 
 
@@ -492,7 +481,6 @@ with tempfile.TemporaryDirectory(prefix="task-escalation-custom-writer.") as raw
     check(
         "custom runtime writer is record-first and replay-idempotent",
         custom is not None
-        and custom.legacy is False
         and custom.payload["category"] == "pipeline-decision"
         and custom.payload["allowed_decisions"]
         == ["stop", "reapprove-pipeline"]
@@ -535,7 +523,6 @@ with tempfile.TemporaryDirectory(prefix="task-escalation-fix-writer.") as raw:
     check(
         "engineering/fix writer is record-first and replay-idempotent",
         cannot_reproduce is not None
-        and cannot_reproduce.legacy is False
         and cannot_reproduce.payload["category"] == "pipeline-decision"
         and cannot_reproduce.payload["allowed_decisions"]
         == ["stop", "retry-with-fixture"]

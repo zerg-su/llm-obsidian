@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "paths": [
+    "scripts/harness/callback_submit_recovery.py",
+    "scripts/harness/cli.py",
+    "scripts/harness/contracts.py",
+    "scripts/harness/finalization_ledger.py",
+    "scripts/harness/liveness.py",
+    "scripts/harness/pre_model_reviewer_retirement.py",
+    "scripts/harness/provider_events.py",
+    "scripts/harness/review_finalization.py",
+    "scripts/harness/review_input_rollover.py",
+    "scripts/harness/runtime_provider_events.py",
+    "scripts/harness/runtime_worker.py",
+    "scripts/harness/runtime_worker_liveness.py",
+    "scripts/harness/runtime_worker_verification.py",
+    "scripts/harness/verification.py",
+    "scripts/harness/verification_attempt.py",
+    "scripts/harness/workflows/review_gate_attempt.py",
+    "scripts/harness/workflows/review_gate_recovery.py",
+    "scripts/task_review_context.py",
+    "scripts/task_review_finalization_attempt.py",
+    "scripts/task_review_flow.py",
+    "scripts/task_review_verification.py",
+    "scripts/task_review_verification_resubmit.py"
+  ]
+}

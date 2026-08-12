@@ -1,6 +1,8 @@
 """Extracted runtime-worker responsibility mixin."""
 
 from __future__ import annotations
+
+MODEL_JSON_BOUNDARIES = ("pipeline-step-result",)
 from .runtime_worker import *
 from .runtime_worker import (
     _atomic_json,

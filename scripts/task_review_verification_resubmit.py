@@ -16,6 +16,26 @@ from task_review_request import _canonical_sha256
 from task_review_shared import TaskReviewError, _read_json
 
 
+def _accepted_response_receipt(
+    operation_id: str,
+    verification_operation_id: str,
+    failed_head_sha: str,
+    resubmitted_head_sha: str,
+    response_sha256: str,
+) -> dict[str, object]:
+    """Build the sole current-schema changed-HEAD acceptance receipt."""
+
+    return {
+        "schema_version": 2,
+        "operation_id": operation_id,
+        "verification_operation_id": verification_operation_id,
+        "failed_head_sha": failed_head_sha,
+        "resubmitted_head_sha": resubmitted_head_sha,
+        "response_sha256": response_sha256,
+        "status": "accepted",
+    }
+
+
 def _response_receipt_path(
     receipt_path: Path,
     response_receipt: Mapping[str, object],
@@ -46,7 +66,7 @@ def _response_receipt_path(
     prior_sha256 = str(prior.get("response_sha256") or "")
     if (
         set(prior) != receipt_fields
-        or prior.get("schema_version") != 1
+        or prior.get("schema_version") != 2
         or prior.get("operation_id") != response_receipt.get("operation_id")
         or prior.get("verification_operation_id")
         != response_receipt.get("verification_operation_id")
@@ -231,15 +251,13 @@ def _durable_verification_resubmit(
         raise TaskReviewError(
             "finalizing review recovery verification transport changed"
         )
-    response_receipt = {
-        "schema_version": 1,
-        "operation_id": task_id,
-        "verification_operation_id": operation_id,
-        "failed_head_sha": previous_head,
-        "resubmitted_head_sha": current_head,
-        "response_sha256": _canonical_sha256(expected_response),
-        "status": "accepted",
-    }
+    response_receipt = _accepted_response_receipt(
+        task_id,
+        operation_id,
+        previous_head,
+        current_head,
+        _canonical_sha256(expected_response),
+    )
     response_receipt_path = _response_receipt_path(
         receipt_path, response_receipt, packet_sha256
     )

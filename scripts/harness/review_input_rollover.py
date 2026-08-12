@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+MODEL_JSON_BOUNDARIES = ("archive-authority",)
+
 import json
 from pathlib import Path
 from typing import Mapping

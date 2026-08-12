@@ -47,7 +47,6 @@ class DecisionRecord:
     payload: dict[str, Any]
     sha256: str
     path: Path
-    legacy: bool = False
     previous_record_id: str = ""
     previous_record_sha256: str = ""
 
@@ -137,6 +136,17 @@ def _marker_path(worktree: Path) -> Path:
     return worktree / MARKER_NAME
 
 
+def _require_current_marker_schema(worktree: Path) -> None:
+    marker = _marker_path(worktree)
+    if not marker.exists() and not marker.is_symlink():
+        return
+    value, _ = _read_object(marker, "task attention marker")
+    if value.get("schema_version") != 2:
+        raise EscalationRecordError(
+            "task attention marker requires current pointer schema"
+        )
+
+
 def _fsync_directory(path: Path) -> None:
     """Make directory-entry mutations durable before publishing dependants."""
 
@@ -194,7 +204,6 @@ def _record_from_value(
         payload,
         digest,
         path,
-        False,
         previous_id,
         previous_sha256,
     )
@@ -210,22 +219,6 @@ def _read_record(
     )
 
 
-def _legacy_view(worktree: Path, value: dict[str, Any], raw: bytes) -> DecisionRecord:
-    escalation_id = _valid_record_id(value.get("id"))
-    status = str(value.get("status") or "")
-    if not status or len(status) > 64:
-        raise EscalationRecordError("legacy attention marker status is invalid")
-    digest = _sha256(raw)
-    return DecisionRecord(
-        f"legacy-{digest[:32]}",
-        "resolution" if status == "resolved" else "raise",
-        value,
-        digest,
-        _marker_path(worktree),
-        True,
-    )
-
-
 def _load_marker_latest(worktree: Path) -> DecisionRecord | None:
     """Load the pointer target; callers validate its complete chain."""
 
@@ -235,7 +228,9 @@ def _load_marker_latest(worktree: Path) -> DecisionRecord | None:
         return None
     marker, raw = _read_object(marker_path, "task attention marker")
     if marker.get("schema_version") != 2:
-        return _legacy_view(root, marker, raw)
+        raise EscalationRecordError(
+            "task attention marker requires current pointer schema"
+        )
     if set(marker) != POINTER_FIELDS:
         raise EscalationRecordError("latest attention marker is not pointer-only")
     record_id = _valid_record_id(marker.get("record_id"))
@@ -250,8 +245,6 @@ def load_chain(worktree: Path) -> tuple[DecisionRecord, ...]:
     latest = _load_marker_latest(root)
     if latest is None:
         return ()
-    if latest.legacy:
-        return (latest,)
     newest_first: list[DecisionRecord] = []
     seen: set[str] = set()
     current = latest
@@ -326,18 +319,6 @@ def _validate_chain_semantics(
         payload = record.payload
         _validate_payload_worktree(worktree, payload)
         status = str(payload.get("status") or "")
-        if record.record_id.startswith("legacy-"):
-            if previous is not None or status not in {
-                "pending",
-                "delivery-failed",
-                "resolved",
-            }:
-                raise EscalationRecordError("legacy decision transition is invalid")
-            expected_type = "resolution" if status == "resolved" else "raise"
-            if record.record_type != expected_type:
-                raise EscalationRecordError("legacy decision record type is invalid")
-            previous = record
-            continue
         if record.record_type == "raise":
             if (
                 status != "pending"
@@ -613,24 +594,6 @@ def _resume_existing_append(
     return existing, True
 
 
-def _backfill_legacy(worktree: Path, legacy: DecisionRecord) -> DecisionRecord:
-    payload = dict(legacy.payload)
-    occurred_at = str(
-        payload.get("resolved_at") or payload.get("raised_at") or "legacy-unknown-time"
-    )
-    value = _record_value(
-        worktree,
-        record_id=legacy.record_id,
-        record_type=legacy.record_type,
-        payload=payload,
-        occurred_at=occurred_at,
-        previous=None,
-    )
-    record = _persist_record(worktree, value)
-    _write_pointer(worktree, record)
-    return record
-
-
 def append_raise(
     worktree: Path,
     payload: dict[str, Any],
@@ -652,6 +615,7 @@ def append_raise(
     ):
         raise EscalationRecordError("raise payload worktree origin is stale")
     normalized_payload = {**payload, "worktree": str(root)}
+    _require_current_marker_schema(root)
     with _writer_lock(root):
         latest = load_latest(root)
         _require_expected_latest(latest, expected_record_sha256)
@@ -675,12 +639,6 @@ def append_raise(
             "delivery-failed",
         }:
             raise EscalationRecordError("another coordinator escalation is unresolved")
-        if latest is not None and latest.legacy:
-            if latest.payload.get("status") != "resolved":
-                raise EscalationRecordError(
-                    "legacy attention marker cannot be deterministically backfilled"
-                )
-            latest = _backfill_legacy(root, latest)
         value = _record_value(
             root,
             record_id=record_id,
@@ -705,12 +663,13 @@ def append_resolution(
     resolved_at: str | None = None,
     expected_record_sha256: str | None | object = _UNSET,
 ) -> DecisionRecord:
-    """Append a resolution, deterministically backfilling a legacy marker first."""
+    """Append one current-schema resolution."""
 
     root = worktree.expanduser().resolve()
     answer = " ".join(str(decision).split()).strip()
     if not answer:
         raise EscalationRecordError("resolution decision is empty")
+    _require_current_marker_schema(root)
     with _writer_lock(root):
         latest = load_latest(root)
         _require_expected_latest(latest, expected_record_sha256)
@@ -727,9 +686,7 @@ def append_resolution(
             not payload_worktree
             or Path(payload_worktree).expanduser().resolve() != root
         ):
-            raise EscalationRecordError("legacy attention marker origin is stale")
-        if latest.legacy:
-            latest = _backfill_legacy(root, latest)
+            raise EscalationRecordError("attention marker origin is stale")
         record_id = _derived_record_id(
             "resolution",
             {"previous_record_sha256": latest.sha256, "decision": answer},
@@ -781,6 +738,7 @@ def append_delivery_failure(
     """Append the failed delivery transition without mutating its raise record."""
 
     root = worktree.expanduser().resolve()
+    _require_current_marker_schema(root)
     with _writer_lock(root):
         latest = load_latest(root)
         _require_expected_latest(latest, expected_record_sha256)
@@ -788,8 +746,6 @@ def append_delivery_failure(
             if latest is not None and latest.payload.get("status") == "delivery-failed":
                 return latest
             raise EscalationRecordError("latest escalation is not pending delivery")
-        if latest.legacy:
-            latest = _backfill_legacy(root, latest)
         record_id = _derived_record_id(
             "delivery-failure", {"previous_record_sha256": latest.sha256}
         )
@@ -852,6 +808,7 @@ def append_amendment(
         "decision": answer,
     }
     record_id = _derived_record_id("amendment", stable)
+    _require_current_marker_schema(root)
     with _writer_lock(root):
         latest = load_latest(root)
         _require_expected_latest(latest, expected_record_sha256)
@@ -882,8 +839,6 @@ def append_amendment(
             raise EscalationRecordError(
                 "cannot append an amendment while an escalation is unresolved"
             )
-        if latest is not None and latest.legacy:
-            latest = _backfill_legacy(root, latest)
         value = _record_value(
             root,
             record_id=record_id,

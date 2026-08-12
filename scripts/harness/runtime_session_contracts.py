@@ -2,6 +2,13 @@
 
 from __future__ import annotations
 
+MODEL_JSON_BOUNDARIES = (
+    "live-dispatch-ack",
+    "permissions",
+    "dependencies",
+    "external-state",
+)
+
 import hashlib
 import os
 import re

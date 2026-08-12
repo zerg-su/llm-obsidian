@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+MODEL_JSON_BOUNDARIES = ("review-resolution", "callbacks")
+
 import fcntl
 import hashlib
 import json

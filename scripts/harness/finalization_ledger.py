@@ -8,6 +8,8 @@ creating a reviewer session or causing a provider effect.
 
 from __future__ import annotations
 
+MODEL_JSON_BOUNDARIES = ("finalization-ledger",)
+
 import fcntl
 import json
 import os

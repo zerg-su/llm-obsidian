@@ -244,4 +244,28 @@ with tempfile.TemporaryDirectory(prefix="pre-model-retirement.") as raw:
             result is None and candidate.read("owner-review", candidate_id) == before,
         )
 
+    escaped, escaped_id, escaped_runtime, escaped_callback = fixture(
+        root, "callback-ancestor-symlink"
+    )
+    escaped_callback.parent.rmdir()
+    escaped_callback.parent.parent.rmdir()
+    outside = root / "outside-callbacks" / "openai-intent"
+    outside.mkdir(parents=True)
+    escaped_callback.parent.parent.symlink_to(outside.parent, target_is_directory=True)
+    launch_path = escaped_runtime / "launch.json"
+    launch = json.loads(launch_path.read_text(encoding="utf-8"))
+    launch["callback_pointer"] = str(escaped_callback.resolve())
+    launch_path.write_text(
+        json.dumps(launch, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    before_escape = escaped.read("owner-review", escaped_id)
+    escaped_result = retire_failed_reviewer_start(
+        escaped, "owner-review", escaped_id, cmux_adapter=FakeCmux()
+    )
+    check(
+        "retirement rejects a callback pointer with a symlinked ancestor",
+        escaped_result is None
+        and escaped.read("owner-review", escaped_id) == before_escape,
+    )
+
 print("pre-model reviewer retirement matrix: ok")

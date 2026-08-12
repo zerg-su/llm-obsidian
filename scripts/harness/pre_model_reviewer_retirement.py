@@ -187,11 +187,18 @@ def _bound_absent_callback(cwd: Path, pointer: object) -> Path | None:
         part in {"", ".", ".."} for part in relative.parts
     ):
         return None
-    callback_path = cwd.joinpath(*relative.parts)
+    current = cwd
+    for part in relative.parts[:-1]:
+        current /= part
+        if current.is_symlink() or not current.is_dir():
+            return None
+    callback_path = current / relative.parts[-1]
+    try:
+        callback_path.resolve().relative_to(cwd)
+    except (OSError, ValueError):
+        return None
     if (
-        callback_path.parent.is_symlink()
-        or not callback_path.parent.is_dir()
-        or callback_path.exists()
+        callback_path.exists()
         or callback_path.is_symlink()
     ):
         return None

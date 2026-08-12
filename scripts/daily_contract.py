@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+MODEL_JSON_BOUNDARIES = ("daily-summary",)
+
 import hashlib
 import json
 import os

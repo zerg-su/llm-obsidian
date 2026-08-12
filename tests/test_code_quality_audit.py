@@ -146,7 +146,12 @@ with tempfile.TemporaryDirectory(prefix="rc1-authority-audit.") as raw:
     )
     quiet.write_text("def observe():\n    return 'read-only'\n", encoding="utf-8")
 
-    authority = audit.audit_rc1_active_authority(root)
+    authority = audit._audit_rc1_sources(
+        tuple(
+            (path.relative_to(root).as_posix(), path.read_text(encoding="utf-8"))
+            for path in (quiet, recovery, incident)
+        )
+    )
     assert authority["schema_version"] == 1
     assert authority["production_loc"] == 7
     assert authority["production_files"] == [
@@ -174,5 +179,25 @@ with tempfile.TemporaryDirectory(prefix="rc1-authority-audit.") as raw:
     assert all(
         "value" not in item for item in authority["incident_literals"]
     ), "audit output must remain content-free"
+
+with tempfile.TemporaryDirectory(prefix="authority-manifest-omission.") as raw:
+    root = Path(raw)
+    config = root / "config"
+    config.mkdir()
+    (config / "active-review-authority.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "paths": ["scripts/harness/omitted-owner.py"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    try:
+        audit.active_authority_files(root)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("a missing active authority owner was silently skipped")
 
 print("code quality audit unit contracts passed")

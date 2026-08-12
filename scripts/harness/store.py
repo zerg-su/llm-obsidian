@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+MODEL_JSON_BOUNDARIES = ("operation-store",)
+
 import contextlib
 import fcntl
 import json

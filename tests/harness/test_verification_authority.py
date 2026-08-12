@@ -37,6 +37,9 @@ from harness.verification_attempt import (  # noqa: E402
     pipeline_verify_effect_id,
     pipeline_verify_identity,
 )
+from task_review_verification_resubmit import (  # noqa: E402
+    _accepted_response_receipt,
+)
 
 
 def check(label: str, value: bool) -> None:
@@ -305,5 +308,56 @@ with tempfile.TemporaryDirectory(prefix="verification-authority.") as raw:
             )
             == "invalid",
         )
+
+    changed_response = (
+        runtime_root
+        / "pipeline-verification"
+        / "changed-head-attempt"
+        / "response-receipt.json"
+    )
+    changed_response.parent.mkdir(parents=True)
+    changed_response.write_text(
+        json.dumps(
+            _accepted_response_receipt(
+                owner,
+                "changed-head-attempt",
+                "a" * 40,
+                "b" * 40,
+                "c" * 64,
+            ),
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    check(
+        "the finalizing producer's schema-v2 receipt consumes the resubmit budget",
+        RuntimeWorkerVerificationMixin.changed_head_resubmit_count(fake_worker)
+        == 1,
+    )
+    check(
+        "a second changed-HEAD resubmit is unavailable after that receipt",
+        not RuntimeWorkerVerificationMixin.changed_head_resubmit_available(
+            SimpleNamespace(
+                changed_head_resubmit_count=lambda: (
+                    RuntimeWorkerVerificationMixin.changed_head_resubmit_count(
+                        fake_worker
+                    )
+                )
+            )
+        ),
+    )
+    malformed = json.loads(changed_response.read_text(encoding="utf-8"))
+    malformed["schema_version"] = 1
+    changed_response.write_text(
+        json.dumps(malformed, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    try:
+        RuntimeWorkerVerificationMixin.changed_head_resubmit_count(fake_worker)
+    except RuntimeWorkerError:
+        pass
+    else:
+        raise AssertionError("schema-v1 changed-HEAD budget receipt was accepted")
+    check("malformed resubmit budget evidence fails closed", True)
 
 print("verification authority matrix: ok")

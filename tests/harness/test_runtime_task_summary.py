@@ -3390,8 +3390,11 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         and len(response_receipts) == 1
         and json.loads(
             response_receipts[0].read_text(encoding="utf-8")
-        )["status"]
-        == "accepted"
+        )["schema_version"]
+        == 2
+        and json.loads(
+            response_receipts[0].read_text(encoding="utf-8")
+        )["status"] == "accepted"
         and commands_before_resubmission == [1]
         and failing_commands == [4]
         and failed_cmux.sent
@@ -3945,7 +3948,10 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
             ("make", "test-model-routing"),
             ("git", "diff", "--check"),
         ]
-        and len(crash_response_receipts) == 1,
+        and len(crash_response_receipts) == 1
+        and json.loads(
+            crash_response_receipts[0].read_text(encoding="utf-8")
+        )["schema_version"] == 2,
         (
             crash_parent,
             crash_children,

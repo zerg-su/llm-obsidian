@@ -14,6 +14,7 @@ from typing import Any, Mapping
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BASELINE = ROOT / "config" / "code-quality-baseline.json"
+ACTIVE_AUTHORITY_MANIFEST = ROOT / "config" / "active-review-authority.json"
 FILE_REVIEW_LINES = 200
 FILE_HARD_LINES = 1_000
 FUNCTION_REVIEW_LINES = 60
@@ -31,43 +32,6 @@ NON_PRODUCTION_DIRECTORIES = frozenset(
     {"__pycache__", "references", "tests"}
 )
 
-RC5_1_ACTIVE_AUTHORITY_FILES = (
-    "scripts/harness/cli.py",
-    "scripts/harness/contracts.py",
-    "scripts/harness/finalization_ledger.py",
-    "scripts/harness/pre_model_reviewer_retirement.py",
-    "scripts/harness/review_finalization.py",
-    "scripts/harness/review_input_rollover.py",
-    "scripts/harness/runtime_worker.py",
-    "scripts/harness/runtime_worker_verification.py",
-    "scripts/harness/verification.py",
-    "scripts/harness/verification_attempt.py",
-    "scripts/harness/workflows/review_gate_attempt.py",
-    "scripts/task_review_context.py",
-    "scripts/task_review_finalization_attempt.py",
-    "scripts/task_review_flow.py",
-    "scripts/task_review_verification.py",
-    "scripts/task_review_verification_resubmit.py",
-)
-
-RC1_ACTIVE_AUTHORITY_FILES = tuple(dict.fromkeys((
-    "scripts/harness/callback_submit_recovery.py",
-    "scripts/harness/liveness.py",
-    "scripts/harness/provider_events.py",
-    "scripts/harness/review_drive_rearm.py",
-    "scripts/harness/runtime_provider_events.py",
-    "scripts/harness/runtime_worker_liveness.py",
-    "scripts/harness/workflows/review_gate_attempt.py",
-    "scripts/harness/workflows/review_gate_recovery.py",
-    "scripts/task_review_authorization_boundary.py",
-    "scripts/task_review_drift_contract.py",
-    "scripts/task_review_flow.py",
-    "scripts/task_review_mechanism_recovery.py",
-    "scripts/task_review_post_fresh_publication.py",
-    "scripts/task_review_post_fresh_recovery.py",
-    "scripts/task_review_provenance_contract.py",
-    "scripts/task_review_resolution_flow.py",
-) + RC5_1_ACTIVE_AUTHORITY_FILES))
 RC1_WRITABLE_AUTHORITY_SYMBOLS = frozenset(
     {
         "rearm_review_drive",
@@ -243,12 +207,44 @@ def _audit_rc1_sources(
 def audit_rc1_active_authority(repo_root: Path = ROOT) -> dict[str, object]:
     """Inventory the bounded RC1 review/recovery contour without content."""
 
+    authority_files = active_authority_files(repo_root)
     sources = []
-    for relative in RC1_ACTIVE_AUTHORITY_FILES:
+    for relative in authority_files:
         path = repo_root / relative
-        if path.is_file() and not path.is_symlink():
-            sources.append((relative, path.read_text(encoding="utf-8")))
+        sources.append((relative, path.read_text(encoding="utf-8")))
     return _audit_rc1_sources(tuple(sources))
+
+
+def active_authority_files(repo_root: Path = ROOT) -> tuple[str, ...]:
+    """Load the separately owned exact active-authority path denominator."""
+
+    path = repo_root / "config" / "active-review-authority.json"
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("active authority manifest is unavailable")
+    value = json.loads(path.read_text(encoding="utf-8"))
+    paths = value.get("paths") if isinstance(value, dict) else None
+    if (
+        not isinstance(value, dict)
+        or set(value) != {"schema_version", "paths"}
+        or value.get("schema_version") != 1
+        or not isinstance(paths, list)
+        or not paths
+        or not all(isinstance(item, str) and item for item in paths)
+        or len(paths) != len(set(paths))
+    ):
+        raise ValueError("active authority manifest is invalid")
+    result = tuple(sorted(paths))
+    for relative in result:
+        candidate = Path(relative)
+        path = repo_root / candidate
+        if (
+            candidate.is_absolute()
+            or ".." in candidate.parts
+            or path.is_symlink()
+            or not path.is_file()
+        ):
+            raise ValueError("active authority manifest path is invalid")
+    return result
 
 
 def audit_rc1_active_authority_at_commit(
@@ -268,7 +264,7 @@ def audit_rc1_active_authority_at_commit(
     if commit.returncode:
         raise ValueError("RC1 authority subject commit is unavailable")
     sources = []
-    for relative in RC1_ACTIVE_AUTHORITY_FILES:
+    for relative in active_authority_files(repo_root):
         exists = subprocess.run(
             ["git", "cat-file", "-e", f"{subject_sha}:{relative}"],
             cwd=repo_root,

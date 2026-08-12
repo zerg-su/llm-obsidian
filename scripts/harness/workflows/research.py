@@ -10,6 +10,8 @@ Source-audit compatibility: the sandbox retains
 
 from __future__ import annotations
 
+MODEL_JSON_BOUNDARIES = ("protected-research",)
+
 import hashlib
 import json
 import os

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+MODEL_JSON_BOUNDARIES = ("task-summary",)
+
 from dataclasses import dataclass
 
 from .runtime_worker import *  # noqa: F401,F403

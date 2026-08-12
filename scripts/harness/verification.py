@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+MODEL_JSON_BOUNDARIES = ("verification-authority",)
+
 import hashlib
 import json
 import os

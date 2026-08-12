@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+MODEL_JSON_BOUNDARIES = ("review-input",)
+
 import argparse
 import hashlib
 import json

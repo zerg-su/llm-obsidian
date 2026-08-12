@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import dataclasses
+import ast
 import enum
 import hashlib
 import json
 import math
 import re
 from dataclasses import dataclass, field
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 from typing import Any, ClassVar, Mapping, TypeVar
 
@@ -229,32 +230,6 @@ class ContractBoundaryInventoryEntry:
             raise ContractError("contract boundary inventory entry is invalid")
 
 
-_CONTRACT_BOUNDARY_INVENTORY = tuple(
-    ContractBoundaryInventoryEntry(name, owner)
-    for name, owner in (
-        ("task-summary", "runtime_worker_summary"),
-        ("review-input", "review_submit"),
-        ("review-resolution", "runtime_callback_io"),
-        ("pipeline-step-result", "runtime_worker_custom"),
-        ("verification-escalation", "runtime_worker_verification"),
-        ("protected-research", "runtime_research"),
-        ("daily-summary", "daily_summarizer"),
-        ("custom-pipeline-authoring", "custom_pipelines"),
-        ("live-dispatch-ack", "dispatch_runtime_tests"),
-        ("operation-store", "store"),
-        ("callbacks", "runtime_callback_io"),
-        ("receipts", "runtime_worker_contracts"),
-        ("task-metadata", "task_contract"),
-        ("verification-authority", "verification"),
-        ("finalization-ledger", "finalization_ledger"),
-        ("reap-markers", "task_reap_lifecycle"),
-        ("archive-authority", "review_input_rollover"),
-        ("permissions", "runtime_session_contracts"),
-        ("dependencies", "runtime_session_contracts"),
-        ("external-state", "runtime_session_contracts"),
-    )
-)
-
 _CONTRACT_AUDIT = tuple(
     [
         ContractAuditEntry(family.value, ContractDisposition.COVERED)
@@ -297,13 +272,71 @@ def contract_registry() -> Mapping[ContractFamily, ModelContract]:
 def contract_registry_audit() -> tuple[ContractAuditEntry, ...]:
     """Return the explicit disposition table for non-family boundaries."""
 
+    validate_contract_boundary_classification(
+        contract_boundary_inventory(), _CONTRACT_AUDIT
+    )
     return _CONTRACT_AUDIT
 
 
-def contract_boundary_inventory() -> tuple[ContractBoundaryInventoryEntry, ...]:
-    """Return the seam-owned denominator independently classified by the audit."""
+def contract_boundary_inventory(
+    repo_root: Path | None = None,
+) -> tuple[ContractBoundaryInventoryEntry, ...]:
+    """Collect declarations from the production seams that own each boundary."""
 
-    return _CONTRACT_BOUNDARY_INVENTORY
+    root = (repo_root or Path(__file__).resolve().parents[2]).resolve()
+    scripts_root = root / "scripts"
+    entries: list[ContractBoundaryInventoryEntry] = []
+    for path in sorted(scripts_root.rglob("*.py")):
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        except (OSError, SyntaxError) as exc:
+            raise ContractError("model boundary inventory cannot be read") from exc
+        for statement in tree.body:
+            targets = (
+                statement.targets
+                if isinstance(statement, ast.Assign)
+                else [statement.target]
+                if isinstance(statement, ast.AnnAssign)
+                else []
+            )
+            if not any(
+                isinstance(target, ast.Name)
+                and target.id == "MODEL_JSON_BOUNDARIES"
+                for target in targets
+            ):
+                continue
+            try:
+                names = ast.literal_eval(statement.value)
+            except (TypeError, ValueError) as exc:
+                raise ContractError(
+                    "model boundary declaration must be literal"
+                ) from exc
+            if not isinstance(names, (tuple, list)) or not names:
+                raise ContractError("model boundary declaration is invalid")
+            owner = path.relative_to(root).as_posix()
+            entries.extend(
+                ContractBoundaryInventoryEntry(name, owner) for name in names
+            )
+    entries.sort(key=lambda item: (item.name, item.owner))
+    if len({item.name for item in entries}) != len(entries):
+        raise ContractError("model boundary declaration is duplicated")
+    return tuple(entries)
+
+
+def validate_contract_boundary_classification(
+    inventory: tuple[ContractBoundaryInventoryEntry, ...],
+    audit: tuple[ContractAuditEntry, ...],
+) -> None:
+    """Require exact classification of the independently collected seams."""
+
+    inventory_names = {item.name for item in inventory}
+    audit_names = {item.name for item in audit}
+    if (
+        len(inventory_names) != len(inventory)
+        or len(audit_names) != len(audit)
+        or inventory_names != audit_names
+    ):
+        raise ContractError("model boundary classification is incomplete")
 
 
 @dataclass(frozen=True)

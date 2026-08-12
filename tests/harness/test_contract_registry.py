@@ -15,11 +15,13 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from harness.contracts import (  # noqa: E402
     CanonicalContractTemplate,
     ContractDisposition,
+    ContractBoundaryInventoryEntry,
     ContractError,
     ContractFamily,
     contract_boundary_inventory,
     contract_registry,
     contract_registry_audit,
+    validate_contract_boundary_classification,
 )
 
 
@@ -56,6 +58,22 @@ check(
 
 audit = contract_registry_audit()
 inventory = contract_boundary_inventory()
+try:
+    validate_contract_boundary_classification(
+        inventory
+        + (
+            ContractBoundaryInventoryEntry(
+                "unclassified-production-boundary",
+                "scripts/harness/unclassified.py",
+            ),
+        ),
+        audit,
+    )
+except ContractError:
+    pass
+else:
+    raise AssertionError("an unclassified production seam passed the audit")
+check("an unclassified production seam fails the registry gate", True)
 by_disposition = {
     disposition: {item.name for item in audit if item.disposition == disposition}
     for disposition in ContractDisposition

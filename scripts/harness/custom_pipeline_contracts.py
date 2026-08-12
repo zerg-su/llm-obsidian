@@ -6,6 +6,8 @@ canonical hashing are code-owned and happen before any runtime effect.
 
 from __future__ import annotations
 
+MODEL_JSON_BOUNDARIES = ("custom-pipeline-authoring",)
+
 import hashlib
 import json
 import os

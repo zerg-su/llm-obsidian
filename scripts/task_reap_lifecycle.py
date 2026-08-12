@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+MODEL_JSON_BOUNDARIES = ("reap-markers",)
+
 import hashlib
 import re
 import time

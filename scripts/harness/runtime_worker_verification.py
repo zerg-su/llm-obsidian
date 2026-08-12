@@ -1,6 +1,8 @@
 """Extracted runtime-worker responsibility mixin."""
 
 from __future__ import annotations
+
+MODEL_JSON_BOUNDARIES = ("verification-escalation",)
 from .runtime_worker import *
 from .runtime_worker import (
     _atomic_json,
@@ -244,15 +246,62 @@ class RuntimeWorkerVerificationMixin:
             if path.is_symlink() or not path.is_file():
                 raise RuntimeWorkerError("verification response receipt is invalid")
             value = json.loads(path.read_text(encoding="utf-8"))
+            changed_head_fields = {
+                "schema_version",
+                "operation_id",
+                "verification_operation_id",
+                "failed_head_sha",
+                "resubmitted_head_sha",
+                "response_sha256",
+                "status",
+            }
+            if not isinstance(value, dict):
+                raise RuntimeWorkerError("verification response receipt is invalid")
             if (
-                isinstance(value, dict)
-                and value.get("schema_version") == 1
-                and value.get("status") == "accepted"
-                and value.get("resubmitted_head_sha")
-                != value.get("failed_head_sha")
+                value.get("schema_version") != 2
+                or value.get("status") != "accepted"
+                or not IDENTIFIER.fullmatch(str(value.get("operation_id") or ""))
+                or not IDENTIFIER.fullmatch(
+                    str(value.get("verification_operation_id") or "")
+                )
+                or not re.fullmatch(
+                    "[0-9a-f]{40}", str(value.get("failed_head_sha") or "")
+                )
+                or not re.fullmatch(
+                    "[0-9a-f]{40}",
+                    str(value.get("resubmitted_head_sha") or ""),
+                )
+                or not re.fullmatch(
+                    "[0-9a-f]{64}", str(value.get("response_sha256") or "")
+                )
             ):
-                count += 1
+                raise RuntimeWorkerError("verification response receipt is invalid")
+            if "next_attempt" in value:
+                same_head_fields = changed_head_fields | {
+                    "failed_attempt_sha256",
+                    "next_attempt",
+                    "next_attempt_sha256",
+                    "mechanism_flake_decision_id",
+                    "mechanism_flake_decision_sha256",
+                }
+                if (
+                    set(value) != same_head_fields
+                    or value["resubmitted_head_sha"] != value["failed_head_sha"]
+                ):
+                    raise RuntimeWorkerError(
+                        "verification response receipt is invalid"
+                    )
+                continue
+            if (
+                set(value) != changed_head_fields
+                or value["resubmitted_head_sha"] == value["failed_head_sha"]
+            ):
+                raise RuntimeWorkerError("verification response receipt is invalid")
+            count += 1
         return count
+
+    def changed_head_resubmit_available(self) -> bool:
+        return self.changed_head_resubmit_count() < MAX_PIPELINE_VERIFY_RESUBMITS
 
     def fix_retry_policy(self) -> tuple[str, int]:
         raw_policy = self.meta.get("pipeline_policy")
@@ -628,10 +677,7 @@ class RuntimeWorkerVerificationMixin:
             return False
         _, packet_sha256 = self.verification_attention_packet(
             failed,
-            allow_resubmit=(
-                self.changed_head_resubmit_count()
-                < MAX_PIPELINE_VERIFY_RESUBMITS
-            ),
+            allow_resubmit=self.changed_head_resubmit_available(),
             allow_same_head_retry=True,
         )
         response_path = self.spec["cwd"] / ".task-verification-response.json"

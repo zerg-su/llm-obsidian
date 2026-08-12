@@ -74,14 +74,12 @@ quality = importlib.util.module_from_spec(quality_spec)
 sys.modules[quality_spec.name] = quality
 quality_spec.loader.exec_module(quality)
 authority = quality.audit_rc1_active_authority(ROOT)
+authority_paths = set(quality.active_authority_files(ROOT))
 check(
-    "every RC5.1 review/recovery owner is measured by the authority contour",
-    set(quality.RC5_1_ACTIVE_AUTHORITY_FILES)
-    <= set(quality.RC1_ACTIVE_AUTHORITY_FILES),
-    sorted(
-        set(quality.RC5_1_ACTIVE_AUTHORITY_FILES)
-        - set(quality.RC1_ACTIVE_AUTHORITY_FILES)
-    ),
+    "the separately owned authority manifest is the exact measured contour",
+    authority_paths
+    == {item["path"] for item in authority["production_files"]},
+    sorted(authority_paths ^ {item["path"] for item in authority["production_files"]}),
 )
 quality_ceiling = json.loads(
     (ROOT / "config/code-quality-baseline.json").read_text(encoding="utf-8")
@@ -93,7 +91,9 @@ check(
     and len(authority["incident_literals"])
     <= int(quality_ceiling["final_max_incident_literals"])
     and int(authority["production_loc"])
-    <= int(quality_ceiling["final_max_production_loc"]),
+    <= int(quality_ceiling["final_max_production_loc"])
+    and len(authority["production_files"])
+    == int(quality_ceiling["final_production_file_count"]),
     authority,
 )
 
