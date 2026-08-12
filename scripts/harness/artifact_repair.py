@@ -33,28 +33,14 @@ from .verification_attempt import (
 )
 
 
-MAX_ARTIFACT_BYTES = 200_000
-SHA256 = re.compile(r"[0-9a-f]{64}\Z")
-PUBLICATION_FIELDS = frozenset(
-    {
-        "schema_version",
-        "type",
-        "actual_target",
-        "template",
-        "publication_sha256",
-    }
-)
-RESERVATION_FIELDS = frozenset(
-    {
-        "schema_version",
-        "family",
-        "attempt_id",
-        "template_sha256",
-        "invalid_sha256",
-        "attempt",
-        "correction_id",
-    }
-)
+MAX_ARTIFACT_BYTES, SHA256 = 200_000, re.compile(r"[0-9a-f]{64}\Z")
+PUBLICATION_FIELDS = frozenset({
+    "schema_version", "type", "actual_target", "template", "publication_sha256",
+})
+RESERVATION_FIELDS = frozenset({
+    "schema_version", "family", "attempt_id", "template_sha256",
+    "invalid_sha256", "attempt", "correction_id",
+})
 VERIFICATION_ACTIONS = frozenset(
     {"authorize-one-same-head-retry", "stop", "repair-repository-mechanism"}
 )
@@ -157,21 +143,15 @@ def pipeline_step_contract_template(
     request: Mapping[str, object],
 ) -> CanonicalContractTemplate:
     """Build the one concrete fix/custom result template for a request."""
-
     attempt_id = request.get("operation_id")
     if not isinstance(attempt_id, str) or not attempt_id:
         raise ArtifactRepairError("pipeline-step template attempt is invalid")
     custom = request.get("workflow_kind") == "custom"
     value: dict[str, object] = {
-        "schema_version": 1,
-        "status": "",
-        "output_sha256": "",
-        "head_sha": "",
+        "schema_version": 1, "status": "", "output_sha256": "", "head_sha": "",
     }
-    model_owned = {"status"}
     if custom:
         value["outcome"] = ""
-        model_owned.add("outcome")
     try:
         return CanonicalContractTemplate.create(
             ContractFamily.PIPELINE_STEP_RESULT,
@@ -179,7 +159,7 @@ def pipeline_step_contract_template(
             target_pointer=".task-pipeline-step-result.json",
             value=value,
             code_owned_fields={"schema_version", "output_sha256", "head_sha"},
-            model_owned_fields=model_owned,
+            model_owned_fields={"status", "outcome"} if custom else {"status"},
         )
     except ContractError as exc:
         raise ArtifactRepairError("pipeline-step template is invalid") from exc
@@ -359,20 +339,39 @@ def publish_verification_escalation(
     *, state_root: Path, worktree: Path, failed_attempt: VerificationAttempt,
     verification_operation_id: str,
 ) -> "ContractArtifactOwner":
+    template = verification_escalation_contract_template(
+        attempt_id=verification_operation_id,
+        value=build_verification_escalation(
+            failed_attempt, verification_operation_id
+        ),
+    )
     owner = ContractArtifactOwner.publish(
         state_root=state_root,
         worktree=worktree,
-        template=verification_escalation_contract_template(
-            attempt_id=verification_operation_id,
-            value=build_verification_escalation(
-                failed_attempt, verification_operation_id
-            ),
-        ),
+        template=template,
         actual_target=worktree / ".task-verification-contract.json",
     )
     if owner.publication_created or not owner.actual_target.exists():
         owner.restore_template()
     return owner
+
+
+def publish_pipeline_step_contract(
+    *, state_root: Path, worktree: Path, request: Mapping[str, object],
+) -> tuple[dict[str, object], "ContractArtifactOwner"]:
+    result_pointer = request.get("result_pointer")
+    if not isinstance(result_pointer, str) or not result_pointer:
+        raise ArtifactRepairError("pipeline-step result pointer is invalid")
+    enriched, template = dict(request), pipeline_step_contract_template(request)
+    owner = ContractArtifactOwner.publish(
+        state_root=state_root, worktree=worktree, template=template,
+        actual_target=worktree / result_pointer,
+    )
+    enriched["contract_template_pointer"] = str(owner.sidecar_path)
+    if owner.publication_created or not owner.actual_target.exists():
+        owner.restore_template()
+    _atomic_write(owner.worktree / ".task-pipeline-step-request.json", enriched)
+    return enriched, owner
 
 
 def _canonical_bytes(value: object) -> bytes:
@@ -1003,6 +1002,7 @@ __all__ = (
     "build_verification_escalation",
     "observe_stable_artifact",
     "pipeline_step_contract_template",
+    "publish_pipeline_step_contract",
     "publish_verification_escalation",
     "review_input_contract_template",
     "review_resolution_contract_template",

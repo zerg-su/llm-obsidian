@@ -14,8 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 from harness.artifact_repair import (  # noqa: E402
-    ContractArtifactOwner,
-    pipeline_step_contract_template,
+    publish_pipeline_step_contract,
 )
 from harness.runtime_callback_io import _pipeline_submit_failure  # noqa: E402
 
@@ -108,14 +107,11 @@ def request(
         "result_pointer": result_pointer,
         "output_pointer": output_pointer,
     }
-    template = pipeline_step_contract_template(value)
-    owner = ContractArtifactOwner.publish(
+    value, _owner = publish_pipeline_step_contract(
         state_root=worktree / ".task-pipeline-contract-state",
         worktree=worktree,
-        template=template,
-        actual_target=worktree / result_pointer,
+        request=value,
     )
-    value["contract_template_pointer"] = str(owner.sidecar_path)
     return value
 
 
@@ -510,13 +506,11 @@ with tempfile.TemporaryDirectory(prefix="pipeline-step-submit.") as raw:
         "result_pointer": ".task-pipeline/custom/00-design-result.json",
         "output_pointer": ".task-pipeline/custom/00-design-output.md",
     }
-    custom_owner = ContractArtifactOwner.publish(
+    custom_request, _custom_owner = publish_pipeline_step_contract(
         state_root=worktree / ".task-pipeline-contract-state",
         worktree=worktree,
-        template=pipeline_step_contract_template(custom_request),
-        actual_target=worktree / str(custom_request["result_pointer"]),
+        request=custom_request,
     )
-    custom_request["contract_template_pointer"] = str(custom_owner.sidecar_path)
     custom_output_path = worktree / str(custom_request["output_pointer"])
     custom_result_path = worktree / str(custom_request["result_pointer"])
     custom_output_path.parent.mkdir(parents=True, exist_ok=True)

@@ -259,8 +259,7 @@ class RuntimeWorkerCustomMixin:
                 receipts=tuple(receipts),
             )
             request = custom_step_request(round_)
-            self.publish_pipeline_step_contract(request)
-            _atomic_json(self.spec["cwd"] / ".task-pipeline-step-request.json", request)
+            request, _owner = self.publish_pipeline_step_contract(request)
             self.retarget_fix_callback(
                 operation_id=round_.spec.operation_id,
                 run_id=round_.run_id,

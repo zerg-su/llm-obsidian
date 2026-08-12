@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 from dataclasses import replace
@@ -41,9 +42,20 @@ class FakeRuntime:
     def __init__(self, root: Path) -> None:
         self.requests: list[object] = []
         self.prepared: list[object] = []
+        self.visible_step_authority: tuple[dict[str, object], bool, bool] | None = None
         self.store = OperationStore(root)
 
     def start(self, request: object, *, on_surface_opened=None) -> object:
+        step_path = request.cwd / ".task-pipeline-step-request.json"
+        if step_path.is_file():
+            step = json.loads(step_path.read_text(encoding="utf-8"))
+            pointer = Path(str(step.get("contract_template_pointer") or ""))
+            result = request.cwd / str(step.get("result_pointer") or "")
+            self.visible_step_authority = (
+                step,
+                pointer.is_absolute() and pointer.is_file(),
+                result.is_file(),
+            )
         self.requests.append(request)
         record = OperationRecord(
             request.spec,
@@ -194,14 +206,20 @@ with tempfile.TemporaryDirectory() as raw:
         initial_head_sha="d" * 40,
     )
     custom_session = custom_runtime.requests[0]
-    step_request = (cwd / ".task-pipeline-step-request.json").read_text(
-        encoding="utf-8"
+    step_request = json.loads(
+        (cwd / ".task-pipeline-step-request.json").read_text(encoding="utf-8")
     )
+    visible = custom_runtime.visible_step_authority
     check(
-        "custom dispatch freezes before launch and targets its first typed child",
+        "custom dispatch publishes complete step authority before launch",
         custom_session.callback_pointer == ".task-pipeline-step-callback.json"
         and "-custom-0-" in custom_session.initial_callback_operation_id
         and custom_session.initial_callback_operation_id != custom_request.task_id
-        and '"workflow_kind": "custom"' in step_request
-        and '"step_id": "implement"' in step_request,
+        and step_request["workflow_kind"] == "custom"
+        and step_request["step_id"] == "implement"
+        and visible is not None
+        and visible[0]["operation_id"]
+        == custom_session.initial_callback_operation_id
+        and visible[1]
+        and visible[2],
     )

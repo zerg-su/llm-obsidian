@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from harness.adapters.process import ProcessAdapter
+from harness.artifact_repair import publish_pipeline_step_contract
 from harness.contracts import OperationSpec, RuntimeRoute
 from harness.custom_pipelines import (
     CustomPipelinePolicy,
@@ -180,7 +181,11 @@ with tempfile.TemporaryDirectory(prefix="custom-runtime.") as raw:
         initial_head_sha=head,
         receipts=(),
     )
-    write_json(worktree / ".task-pipeline-step-request.json", custom_step_request(first))
+    publish_pipeline_step_contract(
+        state_root=state_root,
+        worktree=worktree,
+        request=custom_step_request(first),
+    )
     profile = load_profiles(vault / "config" / "verification-profiles.toml")["scoped"]
     write_json(
         vault / ".vault-meta" / "task-sessions" / "session-bindings" / "coordinator-session" / "binding.json",
@@ -232,7 +237,10 @@ with tempfile.TemporaryDirectory(prefix="custom-runtime.") as raw:
         "      if row.get('step_id')==expected and row.get('operation_id') not in seen: break\n"
         "    time.sleep(0.01)\n"
         "  else: raise SystemExit(3)\n"
+        "  pointer=pathlib.Path(row.get('contract_template_pointer',''))\n"
+        "  if not pointer.is_absolute() or not pointer.is_file(): raise SystemExit(6)\n"
         "  seen.add(row['operation_id']); output=root/row['output_pointer']; result=root/row['result_pointer']\n"
+        "  if not result.is_file(): raise SystemExit(7)\n"
         "  output.parent.mkdir(parents=True,exist_ok=True); output.write_text(expected+' evidence\\n',encoding='utf-8')\n"
         "  head=subprocess.run(['git','rev-parse','HEAD'],cwd=root,text=True,capture_output=True,check=True).stdout.strip()\n"
         "  result.write_text(json.dumps({'schema_version':1,'status':'complete','outcome':'complete','output_sha256':hashlib.sha256(output.read_bytes()).hexdigest(),'head_sha':head},sort_keys=True)+'\\n',encoding='utf-8')\n"

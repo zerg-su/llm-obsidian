@@ -17,6 +17,7 @@ from ..contracts import (
     OwnedResources,
     RuntimeRoute,
 )
+from ..artifact_repair import publish_pipeline_step_contract
 from ..custom_pipelines import FrozenCustomPipeline, FrozenPipelineStore
 from ..pipeline_builtins import EXECUTABLE_BUILTINS, compiled_builtin
 from ..state_machine import TERMINAL
@@ -254,35 +255,6 @@ def _fix_phase_request(round_: FixPhaseRound) -> dict[str, object]:
     }
 
 
-def _write_pipeline_step_request(
-    cwd: Path,
-    round_: FixPhaseRound | CustomStepRound,
-) -> None:
-    path = cwd / ".task-pipeline-step-request.json"
-    request = (
-        custom_step_request(round_)
-        if isinstance(round_, CustomStepRound)
-        else _fix_phase_request(round_)
-    )
-    payload = (
-        json.dumps(
-            request,
-            sort_keys=True,
-            indent=2,
-        )
-        + "\n"
-    )
-    if path.exists() or path.is_symlink():
-        if path.is_symlink() or not path.is_file():
-            raise ValueError("fix phase request must be a regular file")
-        if path.read_text(encoding="utf-8") != payload:
-            raise ValueError("fix phase request changed during replay")
-        return
-    temporary = path.with_name(f".{path.name}.tmp")
-    temporary.write_text(payload, encoding="utf-8")
-    temporary.replace(path)
-
-
 def start_dispatch(
     request: DispatchRequest,
     runtime: RuntimeSessionManager,
@@ -348,7 +320,17 @@ def start_dispatch(
             receipts=(),
             iteration=0,
         )
-        _write_pipeline_step_request(cwd, round_)
+        publish_pipeline_step_contract(
+            state_root=(
+                runtime.store.root
+                / "owners"
+                / request.owner_id
+                / "runtime"
+                / request.task_id
+            ),
+            worktree=cwd,
+            request=_fix_phase_request(round_),
+        )
         callback_pointer = ".task-pipeline-step-callback.json"
         initial_callback_operation_id = round_.spec.operation_id
         initial_callback_run_id = round_.run_id
@@ -365,7 +347,17 @@ def start_dispatch(
             initial_head_sha=initial_head_sha,
             receipts=(),
         )
-        _write_pipeline_step_request(cwd, round_)
+        publish_pipeline_step_contract(
+            state_root=(
+                runtime.store.root
+                / "owners"
+                / request.owner_id
+                / "runtime"
+                / request.task_id
+            ),
+            worktree=cwd,
+            request=custom_step_request(round_),
+        )
         callback_pointer = ".task-pipeline-step-callback.json"
         initial_callback_operation_id = round_.spec.operation_id
         initial_callback_run_id = round_.run_id

@@ -23,7 +23,7 @@ from .artifact_repair import (
     ContractArtifactOwner,
     CorrectionBudgetExhausted,
     CorrectionNotificationUncertain,
-    pipeline_step_contract_template,
+    publish_pipeline_step_contract as publish_step_contract,
 )
 from .fresh_artifact_repair import (
     FreshArtifactRepair,
@@ -120,22 +120,17 @@ class RuntimeWorkerControlMixin:
 
     def publish_pipeline_step_contract(
         self, request: dict[str, object]
-    ) -> ContractArtifactOwner:
-        result_pointer = request.get("result_pointer")
-        if not isinstance(result_pointer, str) or not result_pointer:
-            raise RuntimeWorkerError("pipeline-step result pointer is invalid")
-        template = pipeline_step_contract_template(request)
-        owner = ContractArtifactOwner.publish(
-            state_root=self.spec_path.parent,
-            worktree=self.spec["cwd"],
-            template=template,
-            actual_target=self.spec["cwd"] / result_pointer,
-        )
-        request["contract_template_pointer"] = str(owner.sidecar_path)
-        if owner.publication_created or not owner.actual_target.exists():
-            owner.restore_template()
+    ) -> tuple[dict[str, object], ContractArtifactOwner]:
+        try:
+            enriched, owner = publish_step_contract(
+                state_root=self.spec_path.parent,
+                worktree=self.spec["cwd"],
+                request=request,
+            )
+        except ArtifactRepairError as exc:
+            raise RuntimeWorkerError(str(exc)) from exc
         self.pipeline_step_artifact_owner = owner
-        return owner
+        return enriched, owner
 
     def request_pipeline_step_correction(
         self, invalid_sha256: str, *, stage: str
