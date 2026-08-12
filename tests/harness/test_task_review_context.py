@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -13,7 +14,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from harness.context import ContextBuilder  # noqa: E402
 from outcome_contract import extract_from_bytes  # noqa: E402
-from task_escalation_records import append_amendment  # noqa: E402
+from task_escalation_records import DecisionRecord, append_amendment  # noqa: E402
 from task_review_context import (  # noqa: E402
     _amendment_evidence,
     _bounded_review_diff,
@@ -88,9 +89,9 @@ class ReviewAmendmentEvidenceTest(unittest.TestCase):
         evidence = _amendment_evidence(self.meta, self.worktree)
         self.assertIsNotNone(evidence)
         assert evidence is not None
-        item, metadata = evidence
+        inputs, metadata = evidence
         manifest = ContextBuilder(self.worktree / "packets").build(
-            "review", (item,), metadata=metadata
+            "review", inputs, metadata=metadata
         )
         payload = json.loads(
             (
@@ -117,11 +118,53 @@ class ReviewAmendmentEvidenceTest(unittest.TestCase):
         with self.assertRaisesRegex(TaskReviewError, "does not match"):
             _amendment_evidence(stale, self.worktree)
 
-    def test_multiple_matching_amendments_are_rejected(self) -> None:
-        self.append("authorize first exact repair")
-        self.append("authorize second exact repair")
+    def test_ordered_superseding_amendments_select_terminal_authority(self) -> None:
+        first = self.append("authorize first exact repair")
+        terminal = self.append("supersede with second exact repair")
 
-        with self.assertRaisesRegex(TaskReviewError, "ambiguous"):
+        evidence = _amendment_evidence(self.meta, self.worktree)
+
+        self.assertIsNotNone(evidence)
+        assert evidence is not None
+        inputs, metadata = evidence
+        self.assertEqual(
+            tuple(item.content_sha256 for item in inputs),
+            (first.sha256, terminal.sha256),
+        )
+        self.assertEqual(
+            tuple(item.name for item in inputs),
+            ("approved-amendment-001.json", "approved-amendment-002.json"),
+        )
+        self.assertEqual(metadata["amendment_record_id"], terminal.record_id)
+        self.assertEqual(metadata["amendment_record_sha256"], terminal.sha256)
+        self.assertEqual(metadata["amendment_chain_length"], "2")
+
+    def test_noncontiguous_amendment_chain_is_rejected(self) -> None:
+        first = self.append("authorize first exact repair")
+        second = self.append("authorize second exact repair")
+        broken = DecisionRecord(
+            **{
+                **second.__dict__,
+                "previous_record_id": "amendment-missing",
+            }
+        )
+
+        with patch(
+            "task_review_context.load_chain", return_value=(first, broken)
+        ):
+            with self.assertRaisesRegex(TaskReviewError, "contiguous"):
+                _amendment_evidence(self.meta, self.worktree)
+
+    def test_mixed_amendment_bindings_are_rejected(self) -> None:
+        self.append("authorize matching repair")
+        append_amendment(
+            self.worktree,
+            plan_sha256=self.plan_sha,
+            outcome_sha256="f" * 64,
+            decision="authorize foreign outcome repair",
+        )
+
+        with self.assertRaisesRegex(TaskReviewError, "does not match"):
             _amendment_evidence(self.meta, self.worktree)
 
     def test_missing_or_tampered_authoritative_record_is_rejected(self) -> None:

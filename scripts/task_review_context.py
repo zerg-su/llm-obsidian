@@ -197,8 +197,8 @@ class _ReviewedArtifactMissing(TaskReviewError):
 
 def _amendment_evidence(
     meta: Mapping[str, Any], worktree: Path
-) -> tuple[ContextInput, dict[str, str]] | None:
-    """Select one exact protected amendment from the authoritative chain."""
+) -> tuple[tuple[ContextInput, ...], dict[str, str]] | None:
+    """Bind one ordered protected-amendment chain and its terminal authority."""
 
     try:
         amendments = tuple(
@@ -214,41 +214,75 @@ def _amendment_evidence(
         return None
     plan_sha256 = str(meta.get("approved_plan_sha256") or "")
     outcome_sha256 = str(meta.get("outcome_contract_sha256") or "")
-    matching = tuple(
-        record
+    if any(
+        record.payload.get("plan_sha256") != plan_sha256
+        or record.payload.get("outcome_sha256") != outcome_sha256
         for record in amendments
-        if record.payload.get("plan_sha256") == plan_sha256
-        and record.payload.get("outcome_sha256") == outcome_sha256
-    )
-    if not matching:
+    ):
         raise TaskReviewError(
             "authoritative amendment does not match reviewed task metadata"
         )
-    if len(matching) != 1:
+    amendment_ids = {record.record_id for record in amendments}
+    if (
+        len(amendment_ids) != len(amendments)
+        or amendments[0].previous_record_id in amendment_ids
+    ):
         raise TaskReviewError("authoritative amendment evidence is ambiguous")
-    record = matching[0]
-    try:
-        if record.path.is_symlink():
-            raise OSError("amendment record is a symlink")
-        raw = record.path.read_bytes()
-    except OSError as exc:
-        raise TaskReviewError(
-            "authoritative amendment evidence is invalid"
-        ) from exc
-    if hashlib.sha256(raw).hexdigest() != record.sha256:
-        raise TaskReviewError("authoritative amendment evidence is invalid")
-    return (
-        ContextInput(
-            "approved-amendment.json",
-            str(record.path),
-            raw,
-            role="outcome",
-        ),
-        {
-            "amendment_record_id": record.record_id,
-            "amendment_record_sha256": record.sha256,
-        },
-    )
+    for previous, record in zip(amendments, amendments[1:]):
+        if (
+            record.previous_record_id != previous.record_id
+            or record.previous_record_sha256 != previous.sha256
+        ):
+            raise TaskReviewError(
+                "authoritative amendment chain is not contiguous"
+            )
+    inputs: list[ContextInput] = []
+    chain_identity: list[dict[str, str]] = []
+    for index, record in enumerate(amendments, start=1):
+        try:
+            if record.path.is_symlink():
+                raise OSError("amendment record is a symlink")
+            raw = record.path.read_bytes()
+        except OSError as exc:
+            raise TaskReviewError(
+                "authoritative amendment evidence is invalid"
+            ) from exc
+        if hashlib.sha256(raw).hexdigest() != record.sha256:
+            raise TaskReviewError(
+                "authoritative amendment evidence is invalid"
+            )
+        inputs.append(
+            ContextInput(
+                (
+                    "approved-amendment.json"
+                    if len(amendments) == 1
+                    else f"approved-amendment-{index:03d}.json"
+                ),
+                str(record.path),
+                raw,
+                role="outcome",
+            )
+        )
+        chain_identity.append(
+            {"record_id": record.record_id, "record_sha256": record.sha256}
+        )
+    terminal = amendments[-1]
+    metadata = {
+        "amendment_record_id": terminal.record_id,
+        "amendment_record_sha256": terminal.sha256,
+    }
+    if len(amendments) > 1:
+        metadata.update(
+            {
+                "amendment_chain_length": str(len(amendments)),
+                "amendment_chain_sha256": hashlib.sha256(
+                    json.dumps(
+                        chain_identity, sort_keys=True, separators=(",", ":")
+                    ).encode()
+                ).hexdigest(),
+            }
+        )
+    return tuple(inputs), metadata
 
 
 def _reviewed_artifact_input(
@@ -581,8 +615,8 @@ def _context(
     amendment_inputs: list[ContextInput] = []
     amendment = _amendment_evidence(meta, worktree)
     if amendment is not None:
-        amendment_input, amendment_metadata = amendment
-        amendment_inputs.append(amendment_input)
+        amendment_chain, amendment_metadata = amendment
+        amendment_inputs.extend(amendment_chain)
         packet_metadata.update(amendment_metadata)
     if plan_review is not None:
         if not isinstance(plan_review, Mapping):
