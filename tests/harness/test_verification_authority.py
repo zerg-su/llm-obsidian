@@ -253,6 +253,14 @@ with tempfile.TemporaryDirectory(prefix="verification-authority.") as raw:
         "effect": dict(receipt, effect_id="foreign"),
         "definition": dict(receipt, definition_sha256="0" * 64),
         "profile digest": dict(receipt, profile_sha256="0" * 64),
+        "false exit code": {
+            **receipt,
+            "evidence": [{**receipt["evidence"][0], "exit_code": False}],
+        },
+        "true exit code": {
+            **receipt,
+            "evidence": [{**receipt["evidence"][0], "exit_code": True}],
+        },
     }
     for label, mutated in mutations.items():
         try:
@@ -271,5 +279,31 @@ with tempfile.TemporaryDirectory(prefix="verification-authority.") as raw:
         else:
             raise AssertionError(f"{label} authority mutation was accepted")
         check(f"{label} authority mutation fails closed", True)
+
+    for boolean_exit in (False, True):
+        mutated = {
+            **receipt,
+            "evidence": [
+                {**receipt["evidence"][0], "exit_code": boolean_exit}
+            ],
+        }
+        receipt_path.write_text(
+            json.dumps(mutated, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        try:
+            RuntimeWorkerVerificationMixin.load_verification_receipt(
+                fake_worker, receipt_path
+            )
+        except RuntimeWorkerError:
+            pass
+        else:
+            raise AssertionError("runtime accepted a boolean verification exit code")
+        check(
+            f"boolean exit code {boolean_exit!r} is invalid for every consumer",
+            verification_receipt_status(
+                store, parent, runtime_root, receipt_path
+            )
+            == "invalid",
+        )
 
 print("verification authority matrix: ok")

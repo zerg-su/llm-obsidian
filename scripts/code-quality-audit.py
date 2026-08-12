@@ -31,7 +31,26 @@ NON_PRODUCTION_DIRECTORIES = frozenset(
     {"__pycache__", "references", "tests"}
 )
 
-RC1_ACTIVE_AUTHORITY_FILES = (
+RC5_1_ACTIVE_AUTHORITY_FILES = (
+    "scripts/harness/cli.py",
+    "scripts/harness/contracts.py",
+    "scripts/harness/finalization_ledger.py",
+    "scripts/harness/pre_model_reviewer_retirement.py",
+    "scripts/harness/review_finalization.py",
+    "scripts/harness/review_input_rollover.py",
+    "scripts/harness/runtime_worker.py",
+    "scripts/harness/runtime_worker_verification.py",
+    "scripts/harness/verification.py",
+    "scripts/harness/verification_attempt.py",
+    "scripts/harness/workflows/review_gate_attempt.py",
+    "scripts/task_review_context.py",
+    "scripts/task_review_finalization_attempt.py",
+    "scripts/task_review_flow.py",
+    "scripts/task_review_verification.py",
+    "scripts/task_review_verification_resubmit.py",
+)
+
+RC1_ACTIVE_AUTHORITY_FILES = tuple(dict.fromkeys((
     "scripts/harness/callback_submit_recovery.py",
     "scripts/harness/liveness.py",
     "scripts/harness/provider_events.py",
@@ -48,7 +67,7 @@ RC1_ACTIVE_AUTHORITY_FILES = (
     "scripts/task_review_post_fresh_recovery.py",
     "scripts/task_review_provenance_contract.py",
     "scripts/task_review_resolution_flow.py",
-)
+) + RC5_1_ACTIVE_AUTHORITY_FILES))
 RC1_WRITABLE_AUTHORITY_SYMBOLS = frozenset(
     {
         "rearm_review_drive",

@@ -255,6 +255,7 @@ def _authority_evidence(
         if (
             typed is None
             or typed.schema_version != 2
+            or type(typed.exit_code) is not int
             or typed.profile != profile
             or typed.profile_sha256 != profile_sha256
             or typed.head_sha != head_sha

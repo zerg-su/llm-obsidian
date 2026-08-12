@@ -36,7 +36,7 @@ from model_routing import load_config, resolve, session_from_meta
 from outcome_contract import OutcomeContractError, extract_from_bytes
 from task_contract import normalize
 from task_review_delta_packet import DeltaPacket, build_delta_packet
-from task_escalation_records import EscalationRecordError, load_chain
+from task_escalation_records import EscalationRecordError, load_amendments
 from task_review_resolution_bundle import _bounded_input
 from task_review_identity import (
     _current_review_is_quiescent,
@@ -201,11 +201,7 @@ def _amendment_evidence(
     """Bind one ordered protected-amendment chain and its terminal authority."""
 
     try:
-        amendments = tuple(
-            record
-            for record in load_chain(worktree)
-            if record.record_type == "amendment"
-        )
+        amendments = load_amendments(worktree)
     except EscalationRecordError as exc:
         raise TaskReviewError(
             "authoritative amendment evidence is invalid"
@@ -228,14 +224,6 @@ def _amendment_evidence(
         or amendments[0].previous_record_id in amendment_ids
     ):
         raise TaskReviewError("authoritative amendment evidence is ambiguous")
-    for previous, record in zip(amendments, amendments[1:]):
-        if (
-            record.previous_record_id != previous.record_id
-            or record.previous_record_sha256 != previous.sha256
-        ):
-            raise TaskReviewError(
-                "authoritative amendment chain is not contiguous"
-            )
     inputs: list[ContextInput] = []
     chain_identity: list[dict[str, str]] = []
     for index, record in enumerate(amendments, start=1):

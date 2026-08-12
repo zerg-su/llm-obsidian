@@ -74,6 +74,15 @@ quality = importlib.util.module_from_spec(quality_spec)
 sys.modules[quality_spec.name] = quality
 quality_spec.loader.exec_module(quality)
 authority = quality.audit_rc1_active_authority(ROOT)
+check(
+    "every RC5.1 review/recovery owner is measured by the authority contour",
+    set(quality.RC5_1_ACTIVE_AUTHORITY_FILES)
+    <= set(quality.RC1_ACTIVE_AUTHORITY_FILES),
+    sorted(
+        set(quality.RC5_1_ACTIVE_AUTHORITY_FILES)
+        - set(quality.RC1_ACTIVE_AUTHORITY_FILES)
+    ),
+)
 quality_ceiling = json.loads(
     (ROOT / "config/code-quality-baseline.json").read_text(encoding="utf-8")
 )["rc1_active_authority"]

@@ -275,6 +275,36 @@ def load_chain(worktree: Path) -> tuple[DecisionRecord, ...]:
     return chain
 
 
+def load_amendments(worktree: Path) -> tuple[DecisionRecord, ...]:
+    """Return every authoritative amendment, rejecting any orphan branch."""
+
+    root = worktree.expanduser().resolve()
+    chain = load_chain(root)
+    authoritative = tuple(
+        record for record in chain if record.record_type == "amendment"
+    )
+    records = _records_root(root)
+    persisted: list[DecisionRecord] = []
+    if records.exists():
+        for path in sorted(records.glob("*.json")):
+            if path.is_symlink() or not path.is_file():
+                raise EscalationRecordError(
+                    "immutable decision record inventory is invalid"
+                )
+            record = _read_record(root, path.stem)
+            if record.record_type == "amendment":
+                persisted.append(record)
+    if {
+        (record.record_id, record.sha256) for record in persisted
+    } != {
+        (record.record_id, record.sha256) for record in authoritative
+    }:
+        raise EscalationRecordError(
+            "authoritative amendment evidence has an immutable sibling fork"
+        )
+    return authoritative
+
+
 def load_latest(worktree: Path) -> DecisionRecord | None:
     """Load and validate the complete chain, returning its authoritative head."""
 

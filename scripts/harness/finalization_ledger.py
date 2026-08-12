@@ -271,9 +271,6 @@ class FinalizationLedger:
             value = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             raise FinalizationLedgerError("finalization ledger is invalid") from exc
-        if isinstance(value, dict) and "attempts" not in value:
-            # Pre-2.6.7 ledgers carry no mechanism attempt receipts.
-            value["attempts"] = []
         self._validate(value)
         return value
 
@@ -493,11 +490,20 @@ class FinalizationLedger:
                 raise FinalizationLedgerError(
                     "a distinct attempt cannot overlap the active reservation"
                 )
+            cycle_number = len(value["cycles"]) + 1
+            latest_receipt = value["attempts"][-1] if value["attempts"] else None
+            if (
+                latest_receipt is not None
+                and latest_receipt["cycle_number"] == cycle_number
+                and not predecessor
+            ):
+                raise FinalizationLedgerError(
+                    "released product cycle requires its retry predecessor"
+                )
             if len(value["cycles"]) >= self.max_cycles:
                 raise FinalizationLedgerError(
                     "finalization cycle ceiling lacks a terminal disposition"
                 )
-            cycle_number = len(value["cycles"]) + 1
             if retry_cycle is not None and retry_cycle != cycle_number:
                 raise FinalizationLedgerError(
                     "retry predecessor product cycle changed"

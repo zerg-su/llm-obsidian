@@ -217,6 +217,44 @@ class ContractAuditEntry:
             raise ContractError("contract audit name must be a bounded identifier")
 
 
+@dataclass(frozen=True)
+class ContractBoundaryInventoryEntry:
+    """Independent boundary denominator owned by its production seam."""
+
+    name: str
+    owner: str
+
+    def __post_init__(self) -> None:
+        if not ID_RE.fullmatch(self.name) or not self.owner:
+            raise ContractError("contract boundary inventory entry is invalid")
+
+
+_CONTRACT_BOUNDARY_INVENTORY = tuple(
+    ContractBoundaryInventoryEntry(name, owner)
+    for name, owner in (
+        ("task-summary", "runtime_worker_summary"),
+        ("review-input", "review_submit"),
+        ("review-resolution", "runtime_callback_io"),
+        ("pipeline-step-result", "runtime_worker_custom"),
+        ("verification-escalation", "runtime_worker_verification"),
+        ("protected-research", "runtime_research"),
+        ("daily-summary", "daily_summarizer"),
+        ("custom-pipeline-authoring", "custom_pipelines"),
+        ("live-dispatch-ack", "dispatch_runtime_tests"),
+        ("operation-store", "store"),
+        ("callbacks", "runtime_callback_io"),
+        ("receipts", "runtime_worker_contracts"),
+        ("task-metadata", "task_contract"),
+        ("verification-authority", "verification"),
+        ("finalization-ledger", "finalization_ledger"),
+        ("reap-markers", "task_reap_lifecycle"),
+        ("archive-authority", "review_input_rollover"),
+        ("permissions", "runtime_session_contracts"),
+        ("dependencies", "runtime_session_contracts"),
+        ("external-state", "runtime_session_contracts"),
+    )
+)
+
 _CONTRACT_AUDIT = tuple(
     [
         ContractAuditEntry(family.value, ContractDisposition.COVERED)
@@ -260,6 +298,12 @@ def contract_registry_audit() -> tuple[ContractAuditEntry, ...]:
     """Return the explicit disposition table for non-family boundaries."""
 
     return _CONTRACT_AUDIT
+
+
+def contract_boundary_inventory() -> tuple[ContractBoundaryInventoryEntry, ...]:
+    """Return the seam-owned denominator independently classified by the audit."""
+
+    return _CONTRACT_BOUNDARY_INVENTORY
 
 
 @dataclass(frozen=True)

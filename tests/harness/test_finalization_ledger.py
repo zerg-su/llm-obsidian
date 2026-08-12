@@ -244,13 +244,43 @@ with tempfile.TemporaryDirectory(prefix="finalization-ledger-mechanism.") as raw
         replay.reason == "already-mechanism"
         and ledger.path.read_bytes() == before_replay,
     )
-    retry = reserve(ledger, 31)
+    before_unbound_retry = ledger.path.read_bytes()
+    try:
+        reserve(ledger, 31)
+    except FinalizationLedgerError:
+        pass
+    else:
+        raise AssertionError("a predecessor-free retry reopened a released cycle")
+    check(
+        "a released product cycle requires its exact predecessor generation",
+        ledger.path.read_bytes() == before_unbound_retry,
+    )
+    retry_id = predecessor_bound_attempt_id(
+        lineage_id=ledger.lineage_id,
+        predecessor_attempt_id=attempt(30),
+        exact_head="a" * 40,
+        cycle_number=1,
+    )
+    retry = ledger.reserve_from_policy_matrix(
+        attempt_id=retry_id,
+        exact_head="a" * 40,
+        task_id=attempt(1031),
+        worktree="/tmp/finalization-task-31",
+        provider_policies={
+            cycle: {
+                "routes": ["finalization-primary"],
+                "reason": "primary-only",
+            }
+            for cycle in range(1, ledger.max_cycles + 1)
+        },
+        predecessor_attempt_id=attempt(30),
+    )
     check(
         "the released cycle number is reserved again by the retry",
         retry.allowed and retry.created and retry.cycle_number == 1,
     )
     blocked = ledger.record_terminal(
-        attempt_id=attempt(31), terminal_result="blocked"
+        attempt_id=retry_id, terminal_result="blocked"
     )
     snapshot = ledger.snapshot()
     check(
@@ -260,7 +290,30 @@ with tempfile.TemporaryDirectory(prefix="finalization-ledger-mechanism.") as raw
         and [row["classification"] for row in snapshot["attempts"]]
         == ["attention-required", "blocked"],
     )
-    for number in range(32, 37):
+    second_retry_id = predecessor_bound_attempt_id(
+        lineage_id=ledger.lineage_id,
+        predecessor_attempt_id=retry_id,
+        exact_head=f"{32:040x}",
+        cycle_number=1,
+    )
+    ledger.reserve_from_policy_matrix(
+        attempt_id=second_retry_id,
+        exact_head=f"{32:040x}",
+        task_id=attempt(32),
+        worktree="/tmp/finalization-task-32",
+        provider_policies={
+            cycle: {
+                "routes": ["finalization-primary"],
+                "reason": "primary-only",
+            }
+            for cycle in range(1, ledger.max_cycles + 1)
+        },
+        predecessor_attempt_id=retry_id,
+    )
+    ledger.record_terminal(
+        attempt_id=second_retry_id, terminal_result="changes-requested"
+    )
+    for number in range(33, 37):
         reserve(ledger, number)
         ledger.record_terminal(
             attempt_id=attempt(number), terminal_result="changes-requested"
@@ -412,21 +465,20 @@ with tempfile.TemporaryDirectory(prefix="finalization-ledger-legacy.") as raw:
     legacy.record_terminal(
         attempt_id=attempt(40), terminal_result="changes-requested"
     )
-    # A pre-2.6.7 ledger has no attempts field; reading it must not require
-    # a migration.
+    # A pre-2.6.7 ledger has no current mechanism-attempt authority.
     stored = json.loads(legacy.path.read_text(encoding="utf-8"))
     stored.pop("attempts")
     legacy.path.write_text(
         json.dumps(stored, sort_keys=True, separators=(",", ":")) + "\n",
         encoding="utf-8",
     )
-    snapshot = legacy.snapshot()
-    check(
-        "a legacy ledger without attempt receipts stays readable",
-        snapshot["attempts"] == []
-        and [cycle["terminal_result"] for cycle in snapshot["cycles"]]
-        == ["changes-requested"],
-    )
+    try:
+        legacy.snapshot()
+    except FinalizationLedgerError:
+        pass
+    else:
+        raise AssertionError("a legacy ledger without attempts was accepted")
+    check("a legacy ledger without attempt receipts fails closed", True)
 
 with tempfile.TemporaryDirectory(prefix="finalization-ledger-bound.") as raw:
     bounded = FinalizationLedger(
@@ -436,15 +488,59 @@ with tempfile.TemporaryDirectory(prefix="finalization-ledger-bound.") as raw:
         plan_sha256="c" * 64,
         outcome_contract_sha256="d" * 64,
     )
+    mechanism_attempt_id = attempt(50)
+    reserve(bounded, 50)
     for number in range(50, 50 + 25):
-        reserve(bounded, number)
+        if number != 50:
+            next_attempt_id = predecessor_bound_attempt_id(
+                lineage_id=bounded.lineage_id,
+                predecessor_attempt_id=mechanism_attempt_id,
+                exact_head=f"{number:040x}",
+                cycle_number=1,
+            )
+            bounded.reserve_from_policy_matrix(
+                attempt_id=next_attempt_id,
+                exact_head=f"{number:040x}",
+                task_id=attempt(number),
+                worktree=f"/tmp/finalization-task-{number}",
+                provider_policies={
+                    cycle: {
+                        "routes": ["finalization-primary"],
+                        "reason": "primary-only",
+                    }
+                    for cycle in range(1, bounded.max_cycles + 1)
+                },
+                predecessor_attempt_id=mechanism_attempt_id,
+            )
+            mechanism_attempt_id = next_attempt_id
         bounded.record_terminal(
-            attempt_id=attempt(number), terminal_result="attention-required"
+            attempt_id=mechanism_attempt_id,
+            terminal_result="attention-required",
         )
     try:
-        reserve(bounded, 99)
+        final_attempt_id = predecessor_bound_attempt_id(
+            lineage_id=bounded.lineage_id,
+            predecessor_attempt_id=mechanism_attempt_id,
+            exact_head=f"{99:040x}",
+            cycle_number=1,
+        )
+        bounded.reserve_from_policy_matrix(
+            attempt_id=final_attempt_id,
+            exact_head=f"{99:040x}",
+            task_id=attempt(99),
+            worktree="/tmp/finalization-task-99",
+            provider_policies={
+                cycle: {
+                    "routes": ["finalization-primary"],
+                    "reason": "primary-only",
+                }
+                for cycle in range(1, bounded.max_cycles + 1)
+            },
+            predecessor_attempt_id=mechanism_attempt_id,
+        )
         bounded.record_terminal(
-            attempt_id=attempt(99), terminal_result="attention-required"
+            attempt_id=final_attempt_id,
+            terminal_result="attention-required",
         )
     except FinalizationLedgerError as exc:
         check(

@@ -17,6 +17,7 @@ from harness.contracts import (  # noqa: E402
     ContractDisposition,
     ContractError,
     ContractFamily,
+    contract_boundary_inventory,
     contract_registry,
     contract_registry_audit,
 )
@@ -54,6 +55,7 @@ check(
 )
 
 audit = contract_registry_audit()
+inventory = contract_boundary_inventory()
 by_disposition = {
     disposition: {item.name for item in audit if item.disposition == disposition}
     for disposition in ContractDisposition
@@ -63,6 +65,12 @@ check(
     by_disposition[ContractDisposition.COVERED]
     == {family.value for family in ContractFamily},
     by_disposition,
+)
+check(
+    "audit exactly classifies the independent model boundary inventory",
+    {item.name for item in audit} == {item.name for item in inventory}
+    and all(item.owner for item in inventory),
+    inventory,
 )
 check(
     "audit records deferred and test-only model boundaries",

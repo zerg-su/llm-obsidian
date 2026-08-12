@@ -170,7 +170,7 @@ class RuntimeWorkerVerificationMixin:
         accepted = json.loads(response_receipt_path.read_text(encoding="utf-8"))
         if (
             not isinstance(accepted, dict)
-            or accepted.get("schema_version") not in {1, 2}
+            or accepted.get("schema_version") != 2
             or accepted.get("operation_id") != self.spec["operation_id"]
             or (accepted.get("verification_operation_id") != receipt["operation_id"])
             or (accepted.get("failed_head_sha") != receipt["head_sha"])
@@ -187,7 +187,7 @@ class RuntimeWorkerVerificationMixin:
             )
         ):
             raise RuntimeWorkerError("verification response receipt is invalid")
-        if accepted["schema_version"] == 1:
+        if "next_attempt" not in accepted:
             if accepted.get("resubmitted_head_sha") == receipt["head_sha"]:
                 raise RuntimeWorkerError("verification response receipt is invalid")
             return True
@@ -392,7 +392,7 @@ class RuntimeWorkerVerificationMixin:
             json.dumps(intent, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
         response_receipt = {
-            "schema_version": 1,
+            "schema_version": 2,
             "operation_id": self.spec["operation_id"],
             "verification_operation_id": failed["operation_id"],
             "failed_head_sha": failed["head_sha"],
@@ -590,7 +590,7 @@ class RuntimeWorkerVerificationMixin:
             / "response-receipt.json"
         )
         response_receipt = {
-            "schema_version": 1,
+            "schema_version": 2,
             "operation_id": self.spec["operation_id"],
             "verification_operation_id": failed["operation_id"],
             "failed_head_sha": failed["head_sha"],
