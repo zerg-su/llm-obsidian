@@ -32,6 +32,7 @@ from harness.liveness import (  # noqa: E402
     LivenessEvidence,
     LivenessPolicy,
 )
+from harness.review_submit import publish_review_input_template  # noqa: E402
 
 
 SHA = "a" * 64
@@ -197,6 +198,12 @@ with tempfile.TemporaryDirectory(prefix="callback-input-fast-path.") as raw:
         "verification_profile": {"name": "scoped", "sha256": "b" * 64},
         "worktree": str(worktree),
     }
+    meta = publish_review_input_template(
+        state_root=root,
+        state_dir=state_dir,
+        worktree=worktree,
+        meta=meta,
+    )
     result = {
         "schema_version": 1,
         "axis": "openai-holistic",
