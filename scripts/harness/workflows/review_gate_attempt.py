@@ -17,6 +17,7 @@ from ..finalization_ledger import (
 from ..pre_model_reviewer_retirement import (
     review_attempt_records_are_quiescent,
 )
+from ..review_input_rollover import archive_prior_review_input
 from ..store import StoreError
 from ..review_attempt import (
     EXACT_HEAD_REVIEW_PROTOCOL,
@@ -524,7 +525,9 @@ class ReviewGateAttemptMixin:
                             handle.write(encoded)
                             handle.flush()
                             os.fsync(handle.fileno())
-                    self._archive_prior_review_input(
+                    archive_prior_review_input(
+                        root=self.root,
+                        store=self.round_store,
                         attempt=existing,
                         runtime_root=runtime_root,
                         callback_root=callback_root,
@@ -565,200 +568,6 @@ class ReviewGateAttemptMixin:
                 return existing
             _atomic_json(self.state_path, initial)
         return attempt
-
-    def _archive_prior_review_input(
-        self,
-        *,
-        attempt: ReviewAttempt,
-        runtime_root: Path | None,
-        callback_root: str,
-    ) -> None:
-        """Retire model-writable scratch using only prior round identity."""
-
-        if attempt.status != "terminal" or attempt.terminal is None:
-            raise ReviewAttemptError(
-                "review input rollover requires a terminal attempt"
-            )
-        if runtime_root is None or not callback_root:
-            raise ReviewAttemptError(
-                "review input rollover authority is unavailable"
-            )
-        runtime = runtime_root.expanduser().resolve()
-        relative = Path(callback_root)
-        if (
-            relative.is_absolute()
-            or not relative.parts
-            or relative == Path(".")
-            or ".." in relative.parts
-        ):
-            raise ReviewAttemptError("review input rollover path is invalid")
-        callbacks = runtime / relative
-        current = runtime
-        for component in relative.parts:
-            current /= component
-            if current.is_symlink():
-                raise ReviewAttemptError(
-                    "review input rollover path is invalid"
-                )
-        try:
-            callbacks.resolve(strict=False).relative_to(runtime)
-        except (OSError, ValueError) as exc:
-            raise ReviewAttemptError(
-                "review input rollover path is invalid"
-            ) from exc
-        archive = (
-            self.root
-            / "attempts"
-            / f"attempt-{attempt.identity.attempt_id}-review-input"
-        )
-        if archive.is_symlink() or (
-            archive.exists() and not archive.is_dir()
-        ):
-            raise ReviewAttemptError(
-                "review input rollover archive is invalid"
-            )
-        moves: list[tuple[Path, Path]] = []
-        for lane in attempt.identity.lanes:
-            axis_root = callbacks / lane.axis
-            if axis_root.is_symlink():
-                raise ReviewAttemptError(
-                    "review input rollover path is invalid"
-                )
-            live_meta = axis_root / ".review-meta.json"
-            live_input = axis_root / ".review-input.json"
-            archived_meta = archive / f"{lane.axis}.review-meta.json"
-            archived_input = archive / f"{lane.axis}.review-input.json"
-            if any(
-                left.exists() or left.is_symlink()
-                for left in (live_meta, live_input)
-            ) and any(
-                right.exists() or right.is_symlink()
-                for right in (archived_meta, archived_input)
-            ):
-                # A crash may split the two-file move, but never duplicate one
-                # exact artifact across mutable and immutable locations.
-                if (
-                    (live_meta.exists() or live_meta.is_symlink())
-                    and (archived_meta.exists() or archived_meta.is_symlink())
-                ) or (
-                    (live_input.exists() or live_input.is_symlink())
-                    and (archived_input.exists() or archived_input.is_symlink())
-                ):
-                    raise ReviewAttemptError(
-                        "review input rollover is ambiguous"
-                    )
-            meta_path = (
-                live_meta
-                if live_meta.exists() or live_meta.is_symlink()
-                else archived_meta
-            )
-            input_path = (
-                live_input
-                if live_input.exists() or live_input.is_symlink()
-                else archived_input
-            )
-            meta_present = meta_path.exists() or meta_path.is_symlink()
-            input_present = input_path.exists() or input_path.is_symlink()
-            if not meta_present and not input_present:
-                continue
-            if not meta_present:
-                raise ReviewAttemptError(
-                    "review input rollover metadata is unavailable"
-                )
-            if meta_path.is_symlink() or not meta_path.is_file():
-                raise ReviewAttemptError(
-                    "review input rollover metadata changed"
-                )
-            try:
-                meta = json.loads(meta_path.read_bytes())
-            except (OSError, json.JSONDecodeError) as exc:
-                raise ReviewAttemptError(
-                    "review input rollover metadata changed"
-                ) from exc
-            try:
-                children = [
-                    row
-                    for row in self.round_store.list(lane.owner_id)
-                    if row.spec.kind == "review-round"
-                    and row.spec.parent_operation_id == lane.operation_id
-                    and row.lane_id == lane.lane_id
-                    and row.spec.operation_id == meta.get("operation_id")
-                    and row.run_id == meta.get("run_id")
-                ]
-            except (AttributeError, StoreError) as exc:
-                raise ReviewAttemptError(
-                    "review input rollover round authority is unavailable"
-                ) from exc
-            if (
-                not isinstance(meta, dict)
-                or set(meta) != {
-                    "schema_version",
-                    "transport",
-                    "operation_id",
-                    "run_id",
-                    "review_id",
-                    "parent_session_operation_id",
-                    "review_mode",
-                    "axis",
-                    "verification_iteration",
-                    "started_at",
-                    "worktree",
-                    "task_name",
-                    "head_sha",
-                    "review_purpose",
-                    "review_boundary_input_sha256",
-                    "verification_profile",
-                    "route",
-                }
-                or meta.get("schema_version") != 1
-                or meta.get("transport") != "review-round"
-                or meta.get("axis") != lane.axis
-                or meta.get("parent_session_operation_id")
-                != lane.operation_id
-                or meta.get("head_sha") != attempt.identity.exact_head_sha
-                or meta.get("verification_iteration") != 0
-                or len(children) != 1
-            ):
-                raise ReviewAttemptError(
-                    "review input rollover metadata changed"
-                )
-            if input_present:
-                if input_path.is_symlink() or not input_path.is_file():
-                    raise ReviewAttemptError(
-                        "review input rollover scratch changed"
-                    )
-                try:
-                    value = json.loads(input_path.read_bytes())
-                except (OSError, json.JSONDecodeError) as exc:
-                    raise ReviewAttemptError(
-                        "review input rollover scratch changed"
-                    ) from exc
-                if (
-                    not isinstance(value, dict)
-                    or set(value)
-                    != {
-                        "schema_version",
-                        "axis",
-                        "verdict",
-                        "verification_iteration",
-                        "findings",
-                    }
-                    or value.get("schema_version") != 1
-                    or value.get("axis") != lane.axis
-                    or value.get("verification_iteration") != 0
-                ):
-                    raise ReviewAttemptError(
-                        "review input rollover scratch changed"
-                    )
-            if live_meta.exists():
-                moves.append((live_meta, archived_meta))
-            if live_input.exists():
-                moves.append((live_input, archived_input))
-        if moves:
-            archive.mkdir(parents=True, exist_ok=True, mode=0o700)
-            archive.chmod(0o700)
-        for source, destination in moves:
-            source.replace(destination)
 
     def begin_attempt(
         self,

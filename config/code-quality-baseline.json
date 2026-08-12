@@ -28,9 +28,9 @@
       "operation-uuid": 27,
       "operator-local-path": 2
     },
-    "final_max_production_loc": 4022,
+    "final_max_production_loc": 4146,
     "final_max_writable_authorities": 0,
     "final_max_incident_literals": 0,
-    "evidence": "docs/acceptance/v2.6.6-rc1-active-authority-baseline.md"
+    "evidence": "docs/acceptance/v2.6.6-rc1-active-authority-baseline.md plus RC5.1 exact-attempt, pre-model retirement, and full Harness regressions"
   }
 }
