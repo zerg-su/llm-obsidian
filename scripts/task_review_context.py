@@ -202,8 +202,11 @@ def _amendment_evidence(
     """Bind one ordered protected-amendment chain and its terminal authority."""
 
     try:
-        resolved = authority or resolve_plan_authority(meta, worktree)
-        amendments = resolved.amendments
+        resolved = authority or (
+            None if meta.get("lifecycle") == "current-checkout"
+            else resolve_plan_authority(meta, worktree)
+        )
+        amendments = load_amendments(worktree) if resolved is None else resolved.amendments
     except (EscalationRecordError, PlanAuthorityError) as exc:
         raise TaskReviewError(
             "authoritative amendment evidence is invalid"

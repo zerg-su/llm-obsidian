@@ -41,11 +41,14 @@ def exact_head_attempt_enabled(meta: Mapping[str, Any]) -> bool:
         raise FinalizationAttemptError(str(exc)) from exc
 
 
-def _plan_authority(meta: Mapping[str, Any], worktree: Path):
+def _plan_identities(meta: Mapping[str, Any], worktree: Path) -> tuple[str, str]:
+    if meta.get("lifecycle") == "current-checkout":
+        return str(meta.get("approved_plan_sha256") or ""), str(meta.get("outcome_contract_sha256") or "")
     try:
-        return resolve_plan_authority(meta, worktree)
+        authority = resolve_plan_authority(meta, worktree)
     except PlanAuthorityError as exc:
         raise FinalizationAttemptError(str(exc)) from exc
+    return authority.plan_sha256, authority.outcome_sha256
 
 
 def attempt_binding(meta: Mapping[str, Any], task_id: str, worktree: Path, *, cycle: int) -> tuple[str, int, str, str]:
@@ -57,8 +60,8 @@ def attempt_binding(meta: Mapping[str, Any], task_id: str, worktree: Path, *, cy
         or cycle > policy.max_cycles
     ):
         raise FinalizationAttemptError("exact-HEAD review cycle is invalid")
-    authority = _plan_authority(meta, worktree)
-    return task_id, cycle, authority.plan_sha256, authority.outcome_sha256
+    plan_sha256, outcome_sha256 = _plan_identities(meta, worktree)
+    return task_id, cycle, plan_sha256, outcome_sha256
 
 
 def finalization_ledger(meta: Mapping[str, Any], vault: Path, task_id: str, worktree: Path) -> FinalizationLedger:
@@ -67,13 +70,13 @@ def finalization_ledger(meta: Mapping[str, Any], vault: Path, task_id: str, work
         raise FinalizationAttemptError(
             "exact-HEAD finalization policy is unavailable"
         )
-    authority = _plan_authority(meta, worktree)
+    plan_sha256, outcome_sha256 = _plan_identities(meta, worktree)
     return FinalizationLedger(
         vault / ".vault-meta" / "harness" / "finalization-ledger",
         lineage_id=task_id,
         origin_task_id=task_id,
-        plan_sha256=authority.plan_sha256,
-        outcome_contract_sha256=authority.outcome_sha256,
+        plan_sha256=plan_sha256,
+        outcome_contract_sha256=outcome_sha256,
         max_cycles=policy.max_cycles,
     )
 
