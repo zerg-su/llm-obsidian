@@ -118,6 +118,7 @@ from task_escalation_records import (
     load_latest as load_latest_escalation,
 )
 from wiki_summary_contract import WikiSummaryError, validate_summary_for_task
+from outcome_contract import OutcomeContractError, extract_from_bytes
 
 from .runtime_callback_io import (
     MAX_OUTBOX_BYTES,

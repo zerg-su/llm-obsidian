@@ -32,6 +32,7 @@ from .runtime_worker_review_bridge import RuntimeWorkerReviewBridgeMixin
 from .runtime_worker_verification import RuntimeWorkerVerificationMixin
 from .runtime_worker_liveness import RuntimeWorkerLivenessMixin
 from .runtime_worker_loop import RuntimeWorkerLoopMixin
+from .artifact_repair import ArtifactRepairError
 
 
 class RuntimeWorkerExecution(
@@ -421,6 +422,21 @@ class RuntimeWorkerExecution(
                 {"schema_version": 1, "status": "store-root-invalid", "exit_code": 2},
             )
             return 2
+        self.task_summary_artifact_owner = None
+        if self.spec["callback_mode"] == "task-summary":
+            try:
+                self.publish_task_summary_contract()
+            except (ArtifactRepairError, ContractError, RuntimeWorkerError):
+                _atomic_json(self.ready, {"schema_version": 1, "status": "failed"})
+                _atomic_json(
+                    self.exit_path,
+                    {
+                        "schema_version": 1,
+                        "status": "task-summary-template-invalid",
+                        "exit_code": 2,
+                    },
+                )
+                return 2
         self.process = ProcessAdapter()
         self.handle: ProcessHandle | None = None
         self.research_input_sha256 = ""

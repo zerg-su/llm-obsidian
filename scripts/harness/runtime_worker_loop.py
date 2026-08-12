@@ -322,6 +322,7 @@ class RuntimeWorkerLoopMixin:
         """Classify one observed exit and decide restart versus finality."""
 
         self.mark_failed_research_runtime()
+        self.mark_failed_task_summary_correction_runtime()
         if self.needs_provider_restart():
             self.restart_provider()
         return self.provider_exit_is_final()

@@ -474,6 +474,29 @@ class ContractArtifactOwner:
     def template_value(self) -> dict[str, object]:
         return dict(self.template.as_dict()["template"])
 
+    @property
+    def template_artifact_sha256(self) -> str:
+        return _sha256(_canonical_bytes(self.template_value))
+
+    def awaiting_semantic_edit(self, artifact_sha256: str) -> bool:
+        """Return true only for a sent correction's untouched restored template."""
+
+        if artifact_sha256 != self.template_artifact_sha256:
+            return False
+        return any(
+            (reservation.root / "notification-sent.json").is_file()
+            and not (reservation.root / "notification-sent.json").is_symlink()
+            for reservation in self._reservations()
+        )
+
+    @property
+    def has_sent_correction(self) -> bool:
+        return any(
+            (reservation.root / "notification-sent.json").is_file()
+            and not (reservation.root / "notification-sent.json").is_symlink()
+            for reservation in self._reservations()
+        )
+
     def restore_template(self) -> None:
         if self.actual_target.is_symlink():
             raise ArtifactRepairError("model artifact cannot be a symlink")

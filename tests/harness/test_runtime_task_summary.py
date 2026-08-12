@@ -4000,14 +4000,22 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
     )
     invalid_record = invalid_store.read("owner-1", INVALID_TASK)
     check(
-        "invalid handoff becomes attention and never notifies coordinator",
+        "invalid handoff gets one same-session correction before dead-session attention",
         invalid_rc == 0
         and invalid_record.state == "attention-required"
         and not invalid_record.accepted_callback_id
-        and invalid_cmux.sent == []
-        and invalid_cmux.keys == []
+        and len(invalid_cmux.sent) == 1
+        and invalid_cmux.sent[0][0] == CHILD
+        and "only same-session correction" in invalid_cmux.sent[0][1]
+        and invalid_cmux.keys == [(CHILD, "Enter")]
+        and (
+            invalid_state
+            / "contract-templates"
+            / "task-summary"
+            / f"{INVALID_TASK}.json"
+        ).is_file()
         and not (invalid_state / "task-summary-notify.json").exists(),
-        invalid_record,
+        (invalid_record, invalid_cmux.sent, invalid_cmux.keys),
     )
 
     drift_task = "88888888-8888-4888-8888-888888888888"

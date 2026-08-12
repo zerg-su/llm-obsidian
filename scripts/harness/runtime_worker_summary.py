@@ -5,6 +5,8 @@ from __future__ import annotations
 MODEL_JSON_BOUNDARIES = ("task-summary",)
 
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Mapping
 
 from .runtime_worker import *  # noqa: F401,F403
 from .runtime_worker import (
@@ -13,7 +15,95 @@ from .runtime_worker import (
     _pipeline_verify_identity,
     _review_resolution_handoff_ready,
 )
+from .artifact_repair import (
+    ArtifactRepairError,
+    ContractArtifactOwner,
+    CorrectionBudgetExhausted,
+    CorrectionNotificationUncertain,
+)
+from .contracts import CanonicalContractTemplate, ContractFamily
 from .verification_attempt import verification_input_sha256
+
+
+def task_summary_contract_template(
+    meta: Mapping[str, object], attempt_id: str
+) -> CanonicalContractTemplate:
+    """Derive the blank model-editable summary from dispatch authority."""
+
+    version = meta.get("version")
+    reap = meta.get("reap_policy")
+    if version not in {3, 4} or not isinstance(reap, Mapping):
+        raise RuntimeWorkerError("task-summary template requires current metadata")
+    allowed = reap.get("allowed_types")
+    title = reap.get("title")
+    session = meta.get("origin_session")
+    plan = meta.get("plan_file")
+    mode = reap.get("mode")
+    if (
+        not isinstance(allowed, list)
+        or len(allowed) != 1
+        or not isinstance(allowed[0], str)
+        or not allowed[0]
+        or not isinstance(title, str)
+        or not title
+        or not isinstance(session, str)
+        or not session
+        or not isinstance(plan, str)
+        or not plan
+        or mode not in {"shared", "final"}
+    ):
+        raise RuntimeWorkerError("task-summary template authority is invalid")
+    if version == 3:
+        return CanonicalContractTemplate.create(
+            ContractFamily.TASK_SUMMARY,
+            attempt_id=attempt_id,
+            target_pointer=".task-summary.json",
+            value={
+                "schema_version": 1,
+                "type": allowed[0],
+                "title": title,
+                "session": session,
+                "body": "",
+            },
+            code_owned_fields={"schema_version", "type", "session"},
+            model_owned_fields={"title", "body"},
+        )
+    evidence_ids: list[str] = []
+    gaps: list[str] = [plan]
+    disposition = "partially-achieved"
+    if mode == "final":
+        try:
+            contract = extract_from_bytes(Path(plan).expanduser().read_bytes())
+        except (OSError, OutcomeContractError) as exc:
+            raise RuntimeWorkerError(
+                "task-summary outcome authority is invalid"
+            ) from exc
+        evidence_ids = list(contract.evidence_ids)
+        gaps = []
+        disposition = "achieved"
+    return CanonicalContractTemplate.create(
+        ContractFamily.TASK_SUMMARY,
+        attempt_id=attempt_id,
+        target_pointer=".task-summary.json",
+        value={
+            "schema_version": 2,
+            "type": allowed[0],
+            "title": title,
+            "session": session,
+            "body": "",
+            "outcome_disposition": disposition,
+            "outcome_evidence_ids": evidence_ids,
+            "residual_gap_pointers": gaps,
+        },
+        code_owned_fields={"schema_version", "type", "session"},
+        model_owned_fields={
+            "title",
+            "body",
+            "outcome_disposition",
+            "outcome_evidence_ids",
+            "residual_gap_pointers",
+        },
+    )
 
 
 @dataclass
@@ -26,6 +116,84 @@ class SummaryPipelineState:
 
 
 class RuntimeWorkerSummaryMixin:
+    def mark_failed_task_summary_correction_runtime(self) -> None:
+        owner = getattr(self, "task_summary_artifact_owner", None)
+        if (
+            self.provider_exited
+            and not self.callback_handled
+            and isinstance(owner, ContractArtifactOwner)
+            and owner.has_sent_correction
+        ):
+            self.summary_attention(
+                "wiki-summary-correction-session-dead",
+                AttentionReason.ATTENTION_REQUIRED,
+            )
+
+    def publish_task_summary_contract(self) -> None:
+        meta_path = self.spec["cwd"] / ".task-meta.json"
+        if meta_path.is_symlink():
+            raise RuntimeWorkerError("task-summary metadata cannot be a symlink")
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RuntimeWorkerError("task-summary metadata is unreadable") from exc
+        if not isinstance(meta, dict):
+            raise RuntimeWorkerError("task-summary metadata is invalid")
+        template = task_summary_contract_template(
+            meta, str(self.spec["operation_id"])
+        )
+        self.task_summary_artifact_owner = ContractArtifactOwner.publish(
+            state_root=self.spec_path.parent,
+            worktree=self.spec["cwd"],
+            template=template,
+            actual_target=self.spec["task_summary_pointer"],
+        )
+
+    def request_task_summary_correction(self, invalid_sha256: str) -> None:
+        owner = getattr(self, "task_summary_artifact_owner", None)
+        if not isinstance(owner, ContractArtifactOwner):
+            self.summary_attention("wiki-summary-template-unavailable")
+            return
+        if owner.awaiting_semantic_edit(invalid_sha256):
+            return
+        try:
+            reservation = owner.reserve_correction(invalid_sha256)
+            owner.restore_template()
+            message = (
+                "The task summary was rejected before callback acceptance. "
+                "Harness restored the exact identity-bound template in "
+                ".task-summary.json. Edit that existing object in place; fill "
+                "only the model-owned title, body, outcome_disposition, "
+                "outcome_evidence_ids, and residual_gap_pointers fields. Keep "
+                "schema_version, type, and session unchanged. This is the only "
+                "same-session correction; do not relaunch work, review, or reap."
+            )
+
+            def send(wake: str) -> None:
+                self.cmux_adapter.send(self.spec["surface_id"], wake)
+                self.cmux_adapter.send_key(self.spec["surface_id"], "Enter")
+
+            owner.deliver_correction(
+                reservation,
+                message,
+                send,
+                fault_observer=getattr(self, "fault_observer", None),
+            )
+            self.summary_digest = ""
+            self.summary_stable_reads = 0
+        except CorrectionBudgetExhausted:
+            self.summary_attention(
+                "wiki-summary-correction-exhausted",
+                AttentionReason.RETRY_EXHAUSTED,
+            )
+        except CorrectionNotificationUncertain:
+            self.summary_attention(
+                "wiki-summary-correction-notification-uncertain",
+                AttentionReason.ATTENTION_REQUIRED,
+            )
+        except ArtifactRepairError:
+            self.summary_attention("wiki-summary-template-invalid")
+
     def summary_is_stable(self, raw: bytes) -> bool:
         self.digest = hashlib.sha256(raw).hexdigest()
         if self.digest != self.summary_digest:
@@ -243,8 +411,10 @@ class RuntimeWorkerSummaryMixin:
                 return None, True
         return existing, False
 
-    def build_summary_pipeline_state(self, raw: bytes) -> SummaryPipelineState | None:
-        summary = self.load_summary_contract(raw)
+    def build_summary_pipeline_state(
+        self, raw: bytes, *, summary: dict[str, object] | None = None
+    ) -> SummaryPipelineState | None:
+        summary = summary if summary is not None else self.load_summary_contract(raw)
         if (
             self.pipeline is None
             or self.operation.spec.contract_sha256 != self.pipeline.definition_sha256
@@ -543,8 +713,26 @@ class RuntimeWorkerSummaryMixin:
     def finish_task_summary(self, raw: bytes) -> None:
         if not self.summary_is_stable(raw):
             return
+        owner = getattr(self, "task_summary_artifact_owner", None)
+        if not isinstance(owner, ContractArtifactOwner):
+            self.summary_attention("wiki-summary-template-unavailable")
+            return
         try:
-            state = self.build_summary_pipeline_state(raw)
+            repaired = owner.repair(authoritative_fields={})
+        except ArtifactRepairError:
+            self.summary_attention("wiki-summary-invalid")
+            return
+        if repaired.changed:
+            self.summary_digest = repaired.output_sha256
+            self.summary_stable_reads = 0
+            return
+        try:
+            summary = self.load_summary_contract(raw)
+        except (WikiSummaryError, json.JSONDecodeError, TypeError, ValueError):
+            self.request_task_summary_correction(repaired.output_sha256)
+            return
+        try:
+            state = self.build_summary_pipeline_state(raw, summary=summary)
             if state is None or not self.advance_compiled_pipeline(state):
                 return
             self.publish_summary_callback(state.summary)
@@ -553,7 +741,6 @@ class RuntimeWorkerSummaryMixin:
             ContractError,
             RuntimeWorkerError,
             VerificationError,
-            WikiSummaryError,
             OSError,
             TypeError,
             ValueError,

@@ -21,6 +21,10 @@ from harness.artifact_repair import (  # noqa: E402
     observe_stable_artifact,
 )
 from harness.contracts import CanonicalContractTemplate, ContractFamily  # noqa: E402
+from harness.runtime_worker_summary import (  # noqa: E402
+    RuntimeWorkerSummaryMixin,
+    task_summary_contract_template,
+)
 
 
 def check(label: str, value: bool, detail: object = "") -> None:
@@ -207,6 +211,89 @@ with tempfile.TemporaryDirectory(prefix="artifact-repair.") as raw:
         "restart after notification reservation fails closed without a duplicate prompt",
         sends == ["correct the artifact"],
         sends,
+    )
+
+    meta = {
+        "version": 4,
+        "origin_session": "session-1",
+        "plan_file": "/vault/wiki/plans/approved.md",
+        "reap_policy": {
+            "mode": "shared",
+            "allowed_types": ["repo-touch"],
+            "title": "Bounded repair result",
+        },
+    }
+    runtime_template = task_summary_contract_template(meta, "runtime-summary")
+    check(
+        "runtime task-summary template is derived only from durable dispatch authority",
+        runtime_template.as_dict()["template"]
+        == {
+            "schema_version": 2,
+            "type": "repo-touch",
+            "title": "Bounded repair result",
+            "session": "session-1",
+            "body": "",
+            "outcome_disposition": "partially-achieved",
+            "outcome_evidence_ids": [],
+            "residual_gap_pointers": ["/vault/wiki/plans/approved.md"],
+        },
+    )
+
+    class Cmux:
+        def __init__(self) -> None:
+            self.events: list[tuple[str, str]] = []
+
+        def send(self, surface: str, message: str) -> None:
+            self.events.append((surface, message))
+
+        def send_key(self, surface: str, key: str) -> None:
+            self.events.append((surface, key))
+
+    class SummaryWorker(RuntimeWorkerSummaryMixin):
+        def __init__(self) -> None:
+            self.spec = {"operation_id": "runtime-summary", "surface_id": "surface-1"}
+            self.spec_path = state / "runtime-worker.json"
+            self.task_summary_artifact_owner = ContractArtifactOwner.publish(
+                state_root=state / "runtime-summary-state",
+                worktree=worktree,
+                template=runtime_template,
+                actual_target=target,
+            )
+            self.cmux_adapter = Cmux()
+            self.fault_observer = None
+            self.summary_digest = ""
+            self.summary_stable_reads = 0
+            self.attention: list[tuple[str, object]] = []
+
+        def summary_attention(self, status: str, reason: object = None) -> None:
+            self.attention.append((status, reason))
+
+    worker = SummaryWorker()
+    target.write_text('{"body":"missing identity"}\n', encoding="utf-8")
+    invalid_sha256 = __import__("hashlib").sha256(target.read_bytes()).hexdigest()
+    worker.request_task_summary_correction(invalid_sha256)
+    restored = target.read_bytes()
+    worker.request_task_summary_correction(
+        __import__("hashlib").sha256(restored).hexdigest()
+    )
+    check(
+        "task-summary semantic correction restores once and waits for an edit",
+        len(worker.cmux_adapter.events) == 2
+        and worker.cmux_adapter.events[-1] == ("surface-1", "Enter")
+        and worker.attention == []
+        and json.loads(restored) == runtime_template.as_dict()["template"],
+        (worker.cmux_adapter.events, worker.attention),
+    )
+    target.write_text('{"body":"still invalid"}\n', encoding="utf-8")
+    worker.request_task_summary_correction(
+        __import__("hashlib").sha256(target.read_bytes()).hexdigest()
+    )
+    check(
+        "a second distinct semantic defect exhausts task-summary correction",
+        worker.attention
+        and worker.attention[-1][0] == "wiki-summary-correction-exhausted"
+        and len(worker.cmux_adapter.events) == 2,
+        (worker.cmux_adapter.events, worker.attention),
     )
 
 print("artifact repair matrix: ok")
