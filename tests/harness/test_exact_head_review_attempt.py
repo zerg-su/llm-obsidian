@@ -742,9 +742,15 @@ with tempfile.TemporaryDirectory(prefix="exact-head-input-rollover.") as raw:
         )
         and all(
             (base / "callbacks" / lane.axis / ".review-meta.json").is_file()
-            and not (
+            and (
                 base / "callbacks" / lane.axis / ".review-input.json"
-            ).exists()
+            ).is_file()
+            and json.loads(
+                (
+                    base / "callbacks" / lane.axis / ".review-input.json"
+                ).read_text(encoding="utf-8")
+            )["axis"]
+            == lane.axis
             for lane in second.execution.lanes
         ),
     )

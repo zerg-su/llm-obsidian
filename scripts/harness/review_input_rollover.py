@@ -31,6 +31,7 @@ META_FIELDS = frozenset(
         "review_boundary_input_sha256",
         "verification_profile",
         "route",
+        "contract_template_pointer",
     }
 )
 INPUT_FIELDS = frozenset(

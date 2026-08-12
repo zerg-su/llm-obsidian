@@ -34,6 +34,7 @@ from harness.contracts import (  # noqa: E402
 )
 from harness.review_submit import (  # noqa: E402
     ReviewSubmitError,
+    publish_review_input_template,
     round_schema_lines,
 )
 from harness.runtime_worker_control import (  # noqa: E402
@@ -91,9 +92,11 @@ def check_rejection_receipts_are_keyed_and_idempotent(root: Path) -> None:
     state_dir.mkdir(parents=True)
     worktree = root / "submit-product"
     worktree.mkdir()
-    write_json(
-        state_dir / ".review-meta.json",
-        {
+    meta = publish_review_input_template(
+        state_root=root,
+        state_dir=state_dir,
+        worktree=worktree,
+        meta={
             "schema_version": 1,
             "transport": "review-round",
             "operation_id": "round-op",
@@ -108,27 +111,40 @@ def check_rejection_receipts_are_keyed_and_idempotent(root: Path) -> None:
             "verification_profile": {"name": "scoped", "sha256": "5" * 64},
         },
     )
+    write_json(state_dir / ".review-meta.json", meta)
+    identity_drift = {
+        "schema_version": 1,
+        "axis": "copied-wrong",
+        "verdict": "approved",
+        "verification_iteration": 1,
+        "findings": [],
+    }
+    repaired = run_submit(state_dir, worktree, identity_drift)
+    check(
+        "review identity and value aliases repair before authoritative submit",
+        repaired == 0 and (state_dir / ".review-callback.json").is_file(),
+        repaired,
+    )
+    (state_dir / ".review-callback.json").unlink()
     invalid = {
         "schema_version": 1,
         "axis": "openai-holistic",
-        "verdict": "approve",
-        "verification_iteration": 1,
+        "verdict": "invalid-semantic-verdict",
+        "verification_iteration": 0,
         "findings": [],
     }
     first = run_submit(state_dir, worktree, invalid)
     rejections = state_dir / ".review-submit-rejections"
     receipts = sorted(rejections.glob("*.json"))
     check(
-        "an invalid iteration writes one typed keyed rejection receipt",
+        "a semantic defect writes one typed keyed rejection receipt",
         first == 3 and len(receipts) == 1,
         (first, receipts),
     )
     receipt = json.loads(receipts[0].read_text(encoding="utf-8"))
     check(
-        "the receipt carries actionable expected and actual values",
-        receipt["error_code"] == "verification-iteration-mismatch"
-        and receipt["expected"] == 0
-        and receipt["actual"] == 1
+        "the receipt carries the authoritative rejected digest",
+        receipt["error_code"] == "invalid-review-submission"
         and receipt["attempt"] == 1
         and receipt["operation_id"] == "round-op",
         receipt,
@@ -140,16 +156,16 @@ def check_rejection_receipts_are_keyed_and_idempotent(root: Path) -> None:
         duplicate,
     )
     second = dict(invalid)
-    second["verification_iteration"] = 2
+    second["verdict"] = "another-invalid-verdict"
     run_submit(state_dir, worktree, second)
     names = [path.name for path in sorted(rejections.glob("*.json"))]
     check(
         "a different invalid input receives the next attempt number",
-        len(names) == 2 and names[1].endswith("-a2.json"),
+        len(names) == 2 and sum(name.endswith("-a2.json") for name in names) == 1,
         names,
     )
     valid = dict(invalid)
-    valid["verification_iteration"] = 0
+    valid["verdict"] = "approve"
     accepted = run_submit(state_dir, worktree, valid)
     check(
         "a corrected input publishes the callback and continues automatically",
@@ -243,9 +259,11 @@ def correction_worker(
             "callback_pointer": str(callbacks / ".review-callback.json"),
         },
     )
-    write_json(
-        callbacks / ".review-meta.json",
-        {
+    meta = publish_review_input_template(
+        state_root=state,
+        state_dir=callbacks,
+        worktree=worktree,
+        meta={
             "schema_version": 1,
             "operation_id": "round-op" if not identity_mismatch else "foreign",
             "run_id": "round-run",
@@ -255,6 +273,7 @@ def correction_worker(
             "head_sha": ("b" * 40) if head_drift else head,
         },
     )
+    write_json(callbacks / ".review-meta.json", meta)
     for index in range(1, receipts + 1):
         write_json(
             callbacks / ".review-submit-rejections" / f"{'c' * 12}{index}-a{index}.json",

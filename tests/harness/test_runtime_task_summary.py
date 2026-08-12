@@ -505,17 +505,29 @@ def assert_malformed_review_resolution_self_heals_boundedly(root: Path) -> None:
         worker, packet=packet, material_findings=findings
     )
     write_json(resolution_path, malformed | {"resolution_summary": "fixed thrice"})
+    RuntimeWorkerReviewBridgeMixin.ensure_review_resolution_template(
+        worker, packet=packet, material_findings=findings
+    )
+    write_json(resolution_path, malformed | {"resolution_summary": "fixed fourth"})
     try:
         RuntimeWorkerReviewBridgeMixin.ensure_review_resolution_template(
             worker, packet=packet, material_findings=findings
         )
     except RuntimeWorkerError as exc:
         exhausted = "correction budget exhausted" in str(exc)
+        exhaustion_error = str(exc)
     else:
         exhausted = False
-    receipts = sorted((state / "review-resolution-corrections").glob("*.json"))
+        exhaustion_error = ""
+    correction_root = (
+        state
+        / "contract-corrections"
+        / "review-resolution"
+        / packet["review_identity_sha256"]
+    )
+    receipts = sorted(correction_root.glob("attempt-*/reservation.json"))
     check(
-        "malformed review resolution gets two bounded same-session corrections",
+        "deterministic repair precedes two bounded review-resolution corrections",
         first == resolution_path
         and second == resolution_path
         and set(restored)
@@ -537,7 +549,7 @@ def assert_malformed_review_resolution_self_heals_boundedly(root: Path) -> None:
         and [json.loads(path.read_text())["attempt"] for path in receipts]
         == [1, 2]
         and exhausted,
-        (restored, cmux.sent, receipts, exhausted),
+        (restored, cmux.sent, receipts, exhausted, exhaustion_error),
     )
 
 
@@ -569,12 +581,32 @@ def assert_resolution_correction_crash_resumes_once(root: Path) -> None:
     }
     findings = [{"finding_id": "F-1"}]
     resolution_path = worktree / ".task-review-resolution.json"
-    write_json(resolution_path, {"schema_version": 1, "wrong": True})
     crashed = SimpleNamespace(
         spec_path=state / "runtime.json",
         spec={"operation_id": TASK, "surface_id": CHILD, "cwd": worktree},
         cmux_adapter=CrashAfterSend(),
         resumed_wake_identities=set(),
+    )
+    RuntimeWorkerReviewBridgeMixin.ensure_review_resolution_template(
+        crashed, packet=packet, material_findings=findings
+    )
+    write_json(
+        resolution_path,
+        {
+            "schema_version": 1,
+            "operation_id": TASK,
+            "review_identity_sha256": packet["review_identity_sha256"],
+            "reviewed_head_sha": packet["reviewed_head_sha"],
+            "resolved_head_sha": "c" * 40,
+            "resolutions": [
+                {
+                    "finding_id": "F-1",
+                    "disposition": "applied",
+                    "rationale": "fixed",
+                    "commit_sha": "c" * 40,
+                }
+            ],
+        },
     )
     try:
         RuntimeWorkerReviewBridgeMixin.ensure_review_resolution_template(
@@ -584,8 +616,16 @@ def assert_resolution_correction_crash_resumes_once(root: Path) -> None:
         pass
     else:
         raise AssertionError("correction wake crash was hidden")
-    receipt_path = state / "review-resolution-corrections/attempt-1.json"
-    pending = json.loads(receipt_path.read_text(encoding="utf-8"))
+    attempt_root = (
+        state
+        / "contract-corrections"
+        / "review-resolution"
+        / packet["review_identity_sha256"]
+        / "attempt-01"
+    )
+    pending = json.loads(
+        (attempt_root / "notification-reserved.json").read_text(encoding="utf-8")
+    )
     cmux = FakeCmux()
     restarted = SimpleNamespace(
         spec_path=state / "runtime.json",
@@ -593,20 +633,22 @@ def assert_resolution_correction_crash_resumes_once(root: Path) -> None:
         cmux_adapter=cmux,
         resumed_wake_identities=set(),
     )
-    RuntimeWorkerReviewBridgeMixin.ensure_review_resolution_template(
-        restarted, packet=packet, material_findings=findings
-    )
-    settled = json.loads(receipt_path.read_text(encoding="utf-8"))
+    try:
+        RuntimeWorkerReviewBridgeMixin.ensure_review_resolution_template(
+            restarted, packet=packet, material_findings=findings
+        )
+    except RuntimeWorkerError as exc:
+        uncertain = "notification effect is uncertain" in str(exc)
+    else:
+        uncertain = False
     check(
-        "torn review resolution correction resumes once without a new attempt",
-        pending["status"] == "pending"
-        and settled["status"] == "sent"
-        and settled["attempt"] == 1
-        and len(cmux.sent) == 1
-        and cmux.keys == [(CHILD, "Enter")]
-        and len(list((state / "review-resolution-corrections").glob("attempt-*.json")))
-        == 1,
-        (pending, settled, cmux.sent, cmux.keys),
+        "torn review resolution correction stays uncertain without duplicate prompt",
+        pending["status"] == "reserved"
+        and uncertain
+        and cmux.sent == []
+        and cmux.keys == []
+        and len(list(attempt_root.parent.glob("attempt-*"))) == 1,
+        (pending, uncertain, cmux.sent, cmux.keys),
     )
 
 

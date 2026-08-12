@@ -16,6 +16,7 @@ from typing import Any, Sequence
 
 from harness.contracts import RuntimeRoute, to_dict
 from harness.review_submit import round_schema_lines
+from harness.review_submit import publish_review_input_template
 from harness.runtime_sessions import RuntimeSessionError, RuntimeSessionManager
 from harness.store import OperationStore, StoreError
 from harness.verification import VerificationError, load_profiles
@@ -466,6 +467,12 @@ def main(
                 },
                 "route": to_dict(record.spec.route),
             }
+            meta = publish_review_input_template(
+                state_root=runtime_root,
+                state_dir=callback_dir,
+                worktree=cwd,
+                meta=meta,
+            )
             _atomic_json(callback_dir / ".review-meta.json", meta)
             prepared[axis] = {
                 "round": round_,

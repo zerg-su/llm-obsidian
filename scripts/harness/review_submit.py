@@ -31,6 +31,11 @@ from review_contract import (
     require_unique_finding_ids,
     validate_finding,
 )
+from harness.artifact_repair import (
+    ArtifactRepairError,
+    ContractArtifactOwner,
+    review_input_contract_template,
+)
 
 
 # The authoritative review-round shape. _round_result accepts a reviewer object
@@ -134,6 +139,46 @@ def atomic_json(path: Path, value: object) -> None:
         os.replace(tmp, path)
     finally:
         tmp.unlink(missing_ok=True)
+
+
+def publish_review_input_template(
+    *, state_root: Path, state_dir: Path, worktree: Path, meta: dict[str, Any]
+) -> dict[str, Any]:
+    """Publish the review sidecar before provider input becomes writable."""
+
+    owner = ContractArtifactOwner.publish(
+        state_root=state_root,
+        worktree=state_dir,
+        template=review_input_contract_template(meta),
+        actual_target=state_dir / ".review-input.json",
+    )
+    if owner.publication_created or not owner.actual_target.exists():
+        owner.restore_template()
+    return {**meta, "contract_template_pointer": str(owner.sidecar_path)}
+
+
+def _repair_review_input(
+    raw: str, meta: dict[str, Any], worktree: Path, input_file: Path
+) -> str:
+    pointer = meta.get("contract_template_pointer")
+    if not isinstance(pointer, str) or not pointer:
+        raise ReviewSubmitError("review input contract template is unavailable")
+    sidecar = Path(pointer).expanduser()
+    if sidecar.is_symlink() or not sidecar.is_file():
+        raise ReviewSubmitError("review input contract template is invalid")
+    try:
+        owner = ContractArtifactOwner.load(
+            state_root=sidecar.parents[2],
+            worktree=input_file.parent,
+            family="review-input",
+            attempt_id=_required_text(meta, "operation_id"),
+        )
+        if owner.sidecar_path != sidecar.resolve() or owner.actual_target != input_file:
+            raise ArtifactRepairError("review input template binding changed")
+        owner.repair(authoritative_fields={})
+        return input_file.read_text(encoding="utf-8")
+    except (ArtifactRepairError, OSError, IndexError) as exc:
+        raise ReviewSubmitError("review input contract repair failed") from exc
 
 
 def _required_text(meta: dict[str, Any], field: str) -> str:
@@ -343,12 +388,15 @@ def main() -> int:
                 raise ReviewSubmitError(
                     "review input must be the exact bounded scratch file"
                 )
+            input_file = expected_input
             raw = input_file.read_text(encoding="utf-8")
         else:
             raw = sys.stdin.read()
         meta = json.loads(
             (state_dir / ".review-meta.json").read_text(encoding="utf-8")
         )
+        if input_file is not None and meta.get("transport") == "review-round":
+            raw = _repair_review_input(raw, meta, worktree, input_file)
         envelope = submit_review(
             raw,
             meta=meta,

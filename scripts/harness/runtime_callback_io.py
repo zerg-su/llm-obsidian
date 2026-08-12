@@ -20,6 +20,13 @@ from .callback_submit_recovery import ArtifactEvidence
 from .runtime_worker_contracts import IDENTIFIER, RuntimeWorkerError
 from research_contract import load_artifact
 from review_resolution import DISPOSITIONS
+from .artifact_repair import (
+    ArtifactRepairError,
+    ContractArtifactOwner,
+    CorrectionBudgetExhausted,
+    CorrectionNotificationUncertain,
+    review_resolution_contract_template,
+)
 
 
 MAX_OUTBOX_BYTES = 70_000
@@ -547,44 +554,56 @@ def ensure_review_resolution(
         raise RuntimeWorkerError("review resolution response path is invalid")
     worker.review_resolution_correction_sent = False
     template = review_resolution_template(packet, material_findings)
-    if _resume_resolution_correction(
-        worker, packet=packet, template=template, path=path
-    ):
-        return path
-    write_template = True
-    if path.exists():
-        raw = path.read_bytes()
-        if len(raw) > MAX_OUTBOX_BYTES:
-            raise RuntimeWorkerError("review resolution response exceeds size cap")
-        try:
-            current = json.loads(raw)
-        except json.JSONDecodeError:
-            current = None
-        recognizable = (
-            isinstance(current, dict)
-            and set(current) == set(template)
-            and current.get("schema_version") == 1
-            and current.get("operation_id") == worker.spec["operation_id"]
+    owner = ContractArtifactOwner.publish(
+        state_root=worker.spec_path.parent,
+        worktree=worker.spec["cwd"],
+        template=review_resolution_contract_template(
+            attempt_id=str(packet["review_identity_sha256"]),
+            value=template,
+        ),
+        actual_target=path,
+    )
+    if owner.publication_created or not path.exists():
+        owner.restore_template()
+    if owner.has_uncertain_correction:
+        raise RuntimeWorkerError(
+            "review resolution correction notification effect is uncertain"
         )
-        if _review_resolution_shape_valid(current, template):
-            write_template = False
-        elif recognizable and (
-            current.get("reviewed_head_sha") != packet["reviewed_head_sha"]
-            or current.get("review_identity_sha256")
-            != packet["review_identity_sha256"]
-        ):
-            write_template = True
-        else:
-            _publish_resolution_correction(
-                worker,
-                packet=packet,
-                template=template,
-                path=path,
-                invalid_sha256=hashlib.sha256(raw).hexdigest(),
-            )
-            return path
-    if write_template:
-        _atomic_json(path, template)
+    try:
+        repaired = owner.repair(authoritative_fields={})
+    except ArtifactRepairError as exc:
+        raise RuntimeWorkerError("review resolution repair failed") from exc
+    current = dict(repaired.value)
+    if _review_resolution_shape_valid(current, template):
+        return path
+    if owner.awaiting_semantic_edit(repaired.output_sha256):
+        worker.review_resolution_correction_sent = True
+        return path
+    try:
+        reservation = owner.reserve_correction(repaired.input_sha256)
+        owner.restore_template()
+
+        def send(message: str) -> None:
+            worker.cmux_adapter.send(worker.spec["surface_id"], message)
+            worker.cmux_adapter.send_key(worker.spec["surface_id"], "Enter")
+
+        owner.deliver_correction(
+            reservation,
+            _resolution_correction_message(path, reservation.attempt),
+            send,
+            fault_observer=getattr(worker, "fault_observer", None),
+        )
+    except CorrectionBudgetExhausted as exc:
+        raise RuntimeWorkerError(
+            "review resolution correction budget exhausted"
+        ) from exc
+    except CorrectionNotificationUncertain as exc:
+        raise RuntimeWorkerError(
+            "review resolution correction notification effect is uncertain"
+        ) from exc
+    except ArtifactRepairError as exc:
+        raise RuntimeWorkerError("review resolution correction is invalid") from exc
+    worker.review_resolution_correction_sent = True
     return path
 
 

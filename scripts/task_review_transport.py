@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from harness.contracts import to_dict
+from harness.review_submit import publish_review_input_template
 from harness.store import OperationStore
 from harness.workflows.review import ReviewContext, ReviewResult, ReviewRound
 from harness.workflows.review_gate import ReviewGateController, ReviewGateRun
@@ -38,9 +39,11 @@ def _write_round_meta(
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     directory.chmod(0o700)
     started_at = _round_telemetry_state(runtime_root, round_)["started_at"]
-    _atomic_json(
-        directory / ".review-meta.json",
-        {
+    meta = publish_review_input_template(
+        state_root=runtime_root,
+        state_dir=directory,
+        worktree=worktree,
+        meta={
             "schema_version": 1,
             "transport": "review-round",
             "operation_id": round_.operation_id,
@@ -65,6 +68,7 @@ def _write_round_meta(
             "route": to_dict(round_.spec.route),
         },
     )
+    _atomic_json(directory / ".review-meta.json", meta)
     _emit_round_telemetry(
         worktree,
         vault,

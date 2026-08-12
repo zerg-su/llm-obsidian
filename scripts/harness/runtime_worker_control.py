@@ -16,6 +16,7 @@ from .runtime_worker import (
     _submit_failure_requires_attention,
 )
 from task_escalation_records import EscalationRecordError, append_raise
+from .contracts import ContractFamily, contract_registry
 from .artifact_repair import (
     ArtifactRepairError,
     ContractArtifactOwner,
@@ -402,24 +403,10 @@ class RuntimeWorkerControlMixin:
             return
         if not isinstance(latest, dict) or latest.get("status") != "rejected":
             return
-        marker = callback_path.parent / f".correction-{latest_path.stem}.json"
-        if marker.is_symlink():
-            self.summary_attention(
-                "review-submit-correction-receipt-invalid",
-                AttentionReason.ATTENTION_REQUIRED,
-            )
-            return
-        if marker.is_file():
-            try:
-                existing = json.loads(marker.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                existing = {}
-            if existing.get("status") == "sent":
-                return
         record = self.store.read(
             self.spec["owner_id"], self.spec["operation_id"]
         )
-        if len(receipts) >= record.attempt_limit:
+        if len(receipts) > contract_registry()[ContractFamily.REVIEW_INPUT].same_session_corrections:
             self.summary_attention(
                 "review-submit-rejections-exhausted",
                 AttentionReason.RETRY_EXHAUSTED,
@@ -472,26 +459,6 @@ class RuntimeWorkerControlMixin:
                 AttentionReason.CONTRACT_DRIFT,
             )
             return
-        try:
-            OperationSupervisor(
-                self.store,
-                self.spec["owner_id"],
-                self.spec["operation_id"],
-            ).consume_attempt()
-        except SupervisorError:
-            self.summary_attention(
-                "review-submit-rejections-exhausted",
-                AttentionReason.RETRY_EXHAUSTED,
-            )
-            return
-        receipt_fields = {
-            "schema_version": 1,
-            "rejection": latest_path.name,
-            "input_sha256": str(latest.get("input_sha256") or ""),
-            "attempt": latest.get("attempt"),
-            "error_code": str(latest.get("error_code") or ""),
-        }
-        _atomic_json(marker, {**receipt_fields, "status": "pending"})
         input_path = callback_path.parent / ".review-input.json"
         submit = shlex.join(
             (
@@ -513,9 +480,55 @@ class RuntimeWorkerControlMixin:
             "contract - change nothing else and do not restart the review - "
             f"then rerun exactly: {submit}"
         )
-        self.cmux_adapter.send(self.spec["surface_id"], message)
-        self.cmux_adapter.send_key(self.spec["surface_id"], "Enter")
-        _atomic_json(marker, {**receipt_fields, "status": "sent"})
+        pointer = meta.get("contract_template_pointer")
+        if not isinstance(pointer, str) or not pointer:
+            self.summary_attention("review-submit-correction-template-invalid")
+            return
+        sidecar = Path(pointer).expanduser()
+        try:
+            owner = ContractArtifactOwner.load(
+                state_root=sidecar.parents[2],
+                worktree=input_path.parent,
+                family=ContractFamily.REVIEW_INPUT,
+                attempt_id=operation_id,
+            )
+            invalid_sha256 = str(latest.get("input_sha256") or "")
+            if owner.awaiting_semantic_edit(invalid_sha256):
+                return
+            reservation = owner.reserve_correction(invalid_sha256)
+            if reservation.created:
+                OperationSupervisor(
+                    self.store,
+                    self.spec["owner_id"],
+                    self.spec["operation_id"],
+                ).consume_attempt()
+            owner.restore_template()
+
+            def send(wake: str) -> None:
+                self.cmux_adapter.send(self.spec["surface_id"], wake)
+                self.cmux_adapter.send_key(self.spec["surface_id"], "Enter")
+
+            owner.deliver_correction(
+                reservation,
+                message,
+                send,
+                fault_observer=getattr(self, "fault_observer", None),
+            )
+        except CorrectionBudgetExhausted:
+            self.summary_attention(
+                "review-submit-rejections-exhausted",
+                AttentionReason.RETRY_EXHAUSTED,
+            )
+        except CorrectionNotificationUncertain:
+            self.summary_attention(
+                "review-submit-correction-notification-uncertain",
+                AttentionReason.ATTENTION_REQUIRED,
+            )
+        except (ArtifactRepairError, IndexError, SupervisorError):
+            self.summary_attention(
+                "review-submit-correction-template-invalid",
+                AttentionReason.ATTENTION_REQUIRED,
+            )
 
     def summary_attention(
         self,

@@ -85,6 +85,7 @@ class CorrectionReservation:
     invalid_sha256: str
     correction_id: str
     root: Path
+    created: bool = False
 
 
 _KEY_ALIASES: Mapping[ContractFamily, Mapping[str, str]] = {
@@ -172,6 +173,67 @@ def pipeline_step_contract_template(
         )
     except ContractError as exc:
         raise ArtifactRepairError("pipeline-step template is invalid") from exc
+
+
+def review_input_contract_template(
+    meta: Mapping[str, object],
+) -> CanonicalContractTemplate:
+    attempt_id = meta.get("operation_id")
+    axis = meta.get("axis")
+    iteration = meta.get("verification_iteration")
+    if (
+        not isinstance(attempt_id, str)
+        or not attempt_id
+        or not isinstance(axis, str)
+        or not axis
+        or type(iteration) is not int
+        or iteration < 0
+    ):
+        raise ArtifactRepairError("review-input template authority is invalid")
+    try:
+        return CanonicalContractTemplate.create(
+            ContractFamily.REVIEW_INPUT,
+            attempt_id=attempt_id,
+            target_pointer=".review-input.json",
+            value={
+                "schema_version": 1,
+                "axis": axis,
+                "verdict": "",
+                "verification_iteration": iteration,
+                "findings": [],
+            },
+            code_owned_fields={
+                "schema_version",
+                "axis",
+                "verification_iteration",
+            },
+            model_owned_fields={"verdict", "findings"},
+        )
+    except ContractError as exc:
+        raise ArtifactRepairError("review-input template is invalid") from exc
+
+
+def review_resolution_contract_template(
+    *,
+    attempt_id: str,
+    value: Mapping[str, object],
+) -> CanonicalContractTemplate:
+    try:
+        return CanonicalContractTemplate.create(
+            ContractFamily.REVIEW_RESOLUTION,
+            attempt_id=attempt_id,
+            target_pointer=".task-review-resolution.json",
+            value=value,
+            code_owned_fields={
+                "schema_version",
+                "operation_id",
+                "review_identity_sha256",
+                "reviewed_head_sha",
+            },
+            model_owned_fields={"resolved_head_sha", "resolutions"},
+        )
+    except ContractError as exc:
+        raise ArtifactRepairError("review-resolution template is invalid") from exc
 
 
 def _canonical_bytes(value: object) -> bytes:
@@ -534,6 +596,14 @@ class ContractArtifactOwner:
             for reservation in self._reservations()
         )
 
+    @property
+    def has_uncertain_correction(self) -> bool:
+        return any(
+            (reservation.root / "notification-reserved.json").is_file()
+            and not (reservation.root / "notification-sent.json").is_file()
+            for reservation in self._reservations()
+        )
+
     def restore_template(self) -> None:
         if self.actual_target.is_symlink():
             raise ArtifactRepairError("model artifact cannot be a symlink")
@@ -642,6 +712,7 @@ class ContractArtifactOwner:
                     str(raw["invalid_sha256"]),
                     str(raw["correction_id"]),
                     directory,
+                    False,
                 )
             )
         return values
@@ -693,6 +764,7 @@ class ContractArtifactOwner:
             invalid_sha256,
             correction_id,
             directory,
+            True,
         )
 
     def _notification_event(
@@ -712,10 +784,20 @@ class ContractArtifactOwner:
         *,
         fault_observer: Callable[[str], object] | None = None,
     ) -> bool:
+        authoritative = [
+            row
+            for row in self._reservations()
+            if row.family is reservation.family
+            and row.attempt_id == reservation.attempt_id
+            and row.attempt == reservation.attempt
+            and row.invalid_sha256 == reservation.invalid_sha256
+            and row.correction_id == reservation.correction_id
+            and row.root == reservation.root
+        ]
         if (
             reservation.family is not self.template.family
             or reservation.attempt_id != self.template.attempt_id
-            or reservation not in self._reservations()
+            or len(authoritative) != 1
         ):
             raise ArtifactRepairError("correction reservation is not authoritative")
         reserved = reservation.root / "notification-reserved.json"
@@ -762,4 +844,6 @@ __all__ = (
     "CorrectionReservation",
     "observe_stable_artifact",
     "pipeline_step_contract_template",
+    "review_input_contract_template",
+    "review_resolution_contract_template",
 )
