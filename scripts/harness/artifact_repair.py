@@ -142,6 +142,38 @@ _WRAPPERS: Mapping[ContractFamily, frozenset[str]] = {
 }
 
 
+def pipeline_step_contract_template(
+    request: Mapping[str, object],
+) -> CanonicalContractTemplate:
+    """Build the one concrete fix/custom result template for a request."""
+
+    attempt_id = request.get("operation_id")
+    if not isinstance(attempt_id, str) or not attempt_id:
+        raise ArtifactRepairError("pipeline-step template attempt is invalid")
+    custom = request.get("workflow_kind") == "custom"
+    value: dict[str, object] = {
+        "schema_version": 1,
+        "status": "",
+        "output_sha256": "",
+        "head_sha": "",
+    }
+    model_owned = {"status"}
+    if custom:
+        value["outcome"] = ""
+        model_owned.add("outcome")
+    try:
+        return CanonicalContractTemplate.create(
+            ContractFamily.PIPELINE_STEP_RESULT,
+            attempt_id=attempt_id,
+            target_pointer=".task-pipeline-step-result.json",
+            value=value,
+            code_owned_fields={"schema_version", "output_sha256", "head_sha"},
+            model_owned_fields=model_owned,
+        )
+    except ContractError as exc:
+        raise ArtifactRepairError("pipeline-step template is invalid") from exc
+
+
 def _canonical_bytes(value: object) -> bytes:
     return (
         json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -153,7 +185,7 @@ def _sha256(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
-def _write_once(path: Path, value: object, *, mode: int = 0o400) -> None:
+def _write_once(path: Path, value: object, *, mode: int = 0o400) -> bool:
     encoded = _canonical_bytes(value)
     if path.is_symlink():
         raise ArtifactRepairError("immutable contract artifact cannot be a symlink")
@@ -168,7 +200,7 @@ def _write_once(path: Path, value: object, *, mode: int = 0o400) -> None:
             ) from exc
         if current != encoded:
             raise ArtifactRepairError("immutable contract artifact changed")
-        return
+        return False
     try:
         with os.fdopen(descriptor, "wb") as handle:
             handle.write(encoded)
@@ -183,6 +215,7 @@ def _write_once(path: Path, value: object, *, mode: int = 0o400) -> None:
     except Exception:
         path.unlink(missing_ok=True)
         raise
+    return True
 
 
 def _atomic_write(path: Path, value: object) -> None:
@@ -378,12 +411,14 @@ class ContractArtifactOwner:
         template: CanonicalContractTemplate,
         actual_target: Path,
         sidecar_path: Path,
+        publication_created: bool,
     ) -> None:
         self.state_root = state_root
         self.worktree = worktree
         self.template = template
         self.actual_target = actual_target
         self.sidecar_path = sidecar_path
+        self.publication_created = publication_created
 
     @classmethod
     def publish(
@@ -412,13 +447,14 @@ class ContractArtifactOwner:
             "template": template.as_dict(),
         }
         value = {**unsigned, "publication_sha256": _sha256(_canonical_bytes(unsigned))}
-        _write_once(path, value)
+        created = _write_once(path, value)
         return cls(
             state_root=root,
             worktree=tree,
             template=template,
             actual_target=tree.joinpath(*PurePosixPath(relative).parts),
             sidecar_path=path,
+            publication_created=created,
         )
 
     @classmethod
@@ -468,6 +504,7 @@ class ContractArtifactOwner:
             template=template,
             actual_target=target,
             sidecar_path=path,
+            publication_created=False,
         )
 
     @property
@@ -724,4 +761,5 @@ __all__ = (
     "CorrectionNotificationUncertain",
     "CorrectionReservation",
     "observe_stable_artifact",
+    "pipeline_step_contract_template",
 )

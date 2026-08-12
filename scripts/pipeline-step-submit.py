@@ -15,6 +15,10 @@ from pathlib import Path, PurePosixPath
 from typing import NoReturn
 
 from harness.contracts import CallbackEnvelope, ContractError, to_dict
+from harness.artifact_repair import (
+    ArtifactRepairError,
+    ContractArtifactOwner,
+)
 from harness.workflows.engineering_fix import FIX_PHASES, PHASE_SCHEMAS
 
 
@@ -44,6 +48,7 @@ FIX_REQUEST_FIELDS = {
     "output_schema",
     "result_pointer",
     "output_pointer",
+    "contract_template_pointer",
 }
 CUSTOM_REQUEST_FIELDS = {
     "schema_version",
@@ -63,6 +68,7 @@ CUSTOM_REQUEST_FIELDS = {
     "allowed_outcomes",
     "result_pointer",
     "output_pointer",
+    "contract_template_pointer",
 }
 FIX_RESULT_FIELDS = {
     "schema_version",
@@ -157,6 +163,35 @@ def _regular_bytes(path: Path, *, limit: int, label: str) -> bytes:
         raise SubmitError(f"{label} is missing") from exc
     except OSError as exc:
         raise SubmitError(f"{label} is unreadable") from exc
+
+
+def _contract_owner(
+    worktree: Path,
+    request: dict[str, object],
+    result_path: Path,
+) -> ContractArtifactOwner:
+    raw = request.get("contract_template_pointer")
+    if not isinstance(raw, str) or not raw:
+        raise SubmitError("contract template pointer is missing")
+    sidecar = Path(raw).expanduser()
+    if not sidecar.is_absolute():
+        raise SubmitError("contract template pointer must be absolute")
+    if sidecar.is_symlink() or not sidecar.is_file():
+        raise SubmitError("contract template sidecar is invalid")
+    try:
+        # .../<state-root>/contract-templates/<family>/<attempt>.json
+        state_root = sidecar.parents[2]
+        owner = ContractArtifactOwner.load(
+            state_root=state_root,
+            worktree=worktree,
+            family="pipeline-step-result",
+            attempt_id=str(request.get("operation_id") or ""),
+        )
+    except (ArtifactRepairError, IndexError) as exc:
+        raise SubmitError("contract template sidecar is invalid") from exc
+    if owner.sidecar_path != sidecar.resolve() or owner.actual_target != result_path:
+        raise SubmitError("contract template binding changed")
+    return owner
 
 
 def _head(worktree: Path) -> str:
@@ -262,6 +297,7 @@ def _validate_fix_request(
         "output_schema": output_schema,
         "result_pointer": result_pointer,
         "output_pointer": output_pointer,
+        "contract_template_pointer": request["contract_template_pointer"],
     }
     return normalized, result_path, output_pointer, output_path
 
@@ -332,6 +368,7 @@ def _validate_custom_request(
             "allowed_outcomes": allowed,
             "result_pointer": result_pointer,
             "output_pointer": output_pointer,
+            "contract_template_pointer": request["contract_template_pointer"],
         },
         result_path,
         output_pointer,
@@ -354,10 +391,24 @@ def _envelope(
     output_pointer: str,
     output_path: Path,
 ) -> CallbackEnvelope:
-    result = _read_json(
-        result_path, limit=MAX_RESULT_BYTES, label="result file"
-    )
     custom = request.get("workflow_kind") == "custom"
+    output = _regular_bytes(
+        output_path, limit=MAX_OUTPUT_BYTES, label="output file"
+    )
+    observed_output_sha256 = hashlib.sha256(output).hexdigest()
+    observed_head = _head(worktree)
+    owner = _contract_owner(worktree, request, result_path)
+    try:
+        repaired = owner.repair(
+            authoritative_fields={
+                "schema_version": 1,
+                "output_sha256": observed_output_sha256,
+                "head_sha": observed_head,
+            }
+        )
+    except ArtifactRepairError as exc:
+        raise SubmitError(f"result contract repair failed: {exc}") from exc
+    result = dict(repaired.value)
     expected_result_fields = CUSTOM_RESULT_FIELDS if custom else FIX_RESULT_FIELDS
     if set(result) != expected_result_fields:
         raise SubmitError("result keys changed")
@@ -368,26 +419,10 @@ def _envelope(
         raise SubmitError("result status is invalid")
     if (
         not custom
-        and
-        status == "cannot-reproduce"
+        and status == "cannot-reproduce"
         and request["step_id"] != "reproduce"
     ):
-        raise SubmitError(
-            "cannot-reproduce is valid only for the reproduce phase"
-        )
-    output = _regular_bytes(
-        output_path, limit=MAX_OUTPUT_BYTES, label="output file"
-    )
-    observed_output_sha256 = hashlib.sha256(output).hexdigest()
-    declared_output_sha256 = _sha256(
-        result.get("output_sha256"), "result output_sha256"
-    )
-    if declared_output_sha256 != observed_output_sha256:
-        raise SubmitError("output digest does not match the regular output file")
-    observed_head = _head(worktree)
-    declared_head = _git_oid(result.get("head_sha"), "result HEAD")
-    if declared_head != observed_head:
-        raise SubmitError("result HEAD does not match the current Git HEAD")
+        raise SubmitError("cannot-reproduce is valid only for the reproduce phase")
     if custom:
         outcome = _identifier(result.get("outcome"), "result outcome")
         if outcome not in request["allowed_outcomes"]:

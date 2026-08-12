@@ -591,6 +591,8 @@ class RuntimeWorkerExecution(
         self.fix_callback_stable_reads = 0
         self.fix_result_digest = ""
         self.fix_result_stable_reads = 0
+        self.fix_output_digest = ""
+        self.fix_output_stable_reads = 0
         self.fix_submit_attempt_digest = ""
         self.fix_transport_complete = (
             self._pipeline_name != "engineering/fix" or self.is_custom_pipeline
@@ -600,7 +602,10 @@ class RuntimeWorkerExecution(
         self.custom_callback_stable_reads = 0
         self.custom_result_digest = ""
         self.custom_result_stable_reads = 0
+        self.custom_output_digest = ""
+        self.custom_output_stable_reads = 0
         self.custom_submit_attempt_digest = ""
+        self.pipeline_step_artifact_owner = None
         self.exit_code = 0
         self.provider_exited = False
         self.exit_containment_failed = False

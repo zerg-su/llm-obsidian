@@ -12,6 +12,7 @@ from .runtime_worker import (
     _envelope,
     _submit_failure_requires_attention,
 )
+from .artifact_repair import ContractArtifactOwner
 
 
 @dataclass
@@ -373,6 +374,7 @@ class RuntimeWorkerFixMixin:
             "result_pointer": result_pointer,
             "output_pointer": output_pointer,
         }
+        self.publish_pipeline_step_contract(request)
         _atomic_json(self.spec["cwd"] / ".task-pipeline-step-request.json", request)
         self.retarget_fix_callback(
             operation_id=round_.spec.operation_id,
@@ -392,6 +394,31 @@ class RuntimeWorkerFixMixin:
         result_digest = _bounded_file_sha256(result_path)
         if not result_digest:
             return
+        owner = getattr(self, "pipeline_step_artifact_owner", None)
+        if (
+            isinstance(owner, ContractArtifactOwner)
+            and owner.actual_target == result_path
+            and result_digest == owner.template_artifact_sha256
+        ):
+            return
+        try:
+            request = json.loads(
+                (self.spec["cwd"] / ".task-pipeline-step-request.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            output_path = self.spec["cwd"] / str(request["output_pointer"])
+        except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+            self.summary_attention("pipeline-fix-request-invalid")
+            return
+        output_digest = _bounded_file_sha256(output_path)
+        if not output_digest:
+            return
+        if output_digest != self.fix_output_digest:
+            self.fix_output_digest = output_digest
+            self.fix_output_stable_reads = 1
+            return
+        self.fix_output_stable_reads += 1
         if result_digest != self.fix_result_digest:
             self.fix_result_digest = result_digest
             self.fix_result_stable_reads = 1
@@ -399,6 +426,7 @@ class RuntimeWorkerFixMixin:
         self.fix_result_stable_reads += 1
         if (
             self.fix_result_stable_reads < 2
+            or self.fix_output_stable_reads < 2
             or self.fix_submit_attempt_digest == result_digest
         ):
             return
@@ -425,8 +453,9 @@ class RuntimeWorkerFixMixin:
                     "status": "attention-required",
                 },
             )
-            self.summary_attention(
-                "pipeline-fix-submit-failed", AttentionReason.CALLBACK_INVALID
+            current_digest = _bounded_file_sha256(result_path) or result_digest
+            self.request_pipeline_step_correction(
+                current_digest, stage="pipeline-fix-submit"
             )
 
     def accept_fix_callback(
@@ -476,6 +505,8 @@ class RuntimeWorkerFixMixin:
         self.fix_callback_stable_reads = 0
         self.fix_result_digest = ""
         self.fix_result_stable_reads = 0
+        self.fix_output_digest = ""
+        self.fix_output_stable_reads = 0
         self.fix_submit_attempt_digest = ""
 
     def drive_fix_transport(self) -> None:

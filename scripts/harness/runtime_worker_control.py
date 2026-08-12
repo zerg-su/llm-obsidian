@@ -16,9 +16,103 @@ from .runtime_worker import (
     _submit_failure_requires_attention,
 )
 from task_escalation_records import EscalationRecordError, append_raise
+from .artifact_repair import (
+    ArtifactRepairError,
+    ContractArtifactOwner,
+    CorrectionBudgetExhausted,
+    CorrectionNotificationUncertain,
+    pipeline_step_contract_template,
+)
 
 
 class RuntimeWorkerControlMixin:
+
+    def publish_pipeline_step_contract(
+        self, request: dict[str, object]
+    ) -> ContractArtifactOwner:
+        result_pointer = request.get("result_pointer")
+        if not isinstance(result_pointer, str) or not result_pointer:
+            raise RuntimeWorkerError("pipeline-step result pointer is invalid")
+        template = pipeline_step_contract_template(request)
+        owner = ContractArtifactOwner.publish(
+            state_root=self.spec_path.parent,
+            worktree=self.spec["cwd"],
+            template=template,
+            actual_target=self.spec["cwd"] / result_pointer,
+        )
+        request["contract_template_pointer"] = str(owner.sidecar_path)
+        if owner.publication_created or not owner.actual_target.exists():
+            owner.restore_template()
+        self.pipeline_step_artifact_owner = owner
+        return owner
+
+    def request_pipeline_step_correction(
+        self, invalid_sha256: str, *, stage: str
+    ) -> None:
+        owner = getattr(self, "pipeline_step_artifact_owner", None)
+        if not isinstance(owner, ContractArtifactOwner):
+            self.summary_attention(f"{stage}-template-unavailable")
+            return
+        if owner.awaiting_semantic_edit(invalid_sha256):
+            return
+        try:
+            reservation = owner.reserve_correction(invalid_sha256)
+            owner.restore_template()
+            message = (
+                "The pipeline-step result was rejected before callback "
+                "acceptance. Harness restored the exact identity-bound result "
+                "template. Edit that existing object in place; fill only status "
+                "and, for a custom step, outcome. Write the requested evidence "
+                "file first. The submit chokepoint derives output_sha256 and "
+                "head_sha from durable authority. This is the only same-session "
+                "correction; do not repeat an accepted step or start a new session."
+            )
+
+            def send(wake: str) -> None:
+                self.cmux_adapter.send(self.spec["surface_id"], wake)
+                self.cmux_adapter.send_key(self.spec["surface_id"], "Enter")
+
+            owner.deliver_correction(
+                reservation,
+                message,
+                send,
+                fault_observer=getattr(self, "fault_observer", None),
+            )
+            self.fix_result_digest = ""
+            self.fix_result_stable_reads = 0
+            self.fix_output_digest = ""
+            self.fix_output_stable_reads = 0
+            self.fix_submit_attempt_digest = ""
+            self.custom_result_digest = ""
+            self.custom_result_stable_reads = 0
+            self.custom_output_digest = ""
+            self.custom_output_stable_reads = 0
+            self.custom_submit_attempt_digest = ""
+        except CorrectionBudgetExhausted:
+            self.summary_attention(
+                f"{stage}-correction-exhausted",
+                AttentionReason.RETRY_EXHAUSTED,
+            )
+        except CorrectionNotificationUncertain:
+            self.summary_attention(
+                f"{stage}-correction-notification-uncertain",
+                AttentionReason.ATTENTION_REQUIRED,
+            )
+        except ArtifactRepairError:
+            self.summary_attention(f"{stage}-template-invalid")
+
+    def mark_failed_pipeline_step_correction_runtime(self) -> None:
+        owner = getattr(self, "pipeline_step_artifact_owner", None)
+        if (
+            self.provider_exited
+            and not self.callback_handled
+            and isinstance(owner, ContractArtifactOwner)
+            and owner.has_sent_correction
+        ):
+            self.summary_attention(
+                "pipeline-step-correction-session-dead",
+                AttentionReason.ATTENTION_REQUIRED,
+            )
 
     def publish_error_latch(self, status: str) -> None:
         """Publish one owned callback/error latch, then expose its durable boundary."""

@@ -22,6 +22,7 @@ from .workflows.research_contracts import (
     research_callback_identity,
 )
 from task_escalation_records import EscalationRecordError, append_raise
+from .artifact_repair import ContractArtifactOwner
 
 
 class RuntimeWorkerCustomMixin:
@@ -259,6 +260,7 @@ class RuntimeWorkerCustomMixin:
                 receipts=tuple(receipts),
             )
             request = custom_step_request(round_)
+            self.publish_pipeline_step_contract(request)
             _atomic_json(self.spec["cwd"] / ".task-pipeline-step-request.json", request)
             self.retarget_fix_callback(
                 operation_id=round_.spec.operation_id,
@@ -275,6 +277,22 @@ class RuntimeWorkerCustomMixin:
                 result_path = self.spec["cwd"] / str(request["result_pointer"])
                 result_digest = _bounded_file_sha256(result_path)
                 if result_digest:
+                    owner = getattr(self, "pipeline_step_artifact_owner", None)
+                    if (
+                        isinstance(owner, ContractArtifactOwner)
+                        and owner.actual_target == result_path
+                        and result_digest == owner.template_artifact_sha256
+                    ):
+                        return
+                    output_path = self.spec["cwd"] / str(request["output_pointer"])
+                    output_digest = _bounded_file_sha256(output_path)
+                    if not output_digest:
+                        return
+                    if output_digest != self.custom_output_digest:
+                        self.custom_output_digest = output_digest
+                        self.custom_output_stable_reads = 1
+                        return
+                    self.custom_output_stable_reads += 1
                     if result_digest != self.custom_result_digest:
                         self.custom_result_digest = result_digest
                         self.custom_result_stable_reads = 1
@@ -282,6 +300,7 @@ class RuntimeWorkerCustomMixin:
                         self.custom_result_stable_reads += 1
                     if (
                         self.custom_result_stable_reads >= 2
+                        and self.custom_output_stable_reads >= 2
                         and self.custom_submit_attempt_digest != result_digest
                     ):
                         self.custom_submit_attempt_digest = result_digest
@@ -313,9 +332,12 @@ class RuntimeWorkerCustomMixin:
                                     "status": "attention-required",
                                 },
                             )
-                            self.summary_attention(
-                                "pipeline-custom-submit-failed",
-                                AttentionReason.CALLBACK_INVALID,
+                            current_digest = (
+                                _bounded_file_sha256(result_path) or result_digest
+                            )
+                            self.request_pipeline_step_correction(
+                                current_digest,
+                                stage="pipeline-custom-submit",
                             )
                 return
             raw = callback_path.read_bytes()
@@ -354,6 +376,8 @@ class RuntimeWorkerCustomMixin:
             self.custom_callback_stable_reads = 0
             self.custom_result_digest = ""
             self.custom_result_stable_reads = 0
+            self.custom_output_digest = ""
+            self.custom_output_stable_reads = 0
             self.custom_submit_attempt_digest = ""
         except (
             CustomSequenceError,

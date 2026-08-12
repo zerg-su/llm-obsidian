@@ -12,6 +12,12 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
+from harness.artifact_repair import (  # noqa: E402
+    ContractArtifactOwner,
+    pipeline_step_contract_template,
+)
+
 SCRIPT = ROOT / "scripts" / "pipeline-step-submit.py"
 REQUEST = ".task-pipeline-step-request.json"
 OUTBOX = ".task-pipeline-step-callback.json"
@@ -75,7 +81,7 @@ def request(
         "regression-test": ("diagnosis/v1", "regression-test/v1"),
         "minimal-fix": ("regression-test/v1", "implementation-result/v1"),
     }[step_id]
-    return {
+    value = {
         "schema_version": 1,
         "operation_id": (
             f"fix-parent-{step_id}-{iteration}-abcdef123456"
@@ -97,6 +103,15 @@ def request(
         "result_pointer": result_pointer,
         "output_pointer": output_pointer,
     }
+    template = pipeline_step_contract_template(value)
+    owner = ContractArtifactOwner.publish(
+        state_root=worktree / ".task-pipeline-contract-state",
+        worktree=worktree,
+        template=template,
+        actual_target=worktree / result_pointer,
+    )
+    value["contract_template_pointer"] = str(owner.sidecar_path)
+    return value
 
 
 def prepare(
@@ -209,6 +224,38 @@ with tempfile.TemporaryDirectory(prefix="pipeline-step-submit.") as raw:
     )
 
     original_outbox = (worktree / OUTBOX).read_bytes()
+    (worktree / OUTBOX).unlink()
+    result_path = worktree / str(raw_request["result_pointer"])
+    result_path.write_text(
+        "```json\n"
+        + json.dumps(
+            {
+                "schemaVersion": 9,
+                "state": "completed",
+                "output_digest": "f" * 64,
+                "head": "e" * 40,
+            },
+            sort_keys=True,
+        )[:-1]
+        + ",\n```\n",
+        encoding="utf-8",
+    )
+    repaired_result = run(worktree)
+    repaired_value = json.loads(result_path.read_text(encoding="utf-8"))
+    check(
+        "submit chokepoint repairs syntax aliases and code-owned identity once",
+        repaired_result.returncode == 0
+        and repaired_value
+        == {
+            "schema_version": 1,
+            "status": "complete",
+            "output_sha256": sha_bytes(b"bounded phase evidence\n"),
+            "head_sha": git(worktree, "rev-parse", "HEAD"),
+        },
+        (repaired_result.stderr, repaired_value),
+    )
+
+    original_outbox = (worktree / OUTBOX).read_bytes()
     second = run(worktree)
     check(
         "submitter never overwrites an existing callback outbox",
@@ -276,10 +323,12 @@ with tempfile.TemporaryDirectory(prefix="pipeline-step-submit.") as raw:
     prepare(worktree, stale, declared_head_sha="f" * 40)
     stale_result = run(worktree)
     check(
-        "declared result HEAD must equal the exact current Git HEAD",
-        stale_result.returncode != 0
-        and not (worktree / OUTBOX).exists()
-        and "HEAD" in stale_result.stderr,
+        "uniquely re-bindable result HEAD is restored from current Git authority",
+        stale_result.returncode == 0
+        and json.loads(
+            (worktree / str(stale["result_pointer"])).read_text(encoding="utf-8")
+        )["head_sha"]
+        == git(worktree, "rev-parse", "HEAD"),
         stale_result.stderr,
     )
 
@@ -288,15 +337,18 @@ with tempfile.TemporaryDirectory(prefix="pipeline-step-submit.") as raw:
     prepare(worktree, bad_hash, declared_output_sha256=sha("wrong"))
     bad_hash_result = run(worktree)
     check(
-        "declared output digest must equal the exact regular output file",
-        bad_hash_result.returncode != 0
-        and not (worktree / OUTBOX).exists()
-        and "digest" in bad_hash_result.stderr,
+        "uniquely re-bindable output digest is restored from regular output authority",
+        bad_hash_result.returncode == 0
+        and json.loads(
+            (worktree / str(bad_hash["result_pointer"])).read_text(encoding="utf-8")
+        )["output_sha256"]
+        == sha_bytes(b"bounded phase evidence\n"),
         bad_hash_result.stderr,
     )
 
     reset_transport(worktree)
-    escaped = request(worktree, result_pointer="../result.json")
+    escaped = request(worktree)
+    escaped["result_pointer"] = "../result.json"
     write_json(worktree / REQUEST, escaped)
     escaped_result = run(worktree)
     check(
@@ -393,6 +445,13 @@ with tempfile.TemporaryDirectory(prefix="pipeline-step-submit.") as raw:
         "result_pointer": ".task-pipeline/custom/00-design-result.json",
         "output_pointer": ".task-pipeline/custom/00-design-output.md",
     }
+    custom_owner = ContractArtifactOwner.publish(
+        state_root=worktree / ".task-pipeline-contract-state",
+        worktree=worktree,
+        template=pipeline_step_contract_template(custom_request),
+        actual_target=worktree / str(custom_request["result_pointer"]),
+    )
+    custom_request["contract_template_pointer"] = str(custom_owner.sidecar_path)
     custom_output_path = worktree / str(custom_request["output_pointer"])
     custom_result_path = worktree / str(custom_request["result_pointer"])
     custom_output_path.parent.mkdir(parents=True, exist_ok=True)

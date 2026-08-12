@@ -323,6 +323,7 @@ class RuntimeWorkerLoopMixin:
 
         self.mark_failed_research_runtime()
         self.mark_failed_task_summary_correction_runtime()
+        self.mark_failed_pipeline_step_correction_runtime()
         if self.needs_provider_restart():
             self.restart_provider()
         return self.provider_exit_is_final()
