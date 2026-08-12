@@ -202,6 +202,7 @@ def correction_worker(
     process_status: str = "alive",
     head_drift: bool = False,
     identity_mismatch: bool = False,
+    receipt_hashes: tuple[str, ...] = (),
 ) -> tuple[object, RecordingCmux, list, OperationStore, Path]:
     vault = root / f"vault-{name}"
     store = OperationStore(vault / ".vault-meta" / "harness")
@@ -265,25 +266,35 @@ def correction_worker(
         worktree=worktree,
         meta={
             "schema_version": 1,
+            "transport": "review-round",
             "operation_id": "round-op" if not identity_mismatch else "foreign",
             "run_id": "round-run",
+            "parent_session_operation_id": op,
             "axis": "anthropic-holistic",
             "verification_iteration": 0,
             "worktree": str(worktree),
             "head_sha": ("b" * 40) if head_drift else head,
+            "verification_profile": {"name": "scoped", "sha256": "5" * 64},
         },
     )
     write_json(callbacks / ".review-meta.json", meta)
     for index in range(1, receipts + 1):
+        digest = (
+            receipt_hashes[index - 1]
+            if index <= len(receipt_hashes)
+            else ("d" * 63) + str(index)
+        )
         write_json(
-            callbacks / ".review-submit-rejections" / f"{'c' * 12}{index}-a{index}.json",
+            callbacks
+            / ".review-submit-rejections"
+            / f"{digest[:12]}-a{index}.json",
             {
                 "schema_version": 1,
                 "status": "rejected",
                 "operation_id": "round-op",
                 "run_id": "round-run",
                 "axis": "anthropic-holistic",
-                "input_sha256": ("d" * 63) + str(index),
+                "input_sha256": digest,
                 "attempt": index,
                 "error_code": "verification-iteration-mismatch",
                 "error": "review round iteration does not match metadata",
@@ -353,6 +364,42 @@ def check_correction_loop(root: Path) -> None:
         and store.read("owner-1", "correct-review-parent").attempt == 1,
         (len(cmux.sent),),
     )
+    corrected = {
+        "schema_version": 1,
+        "axis": "anthropic-holistic",
+        "verdict": "approve",
+        "verification_iteration": 0,
+        "findings": [],
+    }
+    input_path = callbacks / ".review-input.json"
+    write_json(input_path, corrected)
+    corrected_bytes = input_path.read_bytes()
+    restarted = type(worker)()
+    restarted.inspect_submit_rejections()
+    preserved_bytes = input_path.read_bytes()
+    submitted = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts/harness/review_submit.py"),
+            "--worktree",
+            str(root / "product-correct"),
+            "--state-dir",
+            str(callbacks),
+            "--input-file",
+            str(input_path),
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    check(
+        "repeated polling preserves and submits the reviewer's corrected bytes",
+        preserved_bytes == corrected_bytes
+        and submitted.returncode == 0
+        and (callbacks / ".review-callback.json").is_file()
+        and len(cmux.sent) == 1,
+        (preserved_bytes, submitted, cmux.sent),
+    )
     meta = json.loads(
         (callbacks / ".review-meta.json").read_text(encoding="utf-8")
     )
@@ -360,6 +407,71 @@ def check_correction_loop(root: Path) -> None:
         "corrections consume no verification iteration",
         meta["verification_iteration"] == 0,
         meta,
+    )
+
+
+def check_receipt_attempt_order(root: Path) -> None:
+    worker, cmux, attention, store, callbacks = correction_worker(
+        root, "receipt-order", receipt_hashes=("f" * 64,)
+    )
+    type(worker)().inspect_submit_rejections()
+    second_digest = "0" * 64
+    write_json(
+        callbacks
+        / ".review-submit-rejections"
+        / f"{second_digest[:12]}-a2.json",
+        {
+            "schema_version": 1,
+            "status": "rejected",
+            "operation_id": "round-op",
+            "run_id": "round-run",
+            "axis": "anthropic-holistic",
+            "input_sha256": second_digest,
+            "attempt": 2,
+            "error_code": "invalid-review-submission",
+            "error": "second distinct rejection",
+            "expected": "approve",
+            "actual": "still-invalid",
+        },
+    )
+    worker.inspect_submit_rejections()
+    worker.inspect_submit_rejections()
+    check(
+        "authoritative attempt order delivers correction two exactly once",
+        len(cmux.sent) == 2
+        and "second distinct rejection" in cmux.sent[1]
+        and store.read("owner-1", "receipt-order-review-parent").attempt == 2
+        and attention == [],
+        (cmux.sent, attention),
+    )
+
+
+def check_notification_reservation_restart(root: Path) -> None:
+    worker, cmux, attention, _store, _callbacks = correction_worker(
+        root, "notification-reservation"
+    )
+
+    def crash(stage: str) -> None:
+        if stage == "notification-reserved":
+            raise RuntimeError("simulated notification crash")
+
+    worker.fault_observer = crash
+    try:
+        worker.inspect_submit_rejections()
+    except RuntimeError as exc:
+        if str(exc) != "simulated notification crash":
+            raise
+    else:
+        raise AssertionError("notification reservation crash was hidden")
+    restarted = type(worker)()
+    restarted.inspect_submit_rejections()
+    check(
+        "restart before notification publication fails closed without replay",
+        cmux.sent == []
+        and attention
+        and attention[-1][0]
+        == "review-submit-correction-notification-uncertain",
+        (cmux.sent, attention),
     )
 
 
@@ -517,6 +629,8 @@ with tempfile.TemporaryDirectory(prefix="review-submit-corrections.") as raw:
     check_round_prompt_states_exact_iteration()
     check_rejection_receipts_are_keyed_and_idempotent(root)
     check_correction_loop(root)
+    check_receipt_attempt_order(root)
+    check_notification_reservation_restart(root)
     check_correction_fail_closed(root)
     check_launch_in_progress_classification(root)
 

@@ -26,6 +26,47 @@ from .artifact_repair import (
 )
 
 
+_REVIEW_REJECTION_FIELDS = frozenset(
+    {
+        "schema_version", "status", "operation_id", "run_id", "axis",
+        "input_sha256", "attempt", "error_code", "error", "expected", "actual",
+    }
+)
+
+
+def _latest_review_rejection(
+    paths: list[Path], *, operation_id: str, run_id: str, axis: str
+) -> dict[str, object]:
+    rows: list[dict[str, object]] = []
+    for path in paths:
+        try:
+            row = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RuntimeWorkerError("review rejection receipt is unreadable") from exc
+        attempt = row.get("attempt") if isinstance(row, dict) else None
+        digest = row.get("input_sha256") if isinstance(row, dict) else None
+        if (
+            not isinstance(row, dict)
+            or set(row) != _REVIEW_REJECTION_FIELDS
+            or row.get("schema_version") != 1
+            or row.get("status") != "rejected"
+            or row.get("operation_id") != operation_id
+            or row.get("run_id") != run_id
+            or row.get("axis") != axis
+            or type(attempt) is not int
+            or attempt < 1
+            or not re.fullmatch("[0-9a-f]{64}", str(digest or ""))
+            or path.name != f"{str(digest)[:12]}-a{attempt}.json"
+        ):
+            raise RuntimeWorkerError("review rejection receipt identity is invalid")
+        rows.append(row)
+    attempts = sorted(int(row["attempt"]) for row in rows)
+    digests = {str(row["input_sha256"]) for row in rows}
+    if attempts != list(range(1, len(rows) + 1)) or len(digests) != len(rows):
+        raise RuntimeWorkerError("review rejection receipt order is invalid")
+    return max(rows, key=lambda row: int(row["attempt"]))
+
+
 class RuntimeWorkerControlMixin:
 
     def publish_pipeline_step_contract(
@@ -396,13 +437,6 @@ class RuntimeWorkerControlMixin:
         )
         if not receipts:
             return
-        latest_path = receipts[-1]
-        try:
-            latest = json.loads(latest_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return
-        if not isinstance(latest, dict) or latest.get("status") != "rejected":
-            return
         record = self.store.read(
             self.spec["owner_id"], self.spec["operation_id"]
         )
@@ -438,6 +472,19 @@ class RuntimeWorkerControlMixin:
             or meta.get("run_id") != run_id
             or not isinstance(meta.get("worktree"), str)
         ):
+            self.summary_attention(
+                "review-submit-correction-identity",
+                AttentionReason.ATTENTION_REQUIRED,
+            )
+            return
+        try:
+            latest = _latest_review_rejection(
+                receipts,
+                operation_id=operation_id,
+                run_id=run_id,
+                axis=str(meta.get("axis") or ""),
+            )
+        except RuntimeWorkerError:
             self.summary_attention(
                 "review-submit-correction-identity",
                 AttentionReason.ATTENTION_REQUIRED,
@@ -493,8 +540,6 @@ class RuntimeWorkerControlMixin:
                 attempt_id=operation_id,
             )
             invalid_sha256 = str(latest.get("input_sha256") or "")
-            if owner.awaiting_semantic_edit(invalid_sha256):
-                return
             reservation = owner.reserve_correction(invalid_sha256)
             if reservation.created:
                 OperationSupervisor(
@@ -502,7 +547,7 @@ class RuntimeWorkerControlMixin:
                     self.spec["owner_id"],
                     self.spec["operation_id"],
                 ).consume_attempt()
-            owner.restore_template()
+                owner.restore_template()
 
             def send(wake: str) -> None:
                 self.cmux_adapter.send(self.spec["surface_id"], wake)
