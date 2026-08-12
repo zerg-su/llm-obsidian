@@ -37,8 +37,12 @@ authority.
 - Root-scoped terminal dashboard показывает pivot-descendant, route, callback,
   terminal, timing и cleanup evidence, не получая lifecycle authority.
 - Live scripts ratchet один раз точно перебазирован на 281 Python-файл /
-  103 679 строк для унаследованного RC5-дерева и единственного разрешённого
-  workflow-модуля, без запасного headroom.
+  103 700 строк для унаследованного RC5-дерева, единственного разрешённого
+  workflow-модуля и исправления frozen historical denominator, без запасного
+  headroom.
+- Отдельно закреплённый контур active review/recovery authority перебазирован
+  на точный знаменатель RC5.5: 27 файлов / 14 552 строки при нуле writable
+  authorities и incident literals.
 
 ### Граница кандидата
 

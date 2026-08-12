@@ -42,6 +42,13 @@ assert {
     path.relative_to(ROOT).parts[0] for path in owned
 } == set(audit.OWNED_PYTHON_ROOTS)
 
+live_authority = set(audit.active_authority_files(ROOT))
+assert "scripts/harness/workflows/structural_pivot.py" in live_authority
+assert len(audit.RC1_BASELINE_AUTHORITY_FILES) == 16
+assert "scripts/harness/workflows/structural_pivot.py" not in (
+    audit.RC1_BASELINE_AUTHORITY_FILES
+)
+
 
 with tempfile.TemporaryDirectory(prefix="code-quality-owned.") as raw:
     root = Path(raw)

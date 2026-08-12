@@ -18,6 +18,7 @@
     "scripts/harness/runtime_worker_verification.py",
     "scripts/harness/verification.py",
     "scripts/harness/verification_attempt.py",
+    "scripts/harness/workflows/structural_pivot.py",
     "scripts/harness/workflows/review_gate_attempt.py",
     "scripts/harness/workflows/review_gate_recovery.py",
     "scripts/task_escalation_records.py",

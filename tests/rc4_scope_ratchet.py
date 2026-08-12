@@ -214,7 +214,7 @@ rebaselined. This approved slice adds exactly one production module,
 publication, deterministic operation identity, the registered read-only
 review-input session, callback-to-receipt projection, restart reconciliation,
 and cleanup. Existing ledger, route, runtime, callback, and dashboard owners
-remain in place. The exact post-slice tree is 281 files / 103,679 lines; both
+remain in place. The exact post-slice tree is 281 files / 103,700 lines; both
 ceilings are pinned there with no blanket headroom.
 """
 
@@ -227,7 +227,7 @@ from pathlib import Path
 SCRIPT_FILE_CEILING = 281
 
 #: Maximum total lines across those files for the 2.6.7 RC5 candidate.
-SCRIPT_LINE_CEILING = 103_679
+SCRIPT_LINE_CEILING = 103_700
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:
