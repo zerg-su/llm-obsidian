@@ -581,15 +581,20 @@ class StructuralPivotWorkflow:
         current = child
         if current.state in TERMINAL:
             return
-        for target in ("finalizing", "exiting", "complete"):
-            if current.state == target:
-                continue
+        sequence = ("finalizing", "exiting", "complete")
+        remaining = (
+            sequence[sequence.index(current.state) + 1 :]
+            if current.state in sequence
+            else sequence
+        )
+        for target in remaining:
             self.store.transition(
                 current.spec.owner_id, current.spec.operation_id, target
             )
             current = self.store.read(
                 current.spec.owner_id, current.spec.operation_id
             )
+            self._observe(f"child-{target}")
 
     def _receipt(
         self,

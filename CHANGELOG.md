@@ -31,15 +31,17 @@ routes and five-cycle product ledger remain authoritative.
   route, callback, terminal, timing, and cleanup evidence without acquiring
   lifecycle authority.
 - The live scripts ratchet is rebaselined exactly once to 281 Python files /
-  103,712 lines for the inherited RC5 tree, the single authorized workflow
+  103,717 lines for the inherited RC5 tree, the single authorized workflow
   module, and the frozen historical-denominator repair, with no blanket
   headroom.
 - The separately owned active review/recovery authority contour is rebaselined
-  to its exact RC5.5 denominator of 27 files / 14,564 lines, with zero writable
+  to its exact RC5.5 denominator of 27 files / 14,569 lines, with zero writable
   authorities and zero incident literals.
 - The code-quality gate records the two exact file-size blockers inherited at
   the approved RC5 base; the new finalization bridge remains below the existing
   function hard limit.
+- Structural-pivot child finalization now resumes from its durable transition
+  suffix after a crash between `exiting` and `complete`.
 
 ### Candidate boundary
 

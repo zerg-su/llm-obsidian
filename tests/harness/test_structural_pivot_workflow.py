@@ -597,7 +597,7 @@ with tempfile.TemporaryDirectory(prefix="structural-pivot-foreign-callback.") as
         mismatch,
     )
 
-for boundary in ("callback-accepted", "receipt-published"):
+for boundary in ("callback-accepted", "child-exiting", "receipt-published"):
     with tempfile.TemporaryDirectory(prefix=f"structural-pivot-{boundary}.") as raw:
         state = Path(raw) / "store"
         store = OperationStore(state)
