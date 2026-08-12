@@ -49,6 +49,14 @@ check(
     and primary["runtime"] != independent["runtime"],
 )
 
+routing_doc = (ROOT / "docs/model-routing.md").read_text(encoding="utf-8")
+check(
+    "routing documentation gates the structural route on an accepted pivot receipt",
+    "accepted structural-pivot receipt" in routing_doc.casefold()
+    and "availability evidence does not authorize cycles 4–5"
+    in routing_doc.casefold(),
+)
+
 for cycle in range(1, 4):
     decision = compile_finalization_routes(
         config=config,

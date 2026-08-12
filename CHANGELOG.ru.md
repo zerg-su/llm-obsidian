@@ -16,6 +16,32 @@
 внутренними контрольными точками и вошли в следующие публичные релизы; тегов и
 пакетов с этими номерами не выпускалось.
 
+## [2.6.7-rc5] — 2026-08-12
+
+Кандидат ограниченной orchestration для structural pivot. Существующие
+finalization routes и пятицикловый product ledger остаются единственным
+authority.
+
+### Добавлено
+
+- После третьего material product failure одна детерминированная store-backed
+  pivot operation запускает зарегистрированное read-only ревью Sol X-High,
+  принимает обычный review-input callback, публикует один ограниченный
+  identity-bound receipt и освобождает свои ресурсы до cycle 4.
+
+### Изменено
+
+- Finalization cycles 1–3 остаются на Fable High. Cycles 4–5 добавляют Sol
+  X-High только после принятого structural-pivot receipt; одна доступность
+  provider больше не разрешает independent route.
+- Root-scoped terminal dashboard показывает pivot-descendant, route, callback,
+  terminal, timing и cleanup evidence, не получая lifecycle authority.
+
+### Граница кандидата
+
+- Standalone review presets, пятицикловый потолок, provider transport и
+  исторические roots не изменяются. Эта работа ничего не публикует.
+
 ## [2.6.7-rc4] — 2026-08-11
 
 Кандидат terminal-only панели Harness. RC4 улучшает существующий read-only,

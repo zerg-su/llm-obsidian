@@ -10,6 +10,32 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.6.7-rc5] - 2026-08-12
+
+Bounded structural-pivot orchestration candidate. The existing finalization
+routes and five-cycle product ledger remain authoritative.
+
+### Added
+
+- After the third material product failure, one deterministic store-backed
+  pivot operation launches the registered Sol X-High read-only review, accepts
+  the ordinary review-input callback, publishes one bounded identity-bound
+  receipt, and cleans its owned resources before cycle 4.
+
+### Changed
+
+- Finalization cycles 1–3 remain on Fable High. Cycles 4–5 add Sol X-High only
+  after the accepted structural-pivot receipt; provider availability alone no
+  longer authorizes the independent route.
+- The root-scoped terminal dashboard projects the pivot descendant and its
+  route, callback, terminal, timing, and cleanup evidence without acquiring
+  lifecycle authority.
+
+### Candidate boundary
+
+- Standalone review presets, the five-cycle ceiling, provider transports, and
+  historical roots are unchanged. This work does not publish a release.
+
 ## [2.6.7-rc4] - 2026-08-11
 
 Terminal-only Harness dashboard candidate. RC4 refines the existing read-only,
