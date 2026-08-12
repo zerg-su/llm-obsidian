@@ -780,7 +780,11 @@ def _context(
         inputs.append(
             outcome_contract_input(
                 plan,
-                expected_sha256=str(meta.get("outcome_contract_sha256") or ""),
+                expected_sha256=str(
+                    authority.outcome_sha256
+                    if authority is not None
+                    else meta.get("outcome_contract_sha256") or ""
+                ),
             )
         )
     instructions = worktree / "AGENTS.md"

@@ -246,7 +246,12 @@ def render_task_prompt(request: dict[str, Any], config: dict[str, Any]) -> str:
         if config.get("codex_home")
         else "inherited current Codex environment"
     )
-    outcome_contract = extract_from_bytes(request["plan_file"].read_bytes())
+    semantic_plan = (
+        approved_plan_file(request)
+        if isinstance(request.get("_approved_plan_sha256"), str)
+        else request["plan_file"]
+    )
+    outcome_contract = extract_from_bytes(semantic_plan.read_bytes())
     shared_plan = request["reap"]["plan_mode"] == "shared"
     summary_disposition = "partially-achieved" if shared_plan else "achieved"
     summary_evidence = [] if shared_plan else list(outcome_contract.evidence_ids)

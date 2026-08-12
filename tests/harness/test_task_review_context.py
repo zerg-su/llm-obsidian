@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -17,6 +18,7 @@ from approved_plan_snapshot import bind_approved_plan_snapshot  # noqa: E402
 from task_escalation_records import append_raise, append_resolution  # noqa: E402
 from task_plan_authority import record_plan_amendment  # noqa: E402
 from task_review_context import (  # noqa: E402
+    _context,
     _amendment_evidence,
     _bounded_review_diff,
 )
@@ -145,6 +147,52 @@ class ReviewAmendmentEvidenceTest(unittest.TestCase):
         self.assertEqual(payload["metadata"], metadata)
         self.assertEqual(payload["inputs"][0]["sha256"], amendment.sha256)
         self.assertEqual(payload["inputs"][0]["role"], "outcome")
+
+    def test_context_uses_amended_plan_and_outcome_authority(self) -> None:
+        (self.vault / "skills/review").mkdir(parents=True)
+        (self.vault / "skills/review/SKILL.md").write_text(
+            "# Review\n", encoding="utf-8"
+        )
+        runtime = self.root / "runtime"
+        runtime.mkdir()
+        (self.worktree / ".task-summary.json").write_text(
+            '{"schema_version":2}\n', encoding="utf-8"
+        )
+        meta = {
+            **self.meta,
+            "version": 4,
+            "task_name": "fixture",
+            "worktree": str(self.worktree),
+            "review_policy": {
+                "verification_profile": "scoped",
+                "verification_profile_sha256": "a" * 64,
+            },
+        }
+        (self.worktree / ".task-meta.json").write_text(
+            json.dumps(meta), encoding="utf-8"
+        )
+        amendment = self.append("authorize changed outcome evidence")
+        amended_plan = Path(amendment.payload["new_plan_snapshot_file"])
+        amended_contract = extract_from_bytes(amended_plan.read_bytes())
+
+        with mock.patch("task_review_context._git", return_value="b" * 40), mock.patch(
+            "task_review_context._git_bytes", return_value=b"bounded diff\n"
+        ):
+            _review, manifest_path = _context(
+                meta, self.vault, self.worktree, runtime, "task"
+            )
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        inputs = {item["name"]: item for item in manifest["inputs"]}
+
+        self.assertEqual(
+            inputs["approved-plan.md"]["sha256"],
+            hashlib.sha256(amended_plan.read_bytes()).hexdigest(),
+        )
+        self.assertEqual(
+            inputs["outcome-contract.json"]["sha256"],
+            hashlib.sha256(amended_contract.canonical).hexdigest(),
+        )
+        self.assertIn("approved-amendment.json", inputs)
 
     def test_no_chain_requires_no_amendment_input(self) -> None:
         self.assertIsNone(_amendment_evidence(self.meta, self.worktree))

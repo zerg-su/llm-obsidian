@@ -315,6 +315,26 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     finally:
         context_file.write_bytes(context_bytes)
     prompt = runner.render_task_prompt(request, config)
+    (vault / ".vault-meta").mkdir(exist_ok=True)
+    frozen_prompt_request = bind_approved_plan_snapshot(request)
+    original_plan = plan.read_bytes()
+    plan.write_text(
+        "# Drifted source\n\n```json\n"
+        '{"schema_version":1,"desired_outcome":"Source drift only.",'
+        '"success_evidence":[{"evidence_id":"source-drift",'
+        '"observable":"This must not enter the frozen prompt."}],'
+        '"non_goals":["No effects."]}\n```\n',
+        encoding="utf-8",
+    )
+    try:
+        frozen_prompt = runner.render_task_prompt(frozen_prompt_request, config)
+    finally:
+        plan.write_bytes(original_plan)
+    check(
+        "built-in prompt keeps snapshot Outcome after mutable source drift",
+        "fixture-green" in frozen_prompt and "source-drift" not in frozen_prompt,
+        frozen_prompt,
+    )
     check("route inherits captured runtime", effective["runtime"] == "codex")
     check("route inherits captured model", effective["model"] == "gpt-5.6-sol")
     review = runner.review_policy(request, config)
