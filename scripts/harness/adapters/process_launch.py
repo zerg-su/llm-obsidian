@@ -202,7 +202,9 @@ def prepare_surface_launch(
     if (
         effective_product_root is None
         and not reviewer_sandbox
-        and callback_mode not in {"research-fetch", "research-synth"}
+        and callback_mode not in {
+            "research-fetch", "research-synth", "artifact-repair"
+        }
     ):
         effective_product_root = cwd
     resolved_product_root = (
@@ -226,6 +228,7 @@ def prepare_surface_launch(
         "task-summary",
         "research-fetch",
         "research-synth",
+        "artifact-repair",
     }:
         raise error_type("surface callback mode is invalid")
     if not isinstance(reviewer_sandbox, bool) or reviewer_sandbox and (
@@ -243,6 +246,12 @@ def prepare_surface_launch(
         raise error_type(
             "task-summary mode requires an exact source and origin surface"
         )
+    if callback_mode == "artifact-repair" and (
+        resolved_product_root is not None
+        or callback_pointer.parent.resolve() != cwd.resolve()
+        or task_summary_pointer is not None
+    ):
+        raise error_type("artifact repair launch identity is invalid")
     resolved_runtime_home = (
         runtime_home.expanduser().resolve() if runtime_home is not None else None
     )

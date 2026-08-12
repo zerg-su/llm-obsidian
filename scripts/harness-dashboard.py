@@ -521,7 +521,9 @@ def open_dashboard(
             "workspace_id": workspace_id,
             "root_id": selected,
         }
-        if temporary:
+        if root:
+            expected.update({"scope": scope, "scope_id": selected})
+        else:
             expected.update(
                 {"scope": scope, "scope_id": selected, "facade": facade}
             )
@@ -603,7 +605,6 @@ def rebind_dashboard(
                 or value.get("scope") != "root"
                 or value.get("scope_id") != root
                 or value.get("root_id") != root
-                or value.get("facade") != facade
                 or value.get("workspace_id") != workspace_id
                 or value.get("state") != "ready"
                 or not UUID_RE.fullmatch(surface_id)
@@ -612,6 +613,33 @@ def rebind_dashboard(
                 != workspace_id.casefold()
             ):
                 raise CmuxError("dashboard root rebind marker is ambiguous")
+            if temporary_marker.exists():
+                temporary_value = _read_marker(temporary_marker)
+                temporary_surface = str(
+                    temporary_value.get("surface_id") or ""
+                )
+                if (
+                    temporary_value.get("schema_version") != 4
+                    or temporary_value.get("marker_key") != temporary_key
+                    or temporary_value.get("scope") != "temporary"
+                    or temporary_value.get("scope_id") != temporary
+                    or temporary_value.get("root_id") != temporary
+                    or temporary_value.get("facade") not in FACADE_KINDS
+                    or temporary_value.get("workspace_id") != workspace_id
+                    or temporary_value.get("state") != "ready"
+                    or not UUID_RE.fullmatch(temporary_surface)
+                    or temporary_surface.casefold()
+                    in inventory.ambiguous_surfaces
+                    or inventory.surface_workspaces.get(
+                        temporary_surface.casefold(), ""
+                    ).casefold()
+                    != workspace_id.casefold()
+                ):
+                    raise CmuxError(
+                        "dashboard temporary rebind marker is ambiguous"
+                    )
+                if temporary_surface.casefold() != surface_id.casefold():
+                    cmux.close_exact(temporary_surface)
             temporary_marker.unlink(missing_ok=True)
             return OpenResult(surface_id, workspace_id, True)
         if not temporary_marker.exists():
@@ -624,7 +652,7 @@ def rebind_dashboard(
             or value.get("scope") != "temporary"
             or value.get("scope_id") != temporary
             or value.get("root_id") != temporary
-            or value.get("facade") != facade
+            or value.get("facade") not in FACADE_KINDS
             or value.get("workspace_id") != workspace_id
             or value.get("state") != "ready"
             or not UUID_RE.fullmatch(surface_id)
@@ -666,7 +694,6 @@ def rebind_dashboard(
             "scope": "root",
             "scope_id": root,
             "root_id": root,
-            "facade": facade,
             "state": "ready",
             "surface_id": surface_id,
             "reserved_at": 0,

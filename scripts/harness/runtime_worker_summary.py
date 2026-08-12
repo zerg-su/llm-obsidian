@@ -28,6 +28,7 @@ from .verification_attempt import verification_input_sha256
 from .fresh_artifact_repair import (
     FreshArtifactRepair,
     FreshRepairError,
+    FreshRepairInvalid,
     launch_fresh_repair_for_worker,
 )
 
@@ -748,6 +749,12 @@ class RuntimeWorkerSummaryMixin:
                     self.summary_digest = ""
                     self.summary_stable_reads = 0
                     return
+            except FreshRepairInvalid:
+                self.summary_attention(
+                    "wiki-summary-fresh-repair-invalid",
+                    AttentionReason.RETRY_EXHAUSTED,
+                )
+                return
             except (FreshRepairError, StoreError, OSError, json.JSONDecodeError):
                 pass
         if not self.summary_is_stable(raw):

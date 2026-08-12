@@ -245,6 +245,17 @@ def _normalize_runtime_fields(request: RuntimeSessionRequest) -> None:
         and request.spec.route.profile == "reviewer-callback"
     ):
         _validate_reviewer_fields(request, runtime_home)
+    elif request.callback_mode == "artifact-repair":
+        if (
+            request.spec.route.profile != "artifact-repair"
+            or request.callback_pointer != ".artifact-repair-callback.json"
+            or runtime_home is not None
+            or request.research_request_sha256
+            or request.callback_wake
+        ):
+            raise RuntimeSessionError(
+                "artifact repair requires its exact isolated runtime profile"
+            )
     elif runtime_home is not None or request.research_request_sha256 or request.callback_wake:
         raise RuntimeSessionError(
             "research runtime fields require research callback mode"
@@ -357,7 +368,12 @@ def _normalize_checkpoint_and_product(
                 "review callback scratch must be isolated from product root"
             )
     elif request.callback_mode == "artifact-repair":
-        if product_root is not None or not request.cwd.is_dir():
+        if (
+            request.spec.route.profile != "artifact-repair"
+            or product_root is not None
+            or request.checkpoint
+            or not request.cwd.is_dir()
+        ):
             raise RuntimeSessionError(
                 "artifact repair requires an isolated scratch root"
             )

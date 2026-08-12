@@ -33,8 +33,6 @@ SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 ELIGIBLE_FAMILIES = frozenset(
     {
         ContractFamily.TASK_SUMMARY,
-        ContractFamily.REVIEW_INPUT,
-        ContractFamily.REVIEW_RESOLUTION,
         ContractFamily.PIPELINE_STEP_RESULT,
     }
 )
@@ -50,6 +48,10 @@ class FreshRepairExhausted(FreshRepairError):
 
 class FreshRepairEffectUncertain(FreshRepairError):
     pass
+
+
+class FreshRepairInvalid(FreshRepairError):
+    """The single fresh effect completed with a terminal invalid artifact."""
 
 
 @dataclass(frozen=True)
@@ -95,7 +97,7 @@ def select_fresh_repair_route(
         selected,
         default["model"],
         "xhigh",
-        "executor",
+        "artifact-repair",
         config.fingerprint,
     )
 
@@ -166,7 +168,7 @@ class FreshArtifactRepair:
             or selected is not owner.template.family
             or not SHA256.fullmatch(invalid_sha256)
             or route.effort != "xhigh"
-            or route.profile != "executor"
+            or route.profile != "artifact-repair"
             or parent.spec.owner_id != parent.spec.root_operation_id
             or parent.spec.operation_id != owner.template.attempt_id
         ):
@@ -259,7 +261,7 @@ class FreshArtifactRepair:
             or not SHA256.fullmatch(str(value.get("repair_id") or ""))
             or not isinstance(route, dict)
             or route.get("effort") != "xhigh"
-            or route.get("profile") != "executor"
+            or route.get("profile") != "artifact-repair"
         ):
             raise FreshRepairError("fresh repair reservation identity changed")
         return value
@@ -342,6 +344,8 @@ class FreshArtifactRepair:
         )
 
     def start(self, manager: object) -> FreshRepairStart:
+        if (self.root / "failed.json").exists():
+            raise FreshRepairInvalid("fresh repair is terminally invalid")
         started_path = self.root / "started.json"
         if started_path.is_file() and not started_path.is_symlink():
             return FreshRepairStart(
@@ -402,8 +406,14 @@ class FreshArtifactRepair:
         self, validator: Callable[[Mapping[str, object]], object]
     ) -> FreshRepairReceipt:
         callback_path = self.scratch / ".artifact-repair-callback.json"
+        failed_path = self.root / "failed.json"
+        if failed_path.exists() or failed_path.is_symlink():
+            raise FreshRepairInvalid("fresh repair is terminally invalid")
+        callback_sha256 = ""
         try:
-            value = json.loads(callback_path.read_bytes())
+            raw = callback_path.read_bytes()
+            callback_sha256 = hashlib.sha256(raw).hexdigest()
+            value = json.loads(raw)
             envelope = CallbackEnvelope(
                 callback_id=value.get("callback_id", ""),
                 operation_id=value.get("operation_id", ""),
@@ -414,7 +424,8 @@ class FreshArtifactRepair:
                 schema_version=value.get("schema_version", 0),
             )
         except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
-            raise FreshRepairError("fresh repair callback is invalid") from exc
+            self._record_invalid("callback-invalid", callback_sha256)
+            raise FreshRepairInvalid("fresh repair callback is invalid") from exc
         payload = envelope.payload
         artifact = payload.get("artifact")
         if (
@@ -427,7 +438,8 @@ class FreshArtifactRepair:
             or payload.get("repair_id") != self.repair_id
             or not isinstance(artifact, dict)
         ):
-            raise FreshRepairError("fresh repair callback identity changed")
+            self._record_invalid("callback-identity-invalid", callback_sha256)
+            raise FreshRepairInvalid("fresh repair callback identity changed")
         _atomic_write(self.owner.actual_target, artifact)
         authoritative = {
             field: self.owner.template_value[field]
@@ -438,7 +450,8 @@ class FreshArtifactRepair:
             validator(repaired.value)
         except (ArtifactRepairError, TypeError, ValueError) as exc:
             self.owner.restore_template()
-            raise FreshRepairError(
+            self._record_invalid("authoritative-validation-failed", callback_sha256)
+            raise FreshRepairInvalid(
                 "fresh repair failed authoritative validation"
             ) from exc
         receipt = FreshRepairReceipt(
@@ -452,6 +465,21 @@ class FreshArtifactRepair:
         )
         _write_once(self.root / "receipt.json", receipt.__dict__)
         return receipt
+
+    def _record_invalid(self, stage: str, output_sha256: str) -> None:
+        self.owner.restore_template()
+        _write_once(
+            self.root / "failed.json",
+            {
+                "status": "invalid",
+                "family": self.owner.template.family.value,
+                "stage": stage,
+                "repair_id": self.repair_id,
+                "input_sha256": str(self.reservation["invalid_sha256"]),
+                "output_sha256": output_sha256,
+                "route_sha256": self._route().routing_sha256,
+            },
+        )
 
 
 def launch_fresh_repair_for_worker(
@@ -540,6 +568,7 @@ __all__ = [
     "FreshRepairEffectUncertain",
     "FreshRepairError",
     "FreshRepairExhausted",
+    "FreshRepairInvalid",
     "FreshRepairReceipt",
     "FreshRepairStart",
     "ProviderAvailability",

@@ -29,6 +29,7 @@ from .finalization_pivot import (
     load_accepted_pivot_receipt,
     pivot_required,
 )
+from .dashboard_facade import launch_bound_facade_dashboard
 from .verification import VerificationError, load_profiles
 from .workflows.review_gate import (
     ReviewGateAuthorization,
@@ -170,6 +171,11 @@ def reserve_task_finalization_cycle(
     snapshot = ledger.snapshot(missing_ok=True)
     pivot_receipt = None
     if pivot_required(snapshot):
+        launch_bound_facade_dashboard(
+            worktree=Path(worktree),
+            facade="pivot",
+            root_operation_id=task_id,
+        )
         try:
             pivot_receipt = load_accepted_pivot_receipt(
                 ledger.root, snapshot=snapshot

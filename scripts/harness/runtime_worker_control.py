@@ -28,6 +28,7 @@ from .artifact_repair import (
 from .fresh_artifact_repair import (
     FreshArtifactRepair,
     FreshRepairError,
+    FreshRepairInvalid,
     launch_fresh_repair_for_worker,
 )
 
@@ -230,6 +231,12 @@ class RuntimeWorkerControlMixin:
             self.custom_result_digest = ""
             self.custom_result_stable_reads = 0
             return True
+        except FreshRepairInvalid:
+            self.summary_attention(
+                "pipeline-step-fresh-repair-invalid",
+                AttentionReason.RETRY_EXHAUSTED,
+            )
+            return False
         except (FreshRepairError, StoreError, OSError, ValueError):
             return False
 

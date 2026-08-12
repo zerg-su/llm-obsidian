@@ -169,6 +169,7 @@ class CodexDriver:
             "research-safe": ("workspace-write", "never"),
             "research-unsafe": ("read-only", "never"),
             "prototype": ("workspace-write", "never"),
+            "artifact-repair": ("workspace-write", "never"),
         }
         if route.profile not in profiles:
             raise CodexDriverError("unsupported Codex permission profile")
@@ -232,14 +233,14 @@ class CodexDriver:
                     approval,
                 ]
             )
-        if route.profile == "reviewer-callback":
+        if route.profile in {"reviewer-callback", "artifact-repair"}:
             if callback_pointer is None or not callback_pointer.is_absolute():
                 raise CodexDriverError(
-                    "review callback requires an absolute lane root"
+                    "callback-only profile requires an absolute lane root"
                 )
             if session_root is None or not session_root.is_absolute():
                 raise CodexDriverError(
-                    "review callback requires an absolute session root"
+                    "callback-only profile requires an absolute session root"
                 )
             session_input = session_root.expanduser()
             callback_parent = callback_pointer.parent.expanduser()
@@ -249,18 +250,18 @@ class CodexDriver:
                 relative = callback_lexical.relative_to(session_lexical)
             except ValueError as exc:
                 raise CodexDriverError(
-                    "review callback lane escapes its session root"
+                    "callback-only lane escapes its session root"
                 ) from exc
             cursor = session_lexical
             for part in relative.parts:
                 if part == "..":
                     raise CodexDriverError(
-                        "review callback lane escapes its session root"
+                        "callback-only lane escapes its session root"
                     )
                 cursor /= part
                 if cursor.is_symlink():
                     raise CodexDriverError(
-                        "review callback lane root must not contain symlinks"
+                        "callback-only lane root must not contain symlinks"
                     )
             session = session_input.resolve()
             callback_root = callback_parent.resolve(strict=False)
@@ -268,7 +269,7 @@ class CodexDriver:
                 callback_root.relative_to(session)
             except ValueError as exc:
                 raise CodexDriverError(
-                    "review callback lane escapes its session root"
+                    "callback-only lane escapes its session root"
                 ) from exc
             args.append("--strict-config")
             for value in REVIEWER_CONFIG:
@@ -318,7 +319,9 @@ class CodexDriver:
                 callback_pointer=callback_pointer,
                 session_root=(
                     callback_pointer.parent
-                    if route.profile in {"reviewer-callback", "research-safe"}
+                    if route.profile in {
+                        "reviewer-callback", "research-safe", "artifact-repair"
+                    }
                     else None
                 ),
             )
@@ -328,7 +331,10 @@ class CodexDriver:
             "--sandbox" in command
             and "workspace-write" in command
             and route.profile
-            in {"executor", "reviewer-callback", "research-safe", "prototype"}
+            in {
+                "executor", "reviewer-callback", "research-safe",
+                "prototype", "artifact-repair",
+            }
         )
 
     @staticmethod

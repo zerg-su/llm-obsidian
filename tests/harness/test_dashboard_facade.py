@@ -17,6 +17,7 @@ from harness.dashboard_facade import (  # noqa: E402
     FACADE_KINDS,
     DashboardLaunchReceipt,
     facade_dashboard_command,
+    launch_bound_facade_dashboard,
     launch_facade_dashboard,
 )
 
@@ -44,13 +45,16 @@ def check(label: str, condition: bool) -> None:
 
 
 class FakeAdapter:
-    def __init__(self, caller: str, observer: str, workspace: str) -> None:
+    def __init__(
+        self, caller: str, observer: str | list[str], workspace: str
+    ) -> None:
         self.caller = caller
-        self.observer = observer
+        self.observers = [observer] if isinstance(observer, str) else observer
         self.workspace = workspace
         self.open_count = 0
         self.sent: list[tuple[str, str]] = []
         self.keys: list[tuple[str, str]] = []
+        self.closed: list[str] = []
 
     def surface_workspaces(self) -> object:
         return type(
@@ -60,17 +64,21 @@ class FakeAdapter:
                 "ambiguous_surfaces": frozenset(),
                 "surface_workspaces": {
                     self.caller.casefold(): self.workspace,
-                    self.observer.casefold(): self.workspace,
+                    **{
+                        observer.casefold(): self.workspace
+                        for observer in self.observers
+                    },
                 },
             },
         )()
 
     def open_split(self, _caller: str) -> object:
         self.open_count += 1
+        observer = self.observers[self.open_count - 1]
         return type(
             "Surface",
             (),
-            {"surface_id": self.observer, "workspace_id": self.workspace},
+            {"surface_id": observer, "workspace_id": self.workspace},
         )()
 
     def send(self, surface: str, value: str) -> None:
@@ -79,8 +87,8 @@ class FakeAdapter:
     def send_key(self, surface: str, value: str) -> None:
         self.keys.append((surface, value))
 
-    def close_exact(self, _surface: str) -> None:
-        raise AssertionError("rebind must not close its exact observer split")
+    def close_exact(self, surface: str) -> None:
+        self.closed.append(surface)
 
 
 expected_facades = {
@@ -121,6 +129,46 @@ with tempfile.TemporaryDirectory(prefix="dashboard-facade.") as raw:
         "facades compile exact temporary or durable root commands",
         temporary[-4:] == ["--temporary", request, "--facade", "review"]
         and rooted[-4:] == ["--root", root, "--facade", "verify"],
+    )
+    (vault / ".task-meta.json").write_text(
+        json.dumps(
+            {
+                "vault_root": str(vault),
+                "task_surface": caller,
+                "task_id": root,
+            }
+        ),
+        encoding="utf-8",
+    )
+    bound_commands: list[list[str]] = []
+    bound = [
+        launch_bound_facade_dashboard(
+            worktree=vault,
+            facade=facade,
+            root_operation_id=root,
+            runner=lambda argv: bound_commands.append(list(argv)),
+        )
+        for facade in sorted(FACADE_KINDS)
+    ]
+    production_sources = {
+        "dispatch": ROOT / "scripts/harness/workflows/dispatch.py",
+        "fix": ROOT / "scripts/harness/workflows/dispatch.py",
+        "plan-review": ROOT / "scripts/harness/workflows/review.py",
+        "review": ROOT / "scripts/harness/workflows/review.py",
+        "verify": ROOT / "scripts/harness/runtime_worker_verification.py",
+        "recovery": ROOT / "scripts/harness/runtime_worker_loop.py",
+        "pivot": ROOT / "scripts/harness/review_finalization.py",
+        "reap": ROOT / "scripts/reap-runner.py",
+    }
+    check(
+        "every real facade boundary calls the one bound launcher",
+        all(receipt.status == "launched" for receipt in bound)
+        and len(bound_commands) == len(FACADE_KINDS)
+        and all(
+            "launch_bound_facade_dashboard" in path.read_text(encoding="utf-8")
+            and f'"{facade}"' in path.read_text(encoding="utf-8")
+            for facade, path in production_sources.items()
+        ),
     )
 
     captured: list[list[str]] = []
@@ -206,11 +254,59 @@ with tempfile.TemporaryDirectory(prefix="dashboard-facade.") as raw:
         and rebound.surface_id == observer
         and replay.reused
         and adapter.open_count == 1
+        and adapter.closed == []
         and len(adapter.sent) == before_rebind_send_count + 1
         and adapter.keys[-2:] == [(observer, "C-c"), (observer, "Enter")]
         and len(marker_values) == 1
         and marker_values[0]["scope"] == "root"
         and marker_values[0]["root_id"] == root,
+    )
+
+    root_first_markers = Path(raw) / "root-first-markers"
+    temporary_observer = "44444444-4444-4444-8444-444444444444"
+    root_first = FakeAdapter(
+        caller, [observer, temporary_observer], workspace
+    )
+    dashboard.open_dashboard(
+        vault=vault,
+        store=store,
+        caller_surface=caller,
+        root="root-first",
+        facade="review",
+        adapter=root_first,
+        marker_root=root_first_markers,
+    )
+    dashboard.open_dashboard(
+        vault=vault,
+        store=store,
+        caller_surface=caller,
+        temporary="late-temporary",
+        facade="verify",
+        adapter=root_first,
+        marker_root=root_first_markers,
+    )
+    converged = dashboard.rebind_dashboard(
+        vault=vault,
+        store=store,
+        caller_surface=caller,
+        temporary="late-temporary",
+        root="root-first",
+        facade="pivot",
+        adapter=root_first,
+        marker_root=root_first_markers,
+    )
+    root_first_values = [
+        json.loads(path.read_text(encoding="ascii"))
+        for path in root_first_markers.glob("*.json")
+    ]
+    check(
+        "root-first cross-facade rebind closes the duplicate observer",
+        converged.reused
+        and converged.surface_id == observer
+        and root_first.closed == [temporary_observer]
+        and len(root_first_values) == 1
+        and root_first_values[0]["scope"] == "root"
+        and "facade" not in root_first_values[0],
     )
 
 if failures:

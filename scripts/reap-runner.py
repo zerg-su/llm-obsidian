@@ -25,6 +25,7 @@ from wiki_summary_contract import (  # noqa: E402
     validate_summary_for_task,
 )
 from harness.contracts import OwnedResources  # noqa: E402
+from harness.dashboard_facade import launch_bound_facade_dashboard  # noqa: E402
 from harness.runtime_sessions import (  # noqa: E402
     RuntimeSessionError,
     RuntimeSessionManager,
@@ -583,6 +584,11 @@ def apply_reap(
     validate_summary_wikilinks(vault, summary)
     approved_plan_state(meta)
     task_id = str(meta.get("task_id") or "")
+    launch_bound_facade_dashboard(
+        worktree=worktree,
+        facade="reap",
+        root_operation_id=task_id,
+    )
     authorize_review(vault, worktree, meta)
     try:
         lifecycle = run_reap(

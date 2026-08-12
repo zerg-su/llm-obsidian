@@ -839,6 +839,13 @@ class RuntimeWorkerVerificationMixin:
             raise RuntimeWorkerError("failed verification operation state is invalid")
 
     def run_verification(self) -> None:
+        from .dashboard_facade import launch_bound_facade_dashboard
+
+        launch_bound_facade_dashboard(
+            worktree=self.spec["cwd"],
+            facade="verify",
+            root_operation_id=self.verification_spec.root_operation_id,
+        )
         existing = self.verification_receipt()
         current = self.store.create(
             self.verification_spec,

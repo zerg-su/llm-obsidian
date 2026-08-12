@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -127,9 +128,47 @@ def launch_facade_dashboard(
     return DashboardLaunchReceipt("launched", facade, scope, root_operation_id)
 
 
+def launch_bound_facade_dashboard(
+    *,
+    worktree: Path,
+    facade: str,
+    root_operation_id: str,
+    runner: Callable[[Sequence[str]], None] = _run,
+) -> DashboardLaunchReceipt:
+    """Launch from one task binding at a real facade boundary, best-effort."""
+
+    if facade not in FACADE_KINDS:
+        raise ValueError("bound dashboard facade identity is invalid")
+    if not ID_RE.fullmatch(root_operation_id):
+        return DashboardLaunchReceipt(
+            "degraded", facade, "root", root_operation_id="unbound"
+        )
+    try:
+        root = Path(worktree).expanduser().resolve()
+        meta = json.loads((root / ".task-meta.json").read_text(encoding="utf-8"))
+        vault = Path(str(meta["vault_root"])).expanduser().resolve()
+        surface = str(meta["task_surface"])
+        if str(meta["task_id"]) != root_operation_id:
+            raise ValueError("task dashboard root identity changed")
+        return launch_facade_dashboard(
+            vault=vault,
+            store=vault / ".vault-meta" / "harness",
+            caller_surface=surface,
+            facade=facade,
+            request_id=root_operation_id,
+            root_operation_id=root_operation_id,
+            runner=runner,
+        )
+    except Exception:
+        return DashboardLaunchReceipt(
+            "degraded", facade, "root", root_operation_id
+        )
+
+
 __all__ = [
     "DashboardLaunchReceipt",
     "FACADE_KINDS",
     "facade_dashboard_command",
+    "launch_bound_facade_dashboard",
     "launch_facade_dashboard",
 ]

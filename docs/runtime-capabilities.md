@@ -78,7 +78,10 @@ clean up an operation.
 The same projection validates content-free fresh-repair receipts and shows only
 their count/current stage. After reap, it binds scalar outcome disposition and
 evidence/gap counts to the exact summary digest and validated result marker;
-summary title/body and repaired artifact content are never rendered. The one
+summary title/body and repaired artifact content are never rendered. Fresh
+repair uses its own provider-enforced callback-only profile in isolated
+scratch; task-summary and pipeline-step-result are the enabled families, and
+terminal invalid output restores the template without relaunch. The one
 contract-family registry remains `scripts/harness/contracts.py`. Active plan
 authority remains the immutable dispatch snapshot plus an ordered explicit
 amendment chain; the mutable source plan is only an optimistic reap-close

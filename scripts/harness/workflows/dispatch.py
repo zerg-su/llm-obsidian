@@ -27,6 +27,7 @@ from ..runtime_sessions import (
     RuntimeSessionRequest,
     RuntimeSessionResult,
 )
+from ..dashboard_facade import launch_bound_facade_dashboard
 from .engineering_fix import FixPhaseRound, prepare_next_phase
 from .custom_sequence import (
     CustomStepRound,
@@ -368,6 +369,15 @@ def start_dispatch(
         callback_pointer = ".task-pipeline-step-callback.json"
         initial_callback_operation_id = round_.spec.operation_id
         initial_callback_run_id = round_.run_id
+    launch_bound_facade_dashboard(
+        worktree=cwd,
+        facade=(
+            "fix"
+            if request.pipeline_name in {"engineering/fix", "custom"}
+            else "dispatch"
+        ),
+        root_operation_id=request.task_id,
+    )
     return runtime.start(
         RuntimeSessionRequest(
             spec=spec,

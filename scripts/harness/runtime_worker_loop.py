@@ -160,6 +160,13 @@ class RuntimeWorkerLoopMixin:
         )
 
     def restart_provider(self) -> None:
+        from .dashboard_facade import launch_bound_facade_dashboard
+
+        launch_bound_facade_dashboard(
+            worktree=self.spec["cwd"],
+            facade="recovery",
+            root_operation_id=str(self.spec["owner_id"]),
+        )
         recovery_kind = "custom" if self.is_custom_pipeline else "fix"
         recovery_root = self.spec_path.parent / f"pipeline-{recovery_kind}"
         parent = self.store.read(self.spec["owner_id"], self.spec["operation_id"])

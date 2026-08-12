@@ -20,6 +20,7 @@ from ..contracts import (
 )
 from ..state_machine import TERMINAL
 from ..runtime_session_contracts import RuntimeSessionError
+from ..dashboard_facade import launch_bound_facade_dashboard
 from review_contract import MATERIAL_SEVERITIES, SEVERITIES, VERIFY_BUDGETS
 
 
@@ -102,6 +103,15 @@ def start_review(
     callback_root = _owner_relative(
         callback_root, "review callback root"
     ).rstrip("/")
+    launch_bound_facade_dashboard(
+        worktree=product_root,
+        facade=(
+            "plan-review"
+            if request.context.purpose == "intent"
+            else "review"
+        ),
+        root_operation_id=request.root_operation_id,
+    )
     lanes: list[ReviewLaneSession] = []
     started_lanes: list[ReviewLaneSession] = []
     initial_rounds: list[ReviewRound] = []

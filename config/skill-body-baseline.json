@@ -73,11 +73,11 @@
       "token_estimate": 236
     },
     "dispatch": {
-      "body_bytes": 11208,
-      "body_lines": 177,
-      "closure_bytes": 11208,
-      "closure_token_estimate": 2802,
-      "token_estimate": 2802
+      "body_bytes": 11334,
+      "body_lines": 179,
+      "closure_bytes": 11334,
+      "closure_token_estimate": 2834,
+      "token_estimate": 2834
     },
     "distill-runbook": {
       "body_bytes": 4343,

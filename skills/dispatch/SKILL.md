@@ -121,8 +121,10 @@ registry in `scripts/harness/contracts.py`; no skill or facade may invent a
 parallel schema or retry count. After deterministic and registered same-session
 repair are exhausted, only an eligible family may reserve one restart-safe
 XHigh artifact-only session in isolated scratch. It prefers the opposite
-provider, has attempt 1/restart 0, and cannot receive a product or durable-state
-write root. Its receipts contain identities and digests only.
+provider, has attempt 1/restart 0, and uses the dedicated `artifact-repair`
+profile: callback-only writes, no shell/MCP/network/product or durable-state
+root. Invalid output restores the template and terminalizes once. Its receipts
+contain identities and digests only.
 `engineering/fix` runs one persistent executor
 session through exact harness prompts for `reproduce`, `root-cause`,
 `regression-test`, and `minimal-fix`. The model submits a bounded result through

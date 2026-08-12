@@ -330,6 +330,7 @@ class ClaudeDriver:
             "research-safe": "dontAsk",
             "research-unsafe": "dontAsk",
             "prototype": "auto",
+            "artifact-repair": "dontAsk",
         }
         if route.profile not in permissions:
             raise ClaudeDriverError("unsupported Claude permission profile")
@@ -338,6 +339,41 @@ class ClaudeDriver:
             "--effort", route.effort,
             "--permission-mode", permissions[route.profile],
         ]
+        if route.profile == "artifact-repair":
+            args.extend(
+                [
+                    "--tools", "Read,Edit,Write",
+                    "--allowedTools",
+                ]
+            )
+            if callback_pointer is not None:
+                if (
+                    not callback_pointer.is_absolute()
+                    or session_root is None
+                    or not session_root.is_absolute()
+                    or callback_pointer.parent.resolve() != session_root.resolve()
+                ):
+                    raise ClaudeDriverError(
+                        "artifact repair callback escapes isolated scratch"
+                    )
+                callback_rule = _absolute_permission_path(callback_pointer)
+                template_rule = _absolute_permission_path(
+                    session_root / "template.json"
+                )
+                args.extend(
+                    [
+                        f"Read({template_rule})",
+                        f"Edit({callback_rule})",
+                        f"Write({callback_rule})",
+                    ]
+                )
+            args.extend(
+                [
+                    "--setting-sources", "",
+                    "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
+                    "--no-chrome", "--disable-slash-commands",
+                ]
+            )
         if route.profile == "reviewer-callback":
             relative_callback = ""
             relative_input = ""
@@ -469,6 +505,14 @@ class ClaudeDriver:
             return (
                 f"Edit({input_rule})" in command
                 and f"Write({input_rule})" not in command
+            )
+        if route.profile == "artifact-repair":
+            callback_rule = _absolute_permission_path(callback_pointer)
+            return (
+                f"Edit({callback_rule})" in command
+                and f"Write({callback_rule})" in command
+                and "Bash" not in command
+                and "--add-dir" not in command
             )
         return route.profile in {"executor", "prototype"}
 
