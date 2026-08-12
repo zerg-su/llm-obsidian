@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
 
-from outcome_contract import OutcomeContractError, extract_from_bytes
+from task_plan_authority import PlanAuthorityError, resolve_plan_authority
 
 from .runtime_worker import *  # noqa: F401,F403
 from .runtime_worker import (
@@ -72,8 +72,9 @@ def task_summary_contract_template(
         )
     if mode == "final":
         try:
-            extract_from_bytes(Path(plan).expanduser().read_bytes())
-        except (OSError, OutcomeContractError) as exc:
+            worktree = Path(str(meta.get("worktree") or "")).expanduser().resolve()
+            resolve_plan_authority(meta, worktree)
+        except (OSError, PlanAuthorityError) as exc:
             raise RuntimeWorkerError(
                 "task-summary outcome authority is invalid"
             ) from exc

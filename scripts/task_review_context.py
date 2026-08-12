@@ -37,6 +37,7 @@ from outcome_contract import OutcomeContractError, extract_from_bytes
 from task_contract import normalize
 from task_review_delta_packet import DeltaPacket, build_delta_packet
 from task_escalation_records import EscalationRecordError, load_amendments
+from task_plan_authority import PlanAuthorityError, TaskPlanAuthority, resolve_plan_authority
 from task_review_resolution_bundle import _bounded_input
 from task_review_identity import (
     _current_review_is_quiescent,
@@ -196,28 +197,19 @@ class _ReviewedArtifactMissing(TaskReviewError):
 
 
 def _amendment_evidence(
-    meta: Mapping[str, Any], worktree: Path
+    meta: Mapping[str, Any], worktree: Path, authority: TaskPlanAuthority | None = None
 ) -> tuple[tuple[ContextInput, ...], dict[str, str]] | None:
     """Bind one ordered protected-amendment chain and its terminal authority."""
 
     try:
-        amendments = load_amendments(worktree)
-    except EscalationRecordError as exc:
+        resolved = authority or resolve_plan_authority(meta, worktree)
+        amendments = resolved.amendments
+    except (EscalationRecordError, PlanAuthorityError) as exc:
         raise TaskReviewError(
             "authoritative amendment evidence is invalid"
         ) from exc
     if not amendments:
         return None
-    plan_sha256 = str(meta.get("approved_plan_sha256") or "")
-    outcome_sha256 = str(meta.get("outcome_contract_sha256") or "")
-    if any(
-        record.payload.get("plan_sha256") != plan_sha256
-        or record.payload.get("outcome_sha256") != outcome_sha256
-        for record in amendments
-    ):
-        raise TaskReviewError(
-            "authoritative amendment does not match reviewed task metadata"
-        )
     amendment_ids = {record.record_id for record in amendments}
     if (
         len(amendment_ids) != len(amendments)
@@ -587,10 +579,16 @@ def _context(
     head = _git(worktree, "rev-parse", "HEAD")
     policy = meta["review_policy"]
     purpose = str(policy.get("purpose") or "implementation")
-    boundary_input_sha256 = str(
-        policy.get("boundary_input_sha256") or ""
-    )
-    plan = Path(str(meta["plan_file"])).expanduser().resolve()
+    boundary_input_sha256 = str(policy.get("boundary_input_sha256") or "")
+    authority: TaskPlanAuthority | None = None
+    if meta.get("lifecycle") == "current-checkout":
+        plan = Path(str(meta["plan_file"])).expanduser().resolve()
+    else:
+        try:
+            authority = resolve_plan_authority(meta, worktree)
+            plan = authority.path
+        except PlanAuthorityError as exc:
+            raise TaskReviewError("approved plan snapshot identity is invalid") from exc
     plan_review = meta.get("plan_review")
     plan_artifact_root: Path | None = None
     review_artifact_root = _bound_review_artifact_root(meta)
@@ -599,9 +597,10 @@ def _context(
         "task_id": task_id,
         "task_name": str(meta.get("task_name") or ""),
         "head_sha": head,
+        "approved_plan_snapshot_sha256": str(authority.plan_sha256 if authority else meta.get("approved_plan_sha256") or ""),
     }
     amendment_inputs: list[ContextInput] = []
-    amendment = _amendment_evidence(meta, worktree)
+    amendment = _amendment_evidence(meta, worktree, authority)
     if amendment is not None:
         amendment_chain, amendment_metadata = amendment
         amendment_inputs.extend(amendment_chain)

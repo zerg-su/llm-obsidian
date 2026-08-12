@@ -35,8 +35,10 @@ Require the exact caller session; never infer focused cmux. The runner:
    review links; never invent or duplicate them.
 3. Call `cmux_surface_lifecycle.py prepare-reap`, binding the exact result path,
    plan, task, session, and recovery marker.
-4. Apply one `vault-write.py` transaction: `final` closes its plan; `shared`
-   retains the unchanged master plan.
+4. Apply one `vault-write.py` transaction: `final` closes its source plan only
+   when the dispatch-time source digest still matches; `shared` retains the
+   master plan. A concurrent pending source edit is preserved and reported as
+   a plan-close conflict while the task result is recorded independently.
    Updates use `expected_sha256`; new pages receive a real DragonScale address.
 5. Reindex, run `validate-vault.py --summary`, then call `complete-reap`.
 6. Call `request-exit` for the exact task. The lifecycle wrapper sends graceful
@@ -53,9 +55,10 @@ vault write, review archive, `/reap`, or close command.
   wiki page, log, hot list, plan, or manifest directly.
 - The final title/type must match the approved task metadata. Existing content
   is updated only for supported service/repo routes and only optimistically.
-- A pending plan hash mismatch, unresolved wikilink, dirty task product state,
-  missing/changed review archive, session mismatch, or ambiguous result path
-  fails closed before finalization.
+- An invalid immutable plan/amendment identity, unresolved wikilink, dirty task
+  product state, missing/changed review archive, session mismatch, or ambiguous
+  result path fails closed before finalization. A mutable pending source-plan
+  hash mismatch is an optimistic close conflict, not authority drift.
 - An executed `final` plan requires exact prepared recovery; `shared` rejects a
   closed plan.
 - Mechanism failures follow the central repair contract. Do not turn a product

@@ -20,6 +20,7 @@ from outcome_contract import (  # noqa: E402
     extract_from_plan,
 )
 import task_contract  # noqa: E402
+from approved_plan_snapshot import bind_approved_plan_snapshot  # noqa: E402
 from wiki_summary_contract import WikiSummaryError, validate_summary  # noqa: E402
 
 
@@ -161,8 +162,12 @@ with tempfile.TemporaryDirectory(prefix="outcome-task-meta.") as raw:
     vault = Path(raw)
     plan_path = vault / "wiki" / "plans" / "approved.md"
     plan_path.parent.mkdir(parents=True)
+    (vault / ".vault-meta").mkdir()
     original_plan = plan(compact)
     plan_path.write_text(original_plan, encoding="utf-8")
+    snapshot = bind_approved_plan_snapshot(
+        {"vault_root": vault, "plan_file": plan_path}
+    )
     meta = {
         "version": 4,
         "project_id": "11111111-1111-4111-8111-111111111111",
@@ -172,6 +177,7 @@ with tempfile.TemporaryDirectory(prefix="outcome-task-meta.") as raw:
         "executor_runtime": "codex",
         "vault_root": str(vault),
         "plan_file": str(plan_path),
+        "plan_snapshot_file": str(snapshot["_approved_plan_file"]),
         "approved_plan_sha256": hashlib.sha256(original_plan.encode()).hexdigest(),
         "outcome_contract_sha256": DIGEST,
         "interaction_policy": "unattended",
@@ -217,22 +223,18 @@ with tempfile.TemporaryDirectory(prefix="outcome-task-meta.") as raw:
 
     editorial_drift = original_plan + "\nEditorial note.\n"
     plan_path.write_text(editorial_drift, encoding="utf-8")
-    expect_contract_error(
-        "independent plan drift", meta, "approved plan hash changed"
-    )
+    assert task_contract.normalize(meta)["outcome_contract_sha256"] == DIGEST
 
     changed = dict(CONTRACT)
     changed["desired_outcome"] = "A locally convenient proxy."
     changed_plan = plan(json.dumps(changed, separators=(",", ":")))
     plan_path.write_text(changed_plan, encoding="utf-8")
-    outcome_drift = dict(meta)
-    outcome_drift["approved_plan_sha256"] = hashlib.sha256(
-        changed_plan.encode()
-    ).hexdigest()
+    assert task_contract.normalize(meta)["outcome_contract_sha256"] == DIGEST
+    Path(meta["plan_snapshot_file"]).write_text(changed_plan, encoding="utf-8")
     expect_contract_error(
-        "independent outcome drift", outcome_drift, "Outcome Contract digest changed"
+        "immutable snapshot tamper", meta, "snapshot digest changed"
     )
-print("OK   v4 detects plan drift and outcome drift independently")
+print("OK   v4 ignores source drift and rejects immutable snapshot tampering")
 
 declared = {"digest-stable", "authority-closed"}
 summary_v2 = {

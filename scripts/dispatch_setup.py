@@ -250,7 +250,7 @@ def render_task_prompt(request: dict[str, Any], config: dict[str, Any]) -> str:
     shared_plan = request["reap"]["plan_mode"] == "shared"
     summary_disposition = "partially-achieved" if shared_plan else "achieved"
     summary_evidence = [] if shared_plan else list(outcome_contract.evidence_ids)
-    summary_gaps = [str(approved_plan_file(request))] if shared_plan else []
+    summary_gaps = [str(request["plan_file"])] if shared_plan else []
     replacements = {
         "<task_name>": request["task_name"],
         "<description from user, multi-line ok>": request["description"],

@@ -17,6 +17,10 @@ from typing import Any, NoReturn
 from review_contract import MATERIAL_SEVERITIES, SEVERITIES
 from outcome_contract import OutcomeContractError, extract_from_bytes
 from task_escalation_records import EscalationRecordError, load_attention
+from approved_plan_snapshot import (
+    PlanSnapshotError,
+    validate_approved_plan_snapshot,
+)
 
 
 SUMMARY_TYPES = {"session", "decision", "runbook", "incident", "service-update", "repo-touch"}
@@ -80,6 +84,7 @@ V3_META_FIELDS = {
 }
 V4_META_FIELDS = V3_META_FIELDS | {
     "outcome_contract_sha256",
+    "plan_snapshot_file",
     "finalization_policy",
     "split_policy",
     "base_sha",
@@ -541,6 +546,17 @@ def normalize(meta: dict[str, Any], *, verify_plan_hash: bool = True) -> dict[st
     plan = Path(plan_raw).expanduser().resolve()
     if not plan.is_file():
         raise ContractError(f"approved plan is missing: {plan}")
+    snapshot = None
+    if version == 4:
+        if not isinstance(meta.get("plan_snapshot_file"), str) or not str(
+            meta.get("plan_snapshot_file")
+        ).strip():
+            raise ContractError("v4 metadata requires plan_snapshot_file")
+        try:
+            snapshot = validate_approved_plan_snapshot(meta)
+        except PlanSnapshotError as exc:
+            raise ContractError(str(exc)) from exc
+    authority = snapshot.content if snapshot is not None else plan.read_bytes()
     outcome_digest = ""
     if version == 4:
         raw_outcome_digest = meta.get("outcome_contract_sha256")
@@ -551,7 +567,7 @@ def normalize(meta: dict[str, Any], *, verify_plan_hash: bool = True) -> dict[st
                 "v4 metadata requires lowercase outcome_contract_sha256"
             )
         try:
-            current_outcome_digest = extract_from_bytes(plan.read_bytes()).sha256
+            current_outcome_digest = extract_from_bytes(authority).sha256
         except (OSError, OutcomeContractError) as exc:
             raise ContractError(f"approved plan Outcome Contract is invalid: {exc}") from exc
         if current_outcome_digest != raw_outcome_digest:
@@ -559,7 +575,7 @@ def normalize(meta: dict[str, Any], *, verify_plan_hash: bool = True) -> dict[st
                 "approved plan Outcome Contract digest changed after dispatch approval"
             )
         outcome_digest = raw_outcome_digest
-    if verify_plan_hash and sha256_file(plan) != plan_hash:
+    if snapshot is None and verify_plan_hash and sha256_file(plan) != plan_hash:
         raise ContractError("approved plan hash changed after dispatch approval")
     vault_raw = meta.get("vault_root")
     if vault_raw is not None:
@@ -658,6 +674,8 @@ def normalize_for_runtime(meta: dict[str, Any], worktree: Path) -> dict[str, Any
     """
     policy = normalize(meta, verify_plan_hash=False)
     if policy["version"] not in {2, 3, 4}:
+        return policy
+    if meta.get("plan_snapshot_file") is not None:
         return policy
     plan = Path(str(meta.get("plan_file") or "")).expanduser().resolve()
     approved = str(meta.get("approved_plan_sha256") or "")

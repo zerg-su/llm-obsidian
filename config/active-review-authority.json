@@ -1,6 +1,7 @@
 {
   "schema_version": 1,
   "paths": [
+    "scripts/approved_plan_snapshot.py",
     "scripts/harness/callback_submit_recovery.py",
     "scripts/harness/cli.py",
     "scripts/harness/contracts.py",
@@ -19,6 +20,7 @@
     "scripts/harness/workflows/review_gate_attempt.py",
     "scripts/harness/workflows/review_gate_recovery.py",
     "scripts/task_escalation_records.py",
+    "scripts/task_plan_authority.py",
     "scripts/task_review_context.py",
     "scripts/task_review_finalization_attempt.py",
     "scripts/task_review_flow.py",

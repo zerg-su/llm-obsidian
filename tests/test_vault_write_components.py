@@ -6,6 +6,7 @@ from __future__ import annotations
 import tempfile
 import sys
 from pathlib import Path
+import hashlib
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -140,6 +141,48 @@ def main() -> int:
             recovered == 1 and "# Recovered" in target.read_text(encoding="utf-8"),
         )
         suite.check("recovery clears journal", not journal_path.exists())
+
+        plans = root / "wiki/plans"
+        plans.mkdir()
+        source_plan = plans / "approved.md"
+        approved = "---\nstatus: pending\n---\n\n# Approved\n"
+        edited = approved + "\nConcurrent user edit.\n"
+        source_plan.write_text(edited, encoding="utf-8")
+        conflict_result = root / "wiki/concepts/Conflict result.md"
+        conflict_plan = planner.plan(
+            {
+                "actor": "reap",
+                "pages": [
+                    {
+                        "op": "create",
+                        "path": "wiki/concepts/Conflict result.md",
+                        "content": page("Conflict result"),
+                    }
+                ],
+                "plan_close": {
+                    "file": "wiki/plans/approved.md",
+                    "result_link": "[[Conflict result]]",
+                    "exec_session": "executor",
+                    "expected_sha256": hashlib.sha256(approved.encode()).hexdigest(),
+                    "on_conflict": "preserve",
+                },
+            },
+            "2026-08-12",
+        )
+        suite.check(
+            "reap conflict skips only the stale plan close",
+            [path for path, _text in conflict_plan.writes] == [conflict_result]
+            and conflict_plan.warnings
+            == ["plan_close conflict preserved for wiki/plans/approved.md"],
+        )
+        TransactionJournal(root, journal_path, atomic_write).commit(
+            conflict_plan.writes, conflict_plan.deletes
+        )
+        suite.check(
+            "reap conflict records the result without overwriting the user plan",
+            conflict_result.is_file()
+            and source_plan.read_text(encoding="utf-8") == edited,
+        )
 
     return suite.finish()
 

@@ -45,6 +45,7 @@ from harness.supervisor import OperationSupervisor
 from harness.workflows.dispatch import operation_spec
 from task_contract import normalize as normalize_task_meta
 from task_review_flow import _exact_head_attempt_enabled
+from approved_plan_snapshot import bind_approved_plan_snapshot
 
 failures: list[str] = []
 
@@ -910,6 +911,8 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     frozen_spec, frozen_compiled, _frozen_policy, _frozen_card = (
         runner.custom_contract_for_request(frozen_cli_request)
     )
+    frozen_cli_request = bind_approved_plan_snapshot(frozen_cli_request)
+    frozen_prompt = runner.render_task_prompt(frozen_cli_request, config)
     check(
         "custom start installs the approved snapshot despite mutable spec drift",
         frozen_spec.spec_id == custom_payload["spec_id"]
@@ -918,7 +921,8 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         == cli_exact_challenge["definition_sha256"]
         and runner.approved_plan_sha256(frozen_cli_request)
         == cli_exact_challenge["plan_sha256"]
-        and runner.render_task_prompt(frozen_cli_request, config) == cli_prompt
+        and str(frozen_cli_request["_approved_plan_file"]) in frozen_prompt
+        and str(runner.custom_approval_plan_path(cli_request)) not in frozen_prompt
         and not Path(cli_raw["worktree"]).exists(),
     )
     custom_spec.write_text(json.dumps(custom_payload), encoding="utf-8")
@@ -1193,6 +1197,17 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         "runner binds v4 metadata to the approved Outcome Contract",
         meta["outcome_contract_sha256"] == request["outcome_contract_sha256"]
         and len(meta["outcome_contract_sha256"]) == 64,
+    )
+    snapshot_path = Path(str(meta.get("plan_snapshot_file") or ""))
+    check(
+        "runner binds v4 metadata to the canonical immutable plan snapshot",
+        snapshot_path
+        == request["vault_root"]
+        / ".vault-meta/approved-plan-snapshots"
+        / f"{meta['approved_plan_sha256']}.md"
+        and snapshot_path.read_bytes() == request["plan_file"].read_bytes()
+        and runner.sha256_file(snapshot_path) == meta["approved_plan_sha256"],
+        meta,
     )
     check(
         "runner binds automatic review to an exact verification profile",

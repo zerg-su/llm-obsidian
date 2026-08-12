@@ -206,6 +206,37 @@ def prepared_reap_plan(
     raise PlanCloseError(f"reap preparation: {label} has invalid plan mode")
 
 
+def prepared_source_plan(
+    meta: dict[str, Any],
+    text: str,
+    *,
+    approved_sha256: str,
+    today: str,
+    result_link: str,
+    exec_session: str | None,
+    label: str,
+) -> tuple[str, str]:
+    """Prepare an exact close or preserve a concurrent pending source edit."""
+
+    current = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    mode = meta.get("reap_policy", {}).get("mode")
+    if current == approved_sha256:
+        rendered = prepared_reap_plan(
+            meta,
+            text,
+            today=today,
+            result_link=result_link,
+            exec_session=exec_session,
+            label=label,
+        )
+        return rendered, "retained" if mode == "shared" else "closed"
+    if re.search(r"(?m)^status:\s*pending\s*$", text):
+        return text, "retained" if mode == "shared" else "conflict"
+    raise PlanCloseError(
+        f"reap preparation: {label} is neither the approved pending source nor a preserved concurrent edit"
+    )
+
+
 def prepare_reap(worktree: Path, current_session: str, result_path: Path, vault_root: Path) -> int:
     require_origin_session(worktree, current_session)
     try:
@@ -251,40 +282,49 @@ def prepare_reap(worktree: Path, current_session: str, result_path: Path, vault_
     plan_hash = hashlib.sha256(plan_text.encode("utf-8")).hexdigest()
     approved_hash = str(meta.get("approved_plan_sha256") or "")
     prior_marker: dict[str, Any] = {}
+    plan_close_status = ""
     try:
-        if plan_hash == approved_hash:
-            closed_plan = prepared_reap_plan(
+        if plan_hash == approved_hash or re.search(
+            r"(?m)^status:\s*pending\s*$", plan_text
+        ):
+            closed_plan, plan_close_status = prepared_source_plan(
                 meta,
                 plan_text,
+                approved_sha256=approved_hash,
                 today=prepared_date,
                 result_link=result_link,
                 exec_session=exec_session,
                 label=str(plan.relative_to(vault)),
             )
         else:
-            prior_marker = read_json(worktree / ".task-reap-prepared.json")
-            immutable = {
-                "task_name": meta.get("task_name"),
-                "current_session": current_session,
-                "vault_root": str(vault),
-                "summary_sha256": hashlib.sha256(summary_path.read_bytes()).hexdigest(),
-                "meta_sha256": hashlib.sha256(meta_path.read_bytes()).hexdigest(),
-                "plan_path": str(plan),
-                "approved_plan_sha256": approved_hash,
-            }
-            for field, expected in immutable.items():
-                if prior_marker.get(field) != expected:
-                    die(f"prior reap preparation no longer matches {field}", 3)
-            if prior_marker.get("closed_plan_sha256") != plan_hash:
+            prior_path = worktree / ".task-reap-prepared.json"
+            if prior_path.is_file():
+                candidate = read_json(prior_path)
+                immutable = {
+                    "task_name": meta.get("task_name"),
+                    "current_session": current_session,
+                    "vault_root": str(vault),
+                    "summary_sha256": hashlib.sha256(summary_path.read_bytes()).hexdigest(),
+                    "meta_sha256": hashlib.sha256(meta_path.read_bytes()).hexdigest(),
+                    "plan_path": str(plan),
+                    "approved_plan_sha256": approved_hash,
+                }
+                if all(candidate.get(field) == expected for field, expected in immutable.items()) and candidate.get("closed_plan_sha256") == plan_hash:
+                    if candidate.get("review_archives", []) != archive_records:
+                        die("prior reap preparation no longer matches review archive markers", 3)
+                    prior_marker = candidate
+            if prior_marker:
+                closed_plan = reroute_closed_plan(
+                    plan_text,
+                    str(prior_marker.get("result_link") or ""),
+                    result_link,
+                    label=str(plan.relative_to(vault)),
+                )
+                plan_close_status = str(
+                    prior_marker.get("plan_close_status") or "closed"
+                )
+            else:
                 die("approved plan is neither pending nor the prior prepared close", 3)
-            if prior_marker.get("review_archives", []) != archive_records:
-                die("prior reap preparation no longer matches review archive markers", 3)
-            closed_plan = reroute_closed_plan(
-                plan_text,
-                str(prior_marker.get("result_link") or ""),
-                result_link,
-                label=str(plan.relative_to(vault)),
-            )
     except (OSError, PlanCloseError) as exc:
         die(str(exc), 3)
     marker = {
@@ -298,6 +338,7 @@ def prepare_reap(worktree: Path, current_session: str, result_path: Path, vault_
         "plan_path": str(plan),
         "approved_plan_sha256": meta.get("approved_plan_sha256"),
         "closed_plan_sha256": hashlib.sha256(closed_plan.encode("utf-8")).hexdigest(),
+        "plan_close_status": plan_close_status,
         "result_link": result_link,
         "exec_session": exec_session,
         "prepared_date": prepared_date,
@@ -365,8 +406,20 @@ def complete_reap(worktree: Path, current_session: str, result_path: Path, vault
     if str(plan) != prepared.get("plan_path"):
         die("reap preparation points at a different approved plan", 3)
     expected_closed = str(prepared.get("closed_plan_sha256") or "")
-    if not plan.is_file() or hashlib.sha256(plan.read_bytes()).hexdigest() != expected_closed:
-        die("approved plan does not match the coordinator-prepared closed state", 3)
+    plan_close_status = str(prepared.get("plan_close_status") or "closed")
+    if not plan.is_file():
+        die("approved plan is unavailable after the reap transaction", 3)
+    if plan_close_status == "closed":
+        if hashlib.sha256(plan.read_bytes()).hexdigest() != expected_closed:
+            die("approved plan does not match the coordinator-prepared closed state", 3)
+    elif plan_close_status in {"conflict", "retained"}:
+        if re.search(
+            r"(?m)^status:\s*pending\s*$",
+            plan.read_text(encoding="utf-8"),
+        ) is None:
+            die("preserved approved plan is no longer pending", 3)
+    else:
+        die("reap preparation has an invalid plan close status", 3)
     marker = {
         "version": 1,
         "task_name": meta.get("task_name"),
@@ -377,6 +430,7 @@ def complete_reap(worktree: Path, current_session: str, result_path: Path, vault
         "meta_sha256": hashlib.sha256(meta_path.read_bytes()).hexdigest(),
         "plan_path": str(plan),
         "closed_plan_sha256": expected_closed,
+        "plan_close_status": plan_close_status,
         "result_sha256": hashlib.sha256(result.read_bytes()).hexdigest(),
         "validated": True,
         "completed_at": utc_now(),
@@ -415,3 +469,23 @@ def complete_reap(worktree: Path, current_session: str, result_path: Path, vault
     )
     print(f"recorded validated final reap: {result}")
     return 0
+
+
+def mark_plan_close_conflict(worktree: Path) -> None:
+    """Persist the writer's exact optimistic close conflict before completion."""
+
+    root = worktree.expanduser().resolve()
+    marker_path = root / ".task-reap-prepared.json"
+    marker = read_json(marker_path)
+    plan = Path(str(marker.get("plan_path") or "")).expanduser().resolve()
+    if not plan.is_file():
+        die("conflicted approved plan is unavailable", 3)
+    text = plan.read_text(encoding="utf-8")
+    if re.search(r"(?m)^status:\s*pending\s*$", text) is None:
+        die("conflicted approved plan is no longer pending", 3)
+    marker["plan_close_status"] = "conflict"
+    marker["closed_plan_sha256"] = hashlib.sha256(
+        text.encode("utf-8")
+    ).hexdigest()
+    marker["plan_close_conflicted_at"] = utc_now()
+    write_marker(marker_path, marker)

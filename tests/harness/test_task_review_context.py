@@ -13,11 +13,9 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from harness.context import ContextBuilder  # noqa: E402
 from outcome_contract import extract_from_bytes  # noqa: E402
-from task_escalation_records import (  # noqa: E402
-    append_amendment,
-    append_raise,
-    append_resolution,
-)
+from approved_plan_snapshot import bind_approved_plan_snapshot  # noqa: E402
+from task_escalation_records import append_raise, append_resolution  # noqa: E402
+from task_plan_authority import record_plan_amendment  # noqa: E402
 from task_review_context import (  # noqa: E402
     _amendment_evidence,
     _bounded_review_diff,
@@ -47,7 +45,12 @@ class ReviewDiffBoundaryTest(unittest.TestCase):
 class ReviewAmendmentEvidenceTest(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory(prefix="review-amendment.")
-        self.worktree = Path(self.temp.name).resolve()
+        self.root = Path(self.temp.name).resolve()
+        self.worktree = self.root / "worktree"
+        self.vault = self.root / "vault"
+        self.worktree.mkdir()
+        (self.vault / "wiki/plans").mkdir(parents=True)
+        (self.vault / ".vault-meta").mkdir()
         self.plan = (
             b"# Plan\n\n```json\n"
             b'{"schema_version":1,"desired_outcome":"Keep it exact.",'
@@ -57,9 +60,18 @@ class ReviewAmendmentEvidenceTest(unittest.TestCase):
         )
         self.plan_sha = hashlib.sha256(self.plan).hexdigest()
         self.outcome_sha = extract_from_bytes(self.plan).sha256
+        source = self.vault / "wiki/plans/approved.md"
+        source.write_bytes(self.plan)
+        bound = bind_approved_plan_snapshot(
+            {"vault_root": self.vault, "plan_file": source}
+        )
         self.meta = {
             "approved_plan_sha256": self.plan_sha,
             "outcome_contract_sha256": self.outcome_sha,
+            "vault_root": str(self.vault),
+            "plan_file": str(source),
+            "plan_snapshot_file": str(bound["_approved_plan_file"]),
+            "task_id": "task",
         }
         (self.worktree / ".task-meta.json").write_text(
             json.dumps(
@@ -79,10 +91,33 @@ class ReviewAmendmentEvidenceTest(unittest.TestCase):
         self.temp.cleanup()
 
     def append(self, decision: str = "authorize exact repair"):
-        return append_amendment(
+        amended = (
+            b"# Plan\n\n```json\n"
+            + json.dumps(
+                {
+                    "schema_version": 1,
+                    "desired_outcome": decision,
+                    "success_evidence": [
+                        {
+                            "evidence_id": hashlib.sha256(
+                                decision.encode()
+                            ).hexdigest()[:12],
+                            "observable": "The boundary is independently visible.",
+                        }
+                    ],
+                    "non_goals": ["No unrelated scope."],
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+            + b"\n```\n"
+        )
+        source = self.vault / "drafts" / f"{hashlib.sha256(amended).hexdigest()}.md"
+        source.parent.mkdir(exist_ok=True)
+        source.write_bytes(amended)
+        return record_plan_amendment(
             self.worktree,
-            plan_sha256=self.plan_sha,
-            outcome_sha256=self.outcome_sha,
+            source,
             decision=decision,
         )
 
@@ -118,7 +153,7 @@ class ReviewAmendmentEvidenceTest(unittest.TestCase):
         self.append()
         stale = {**self.meta, "approved_plan_sha256": "a" * 64}
 
-        with self.assertRaisesRegex(TaskReviewError, "does not match"):
+        with self.assertRaisesRegex(TaskReviewError, "invalid"):
             _amendment_evidence(stale, self.worktree)
 
     def test_ordered_superseding_amendments_select_terminal_authority(self) -> None:
@@ -187,21 +222,17 @@ class ReviewAmendmentEvidenceTest(unittest.TestCase):
             + "\n",
             encoding="utf-8",
         )
-        self.append("competing terminal amendment")
 
         with self.assertRaisesRegex(TaskReviewError, "invalid"):
             _amendment_evidence(self.meta, self.worktree)
 
     def test_mixed_amendment_bindings_are_rejected(self) -> None:
-        self.append("authorize matching repair")
-        append_amendment(
-            self.worktree,
-            plan_sha256=self.plan_sha,
-            outcome_sha256="f" * 64,
-            decision="authorize foreign outcome repair",
+        amendment = self.append("authorize matching repair")
+        Path(amendment.payload["new_plan_snapshot_file"]).write_bytes(
+            self.plan
         )
 
-        with self.assertRaisesRegex(TaskReviewError, "does not match"):
+        with self.assertRaisesRegex(TaskReviewError, "invalid"):
             _amendment_evidence(self.meta, self.worktree)
 
     def test_missing_or_tampered_authoritative_record_is_rejected(self) -> None:

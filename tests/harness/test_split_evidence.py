@@ -38,6 +38,7 @@ from harness.split_contracts import (  # noqa: E402
 )
 from harness.store import OperationStore  # noqa: E402
 from harness.verification import load_profiles  # noqa: E402
+from approved_plan_snapshot import bind_approved_plan_snapshot  # noqa: E402
 from outcome_contract import extract_from_bytes  # noqa: E402
 
 
@@ -119,6 +120,10 @@ with tempfile.TemporaryDirectory(prefix="split-evidence.") as raw:
     )
     plan_sha = hashlib.sha256(plan.read_bytes()).hexdigest()
     outcome_sha = extract_from_bytes(plan.read_bytes()).sha256
+    (vault / ".vault-meta").mkdir(exist_ok=True)
+    plan_binding = bind_approved_plan_snapshot(
+        {"vault_root": vault.resolve(), "plan_file": plan.resolve()}
+    )
     target_repo.mkdir()
     git(target_repo, "init", "-b", "main")
     git(target_repo, "config", "user.name", "Split Test")
@@ -249,6 +254,8 @@ with tempfile.TemporaryDirectory(prefix="split-evidence.") as raw:
         "base_branch": "deleted-parent-branch",
         "base_sha": base,
         "plan_file": str(plan.resolve()),
+        "plan_snapshot_file": str(plan_binding["_approved_plan_file"]),
+        "approved_plan_sha256": plan_sha,
         "outcome_contract_sha256": outcome_sha,
         "split_policy": policy,
         "review_policy": {

@@ -19,7 +19,8 @@ Payload (stdin or --file), all mutation keys optional:
       "plan_close":    {"file": "wiki/plans/<name>.md",
                         "result_link": "[[Title]]",
                         "exec_session": "<id>|null",
-                        "expected_sha256": "<approved-plan-hash>|null"},
+                        "expected_sha256": "<approved-plan-hash>|null",
+                        "on_conflict": "preserve|null"},
       "pages": [
         {"op": "create", "path": "wiki/concepts/New.md", "content": "..."},
         {"op": "update", "path": "wiki/index.md", "content": "...",
@@ -43,6 +44,8 @@ plan_close (reap final): strict lifecycle close of a plan page. Preconditions
 exit 2, nothing written. Applies: status -> executed, updated bump, executor
 session appended to sessions: (plan-capture format), 'Результат: <link>'
 line appended to body.
+For actor `reap` only, `on_conflict: preserve` skips a stale optimistic close,
+keeps all other transaction writes, and returns one bounded warning.
 
 Ownership contract for hot.md sections:
   - ## Recent Changes    — THIS SCRIPT (prepend bullet, evict >15, truncate essence only)

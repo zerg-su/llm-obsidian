@@ -25,6 +25,8 @@ from harness.runtime_worker_summary import (  # noqa: E402
     RuntimeWorkerSummaryMixin,
     task_summary_contract_template,
 )
+from approved_plan_snapshot import bind_approved_plan_snapshot  # noqa: E402
+from outcome_contract import extract_from_bytes  # noqa: E402
 
 
 def check(label: str, value: bool, detail: object = "") -> None:
@@ -256,9 +258,22 @@ with tempfile.TemporaryDirectory(prefix="artifact-repair.") as raw:
             + "\n```\n",
             encoding="utf-8",
         )
+        vault = root / "vault"
+        (vault / ".vault-meta").mkdir(parents=True, exist_ok=True)
+        plan_binding = bind_approved_plan_snapshot(
+            {"vault_root": vault.resolve(), "plan_file": plan.resolve()}
+        )
         mode_meta = {
             **meta,
+            "task_id": "artifact-repair-task",
+            "worktree": str(worktree.resolve()),
+            "vault_root": str(vault.resolve()),
             "plan_file": str(plan),
+            "plan_snapshot_file": str(plan_binding["_approved_plan_file"]),
+            "approved_plan_sha256": plan_binding["_approved_plan_sha256"],
+            "outcome_contract_sha256": extract_from_bytes(
+                plan.read_bytes()
+            ).sha256,
             "reap_policy": {**meta["reap_policy"], "mode": mode},
         }
         mode_target = worktree / f".{mode}-summary.json"

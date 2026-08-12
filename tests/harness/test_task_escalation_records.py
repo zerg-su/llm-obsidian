@@ -306,23 +306,41 @@ with tempfile.TemporaryDirectory(prefix="task-escalation-records.") as raw:
 
     amendment = append_amendment(
         worktree,
-        plan_sha256="a" * 64,
-        outcome_sha256="b" * 64,
+        task_id="task-a",
+        root_operation_id="task-a",
+        prior_plan_sha256="a" * 64,
+        prior_outcome_sha256="b" * 64,
+        prior_amendment_id="",
+        prior_amendment_sha256="",
+        new_plan_sha256="c" * 64,
+        new_plan_snapshot_file=str((Path(raw) / "snapshots" / ("c" * 64 + ".md")).resolve()),
+        new_outcome_sha256="d" * 64,
         decision="approve the digest-bound amendment",
         recorded_at="2026-08-04T12:03:00Z",
     )
     amendment_bytes = record_path(worktree, amendment.record_id).read_bytes()
     amendment_replay = append_amendment(
         worktree,
-        plan_sha256="a" * 64,
-        outcome_sha256="b" * 64,
+        task_id="task-a",
+        root_operation_id="task-a",
+        prior_plan_sha256="a" * 64,
+        prior_outcome_sha256="b" * 64,
+        prior_amendment_id="",
+        prior_amendment_sha256="",
+        new_plan_sha256="c" * 64,
+        new_plan_snapshot_file=str((Path(raw) / "snapshots" / ("c" * 64 + ".md")).resolve()),
+        new_outcome_sha256="d" * 64,
         decision="approve the digest-bound amendment",
         recorded_at="2026-08-04T12:03:00Z",
     )
     check(
         "amendment binds frozen plan and Outcome digests idempotently",
-        amendment.payload["plan_sha256"] == "a" * 64
-        and amendment.payload["outcome_sha256"] == "b" * 64
+        amendment.payload["prior_plan_sha256"] == "a" * 64
+        and amendment.payload["prior_outcome_sha256"] == "b" * 64
+        and amendment.payload["new_plan_sha256"] == "c" * 64
+        and amendment.payload["new_outcome_sha256"] == "d" * 64
+        and amendment.payload["task_id"] == "task-a"
+        and amendment.payload["root_operation_id"] == "task-a"
         and amendment.payload["decision"] == "approve the digest-bound amendment"
         and amendment_replay.sha256 == amendment.sha256
         and record_path(worktree, amendment.record_id).read_bytes() == amendment_bytes,

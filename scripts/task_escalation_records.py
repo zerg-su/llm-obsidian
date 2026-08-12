@@ -311,10 +311,44 @@ def _validate_payload_worktree(worktree: Path, payload: dict[str, Any]) -> None:
         raise EscalationRecordError("decision payload worktree origin is stale")
 
 
+def _amendment_stable(value: Mapping[str, object]) -> dict[str, str]:
+    stable = {
+        key: str(value.get(key) or "").strip()
+        for key in (
+            "task_id", "root_operation_id", "prior_plan_sha256",
+            "prior_outcome_sha256", "prior_amendment_id",
+            "prior_amendment_sha256", "new_plan_sha256",
+            "new_plan_snapshot_file", "new_outcome_sha256",
+        )
+    }
+    stable["decision"] = " ".join(str(value.get("decision") or "").split())
+    for key, label in (
+        ("prior_plan_sha256", "prior plan"),
+        ("prior_outcome_sha256", "prior Outcome"),
+        ("new_plan_sha256", "new plan"),
+        ("new_outcome_sha256", "new Outcome"),
+    ):
+        stable[key] = _valid_sha256(stable[key], label)
+    prior_id, prior_sha = (
+        stable["prior_amendment_id"], stable["prior_amendment_sha256"]
+    )
+    if bool(prior_id) != bool(prior_sha):
+        raise EscalationRecordError("prior amendment identity is incomplete")
+    if prior_id:
+        _valid_record_id(prior_id)
+        _valid_sha256(prior_sha, "prior amendment")
+    if not Path(stable["new_plan_snapshot_file"]).is_absolute():
+        raise EscalationRecordError("new plan snapshot path is invalid")
+    if not stable["decision"]:
+        raise EscalationRecordError("amendment decision is empty")
+    return stable
+
+
 def _validate_chain_semantics(
     worktree: Path, chain: tuple[DecisionRecord, ...]
 ) -> None:
     previous: DecisionRecord | None = None
+    previous_amendment: DecisionRecord | None = None
     for record in chain:
         payload = record.payload
         _validate_payload_worktree(worktree, payload)
@@ -397,18 +431,18 @@ def _validate_chain_semantics(
                     "delivery-failure transition payload is invalid"
                 )
         else:
-            decision = " ".join(str(payload.get("decision") or "").split())
-            stable = {
-                "plan_sha256": _valid_sha256(payload.get("plan_sha256"), "plan"),
-                "outcome_sha256": _valid_sha256(
-                    payload.get("outcome_sha256"), "Outcome"
-                ),
-                "decision": decision,
-            }
+            stable = _amendment_stable(payload)
+            prior_id = "" if previous_amendment is None else previous_amendment.record_id
+            prior_sha = "" if previous_amendment is None else previous_amendment.sha256
+            origin = _task_origin(worktree)
             if (
                 status != "resolved"
+                or payload.get("version") != 2
                 or payload.get("category") != "amendment"
-                or not decision
+                or stable["task_id"] != origin["task_id"]
+                or stable["root_operation_id"] != origin["task_id"]
+                or stable["prior_amendment_id"] != prior_id
+                or stable["prior_amendment_sha256"] != prior_sha
                 or record.record_id != _derived_record_id("amendment", stable)
                 or (
                     previous is not None
@@ -417,6 +451,7 @@ def _validate_chain_semantics(
                 )
             ):
                 raise EscalationRecordError("amendment transition identity is invalid")
+            previous_amendment = record
         previous = record
 
 
@@ -797,32 +832,33 @@ def append_delivery_failure(
 def append_amendment(
     worktree: Path,
     *,
-    plan_sha256: str,
-    outcome_sha256: str,
+    task_id: str,
+    root_operation_id: str,
+    prior_plan_sha256: str,
+    prior_outcome_sha256: str,
+    prior_amendment_id: str,
+    prior_amendment_sha256: str,
+    new_plan_sha256: str,
+    new_plan_snapshot_file: str,
+    new_outcome_sha256: str,
     decision: str,
     recorded_at: str | None = None,
     expected_record_sha256: str | None | object = _UNSET,
 ) -> DecisionRecord:
-    """Append one coordinator amendment bound to frozen plan and Outcome bytes."""
+    """Append one explicit amendment bound to both plan identities and its task."""
 
     root = worktree.expanduser().resolve()
-    plan_digest = _valid_sha256(plan_sha256, "plan")
-    outcome_digest = _valid_sha256(outcome_sha256, "Outcome")
-    answer = " ".join(str(decision).split()).strip()
-    if not answer:
-        raise EscalationRecordError("amendment decision is empty")
-    stable = {
-        "plan_sha256": plan_digest,
-        "outcome_sha256": outcome_digest,
-        "decision": answer,
-    }
+    origin = _task_origin(root)
+    stable = _amendment_stable(locals())
+    if stable["task_id"] != origin["task_id"] or stable["root_operation_id"] != origin["task_id"]:
+        raise EscalationRecordError("amendment task/root identity is stale")
     record_id = _derived_record_id("amendment", stable)
     _require_current_marker_schema(root)
     with _writer_lock(root):
         latest = load_latest(root)
         _require_expected_latest(latest, expected_record_sha256)
         payload = {
-            "version": 1,
+            "version": 2,
             "id": record_id,
             "status": "resolved",
             "task_name": str(_read_object(root / ".task-meta.json", "task metadata")[0].get("task_name") or "task amendment"),

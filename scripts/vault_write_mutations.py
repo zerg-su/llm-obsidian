@@ -71,7 +71,21 @@ class MutationPlanner:
             )
 
         if payload.get("plan_close"):
-            writes.append(self.apply_plan_close(payload["plan_close"], today))
+            try:
+                writes.append(self.apply_plan_close(payload["plan_close"], today))
+            except ConflictError:
+                spec = payload["plan_close"]
+                if (
+                    payload.get("actor") == "reap"
+                    and isinstance(spec, dict)
+                    and spec.get("on_conflict") == "preserve"
+                ):
+                    warnings.append(
+                        "plan_close conflict preserved for "
+                        + str(spec.get("file") or "")
+                    )
+                else:
+                    raise
 
         self.ensure_unique_writes(writes, deletes)
         if not writes and not deletes:
@@ -241,6 +255,18 @@ class MutationPlanner:
         rel = str(spec.get("file") or "")
         result_link = str(spec.get("result_link") or "").strip()
         exec_session = spec.get("exec_session") or None
+        on_conflict = spec.get("on_conflict")
+        unknown = set(spec) - {
+            "file",
+            "result_link",
+            "exec_session",
+            "expected_sha256",
+            "on_conflict",
+        }
+        if unknown:
+            raise CapViolation(f"plan_close has unknown keys: {sorted(unknown)}")
+        if on_conflict not in {None, "preserve"}:
+            raise CapViolation("plan_close.on_conflict must be preserve when present")
         if not result_link:
             raise CapViolation(
                 "plan_close.result_link is required, e.g. '[[Page Title]]'"

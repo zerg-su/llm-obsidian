@@ -65,6 +65,7 @@ from task_review_flow import (  # noqa: E402
     _run_exact_head_review,
     _run_review,
 )
+from approved_plan_snapshot import bind_approved_plan_snapshot  # noqa: E402
 from outcome_contract import extract_from_bytes  # noqa: E402
 from review_resolution import review_transport_identity_sha256  # noqa: E402
 from task_review_transport import _write_round_meta  # noqa: E402
@@ -1017,6 +1018,10 @@ with tempfile.TemporaryDirectory(prefix="exact-protocol-selector.") as raw:
     )["scoped"].sha256
     task_id = "11111111-1111-4111-8111-111111111111"
     outcome_sha = extract_from_bytes(plan.read_bytes()).sha256
+    (vault / ".vault-meta").mkdir(exist_ok=True)
+    plan_binding = bind_approved_plan_snapshot(
+        {"vault_root": vault.resolve(), "plan_file": plan.resolve()}
+    )
     (product / ".task-summary.json").write_text(
         json.dumps(
             {
@@ -1038,7 +1043,10 @@ with tempfile.TemporaryDirectory(prefix="exact-protocol-selector.") as raw:
         "task_id": task_id,
         "task_name": "exact selector",
         "task_surface": "22222222-2222-4222-8222-222222222222",
+        "worktree": str(product.resolve()),
+        "vault_root": str(vault.resolve()),
         "plan_file": str(plan),
+        "plan_snapshot_file": str(plan_binding["_approved_plan_file"]),
         "approved_plan_sha256": hashlib.sha256(plan.read_bytes()).hexdigest(),
         "outcome_contract_sha256": outcome_sha,
         "finalization_policy": {

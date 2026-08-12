@@ -19,12 +19,12 @@ from lifecycle_telemetry import elapsed_ms, emit_lifecycle_event
 from task_contract import ContractError, normalize_for_runtime
 from task_escalation_records import (
     EscalationRecordError,
-    append_amendment,
     append_delivery_failure,
     append_raise,
     append_resolution,
     load_latest,
 )
+from task_plan_authority import PlanAuthorityError, record_plan_amendment
 from harness.adapters.cmux import run_cmux
 from harness.artifact_repair import (
     build_verification_escalation,
@@ -309,8 +309,7 @@ def resolve_escalation(worktree: Path, decision: str) -> int:
 
 def record_amendment(
     worktree: Path,
-    plan_sha256: str,
-    outcome_sha256: str,
+    plan_file: Path,
     decision: str,
 ) -> int:
     meta, _ = load_unattended(worktree)
@@ -318,13 +317,12 @@ def record_amendment(
     if current == "unknown" or current != str(meta.get("origin_session") or ""):
         die("only the originating coordinator session may record an amendment", 3)
     try:
-        record = append_amendment(
+        record = record_plan_amendment(
             worktree,
-            plan_sha256=plan_sha256,
-            outcome_sha256=outcome_sha256,
+            plan_file,
             decision=compact(decision, "decision"),
         )
-    except EscalationRecordError as exc:
+    except (EscalationRecordError, PlanAuthorityError) as exc:
         die(str(exc), 3)
     emit_lifecycle_event(
         worktree,
@@ -361,8 +359,7 @@ def main() -> int:
     )
     amendment = sub.add_parser("record-amendment")
     amendment.add_argument("--worktree", default=".")
-    amendment.add_argument("--plan-sha256", required=True)
-    amendment.add_argument("--outcome-sha256", required=True)
+    amendment.add_argument("--plan-file", type=Path, required=True)
     amendment.add_argument("--decision", required=True)
     args = parser.parse_args()
     worktree = Path(args.worktree).expanduser().resolve()
@@ -378,8 +375,7 @@ def main() -> int:
         return resolve_escalation(worktree, args.decision)
     return record_amendment(
         worktree,
-        args.plan_sha256,
-        args.outcome_sha256,
+        args.plan_file.expanduser().resolve(),
         args.decision,
     )
 

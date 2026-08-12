@@ -34,6 +34,7 @@ from harness.review_finalization import (  # noqa: E402
     review_gate_root,
 )
 from harness.workflows.reap import run_reap  # noqa: E402
+from task_reap_lifecycle import mark_plan_close_conflict  # noqa: E402
 
 
 TYPE_FOLDER = {
@@ -300,7 +301,7 @@ def approved_plan_state(meta: dict[str, Any]) -> tuple[Path, str]:
     text = plan.read_text(encoding="utf-8")
     if re.search(r"(?m)^status:\s*pending\s*$", text):
         if hashlib.sha256(text.encode("utf-8")).hexdigest() != meta.get("approved_plan_sha256"):
-            raise ReapError("pending approved plan hash drifted")
+            return plan, "conflict"
         return plan, "pending"
     if re.search(r"(?m)^status:\s*executed\s*$", text):
         if not reap_closes_plan(meta):
@@ -335,6 +336,7 @@ def with_plan_close(
             "result_link": result_link,
             "exec_session": exec_session,
             "expected_sha256": meta["approved_plan_sha256"],
+            "on_conflict": "preserve",
         }
     return result
 
@@ -448,7 +450,20 @@ def _finalize_reap(vault: Path, worktree: Path, current: str) -> dict[str, Any]:
             result_link=link,
             exec_session=summary.get("session"),
         )
-        run([sys.executable, str(vault / "scripts/vault-write.py"), "--output", "json"], cwd=vault, input_text=json.dumps(payload, ensure_ascii=False), label="reap vault transaction")
+        write_raw = run([sys.executable, str(vault / "scripts/vault-write.py"), "--output", "json"], cwd=vault, input_text=json.dumps(payload, ensure_ascii=False), label="reap vault transaction")
+        try:
+            write_result = json.loads(write_raw)
+        except json.JSONDecodeError as exc:
+            raise ReapError("reap vault transaction returned invalid JSON") from exc
+        warnings = write_result.get("warnings")
+        if not isinstance(warnings, list):
+            raise ReapError("reap vault transaction omitted its warnings")
+        conflict_warning = (
+            "plan_close conflict preserved for "
+            + plan.relative_to(vault).as_posix()
+        )
+        if conflict_warning in warnings:
+            mark_plan_close_conflict(worktree)
     else:
         expected_closed = str(prepared.get("closed_plan_sha256") or "")
         if (

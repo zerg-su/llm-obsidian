@@ -232,10 +232,10 @@ def _legacy_resume_disabled_receipt(
 
 
 def _attempt_binding(
-    meta: Mapping[str, Any], task_id: str, *, cycle: int
+    meta: Mapping[str, Any], task_id: str, worktree: Path, *, cycle: int
 ) -> tuple[str, int, str, str]:
     try:
-        return attempt_binding(meta, task_id, cycle=cycle)
+        return attempt_binding(meta, task_id, worktree, cycle=cycle)
     except FinalizationAttemptError as exc:
         raise TaskReviewError(str(exc)) from exc
 
@@ -311,7 +311,7 @@ def _start_exact_head_review(
         )
 
     lineage, cycle, plan_sha256, outcome_sha256 = _attempt_binding(
-        meta, task_id, cycle=cycle
+        meta, task_id, worktree, cycle=cycle
     )
     run = gate.begin_attempt(
         dispatch_operation_id=task_id,
@@ -604,7 +604,7 @@ def _run_exact_head_review(
         cycle = prior_attempt.identity.cycle
         if prior_attempt.status == "terminal":
             assert prior_attempt.terminal is not None
-            ledger = finalization_ledger(meta, vault, task_id)
+            ledger = finalization_ledger(meta, vault, task_id, worktree)
             # The one narrow same-HEAD relaxation: an attempt that terminated
             # before the provider launched owns no durable effect, so it may be
             # superseded at an unchanged HEAD instead of replayed as a receipt.
@@ -707,7 +707,7 @@ def _run_exact_head_review(
     state = gate.read()
     attempt = ReviewAttempt.from_mapping(state["attempt"])
     lineage, cycle, plan_sha256, outcome_sha256 = _attempt_binding(
-        meta, task_id, cycle=attempt.identity.cycle
+        meta, task_id, worktree, cycle=attempt.identity.cycle
     )
     candidate = compile_review_attempt_identity(
         request=request,

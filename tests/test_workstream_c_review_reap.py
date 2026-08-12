@@ -20,6 +20,7 @@ from harness.workflows.review_gate import (
     authorize_task_finalization,
     review_context_sha256,
 )
+from approved_plan_snapshot import bind_approved_plan_snapshot
 from wiki_summary_contract import validate_summary
 
 
@@ -81,11 +82,20 @@ with tempfile.TemporaryDirectory(prefix="workstream-c-review.") as raw:
     (vault / "skills/review/SKILL.md").write_text(
         "# Review\n\nReview the exact evidence.\n", encoding="utf-8"
     )
+    (vault / ".vault-meta").mkdir()
+    plan_binding = bind_approved_plan_snapshot(
+        {"vault_root": vault.resolve(), "plan_file": plan.resolve()}
+    )
     (worktree / ".task-summary.json").write_bytes(SUMMARY_BYTES)
     meta = {
         "version": 4,
+        "task_id": "workstream-c",
         "task_name": "workstream-c",
+        "worktree": str(worktree.resolve()),
+        "vault_root": str(vault.resolve()),
         "plan_file": str(plan),
+        "plan_snapshot_file": str(plan_binding["_approved_plan_file"]),
+        "approved_plan_sha256": plan_binding["_approved_plan_sha256"],
         "outcome_contract_sha256": hashlib.sha256(
             b'{"desired_outcome":"Keep the outcome exact.","non_goals":["Do not add a review lane."],"schema_version":1,"success_evidence":[{"evidence_id":"review-contract","observable":"Review independently establishes the contract."}]}'
         ).hexdigest(),

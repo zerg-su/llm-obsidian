@@ -25,6 +25,7 @@ from harness.supervisor import OperationSupervisor
 from harness.workflows.dispatch import DispatchRequest, run_dispatch
 from harness.workflows.reap import summary_callback
 from outcome_contract import extract_from_bytes
+from approved_plan_snapshot import bind_approved_plan_snapshot
 
 failures: list[str] = []
 
@@ -122,11 +123,25 @@ with tempfile.TemporaryDirectory(prefix="reap-runner-test.") as raw:
         encoding="utf-8",
     )
     outcome_meta = vault / ".task-meta.json"
+    (vault / ".vault-meta").mkdir(exist_ok=True)
+    outcome_worktree = vault / "outcome-worktree"
+    outcome_worktree.mkdir()
+    outcome_snapshot = bind_approved_plan_snapshot(
+        {"vault_root": vault, "plan_file": outcome_plan}
+    )
     outcome_meta.write_text(
         json.dumps(
             {
                 "version": 4,
                 "plan_file": str(outcome_plan),
+                "plan_snapshot_file": str(
+                    outcome_snapshot["_approved_plan_file"]
+                ),
+                "approved_plan_sha256": outcome_snapshot[
+                    "_approved_plan_sha256"
+                ],
+                "vault_root": str(vault),
+                "worktree": str(outcome_worktree),
                 "outcome_contract_sha256": extract_from_bytes(
                     outcome_plan.read_bytes()
                 ).sha256,
@@ -196,6 +211,12 @@ with tempfile.TemporaryDirectory(prefix="reap-runner-test.") as raw:
     plan.write_text(pending, encoding="utf-8")
     meta = {"plan_file": str(plan), "approved_plan_sha256": hashlib.sha256(pending.encode()).hexdigest()}
     check("pending plan hash validates", runner.approved_plan_state(meta)[1] == "pending")
+    plan.write_text(pending + "Concurrent user edit.\n", encoding="utf-8")
+    check(
+        "pending concurrent plan edit becomes an independent close conflict",
+        runner.approved_plan_state(meta)[1] == "conflict",
+    )
+    plan.write_text(pending, encoding="utf-8")
     check(
         "shared task reap retains its approved master plan",
         not runner.reap_closes_plan(
@@ -238,7 +259,8 @@ with tempfile.TemporaryDirectory(prefix="reap-runner-test.") as raw:
         "final reap vault transaction binds exact plan_close",
         final_payload["plan_close"]["file"] == "wiki/plans/approved.md"
         and final_payload["plan_close"]["expected_sha256"]
-        == meta["approved_plan_sha256"],
+        == meta["approved_plan_sha256"]
+        and final_payload["plan_close"]["on_conflict"] == "preserve",
     )
     plan.write_text("---\nstatus: executed\n---\n", encoding="utf-8")
     check("executed plan is accepted only as recovery", runner.approved_plan_state(meta)[1] == "executed")

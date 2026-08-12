@@ -91,16 +91,26 @@ Bounded review/schema work may use the compiled ephemeral profile below.
 
 ## Runner contract
 
-`dispatch-runner.py` owns worktree creation, route sync, prompt rendering,
-v3 metadata, identity, and one `vault-write.py` transaction. The generic provider runtime owns the anchored split/workspace,
+`dispatch-runner.py` owns immutable approved-plan capture, worktree creation,
+route sync, prompt rendering, current metadata, identity, and one
+`vault-write.py` transaction. Before provider launch it copies the approved
+plan into the owner-only content-addressed
+`.vault-meta/approved-plan-snapshots/` store outside the task worktree and
+binds metadata/review context to that exact digest. Later source-plan edits
+affect only future dispatches; an active task changes plan identity only through
+the explicit predecessor-bound amendment constructor. The generic provider
+runtime owns the anchored split/workspace,
 provider launch, callback relay, resume, and exact cleanup. A UUID is
 claimed before mutation; launched requests are idempotent, while preparing or
 failed requests fail closed.
 
 The metadata freezes the exact review preset, its deterministic simple/deep/skip
 budget (1/2/0), and the coordinator verification profile digest. Reap mode
-`final` closes its plan; `shared` retains an unchanged pending plan.
-Metadata binds `interaction_policy`, `approved_plan_sha256`,
+`final` optimistically closes the mutable source plan only while its
+dispatch-time digest matches; a concurrent pending edit is preserved and
+reported while the result files independently. `shared` retains the pending
+source plan. Metadata binds `interaction_policy`, `plan_snapshot_file`,
+`approved_plan_sha256`,
 `forbidden_actions`, and `watchdog_policy`.
 `engineering/fix` runs one persistent executor
 session through exact harness prompts for `reproduce`, `root-cause`,

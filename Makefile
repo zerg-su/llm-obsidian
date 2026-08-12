@@ -72,6 +72,9 @@ test-harness:
 	@python3 tests/harness/test_review_resolution_bundle.py
 	@python3 tests/harness/test_review_delta_packet.py
 	@python3 tests/harness/test_review_chunked_delta.py
+	@python3 tests/harness/test_approved_plan_snapshot.py
+	@python3 tests/harness/test_task_plan_authority.py
+	@python3 tests/harness/test_safe_reap_plan.py
 	@python3 tests/harness/test_task_review_context.py
 	@python3 tests/harness/test_review_telemetry.py
 	@python3 tests/harness/test_review_transport.py

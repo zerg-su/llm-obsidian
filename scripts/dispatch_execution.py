@@ -45,6 +45,10 @@ from dispatch_workspace import (
     sync_codex_profile,
     write_task_files,
 )
+from approved_plan_snapshot import (
+    PlanSnapshotError,
+    bind_approved_plan_snapshot,
+)
 
 
 def start(
@@ -61,6 +65,9 @@ def start(
         state_path, prior = begin_run(request, spec_sha256)
         if prior is not None:
             return prior
+        stage = "plan-snapshot"
+        stage_started = time.monotonic()
+        request = bind_approved_plan_snapshot(request)
         config = load_dispatch_config(request["vault_root"], request["target_repo"])
         session_preview, effective_preview = resolved_routes(request, persist=False)
         session, effective = resolved_routes(request)
@@ -245,6 +252,7 @@ def start(
         RuntimeSessionError,
         RuntimeError,
         OSError,
+        PlanSnapshotError,
         ValueError,
     ) as exc:
         if state_path.is_file():

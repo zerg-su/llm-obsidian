@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Collection, Mapping
 
 from outcome_contract import OutcomeContractError, extract_from_bytes
+from task_plan_authority import PlanAuthorityError, resolve_plan_authority
 
 
 SCHEMA_VERSION = 2
@@ -179,13 +180,14 @@ def validate_summary_for_task(
         if version == 3 and summary["schema_version"] != 1:
             raise WikiSummaryError("v3 tasks require Wiki Summary v1")
         return summary
-    plan = Path(str(meta.get("plan_file") or "")).expanduser().resolve()
     expected = str(meta.get("outcome_contract_sha256") or "")
     try:
-        contract = extract_from_bytes(plan.read_bytes())
-    except (OSError, OutcomeContractError) as exc:
+        worktree = Path(str(meta.get("worktree") or "")).expanduser().resolve()
+        authority = resolve_plan_authority(meta, worktree)
+        contract = extract_from_bytes(authority.content)
+    except (OSError, OutcomeContractError, PlanAuthorityError) as exc:
         raise WikiSummaryError(f"task Outcome Contract is invalid: {exc}") from exc
-    if contract.sha256 != expected:
+    if not authority.amendments and contract.sha256 != expected:
         raise WikiSummaryError("task Outcome Contract digest changed")
     summary = validate_summary(
         raw,

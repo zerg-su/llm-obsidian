@@ -29,6 +29,7 @@ from dispatch_custom_contracts import (
 )
 from dispatch_io import DispatchError, atomic_json, atomic_text, utc_now
 from dispatch_setup import render_task_prompt, review_policy, review_topology_preview
+from approved_plan_snapshot import bind_approved_plan_snapshot
 
 
 def run_command(
@@ -192,6 +193,7 @@ def write_task_files(
     effective: dict[str, Any], identity: dict[str, str], origin: dict[str, str],
     child: dict[str, str],
 ) -> dict[str, Any]:
+    request = bind_approved_plan_snapshot(request)
     worktree = request["worktree"]
     ensure_task_git_excludes(worktree)
     handoffs = {
@@ -248,6 +250,7 @@ def write_task_files(
             "effective": effective,
         },
         "plan_file": str(request["plan_file"]),
+        "plan_snapshot_file": str(approved_plan_file(request)),
         "approved_plan_sha256": plan_hash,
         "outcome_contract_sha256": outcome_hash,
         "interaction_policy": "unattended",

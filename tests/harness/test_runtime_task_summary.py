@@ -53,6 +53,7 @@ from harness.runtime_callback_io import record_review_drive_failure
 from harness.store import OperationStore
 from harness.supervisor import OperationSupervisor
 from harness.verification import load_profiles
+from approved_plan_snapshot import bind_approved_plan_snapshot
 from harness.artifact_repair import (  # noqa: E402
     build_verification_escalation,
     resolve_verification_escalation,
@@ -1356,6 +1357,10 @@ def task_meta(
         "worktree": str(worktree),
     }
     if version == 4:
+        snapshot = bind_approved_plan_snapshot(
+            {"vault_root": vault, "plan_file": plan}
+        )
+        meta["plan_snapshot_file"] = str(snapshot["_approved_plan_file"])
         meta["outcome_contract_sha256"] = extract_from_bytes(plan.read_bytes()).sha256
         review = dict(meta["review_policy"])
         review.pop("auto_resolve_severities")

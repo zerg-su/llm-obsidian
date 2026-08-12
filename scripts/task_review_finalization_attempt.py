@@ -25,6 +25,7 @@ from review_contract import (
     review_runtime_provider,
 )
 from task_review_shared import TaskReviewError
+from task_plan_authority import PlanAuthorityError, resolve_plan_authority
 
 
 class FinalizationAttemptError(TaskReviewError):
@@ -40,9 +41,14 @@ def exact_head_attempt_enabled(meta: Mapping[str, Any]) -> bool:
         raise FinalizationAttemptError(str(exc)) from exc
 
 
-def attempt_binding(
-    meta: Mapping[str, Any], task_id: str, *, cycle: int
-) -> tuple[str, int, str, str]:
+def _plan_authority(meta: Mapping[str, Any], worktree: Path):
+    try:
+        return resolve_plan_authority(meta, worktree)
+    except PlanAuthorityError as exc:
+        raise FinalizationAttemptError(str(exc)) from exc
+
+
+def attempt_binding(meta: Mapping[str, Any], task_id: str, worktree: Path, *, cycle: int) -> tuple[str, int, str, str]:
     policy = task_finalization_policy(meta)
     if (
         type(cycle) is not int
@@ -51,28 +57,23 @@ def attempt_binding(
         or cycle > policy.max_cycles
     ):
         raise FinalizationAttemptError("exact-HEAD review cycle is invalid")
-    return (
-        task_id,
-        cycle,
-        str(meta.get("approved_plan_sha256") or ""),
-        str(meta.get("outcome_contract_sha256") or ""),
-    )
+    authority = _plan_authority(meta, worktree)
+    return task_id, cycle, authority.plan_sha256, authority.outcome_sha256
 
 
-def finalization_ledger(
-    meta: Mapping[str, Any], vault: Path, task_id: str
-) -> FinalizationLedger:
+def finalization_ledger(meta: Mapping[str, Any], vault: Path, task_id: str, worktree: Path) -> FinalizationLedger:
     policy = task_finalization_policy(meta)
     if policy is None:
         raise FinalizationAttemptError(
             "exact-HEAD finalization policy is unavailable"
         )
+    authority = _plan_authority(meta, worktree)
     return FinalizationLedger(
         vault / ".vault-meta" / "harness" / "finalization-ledger",
         lineage_id=task_id,
         origin_task_id=task_id,
-        plan_sha256=str(meta.get("approved_plan_sha256") or ""),
-        outcome_contract_sha256=str(meta.get("outcome_contract_sha256") or ""),
+        plan_sha256=authority.plan_sha256,
+        outcome_contract_sha256=authority.outcome_sha256,
         max_cycles=policy.max_cycles,
     )
 
@@ -179,7 +180,7 @@ def reserve_exact_head_attempt(
     reserved_attempt_id: str = "",
 ) -> tuple[ReviewOperationRequest, FinalizationLedger, int]:
     config = load_config(vault)
-    ledger = finalization_ledger(meta, vault, task_id)
+    ledger = finalization_ledger(meta, vault, task_id, worktree)
     attempt_id = reserved_attempt_id or _attempt_id(
         task_id,
         request.context.head_sha,

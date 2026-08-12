@@ -46,6 +46,7 @@ from harness.workflows.review_results import (  # noqa: E402
     ReviewFinding,
     ReviewResult,
 )
+from approved_plan_snapshot import bind_approved_plan_snapshot  # noqa: E402
 from outcome_contract import extract_from_bytes  # noqa: E402
 from review_contract import VERIFY_BUDGETS  # noqa: E402
 
@@ -678,6 +679,9 @@ def build_corridor_world(
             "task_id": task_id,
         },
     )
+    plan_binding = bind_approved_plan_snapshot(
+        {"vault_root": vault.resolve(), "plan_file": plan.resolve()}
+    )
     store = OperationStore(vault / ".vault-meta" / "harness")
     pipeline = compile_pipeline(
         builtin_definitions()["engineering/change"],
@@ -732,6 +736,7 @@ def build_corridor_world(
             }
         },
         "plan_file": str(plan),
+        "plan_snapshot_file": str(plan_binding["_approved_plan_file"]),
         "approved_plan_sha256": hashlib.sha256(plan.read_bytes()).hexdigest(),
         "outcome_contract_sha256": extract_from_bytes(plan.read_bytes()).sha256,
         "vault_root": str(vault),
