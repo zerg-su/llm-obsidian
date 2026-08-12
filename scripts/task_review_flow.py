@@ -21,6 +21,7 @@ from harness.review_attempt import (
 from harness.pre_model_reviewer_retirement import (
     review_attempt_records_are_quiescent,
 )
+from harness.review_finalization import StructuralPivotPending
 from harness.runtime_sessions import RuntimeSessionManager
 from harness.store import OperationStore, StoreError
 from harness.workflows.review import (
@@ -768,19 +769,29 @@ def _run_exact_head_review(
         else:
             reserved_attempt_id = prior_attempt.identity.attempt_id
 
-    request, ledger, cycle = reserve_exact_head_attempt(
-        meta,
-        vault=vault,
-        worktree=worktree,
-        task_id=task_id,
-        request=request,
-        cycle=cycle,
-        predecessor_attempt_id=predecessor_attempt_id,
-        reserved_attempt_id=reserved_attempt_id,
-        supersedes_approved_attempt_id=(
-            supersedes_approved_attempt_id
-        ),
-    )
+    try:
+        request, ledger, cycle = reserve_exact_head_attempt(
+            meta,
+            vault=vault,
+            worktree=worktree,
+            task_id=task_id,
+            request=request,
+            cycle=cycle,
+            predecessor_attempt_id=predecessor_attempt_id,
+            reserved_attempt_id=reserved_attempt_id,
+            supersedes_approved_attempt_id=(
+                supersedes_approved_attempt_id
+            ),
+        )
+    except StructuralPivotPending:
+        return _receipt(
+            status="reviewing",
+            meta=meta,
+            vault=vault,
+            worktree=worktree,
+            runtime_root=runtime_root,
+            context_manifest=context_manifest,
+        )
     _assert_frozen_topology(meta, request)
     if not gate_exists or ReviewAttempt.from_mapping(
         gate.read()["attempt"]

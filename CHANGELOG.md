@@ -30,6 +30,9 @@ routes and five-cycle product ledger remain authoritative.
 - The root-scoped terminal dashboard projects the pivot descendant and its
   route, callback, terminal, timing, and cleanup evidence without acquiring
   lifecycle authority.
+- The live scripts ratchet is rebaselined exactly once to 281 Python files /
+  103,679 lines for the inherited RC5 tree plus the single authorized workflow
+  module, with no blanket headroom.
 
 ### Candidate boundary
 

@@ -61,6 +61,75 @@ with tempfile.TemporaryDirectory(prefix="dashboard-observability.") as raw:
         "complete",
     ):
         store.transition(root, root, state)
+    pivot_spec = OperationSpec(
+        operation_id="structural-pivot-child",
+        idempotency_key="structural-pivot-child-key",
+        kind="structural-pivot",
+        owner_id=root,
+        route=RuntimeRoute(
+            "codex", "gpt-5.6-sol", "xhigh", "reviewer-callback", "f" * 64
+        ),
+        context_manifest="structural-pivots/root/packet.json",
+        verification_profile="scoped",
+        contract_sha256="e" * 64,
+        parent_operation_id=root,
+        root_operation_id=root,
+    )
+    pivot = store.create(
+        pivot_spec, lane_id="pivot-lane", run_id="pivot-run"
+    )
+    for state in ("preflight", "starting", "running", "awaiting-callback"):
+        store.transition(root, pivot.spec.operation_id, state)
+    pivot = store.read(root, pivot.spec.operation_id)
+    round_spec = OperationSpec(
+        operation_id="structural-pivot-round",
+        idempotency_key="structural-pivot-round-key",
+        kind="review-round",
+        owner_id=root,
+        route=pivot_spec.route,
+        context_manifest=pivot_spec.context_manifest,
+        verification_profile="scoped",
+        contract_sha256="e" * 64,
+        parent_operation_id=pivot.spec.operation_id,
+        root_operation_id=root,
+    )
+    pivot_round = store.create(
+        round_spec, lane_id="pivot-lane", run_id="pivot-round-run"
+    )
+    for state in ("preflight", "starting", "running", "awaiting-callback"):
+        store.transition(root, pivot_round.spec.operation_id, state)
+    liveness = (
+        store_root
+        / "owners"
+        / root
+        / "runtime"
+        / pivot.spec.operation_id
+        / "liveness"
+    )
+    liveness.mkdir(parents=True)
+    (liveness / "state.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "started_at": 1_799_999_940.0,
+                "last_progress_at": 1_799_999_980.0,
+                "operation_revision": pivot.revision,
+                "operation_state": pivot.state,
+                "screen_sha256": "",
+                "typed_result_sha256": "",
+                "callback_sha256": "",
+                "receipt_sha256": "",
+                "stable_result_reads": 0,
+                "nudge_count": 0,
+                "restart_count": 0,
+                "callback_submit_binding": "",
+                "callback_submit_status": "",
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     runtime = store_root / "owners" / root / "runtime" / root
     runtime.mkdir(parents=True)
     (runtime / "session.json").write_text(
@@ -145,6 +214,22 @@ with tempfile.TemporaryDirectory(prefix="dashboard-observability.") as raw:
     projection = project_root(store_root, root, observed_at=1_800_000_000.0)
     program = projection.programs[0]
     text = render(projection, scope="root", columns=120)
+    pivot_view = next(
+        child for child in program.children if child.kind == "structural-pivot"
+    )
+    check(
+        "root projection shows pivot route, elapsed wait, callback child, and lineage",
+        pivot_view.state == "awaiting-callback"
+        and pivot_view.status == "running"
+        and pivot_view.route.runtime == "codex"
+        and pivot_view.route.model == "gpt-5.6-sol"
+        and pivot_view.route.effort == "xhigh"
+        and pivot_view.timing.mode == "elapsed"
+        and pivot_view.timing.seconds == 60
+        and len(pivot_view.children) == 1
+        and pivot_view.children[0].kind == "review-round"
+        and pivot_view.children[0].state == "awaiting-callback",
+    )
     check(
         "dashboard projects compact self-heal count and current stage",
         program.self_healed_count == 1
@@ -172,6 +257,19 @@ with tempfile.TemporaryDirectory(prefix="dashboard-observability.") as raw:
     check(
         "malformed or foreign repair evidence never increments self-healed",
         rejected.programs[0].self_healed_count == 0,
+    )
+    for state in ("finalizing", "exiting", "complete"):
+        store.transition(root, pivot.spec.operation_id, state)
+    cleaned = project_root(store_root, root, observed_at=1_800_000_000.0)
+    cleaned_pivot = next(
+        child
+        for child in cleaned.programs[0].children
+        if child.kind == "structural-pivot"
+    )
+    check(
+        "root projection shows terminal resource-free pivot cleanup",
+        cleaned_pivot.state == "complete"
+        and cleaned_pivot.status == "complete",
     )
 
 if failures:

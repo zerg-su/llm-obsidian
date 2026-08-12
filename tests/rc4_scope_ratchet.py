@@ -206,6 +206,16 @@ describe the same revision, and carries each root row's semantic emphasis and
 viewport priority as projected data instead of re-deriving them from rendered
 prefixes. The line ceiling moves exactly to 97,088; the 273-file ceiling
 remains unchanged and no speculative headroom is added.
+
+The 2.6.7 RC5 structural-pivot bridge starts from an inherited RC5 target of
+280 files / 102,845 lines whose still-RC4-labelled ceilings were never
+rebaselined. This approved slice adds exactly one production module,
+``harness/workflows/structural_pivot.py``. It owns immutable packet
+publication, deterministic operation identity, the registered read-only
+review-input session, callback-to-receipt projection, restart reconciliation,
+and cleanup. Existing ledger, route, runtime, callback, and dashboard owners
+remain in place. The exact post-slice tree is 281 files / 103,679 lines; both
+ceilings are pinned there with no blanket headroom.
 """
 
 from __future__ import annotations
@@ -213,11 +223,11 @@ from __future__ import annotations
 from pathlib import Path
 
 
-#: Maximum tracked Python files under ``scripts/`` for the 2.6.7 RC4 candidate.
-SCRIPT_FILE_CEILING = 273
+#: Maximum tracked Python files under ``scripts/`` for the 2.6.7 RC5 candidate.
+SCRIPT_FILE_CEILING = 281
 
-#: Maximum total lines across those files for the 2.6.7 RC4 candidate.
-SCRIPT_LINE_CEILING = 97_088
+#: Maximum total lines across those files for the 2.6.7 RC5 candidate.
+SCRIPT_LINE_CEILING = 103_679
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

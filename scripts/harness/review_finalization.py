@@ -5,7 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import shlex
 import subprocess
+import sys
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,11 +28,13 @@ from .finalization_policy import (
 from .finalization_ledger import CycleDecision, FinalizationLedger
 from .finalization_pivot import (
     FinalizationPivotError,
-    load_accepted_pivot_receipt,
     pivot_required,
 )
 from .dashboard_facade import launch_bound_facade_dashboard
+from .runtime_sessions import RuntimeSessionManager
+from .store import OperationStore
 from .verification import VerificationError, load_profiles
+from .workflows.structural_pivot import StructuralPivotWorkflow
 from .workflows.review_gate import (
     ReviewGateAuthorization,
     authorize_task_finalization,
@@ -56,6 +60,10 @@ ACTIVE_GATE_STATUSES = {
     "recovery-verification-required",
     "awaiting-resolution",
 }
+
+
+class StructuralPivotPending(RuntimeError):
+    """The one reserved structural review is still converging."""
 
 
 @dataclass(frozen=True)
@@ -160,6 +168,8 @@ def reserve_task_finalization_cycle(
     now_epoch: int,
     predecessor_attempt_id: str = "",
     supersedes_approved_attempt_id: str = "",
+    pivot_workflow: object | None = None,
+    pivot_runtime: object | None = None,
 ) -> TaskFinalizationReservation | None:
     """Compile all bounded choices, then atomically select the reserved cycle."""
 
@@ -169,28 +179,80 @@ def reserve_task_finalization_cycle(
     if ledger.max_cycles != policy.max_cycles:
         raise ValueError("finalization ledger and task policy ceilings differ")
     snapshot = ledger.snapshot(missing_ok=True)
-    pivot_receipt = None
+    pivot_accepted = False
     if pivot_required(snapshot):
         launch_bound_facade_dashboard(
             worktree=Path(worktree),
             facade="pivot",
             root_operation_id=task_id,
         )
+        review = meta.get("review_policy")
+        if not isinstance(review, Mapping):
+            raise ValueError("structural pivot review policy is unavailable")
+        vault = Path(str(meta.get("vault_root") or "")).expanduser()
+        expected_store = vault / ".vault-meta" / "harness"
+        if (
+            not vault.is_absolute()
+            or not vault.is_dir()
+            or ledger.root.expanduser().resolve().parent
+            != expected_store.resolve()
+        ):
+            if pivot_workflow is None:
+                raise ValueError("structural pivot store authority is invalid")
+        store_root = ledger.root.expanduser().resolve().parent
+        workflow = pivot_workflow or StructuralPivotWorkflow(
+            OperationStore(store_root),
+            config,
+            verification_profile=str(
+                review.get("verification_profile") or ""
+            ),
+            verification_profile_sha256=str(
+                review.get("verification_profile_sha256") or ""
+            ),
+            ledger_root=ledger.root,
+        )
+        runtime = pivot_runtime or RuntimeSessionManager.for_root(
+            vault, store_root=store_root
+        )
         try:
-            pivot_receipt = load_accepted_pivot_receipt(
-                ledger.root, snapshot=snapshot
+            result = workflow.reconcile(
+                snapshot,
+                root_operation_id=task_id,
+                runtime=runtime,
             )
+            if result.status == "reserved":
+                wake = (
+                    "Structural pivot callback is ready. Run this exact command: "
+                    + shlex.join(
+                        (
+                            str(Path(sys.executable).resolve()),
+                            str(vault / "scripts/task-review-runner.py"),
+                            "run",
+                            "--worktree",
+                            str(Path(worktree).expanduser().resolve()),
+                        )
+                    )
+                )
+                result = workflow.start(
+                    snapshot,
+                    root_operation_id=task_id,
+                    runtime=runtime,
+                    origin_surface=str(meta.get("task_surface") or ""),
+                    worktree=Path(worktree),
+                    callback_wake=wake,
+                )
         except FinalizationPivotError as exc:
             raise ValueError(str(exc)) from exc
-        already_reserved = any(
-            cycle.get("attempt_id") == attempt_id
-            for cycle in snapshot.get("cycles", [])
-        )
-        if pivot_receipt is None and not already_reserved:
-            raise ValueError(
-                "the third material failure requires an accepted structural "
-                "pivot receipt before another product cycle"
+        if result.status in {"reserved", "in-flight"}:
+            raise StructuralPivotPending(
+                "structural pivot is reserved and awaiting its accepted callback"
             )
+        if result.status != "accepted":
+            raise ValueError(
+                "structural pivot requires attention: "
+                + str(getattr(result, "reason", "unclassified"))
+            )
+        pivot_accepted = True
     decisions: dict[int, FinalizationRouteDecision] = {}
     for cycle in range(1, policy.max_cycles + 1):
         decision = compile_task_finalization_routes(
@@ -199,7 +261,7 @@ def reserve_task_finalization_cycle(
             cycle_number=cycle,
             independent_permitted=independent_permitted,
             availability=availability,
-            structural_pivot_accepted=pivot_receipt is not None,
+            structural_pivot_accepted=pivot_accepted,
             now_epoch=now_epoch,
         )
         assert decision is not None

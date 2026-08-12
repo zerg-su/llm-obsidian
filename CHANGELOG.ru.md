@@ -36,6 +36,9 @@ authority.
   provider больше не разрешает independent route.
 - Root-scoped terminal dashboard показывает pivot-descendant, route, callback,
   terminal, timing и cleanup evidence, не получая lifecycle authority.
+- Live scripts ratchet один раз точно перебазирован на 281 Python-файл /
+  103 679 строк для унаследованного RC5-дерева и единственного разрешённого
+  workflow-модуля, без запасного headroom.
 
 ### Граница кандидата
 

@@ -835,8 +835,13 @@ check(
 )
 check(
     FINDING,
-    "the published denominator digest still matches the current tree",
-    str(live_certificate["denominator_source_sha256"]) in certificate_doc,
+    "the published RC5 descendant denominator digest matches the current tree",
+    (
+        "rc5_descendant_denominator_source_sha256"
+        in certificate_doc
+        and str(live_certificate["denominator_source_sha256"])
+        in certificate_doc
+    ),
     live_certificate["denominator_source_sha256"],
 )
 check(

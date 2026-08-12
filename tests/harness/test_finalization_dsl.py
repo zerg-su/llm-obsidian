@@ -23,11 +23,6 @@ from harness.custom_pipelines import (  # noqa: E402
 )
 from harness.finalization_policy import AvailabilityEvidence  # noqa: E402
 from harness.finalization_ledger import FinalizationLedger  # noqa: E402
-from harness.finalization_pivot import (  # noqa: E402
-    compile_pivot_packet,
-    pivot_packet_sha256,
-    pivot_receipt_path,
-)
 from harness.pipeline_builtins import builtin_registry  # noqa: E402
 from harness.review_finalization import (  # noqa: E402
     compile_task_finalization_routes,
@@ -221,41 +216,31 @@ with tempfile.TemporaryDirectory(prefix="finalization-dsl-ledger.") as raw:
         plan_sha256="e" * 64,
         outcome_contract_sha256="f" * 64,
     )
+
+    class AcceptedPivot:
+        def reconcile(self, *_args: object, **_kwargs: object):
+            return type("PivotResult", (), {"status": "accepted", "reason": ""})()
+
     for cycle in range(1, 5):
-        if cycle == 4:
-            # The exact third material failure closes ordinary reservation
-            # until the structural pivot receipt is accepted.
-            packet = compile_pivot_packet(ledger.snapshot())
-            pivot_receipt_path(ledger.root, ledger.lineage_id).write_text(
-                json.dumps(
-                    {
-                        "schema_version": 1,
-                        "kind": "structural-pivot-receipt",
-                        "lineage_id": ledger.lineage_id,
-                        "packet_sha256": pivot_packet_sha256(packet),
-                        "route_alias": "finalization-independent",
-                        "read_only": True,
-                        "structural_recommendation": (
-                            "Consolidate the failing owner seam."
-                        ),
-                        "status": "accepted",
-                    },
-                    sort_keys=True,
-                )
-                + "\n",
-                encoding="utf-8",
-            )
         reserved = reserve_task_finalization_cycle(
             task_meta,
             ledger=ledger,
             config=config,
             attempt_id=str(uuid.UUID(int=510 + cycle)),
             exact_head=f"{cycle:040x}",
-            task_id=str(uuid.UUID(int=520 + cycle)),
+            task_id=ledger.lineage_id,
             worktree=f"/tmp/finalization-dsl-{cycle}",
             independent_permitted=True,
             availability=availability,
             now_epoch=1_000,
+            **(
+                {
+                    "pivot_workflow": AcceptedPivot(),
+                    "pivot_runtime": object(),
+                }
+                if cycle == 4
+                else {}
+            ),
         )
         check(
             f"atomic task reservation selects cycle {cycle} policy",

@@ -28,6 +28,7 @@ from harness.finalization_policy import (  # noqa: E402
     compile_finalization_routes,
 )
 from harness.review_finalization import (  # noqa: E402
+    StructuralPivotPending,
     reserve_task_finalization_cycle,
 )
 from model_routing_config import load_tracked_config  # noqa: E402
@@ -220,7 +221,7 @@ with tempfile.TemporaryDirectory(prefix="finalization-pivot-reserve.") as raw:
         },
     }
 
-    def reserve(number: int):
+    def reserve(number: int, **pivot: object):
         return reserve_task_finalization_cycle(
             meta,
             ledger=ledger,
@@ -232,6 +233,7 @@ with tempfile.TemporaryDirectory(prefix="finalization-pivot-reserve.") as raw:
             independent_permitted=True,
             availability=None,
             now_epoch=1_000,
+            **pivot,
         )
 
     for number in (1, 2, 3):
@@ -250,15 +252,6 @@ with tempfile.TemporaryDirectory(prefix="finalization-pivot-reserve.") as raw:
             attempt_id=identity(810 + number),
             terminal_result="changes-requested",
         )
-    try:
-        reserve(4)
-    except ValueError as exc:
-        check(
-            "the fourth cycle cannot start without the pivot receipt",
-            "pivot receipt" in str(exc),
-        )
-    else:
-        check("the fourth cycle cannot start without the pivot receipt", False)
     packet = compile_pivot_packet(ledger.snapshot())
     pivot_receipt_path(ledger.root, lineage).write_text(
         json.dumps(
@@ -279,9 +272,50 @@ with tempfile.TemporaryDirectory(prefix="finalization-pivot-reserve.") as raw:
         + "\n",
         encoding="utf-8",
     )
-    fourth = reserve(4)
+
+    class PivotStub:
+        def __init__(self, status: str):
+            self.status = status
+            self.reconciles = 0
+            self.starts = 0
+
+        def reconcile(self, *_args: object, **_kwargs: object):
+            self.reconciles += 1
+            return type("PivotResult", (), {"status": self.status, "reason": ""})()
+
+        def start(self, *_args: object, **_kwargs: object):
+            self.starts += 1
+            return type("PivotResult", (), {"status": self.status, "reason": ""})()
+
+    pending = PivotStub("in-flight")
+    before_pending = ledger.path.read_bytes()
+    try:
+        reserve(
+            4,
+            pivot_workflow=pending,
+            pivot_runtime=object(),
+        )
+    except StructuralPivotPending:
+        check(
+            "a disk-only receipt cannot bypass workflow cleanup before cycle four",
+            pending.reconciles == 1
+            and pending.starts == 0
+            and ledger.path.read_bytes() == before_pending,
+        )
+    else:
+        check(
+            "a disk-only receipt cannot bypass workflow cleanup before cycle four",
+            False,
+        )
+
+    accepted = PivotStub("accepted")
+    fourth = reserve(
+        4,
+        pivot_workflow=accepted,
+        pivot_runtime=object(),
+    )
     check(
-        "the accepted pivot receipt opens cycle four with both routes",
+        "the accepted and cleaned pivot workflow opens cycle four with both routes",
         fourth is not None
         and fourth.cycle.allowed
         and fourth.cycle.cycle_number == 4
@@ -293,7 +327,11 @@ with tempfile.TemporaryDirectory(prefix="finalization-pivot-reserve.") as raw:
     ledger.record_terminal(
         attempt_id=identity(814), terminal_result="changes-requested"
     )
-    fifth = reserve(5)
+    fifth = reserve(
+        5,
+        pivot_workflow=accepted,
+        pivot_runtime=object(),
+    )
     check(
         "the fifth cycle keeps the structural route",
         fifth is not None
