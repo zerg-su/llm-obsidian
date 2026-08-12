@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -13,6 +14,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from approved_plan_snapshot import bind_approved_plan_snapshot  # noqa: E402
 from outcome_contract import extract_from_bytes  # noqa: E402
+import task_escalation_records  # noqa: E402
 from task_escalation_records import record_path  # noqa: E402
 from task_plan_authority import (  # noqa: E402
     PlanAuthorityError,
@@ -118,6 +120,50 @@ class TaskPlanAuthorityTest(unittest.TestCase):
 
         self.assertEqual(authority.content, self.base)
         self.assertEqual(authority.plan_sha256, self.meta["approved_plan_sha256"])
+
+    def test_public_amendment_retry_recovers_its_exact_prepointer_record(self) -> None:
+        amended = plan("Crash-safe amended outcome.", "crash-safe")
+        source = self.amendment_source("crash-safe", amended)
+        original_write_pointer = task_escalation_records._write_pointer
+        pointer_attempts = 0
+
+        def fail_first_pointer(worktree: Path, record: object) -> None:
+            nonlocal pointer_attempts
+            pointer_attempts += 1
+            if pointer_attempts == 1:
+                raise OSError("simulated pointer publication failure")
+            original_write_pointer(worktree, record)
+
+        with mock.patch.object(
+            task_escalation_records,
+            "_write_pointer",
+            side_effect=fail_first_pointer,
+        ):
+            with self.assertRaises(PlanAuthorityError):
+                record_plan_amendment(
+                    self.worktree,
+                    source,
+                    decision="approve the crash-safe exact change",
+                )
+            with self.assertRaises(PlanAuthorityError):
+                record_plan_amendment(
+                    self.worktree,
+                    source,
+                    decision="a foreign retry must not adopt the orphan",
+                )
+            self.assertFalse(
+                (self.worktree / ".task-needs-attention.json").exists()
+            )
+            recovered = record_plan_amendment(
+                self.worktree,
+                source,
+                decision="approve the crash-safe exact change",
+            )
+
+        authority = resolve_plan_authority(self.meta, self.worktree)
+        self.assertEqual(pointer_attempts, 2)
+        self.assertEqual(authority.content, amended)
+        self.assertEqual(authority.amendments, (recovered,))
 
     def test_summary_evidence_uses_the_explicit_amended_outcome(self) -> None:
         amended = plan("Amended evidence outcome.", "amended")

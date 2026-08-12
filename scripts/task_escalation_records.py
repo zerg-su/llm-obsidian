@@ -268,14 +268,18 @@ def load_chain(worktree: Path) -> tuple[DecisionRecord, ...]:
     return chain
 
 
-def load_amendments(worktree: Path) -> tuple[DecisionRecord, ...]:
-    """Return every authoritative amendment, rejecting any orphan branch."""
+def load_pointed_amendments(worktree: Path) -> tuple[DecisionRecord, ...]:
+    """Return the amendment lineage reachable from the durable pointer."""
 
-    root = worktree.expanduser().resolve()
-    chain = load_chain(root)
-    authoritative = tuple(
-        record for record in chain if record.record_type == "amendment"
+    return tuple(
+        record
+        for record in load_chain(worktree)
+        if record.record_type == "amendment"
     )
+
+
+def _persisted_amendments(worktree: Path) -> tuple[DecisionRecord, ...]:
+    root = worktree.expanduser().resolve()
     records = _records_root(root)
     persisted: list[DecisionRecord] = []
     if records.exists():
@@ -287,11 +291,28 @@ def load_amendments(worktree: Path) -> tuple[DecisionRecord, ...]:
             record = _read_record(root, path.stem)
             if record.record_type == "amendment":
                 persisted.append(record)
-    if {
-        (record.record_id, record.sha256) for record in persisted
-    } != {
+    return tuple(persisted)
+
+
+def _orphan_amendments(
+    worktree: Path, authoritative: tuple[DecisionRecord, ...]
+) -> tuple[DecisionRecord, ...]:
+    identities = {
         (record.record_id, record.sha256) for record in authoritative
-    }:
+    }
+    return tuple(
+        record
+        for record in _persisted_amendments(worktree)
+        if (record.record_id, record.sha256) not in identities
+    )
+
+
+def load_amendments(worktree: Path) -> tuple[DecisionRecord, ...]:
+    """Return every authoritative amendment, rejecting any orphan branch."""
+
+    root = worktree.expanduser().resolve()
+    authoritative = load_pointed_amendments(root)
+    if _orphan_amendments(root, authoritative):
         raise EscalationRecordError(
             "authoritative amendment evidence has an immutable sibling fork"
         )
@@ -874,6 +895,17 @@ def append_amendment(
             payload=payload,
             ignored_payload_fields={"recorded_at"},
         )
+        authoritative = load_pointed_amendments(root)
+        orphans = _orphan_amendments(root, authoritative)
+        if orphans and (
+            len(orphans) != 1
+            or existing is None
+            or orphans[0].record_id != existing.record_id
+            or orphans[0].sha256 != existing.sha256
+        ):
+            raise EscalationRecordError(
+                "authoritative amendment evidence has an immutable sibling fork"
+            )
         if existing is not None:
             _resume_existing_append(root, existing, latest)
             return existing

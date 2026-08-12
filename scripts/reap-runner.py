@@ -406,6 +406,9 @@ def _finalize_reap(vault: Path, worktree: Path, current: str) -> dict[str, Any]:
         label="reap preparation",
     )
     prepared = read_json(worktree / ".task-reap-prepared.json")
+    plan_close_status = str(prepared.get("plan_close_status") or "closed")
+    if plan_close_status not in {"closed", "conflict", "retained"}:
+        raise ReapError("reap preparation has an invalid plan close status")
     prepared_at = time.monotonic()
     result = Path(str(prepared.get("result_path") or "")).resolve()
     try:
@@ -464,6 +467,7 @@ def _finalize_reap(vault: Path, worktree: Path, current: str) -> dict[str, Any]:
         )
         if conflict_warning in warnings:
             mark_plan_close_conflict(worktree)
+            plan_close_status = "conflict"
     else:
         expected_closed = str(prepared.get("closed_plan_sha256") or "")
         if (
@@ -490,7 +494,20 @@ def _finalize_reap(vault: Path, worktree: Path, current: str) -> dict[str, Any]:
         "verify_ms": round((ended - written_at) * 1000),
         "duration_ms": duration,
     }, vault_root=vault)
-    return {"schema_version": 1, "status": "complete", "result_path": str(result), "result_link": link, "duration_ms": duration}
+    public_warnings = (
+        ["plan-close-conflict"]
+        if plan_close_status == "conflict"
+        else []
+    )
+    return {
+        "schema_version": 1,
+        "status": "complete",
+        "result_path": str(result),
+        "result_link": link,
+        "plan_close_status": plan_close_status,
+        "warnings": public_warnings,
+        "duration_ms": duration,
+    }
 
 
 def _finish_provider_runtime(

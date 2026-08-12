@@ -19,6 +19,7 @@ from task_escalation_records import (
     append_amendment,
     load_amendments,
     load_latest,
+    load_pointed_amendments,
 )
 
 
@@ -59,16 +60,15 @@ def _record_snapshot(
         raise PlanAuthorityError("amendment plan snapshot is invalid") from exc
 
 
-def resolve_plan_authority(
-    meta: Mapping[str, Any], worktree: Path
+def _resolve_plan_authority(
+    meta: Mapping[str, Any],
+    worktree: Path,
+    amendments: tuple[DecisionRecord, ...],
 ) -> TaskPlanAuthority:
-    """Return the only ordered, identity-bound active plan for one task."""
-
     root = worktree.expanduser().resolve()
     try:
         base = validate_approved_plan_snapshot(meta)
-        amendments = load_amendments(root)
-    except (PlanSnapshotError, EscalationRecordError) as exc:
+    except PlanSnapshotError as exc:
         raise PlanAuthorityError("active plan authority is invalid") from exc
     task_id = str(meta.get("task_id") or "")
     current_path = base.path
@@ -112,6 +112,19 @@ def resolve_plan_authority(
     )
 
 
+def resolve_plan_authority(
+    meta: Mapping[str, Any], worktree: Path
+) -> TaskPlanAuthority:
+    """Return the only ordered, identity-bound active plan for one task."""
+
+    root = worktree.expanduser().resolve()
+    try:
+        amendments = load_amendments(root)
+    except EscalationRecordError as exc:
+        raise PlanAuthorityError("active plan authority is invalid") from exc
+    return _resolve_plan_authority(meta, root, amendments)
+
+
 def record_plan_amendment(
     worktree: Path, plan_file: Path, *, decision: str
 ) -> DecisionRecord:
@@ -124,7 +137,9 @@ def record_plan_amendment(
         meta = json.loads((root / ".task-meta.json").read_text(encoding="utf-8"))
         if not isinstance(meta, dict):
             raise ValueError("metadata root")
-        authority = resolve_plan_authority(meta, root)
+        authority = _resolve_plan_authority(
+            meta, root, load_pointed_amendments(root)
+        )
         bound = bind_approved_plan_snapshot(
             {
                 "vault_root": Path(str(meta.get("vault_root") or "")),

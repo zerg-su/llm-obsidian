@@ -482,6 +482,58 @@ def _v4_projection(
     return result
 
 
+def _validated_plan_authority(
+    meta: dict[str, Any], version: int, *, verify_plan_hash: bool
+) -> tuple[Path, str]:
+    plan_value = meta.get("plan_file")
+    hash_value = meta.get("approved_plan_sha256")
+    plan_raw = plan_value.strip() if isinstance(plan_value, str) else ""
+    plan_hash = hash_value.strip() if isinstance(hash_value, str) else ""
+    if not plan_raw or not re.fullmatch(r"[0-9a-f]{64}", plan_hash):
+        raise ContractError(
+            f"v{version} metadata requires plan_file and lowercase "
+            "approved_plan_sha256"
+        )
+    plan = Path(plan_raw).expanduser().resolve()
+    if not plan.is_file():
+        raise ContractError(f"approved plan is missing: {plan}")
+    snapshot = None
+    if version == 4:
+        if not isinstance(meta.get("plan_snapshot_file"), str) or not str(
+            meta.get("plan_snapshot_file")
+        ).strip():
+            raise ContractError("v4 metadata requires plan_snapshot_file")
+        try:
+            snapshot = validate_approved_plan_snapshot(meta)
+        except PlanSnapshotError as exc:
+            raise ContractError(str(exc)) from exc
+    authority = snapshot.content if snapshot is not None else plan.read_bytes()
+    outcome_digest = ""
+    if version == 4:
+        raw_outcome_digest = meta.get("outcome_contract_sha256")
+        if not isinstance(raw_outcome_digest, str) or not re.fullmatch(
+            r"[0-9a-f]{64}", raw_outcome_digest
+        ):
+            raise ContractError(
+                "v4 metadata requires lowercase outcome_contract_sha256"
+            )
+        try:
+            current_outcome_digest = extract_from_bytes(authority).sha256
+        except (OSError, OutcomeContractError) as exc:
+            raise ContractError(
+                f"approved plan Outcome Contract is invalid: {exc}"
+            ) from exc
+        if current_outcome_digest != raw_outcome_digest:
+            raise ContractError(
+                "approved plan Outcome Contract digest changed after "
+                "dispatch approval"
+            )
+        outcome_digest = raw_outcome_digest
+    if snapshot is None and verify_plan_hash and sha256_file(plan) != plan_hash:
+        raise ContractError("approved plan hash changed after dispatch approval")
+    return plan, outcome_digest
+
+
 def normalize(meta: dict[str, Any], *, verify_plan_hash: bool = True) -> dict[str, Any]:
     version = meta.get("version", 1)
     if isinstance(version, bool) or not isinstance(version, int):
@@ -537,46 +589,9 @@ def normalize(meta: dict[str, Any], *, verify_plan_hash: bool = True) -> dict[st
     if policy not in {"interactive", "unattended"}:
         raise ContractError("interaction_policy must be interactive or unattended")
     _validate_pipeline_policy(meta, version)
-    plan_value = meta.get("plan_file")
-    hash_value = meta.get("approved_plan_sha256")
-    plan_raw = plan_value.strip() if isinstance(plan_value, str) else ""
-    plan_hash = hash_value.strip() if isinstance(hash_value, str) else ""
-    if not plan_raw or len(plan_hash) != 64 or any(c not in "0123456789abcdef" for c in plan_hash):
-        raise ContractError(f"v{version} metadata requires plan_file and lowercase approved_plan_sha256")
-    plan = Path(plan_raw).expanduser().resolve()
-    if not plan.is_file():
-        raise ContractError(f"approved plan is missing: {plan}")
-    snapshot = None
-    if version == 4:
-        if not isinstance(meta.get("plan_snapshot_file"), str) or not str(
-            meta.get("plan_snapshot_file")
-        ).strip():
-            raise ContractError("v4 metadata requires plan_snapshot_file")
-        try:
-            snapshot = validate_approved_plan_snapshot(meta)
-        except PlanSnapshotError as exc:
-            raise ContractError(str(exc)) from exc
-    authority = snapshot.content if snapshot is not None else plan.read_bytes()
-    outcome_digest = ""
-    if version == 4:
-        raw_outcome_digest = meta.get("outcome_contract_sha256")
-        if not isinstance(raw_outcome_digest, str) or not re.fullmatch(
-            r"[0-9a-f]{64}", raw_outcome_digest
-        ):
-            raise ContractError(
-                "v4 metadata requires lowercase outcome_contract_sha256"
-            )
-        try:
-            current_outcome_digest = extract_from_bytes(authority).sha256
-        except (OSError, OutcomeContractError) as exc:
-            raise ContractError(f"approved plan Outcome Contract is invalid: {exc}") from exc
-        if current_outcome_digest != raw_outcome_digest:
-            raise ContractError(
-                "approved plan Outcome Contract digest changed after dispatch approval"
-            )
-        outcome_digest = raw_outcome_digest
-    if snapshot is None and verify_plan_hash and sha256_file(plan) != plan_hash:
-        raise ContractError("approved plan hash changed after dispatch approval")
+    plan, outcome_digest = _validated_plan_authority(
+        meta, version, verify_plan_hash=verify_plan_hash
+    )
     vault_raw = meta.get("vault_root")
     if vault_raw is not None:
         if not isinstance(vault_raw, str) or not vault_raw.strip():

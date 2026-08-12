@@ -45,9 +45,12 @@ Require the exact caller session; never infer focused cmux. The runner:
    agent exit and closes the surface only after process exit. Do not close the
    cmux surface directly.
 
-The JSON result contains `status`, exact `result_path`, `result_link`, and
-`duration_ms`. Show the filed link and completion state. Do not emit a second
-vault write, review archive, `/reap`, or close command.
+The JSON result contains `status`, exact `result_path`, `result_link`,
+`plan_close_status` (`closed`, `conflict`, or `retained`), content-free
+`warnings`, and `duration_ms`. A `plan-close-conflict` warning means the result
+was filed while the concurrently edited pending plan was preserved. Show the
+filed link and both completion states. Do not emit a second vault write, review
+archive, `/reap`, or close command.
 
 ## Safety and recovery boundary
 

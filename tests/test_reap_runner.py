@@ -262,6 +262,107 @@ with tempfile.TemporaryDirectory(prefix="reap-runner-test.") as raw:
         == meta["approved_plan_sha256"]
         and final_payload["plan_close"]["on_conflict"] == "preserve",
     )
+    conflict_worktree = vault / "conflict-worktree"
+    conflict_worktree.mkdir()
+    conflict_plan = vault / "wiki/plans/conflict-approved.md"
+    conflict_approved = "---\nstatus: pending\n---\n\n# Conflict plan\n"
+    conflict_edited = conflict_approved + "\nConcurrent user edit.\n"
+    conflict_plan.write_text(conflict_approved, encoding="utf-8")
+    conflict_result = vault / "wiki/meta/sessions/Conflict Result.md"
+    conflict_meta = {
+        "version": 3,
+        "interaction_policy": "unattended",
+        "task_id": "conflict-task",
+        "task_name": "conflict-task",
+        "plan_file": str(conflict_plan),
+        "approved_plan_sha256": hashlib.sha256(
+            conflict_approved.encode()
+        ).hexdigest(),
+        "reap_policy": {"mode": "final"},
+    }
+    conflict_summary = {
+        "schema_version": 1,
+        "type": "session",
+        "title": "Conflict Result",
+        "session": "executor-session",
+        "body": "The result remains durable.",
+    }
+    (conflict_worktree / ".task-meta.json").write_text(
+        json.dumps(conflict_meta) + "\n", encoding="utf-8"
+    )
+    (conflict_worktree / ".task-summary.json").write_text(
+        json.dumps(conflict_summary) + "\n", encoding="utf-8"
+    )
+    saved_finalize_edges = {
+        name: getattr(runner, name)
+        for name in (
+            "authorize_review",
+            "validate_summary_for_task",
+            "validate_handoff",
+            "validate_summary_wikilinks",
+            "archive_reviews",
+            "summary_with_reviews",
+            "frontmatter_page",
+            "emit_lifecycle_event",
+            "run",
+        )
+    }
+
+    def conflict_run(_argv, *, label, **_kwargs):
+        if label == "reap preparation":
+            (conflict_worktree / ".task-reap-prepared.json").write_text(
+                json.dumps(
+                    {
+                        "result_path": str(conflict_result),
+                        "result_link": "[[Conflict Result]]",
+                        "plan_path": str(conflict_plan),
+                        "plan_close_status": "closed",
+                        "closed_plan_sha256": "0" * 64,
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            conflict_plan.write_text(conflict_edited, encoding="utf-8")
+        elif label == "reap vault transaction":
+            conflict_result.write_text("durable result\n", encoding="utf-8")
+            return json.dumps(
+                {
+                    "warnings": [
+                        "plan_close conflict preserved for "
+                        "wiki/plans/conflict-approved.md"
+                    ]
+                }
+            )
+        return ""
+
+    try:
+        runner.authorize_review = lambda *_args, **_kwargs: None
+        runner.validate_summary_for_task = lambda value, *_args, **_kwargs: value
+        runner.validate_handoff = lambda *_args, **_kwargs: None
+        runner.validate_summary_wikilinks = lambda *_args, **_kwargs: None
+        runner.archive_reviews = lambda *_args, **_kwargs: []
+        runner.summary_with_reviews = (
+            lambda *_args, **_kwargs: conflict_summary
+        )
+        runner.frontmatter_page = (
+            lambda *_args, **_kwargs: "---\naddress: c-000125\n---\n"
+        )
+        runner.emit_lifecycle_event = lambda *_args, **_kwargs: None
+        runner.run = conflict_run
+        conflict_public = runner._finalize_reap(
+            vault.resolve(), conflict_worktree, "reap-session"
+        )
+    finally:
+        for name, value in saved_finalize_edges.items():
+            setattr(runner, name, value)
+    check(
+        "public reap JSON reports a preserved plan-close conflict",
+        conflict_public.get("plan_close_status") == "conflict"
+        and conflict_public.get("warnings") == ["plan-close-conflict"]
+        and conflict_result.is_file()
+        and conflict_plan.read_text(encoding="utf-8") == conflict_edited,
+    )
     plan.write_text("---\nstatus: executed\n---\n", encoding="utf-8")
     check("executed plan is accepted only as recovery", runner.approved_plan_state(meta)[1] == "executed")
     try:
@@ -407,6 +508,8 @@ with tempfile.TemporaryDirectory(prefix="reap-runner-test.") as raw:
         "status": "complete",
         "result_path": str(vault / "wiki/meta/sessions/Typed Result.md"),
         "result_link": "[[Typed Result]]",
+        "plan_close_status": "closed",
+        "warnings": [],
         "duration_ms": 1,
     }
     runner.validate_summary_wikilinks = lambda *_args, **_kwargs: None
@@ -487,6 +590,8 @@ with tempfile.TemporaryDirectory(prefix="reap-runner-test.") as raw:
     check(
         "public reap runner accepts callback and completes the dispatch operation",
         reaped["status"] == "complete"
+        and reaped["plan_close_status"] == "closed"
+        and reaped["warnings"] == []
         and dispatched.record.state == "awaiting-callback"
         and durable.state == "complete"
         and durable.accepted_callback_kind == "wiki-summary"

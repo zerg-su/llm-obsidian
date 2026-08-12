@@ -571,6 +571,92 @@ def _bound_review_artifact_root(
     return resolved
 
 
+def _review_plan_authority(
+    meta: Mapping[str, Any], worktree: Path
+) -> tuple[Path, TaskPlanAuthority | None]:
+    if meta.get("lifecycle") == "current-checkout":
+        return Path(str(meta["plan_file"])).expanduser().resolve(), None
+    try:
+        authority = resolve_plan_authority(meta, worktree)
+    except PlanAuthorityError as exc:
+        raise TaskReviewError(
+            "approved plan snapshot identity is invalid"
+        ) from exc
+    return authority.path, authority
+
+
+def _plan_review_context(
+    meta: Mapping[str, Any],
+    runtime_root: Path,
+    task_id: str,
+    head: str,
+    authority: TaskPlanAuthority | None,
+) -> tuple[Path | None, Path | None, list[ContextInput], dict[str, str]]:
+    plan_artifact_root: Path | None = None
+    review_artifact_root = _bound_review_artifact_root(meta)
+    inputs: list[ContextInput] = []
+    packet_metadata = {
+        "task_id": task_id,
+        "task_name": str(meta.get("task_name") or ""),
+        "head_sha": head,
+        "approved_plan_snapshot_sha256": str(
+            authority.plan_sha256
+            if authority
+            else meta.get("approved_plan_sha256") or ""
+        ),
+    }
+    plan_review = meta.get("plan_review")
+    if plan_review is None:
+        return (
+            plan_artifact_root,
+            review_artifact_root,
+            inputs,
+            packet_metadata,
+        )
+    if not isinstance(plan_review, Mapping):
+        raise TaskReviewError("plan review metadata is invalid")
+    base_sha = str(plan_review.get("base_sha") or "")
+    bound_head = str(plan_review.get("head_sha") or "")
+    if (
+        plan_review.get("schema_version") != 1
+        or plan_review.get("artifact_root") != "runtime"
+        or bound_head != head
+        or not base_sha
+    ):
+        raise TaskReviewError("plan review OID binding is stale")
+    inspection = runtime_root / "inputs/plan-review-inspection.json"
+    evidence = _read_json(inspection, "plan review inspection evidence")
+    commands = evidence.get("commands")
+    if (
+        evidence.get("schema_version") != 1
+        or evidence.get("base_sha") != base_sha
+        or evidence.get("head_sha") != head
+        or not isinstance(commands, list)
+        or len(commands) != 4
+        or any(not isinstance(item, str) or not item for item in commands)
+    ):
+        raise TaskReviewError("plan review inspection evidence is stale")
+    plan_artifact_root = runtime_root
+    packet_metadata["base_sha"] = base_sha
+    inputs.extend(
+        (
+            ContextInput(
+                "exact-base.txt",
+                "git:base",
+                (base_sha + "\n").encode(),
+                role="base",
+            ),
+            ContextInput(
+                "review-inspect-commands.txt",
+                str(inspection),
+                ("\n".join(commands) + "\n").encode(),
+                role="instructions",
+            ),
+        )
+    )
+    return plan_artifact_root, review_artifact_root, inputs, packet_metadata
+
+
 def _context(
     meta: Mapping[str, Any],
     vault: Path,
@@ -583,73 +669,19 @@ def _context(
     policy = meta["review_policy"]
     purpose = str(policy.get("purpose") or "implementation")
     boundary_input_sha256 = str(policy.get("boundary_input_sha256") or "")
-    authority: TaskPlanAuthority | None = None
-    if meta.get("lifecycle") == "current-checkout":
-        plan = Path(str(meta["plan_file"])).expanduser().resolve()
-    else:
-        try:
-            authority = resolve_plan_authority(meta, worktree)
-            plan = authority.path
-        except PlanAuthorityError as exc:
-            raise TaskReviewError("approved plan snapshot identity is invalid") from exc
-    plan_review = meta.get("plan_review")
-    plan_artifact_root: Path | None = None
-    review_artifact_root = _bound_review_artifact_root(meta)
-    plan_review_inputs: list[ContextInput] = []
-    packet_metadata = {
-        "task_id": task_id,
-        "task_name": str(meta.get("task_name") or ""),
-        "head_sha": head,
-        "approved_plan_snapshot_sha256": str(authority.plan_sha256 if authority else meta.get("approved_plan_sha256") or ""),
-    }
+    plan, authority = _review_plan_authority(meta, worktree)
+    (
+        plan_artifact_root,
+        review_artifact_root,
+        plan_review_inputs,
+        packet_metadata,
+    ) = _plan_review_context(meta, runtime_root, task_id, head, authority)
     amendment_inputs: list[ContextInput] = []
     amendment = _amendment_evidence(meta, worktree, authority)
     if amendment is not None:
         amendment_chain, amendment_metadata = amendment
         amendment_inputs.extend(amendment_chain)
         packet_metadata.update(amendment_metadata)
-    if plan_review is not None:
-        if not isinstance(plan_review, Mapping):
-            raise TaskReviewError("plan review metadata is invalid")
-        base_sha = str(plan_review.get("base_sha") or "")
-        bound_head = str(plan_review.get("head_sha") or "")
-        if (
-            plan_review.get("schema_version") != 1
-            or plan_review.get("artifact_root") != "runtime"
-            or bound_head != head
-            or not base_sha
-        ):
-            raise TaskReviewError("plan review OID binding is stale")
-        inspection = runtime_root / "inputs/plan-review-inspection.json"
-        evidence = _read_json(inspection, "plan review inspection evidence")
-        commands = evidence.get("commands")
-        if (
-            evidence.get("schema_version") != 1
-            or evidence.get("base_sha") != base_sha
-            or evidence.get("head_sha") != head
-            or not isinstance(commands, list)
-            or len(commands) != 4
-            or any(not isinstance(item, str) or not item for item in commands)
-        ):
-            raise TaskReviewError("plan review inspection evidence is stale")
-        plan_artifact_root = runtime_root
-        packet_metadata["base_sha"] = base_sha
-        plan_review_inputs.extend(
-            (
-                ContextInput(
-                    "exact-base.txt",
-                    "git:base",
-                    (base_sha + "\n").encode(),
-                    role="base",
-                ),
-                ContextInput(
-                    "review-inspect-commands.txt",
-                    str(inspection),
-                    ("\n".join(commands) + "\n").encode(),
-                    role="instructions",
-                ),
-            )
-        )
     inputs = [
         _bounded_input(
             "approved-plan.md",
