@@ -37,6 +37,7 @@ from .state_machine import TERMINAL
 from .status_segment import publish as publish_status
 from .store import OperationStore, StoreError
 from .supervisor import OperationSupervisor
+from .pre_model_reviewer_retirement import retire_failed_reviewer_start
 from .runtime_sessions import RuntimeSessionError, RuntimeSessionManager
 from .review_finalization import _head as _review_worktree_head
 from .runtime_worker import _review_resolution_handoff_ready
@@ -234,6 +235,11 @@ def _cancel_or_close(
             operation_id,
             reason=AttentionReason.ATTENTION_REQUIRED,
         )
+    retired = retire_failed_reviewer_start(
+        store, owner, operation_id, cmux_adapter=cmux_adapter
+    )
+    if retired is not None:
+        return retired
     if (
         record.spec.route.profile == "reviewer-callback"
         and _has_owned_resources(record)
