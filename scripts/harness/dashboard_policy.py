@@ -19,6 +19,7 @@ MAX_PROGRAMS = 8
 MAX_LANES = 8
 MAX_CHILDREN = 8
 MAX_DEPTH = 4
+MAX_REVIEW_CYCLES = 5
 
 UNKNOWN = "unknown"
 HEALTHY = "healthy"
@@ -172,6 +173,31 @@ class StepView:
 
 
 @dataclass(frozen=True)
+class LifecyclePhaseView:
+    """One display-only phase in the bounded exact-HEAD correction history."""
+
+    kind: str
+    cycle: int
+    status: str
+    operation_id: str = ""
+    route: RouteView = UNKNOWN_ROUTE
+    children: tuple[ChildView, ...] = ()
+    timing: TimingView = UNKNOWN_TIMING
+    review: ReviewSummaryView = UNKNOWN_REVIEW
+
+    def __post_init__(self) -> None:
+        if (
+            self.kind not in {"review", "fix", "reverify"}
+            or isinstance(self.cycle, bool)
+            or not isinstance(self.cycle, int)
+            or not 1 <= self.cycle <= MAX_REVIEW_CYCLES
+            or self.status
+            not in {"pending", "running", "complete", "attention", "unknown"}
+        ):
+            raise ValueError("dashboard lifecycle phase is invalid")
+
+
+@dataclass(frozen=True)
 class LaneView:
     lane_id: str
     scope: str
@@ -213,6 +239,7 @@ class ProgramView:
     self_healed_count: int = 0
     current_stage: str = UNKNOWN
     task_result: TaskResultView = UNKNOWN_TASK_RESULT
+    history: tuple[LifecyclePhaseView, ...] = ()
 
 
 @dataclass(frozen=True)

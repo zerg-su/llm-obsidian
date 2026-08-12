@@ -198,6 +198,23 @@ attempt before display. The one frame clock is display-only: it cannot change
 classification, next action, issues, retry or readiness policy, verification
 truth, or persisted state.
 
+For an exact-HEAD correction lineage, the root view also reads the gate's
+bounded immutable `attempts/cycle-N.json` archives. A cycle is displayed only
+when its lineage, plan, Outcome Contract, HEAD, attempt, lanes, runs, accepted
+round callbacks, and current-root OperationStore records still bind. The view
+orders each accepted changes-requested boundary as `Review N`, `Fix N`, and
+`Re-verify N` before the next review. Terminal review rows show deduplicated
+total and material finding counts; missing, stale, over-limit, malformed, or
+symlinked evidence stays unknown or absent. `Fixing review findings` and
+`Re-verifying` are observational labels for the active durable gate state and
+never transition it.
+
+The first worktree-owned model step reuses the same validated root execution
+interval already shown on the root: elapsed while active and frozen after an
+accepted reap boundary. Other model steps do not inherit it. Completed history
+is compact, the active phase expands its launched current-root operations, and
+narrow or no-color rendering changes presentation only.
+
 Best-effort telemetry in `.vault-meta/pipeline-events.jsonl` remains a numeric
 operations report. Its timestamps, record mtimes, deadlines, screen text, and
 list order are never promoted into root elapsed or terminal duration facts.

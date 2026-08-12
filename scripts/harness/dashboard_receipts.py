@@ -19,6 +19,7 @@ from .contracts import (
     VerificationEvidence,
 )
 from .dashboard_policy import (
+    MAX_REVIEW_CYCLES,
     UNKNOWN_TASK_RESULT,
     UNKNOWN_REVIEW,
     UNKNOWN_TIMING,
@@ -717,7 +718,8 @@ def _review_material_count(
             callback_sha = str(row.get("callback_sha256") or "")
             if (
                 row.get("reviewed_head_sha") != attempt.identity.exact_head_sha
-                or row.get("review_operation_id") != lane.operation_id
+                or row.get("review_operation_id")
+                != attempt.identity.attempt_id
                 or parent.lane_id != lane.lane_id
                 or parent.run_id != lane.run_id
                 or round_record.spec.parent_operation_id != lane.operation_id
@@ -806,13 +808,86 @@ def _review_attempt_is_bound(
     ):
         return False
     if attempt.status == "terminal" and attempt.terminal is not None:
-        return gate.get("status") == attempt.terminal.result.value
+        status = gate.get("status")
+        if attempt.terminal.result == ReviewAttemptTerminalResult.CHANGES_REQUESTED:
+            return status in {
+                "changes-requested",
+                "awaiting-resolution",
+                "verifying",
+                "recovery-verification-required",
+                "fresh-boundary-authorized",
+            }
+        return status == attempt.terminal.result.value
     return gate.get("status") in {
         "pending",
         "reviewing",
         "verifying",
         "awaiting-resolution",
     }
+
+
+def bound_review_attempt(
+    store: OperationStore,
+    record: OperationRecord,
+    gate: Mapping[str, Any] | None,
+) -> ReviewAttempt | None:
+    """Return one exact gate/store-bound attempt without reading review prose."""
+
+    raw = gate.get("attempt") if isinstance(gate, Mapping) else None
+    if not isinstance(raw, Mapping):
+        return None
+    try:
+        attempt = ReviewAttempt.from_mapping(raw)
+    except ReviewAttemptError:
+        return None
+    return attempt if _review_attempt_is_bound(store, record, gate, attempt) else None
+
+
+def review_attempt_history(
+    store: OperationStore,
+    record: OperationRecord,
+    gate: Mapping[str, Any] | None,
+) -> tuple[tuple[Mapping[str, Any], ReviewAttempt], ...]:
+    """Read the bounded immutable cycle archives ending at the current gate.
+
+    The current attempt proves the lineage and upper cycle bound. Each older
+    entry must be the exact numbered archive, bind the same immutable lineage,
+    plan and Outcome Contract, and still bind all stored reviewer identities.
+    Missing or tampered entries are omitted rather than reconstructed.
+    """
+
+    current = bound_review_attempt(store, record, gate)
+    if current is None or current.identity.cycle > MAX_REVIEW_CYCLES:
+        return ()
+    identity = current.identity
+    root = (
+        store.root
+        / "review-data"
+        / record.spec.owner_id
+        / record.spec.owner_id
+    )
+    accepted: list[tuple[Mapping[str, Any], ReviewAttempt]] = []
+    for cycle in range(1, identity.cycle):
+        archived = _read_object(
+            root / "attempts" / f"cycle-{cycle}.json",
+            boundary=store.root,
+        )
+        attempt = bound_review_attempt(store, record, archived)
+        if attempt is None or attempt.status != "terminal":
+            continue
+        candidate = attempt.identity
+        if (
+            candidate.cycle != cycle
+            or candidate.finalization_lineage_id
+            != identity.finalization_lineage_id
+            or candidate.plan_sha256 != identity.plan_sha256
+            or candidate.outcome_sha256 != identity.outcome_sha256
+        ):
+            continue
+        accepted.append((archived, attempt))
+    assert gate is not None
+    accepted.append((gate, current))
+    return tuple(accepted)
 
 
 def review_summary(
@@ -829,11 +904,8 @@ def review_summary(
     raw = gate.get("attempt")
     if not isinstance(raw, Mapping):
         return ReviewSummaryView(limit=limit)
-    try:
-        attempt = ReviewAttempt.from_mapping(raw)
-    except ReviewAttemptError:
-        return ReviewSummaryView(limit=limit)
-    if not _review_attempt_is_bound(store, record, gate, attempt):
+    attempt = bound_review_attempt(store, record, gate)
+    if attempt is None:
         return ReviewSummaryView(limit=limit)
     if attempt.status != "terminal" or attempt.terminal is None:
         return ReviewSummaryView(cycle=attempt.identity.cycle, limit=limit)

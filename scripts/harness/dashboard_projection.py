@@ -29,7 +29,6 @@ from .store import OperationStore, StoreError
 from .dashboard_receipts import (
     absolute_path_is_safe,
     fix_receipt_visits,
-    liveness_timing,
     read_gate,
     review_summary,
     root_task_name,
@@ -70,6 +69,13 @@ from .dashboard_policy import (
     program_classification as _program_classification,
     record_activity as _record_activity,
     route_view as _route_view,
+)
+from .dashboard_history import project_history
+from .dashboard_tree import (
+    child_tree as _child_tree,
+    child_views as _child_views,
+    current_review_ids as _current_review_ids,
+    root_id as _root_id,
 )
 
 
@@ -128,136 +134,6 @@ def _compiled(
             return "", None
         return f"custom/{spec.spec_id}", compiled
     return name, compiled
-
-
-def _parent_id(record: OperationRecord) -> str:
-    """Return the exact durable parent of one record, or '' when it is a root.
-
-    A review parent carries no ``parent_operation_id``: the harness binds it to
-    the dispatch it reviews through ``owner_id``.  Both are exact recorded
-    identity, so neither is an inference.
-    """
-
-    if record.spec.parent_operation_id:
-        return record.spec.parent_operation_id
-    if (
-        record.spec.kind in REVIEW_PARENT_KINDS
-        and record.spec.owner_id != record.spec.operation_id
-    ):
-        return record.spec.owner_id
-    return ""
-
-
-def _root_id(
-    record: OperationRecord,
-    by_id: Mapping[str, OperationRecord],
-) -> str:
-    """Walk the exact lineage upward to the one operation that owns this tree.
-
-    A lineage that leaves the observed set or loops back on itself stops at the
-    last record actually seen, so a broken chain leaves a standalone top-level
-    program instead of silently dropping the operation from the dashboard.
-    """
-
-    declared = record.spec.root_operation_id
-    current = record
-    seen = {current.spec.operation_id}
-    while True:
-        if declared and current.spec.operation_id == declared:
-            return declared
-        parent_id = _parent_id(current)
-        parent = by_id.get(parent_id) if parent_id else None
-        if declared and (
-            parent is None
-            or parent.spec.root_operation_id not in {"", declared}
-        ):
-            return f"invalid-lineage:{record.spec.operation_id}"
-        if parent is None or parent.spec.operation_id in seen:
-            return current.spec.operation_id
-        seen.add(parent.spec.operation_id)
-        current = parent
-
-
-def _child_views(
-    parent_id: str,
-    tree: Mapping[str, list[OperationRecord]],
-    depth: int = 0,
-    *,
-    store: OperationStore,
-    observed_at: float,
-    current_ids: frozenset[str] = frozenset(),
-    dropped: dict[str, int] | None = None,
-) -> tuple[ChildView, ...]:
-    if depth >= MAX_DEPTH:
-        if dropped is not None:
-            dropped["children"] += len(tree.get(parent_id, ()))
-        return ()
-    records = sorted(
-        tree.get(parent_id, ()),
-        key=lambda record: (
-            record.spec.operation_id not in current_ids,
-            record.state in TERMINAL,
-            record.spec.operation_id,
-        ),
-    )
-    selected = records[:MAX_CHILDREN]
-    if dropped is not None:
-        dropped["children"] += len(records) - len(selected)
-    return tuple(
-        ChildView(
-            record.spec.operation_id,
-            record.spec.kind,
-            record.state,
-            _record_activity(record),
-            _route_view(record),
-            _child_views(
-                record.spec.operation_id,
-                tree,
-                depth + 1,
-                store=store,
-                observed_at=observed_at,
-                current_ids=current_ids,
-                dropped=dropped,
-            ),
-            liveness_timing(store, record, observed_at),
-        )
-        for record in selected
-    )
-
-
-def _child_tree(
-    records: list[OperationRecord],
-) -> dict[str, list[OperationRecord]]:
-    by_id = {record.spec.operation_id: record for record in records}
-    tree: dict[str, list[OperationRecord]] = {}
-    for record in sorted(records, key=lambda item: item.spec.operation_id):
-        parent_id = _parent_id(record)
-        if parent_id in by_id and parent_id != record.spec.operation_id:
-            tree.setdefault(parent_id, []).append(record)
-    return tree
-
-
-def _current_review_ids(
-    gate: Mapping[str, Any] | None,
-    tree: Mapping[str, list[OperationRecord]],
-) -> frozenset[str]:
-    """Return the gate-selected review parent and every live descendant."""
-
-    active = str(gate.get("active_review_operation_id") or "") if gate else ""
-    if not active:
-        return frozenset()
-    current = {active}
-    pending = [active]
-    while pending:
-        parent = pending.pop()
-        for child in tree.get(parent, ()):
-            if child.state in TERMINAL:
-                continue
-            operation_id = child.spec.operation_id
-            if operation_id not in current:
-                current.add(operation_id)
-                pending.append(operation_id)
-    return frozenset(current)
 
 
 def _bind_children(
@@ -352,6 +228,8 @@ def _step_view(
     children: tuple[ChildView, ...],
     observed_at: float,
     review_limit: int,
+    root_interval: object = UNKNOWN_TIMING,
+    root_owned: bool = False,
 ) -> tuple[StepView, bool]:
     """Bind one compiled step to durable evidence, or derive it from the record.
 
@@ -398,7 +276,13 @@ def _step_view(
         status = "attention" if issue else (
             "complete" if visits else _model_step_status(record)
         )
-    timing = UNKNOWN_TIMING
+    timing = (
+        root_interval
+        if root_owned
+        and step.primitive_id == "model_step"
+        and step.session_mode == "worktree"
+        else UNKNOWN_TIMING
+    )
     review = UNKNOWN_REVIEW
     if step.primitive_id == "verify":
         timing = verification_receipt_timing(
@@ -439,6 +323,7 @@ def _steps(
     gate: Mapping[str, Any] | None,
     children: Mapping[str, list[ChildView]],
     observed_at: float,
+    root_interval: object = UNKNOWN_TIMING,
 ) -> tuple[tuple[StepView, ...], str]:
     """Project every compiled step, then ask the compiler for the next action."""
 
@@ -456,12 +341,14 @@ def _steps(
                 item.total_pass_limit
                 for item in compiled.definition.completion_policies
             ),
+            root_interval=root_interval,
+            root_owned=index == 0,
         )
-        for step, identity in zip(
+        for index, (step, identity) in enumerate(zip(
             compiled.definition.steps,
             compiled.resolved_primitives,
             strict=True,
-        )
+        ))
     ]
     if record.state in {"failed", "cancelled"}:
         accepted_frontier = max(
@@ -713,6 +600,7 @@ def _program(
             dropped_lanes,
             observed_at,
         )
+    program_timing = root_timing(store, record, observed_at)
     steps, next_action = _steps(
         store,
         record,
@@ -721,14 +609,38 @@ def _program(
         gate,
         by_step,
         observed_at,
+        root_interval=program_timing,
+    )
+    history = project_history(
+        store,
+        record,
+        compiled,
+        runtime,
+        gate,
+        members,
+        tree,
+        observed_at,
     )
     executor_status = _executor_status(record, steps)
     definition = compiled.definition
     self_healed = repair_receipt_count(store, record)
+    active_phase = next(
+        (phase for phase in history if phase.status in {"running", "attention"}),
+        None,
+    )
+    phase_stage = (
+        "Fixing review findings"
+        if active_phase is not None and active_phase.kind == "fix"
+        else "Re-verifying"
+        if active_phase is not None and active_phase.kind == "reverify"
+        else f"Review {active_phase.cycle}"
+        if active_phase is not None
+        else ""
+    )
     current_stage = (
         "complete"
         if record.state == "complete"
-        else next(
+        else phase_stage or next(
             (step.step_id for step in steps if step.status == "running"),
             next(
                 (step.step_id for step in steps if step.status == "pending"),
@@ -773,11 +685,12 @@ def _program(
         children=loose,
         dropped_children=dropped["children"],
         dropped_lanes=dropped_lanes,
-        timing=root_timing(store, record, observed_at),
+        timing=program_timing,
         task_name=root_task_name(store, record) or UNKNOWN,
         self_healed_count=self_healed,
         current_stage=current_stage,
         task_result=root_task_result(store, record),
+        history=history,
     )
 
 

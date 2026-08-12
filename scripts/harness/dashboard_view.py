@@ -23,8 +23,8 @@ from .dashboard_projection import (
     RouteView,
 )
 from .dashboard_policy import ReviewSummaryView, TimingView
+from .dashboard_history_view import history_rows
 from .state_machine import TERMINAL
-
 MAX_LINE = 120
 ROOT_COLUMNS = 100
 DIAGNOSTIC_COLUMNS = 96
@@ -71,8 +71,6 @@ DIM = "\x1b[2m"
 PRIMARY_EMPHASIS = "primary"
 DIM_EMPHASIS = "dim"
 NO_EMPHASIS = "none"
-# Lower survives a smaller viewport first: root and current-work identity, then
-# headings, routes, other steps, issues, frame, bound detail, and history.
 ROOT_PRIORITY_IDENTITY = 0
 ROOT_PRIORITY_HEADING = 1
 ROOT_PRIORITY_ROUTE = 2
@@ -693,6 +691,8 @@ def _root_step_lines(
     *,
     width: int = ROOT_COLUMNS,
 ) -> list[RootRow]:
+    if program.history:
+        return [RootRow(row.text, row.emphasis, row.priority) for row in history_rows(program, width=width)]
     current = _current_step(program)
     lines: list[RootRow] = []
     for index, step in enumerate(program.steps):

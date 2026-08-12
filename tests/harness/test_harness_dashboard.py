@@ -408,6 +408,53 @@ def _write_gate(
     )
 
 
+def _accepted_review_round(
+    store: OperationStore,
+    *,
+    owner: str,
+    parent: str,
+    axis: str,
+) -> tuple[str, str, str, str]:
+    """Create one exact accepted review child for scalar dashboard evidence."""
+
+    operation_id = f"{parent}-round-0"
+    _create(
+        store,
+        operation_id,
+        "review-round",
+        lane_id=f"{axis}-lane",
+        parent=parent,
+        owner=owner,
+        route=_reviewer_route(),
+    )
+    _advance(
+        store,
+        operation_id,
+        "preflight",
+        "starting",
+        "running",
+        "awaiting-callback",
+        owner=owner,
+    )
+    payload = {"axis": axis, "verdict": "changes-requested"}
+    payload_sha256 = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    callback_id = f"review-{payload_sha256[:24]}"
+    CallbackBroker(store, owner).accept(
+        CallbackEnvelope(
+            callback_id,
+            operation_id,
+            f"{operation_id}-run",
+            "review",
+            payload,
+            payload_sha256,
+        )
+    )
+    _advance(store, operation_id, "finalizing", "exiting", "complete", owner=owner)
+    return operation_id, f"{operation_id}-run", callback_id, payload_sha256
+
+
 def _tree_bytes(root: Path) -> dict[str, str]:
     return {
         path.relative_to(root).as_posix(): hashlib.sha256(
@@ -3448,6 +3495,9 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-time.") as raw:
     observed_at = 1_300.0
     timed = project_root(store_root, timed_root, observed_at=observed_at)
     timed_program = timed.programs[0]
+    timed_tdd = next(
+        step for step in timed_program.steps if step.step_id == "tdd-slices"
+    )
     timed_verify = next(
         step for step in timed_program.steps if step.step_id == "verify"
     )
@@ -3459,6 +3509,10 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-time.") as raw:
         and timed_verify.timing.seconds == 150
         and timed_verify.children[0].timing.mode == "elapsed"
         and timed_verify.children[0].timing.seconds == 150,
+    )
+    regression_check(
+        "the root-owned TDD step reuses the validated active root interval",
+        timed_tdd.timing == TimingView("elapsed", 300),
     )
 
     receipt_operation = _verification_receipt(
@@ -3632,11 +3686,17 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-time.") as raw:
         encoding="utf-8",
     )
     reaped = project_root(store_root, reaped_root, observed_at=1_800_000_000.0)
+    reaped_tdd = next(
+        step
+        for step in reaped.programs[0].steps
+        if step.step_id == "tdd-slices"
+    )
     regression_check(
         "validated reap evidence freezes terminal root duration",
         reaped.programs[0].timing.mode == "duration"
         and reaped.programs[0].timing.seconds == 300
-        and reaped.programs[0].task_name == "dashboard-reaped-task",
+        and reaped.programs[0].task_name == "dashboard-reaped-task"
+        and reaped_tdd.timing == TimingView("duration", 300),
     )
 
     task_control_points = (
@@ -3887,6 +3947,312 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-time.") as raw:
     )
     gate_directory.unlink()
     real_gate_directory.rename(gate_directory)
+
+    # E267.RC62.CYCLE_HISTORY.RED: archived exact-HEAD attempts and their
+    # current-root operation records must remain a complete correction story.
+    first_lanes = tuple(
+        ReviewAttemptLaneIdentity(
+            axis,
+            review_root,
+            f"{review_root}-cycle-1-{index}",
+            f"review-cycle-1-lane-{index}",
+            f"review-cycle-1-run-{index}",
+            "claude",
+            "claude-opus-5",
+            "high",
+            "reviewer-callback",
+            "b" * 64,
+        )
+        for index, axis in enumerate(("openai-intent", "openai-engineering"))
+    )
+    first_identity = ReviewAttemptIdentity(
+        "review-attempt-1",
+        "review-lineage",
+        1,
+        "a" * 64,
+        "b" * 64,
+        "b" * 40,
+        ReviewAttemptPolicy(
+            "deep", False, "claude", "claude-opus-5", "high", 2,
+            "implementation", "openai",
+        ),
+        first_lanes,
+    )
+    first_attempt = ReviewAttempt(
+        first_identity,
+        "terminal",
+        ReviewAttemptTerminal(
+            ReviewAttemptTerminalResult.CHANGES_REQUESTED,
+            first_identity.exact_head_sha,
+            (
+                ReviewAttemptLaneResult(
+                    first_lanes[0].axis,
+                    "changes-requested",
+                    "d" * 64,
+                    ("finding-shared", "finding-material"),
+                ),
+                ReviewAttemptLaneResult(
+                    first_lanes[1].axis,
+                    "approve",
+                    "e" * 64,
+                    ("finding-shared", "finding-info"),
+                ),
+            ),
+        ),
+    )
+    first_rows: list[dict[str, object]] = []
+    first_notifications: dict[str, dict[str, object]] = {}
+    for lane in first_lanes:
+        store.create(
+            OperationSpec(
+                lane.operation_id,
+                f"{lane.operation_id}-key",
+                "implementation-review",
+                review_root,
+                RuntimeRoute(
+                    lane.runtime,
+                    lane.model,
+                    lane.effort,
+                    lane.profile,
+                    lane.routing_sha256,
+                ),
+                "packets/review.json",
+                "scoped",
+                parent_operation_id=review_root,
+            ),
+            lane_id=lane.lane_id,
+            run_id=lane.run_id,
+        )
+        _advance(
+            store,
+            lane.operation_id,
+            "preflight",
+            "starting",
+            "running",
+            "awaiting-callback",
+            "finalizing",
+            "exiting",
+            "complete",
+            owner=review_root,
+        )
+        round_id, round_run, callback_id, callback_sha = _accepted_review_round(
+            store,
+            owner=review_root,
+            parent=lane.operation_id,
+            axis=lane.axis,
+        )
+        first_rows.append(
+            {
+                "axis": lane.axis,
+                "operation_id": lane.operation_id,
+                "lane_id": lane.lane_id,
+                "run_id": lane.run_id,
+                "surface_id": "",
+                "checkpoint": "",
+                "verification_iteration": 0,
+                "state": "complete",
+            }
+        )
+        first_notifications[lane.axis] = {
+            "reviewed_head_sha": first_identity.exact_head_sha,
+            "review_operation_id": first_identity.attempt_id,
+            "round_operation_id": round_id,
+            "round_run_id": round_run,
+            "callback_id": callback_id,
+            "callback_sha256": callback_sha,
+            "material_finding_ids": (
+                ["finding-material"] if lane is first_lanes[0] else []
+            ),
+        }
+    first_gate = {
+        "schema_version": 1,
+        "owner_id": review_root,
+        "dispatch_operation_id": review_root,
+        "status": "changes-requested",
+        "active_review_operation_id": first_identity.attempt_id,
+        "context": {
+            "head_sha": first_identity.exact_head_sha,
+            "verification_profile": "scoped",
+            "verification_profile_sha256": "7" * 64,
+        },
+        "lanes": first_rows,
+        "review_notification_evidence": first_notifications,
+        "attempt": first_attempt.payload(),
+    }
+    archive_path = gate_directory / "attempts" / "cycle-1.json"
+    archive_path.parent.mkdir(mode=0o700)
+    archive_path.write_text(
+        json.dumps(first_gate, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    current_gate = json.loads(gate_path.read_text(encoding="utf-8"))
+    current_gate["context"]["head_sha"] = identity.exact_head_sha
+    current_gate["active_review_operation_id"] = identity.attempt_id
+    current_gate["status"] = "approved"
+    gate_path.write_text(
+        json.dumps(current_gate, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    review_runtime = (
+        store_root / "owners" / review_root / "runtime" / review_root
+    )
+    corrected_verification = _verification_receipt(
+        store,
+        review_root,
+        review_runtime,
+        compiled.definition_sha256,
+        head_char="c",
+        owner=review_root,
+    )
+    _advance(
+        store,
+        corrected_verification,
+        "preflight",
+        "starting",
+        "running",
+        "finalizing",
+        "exiting",
+        "complete",
+        owner=review_root,
+    )
+    foreign_root = "dashboard-foreign-history-root"
+    _create(
+        store,
+        foreign_root,
+        "dispatch",
+        lane_id="foreign-history-lane",
+        contract_sha256=compiled.definition_sha256,
+        owner=foreign_root,
+    )
+    history_projection = project_root(
+        store_root, review_root, observed_at=1_800_000_000.0
+    )
+    history_program = history_projection.programs[0]
+    history = getattr(history_program, "history", ())
+    history_render = render(
+        history_projection, scope="root", columns=120, color=False
+    )
+    history_narrow = render(
+        history_projection, scope="root", columns=80, color=False
+    )
+    history_colored = render(
+        history_projection, scope="root", columns=120, color=True
+    )
+    regression_check(
+        "two exact review cycles retain ordered review fix and re-verification history",
+        tuple((item.kind, item.cycle) for item in history)
+        == (("review", 1), ("fix", 1), ("reverify", 1), ("review", 2)),
+    )
+    regression_check(
+        "terminal cycle counts and every current-root reviewer identity remain visible",
+        bool(history)
+        and history[0].review == ReviewSummaryView(1, 2, 3, 1)
+        and {
+            child.operation_id
+            for phase in history
+            for child in phase.children
+            if child.kind == "implementation-review"
+        }
+        == {lane.operation_id for lane in (*first_lanes, *lanes)}
+        and foreign_root not in history_render,
+    )
+    regression_check(
+        "root rendering tells the complete compact correction story",
+        all(
+            label in history_render
+            for label in (
+                "Review 1",
+                "Fix 1",
+                "Re-verify 1",
+                "Review 2",
+                "findings 3",
+                "material 1",
+            )
+        ),
+    )
+    regression_check(
+        "history preserves narrow color and no-color terminal contracts",
+        all(len(line) <= 80 for line in history_narrow.splitlines())
+        and all(len(line) <= 120 for line in history_render.splitlines())
+        and ansi.sub("", history_colored) == history_render
+        and "Review 1" in history_narrow
+        and "Review 2" in history_narrow,
+    )
+
+    archive_directory = archive_path.parent
+    archive_real = archive_directory.with_name("attempts-real")
+    archive_directory.rename(archive_real)
+    archive_directory.symlink_to(archive_real, target_is_directory=True)
+    symlinked_history = getattr(
+        project_root(
+            store_root, review_root, observed_at=1_800_000_000.0
+        ).programs[0],
+        "history",
+        (),
+    )
+    archive_directory.unlink()
+    archive_real.rename(archive_directory)
+    mismatched_archive = json.loads(archive_path.read_text(encoding="utf-8"))
+    mismatched_archive["attempt"]["identity"]["plan_sha256"] = "0" * 64
+    archive_path.write_text(
+        json.dumps(mismatched_archive, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    mismatched_history = getattr(
+        project_root(
+            store_root, review_root, observed_at=1_800_000_000.0
+        ).programs[0],
+        "history",
+        (),
+    )
+    archive_path.write_text(
+        json.dumps(first_gate, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    over_cap_gate = json.loads(gate_path.read_text(encoding="utf-8"))
+    over_cap_gate["attempt"]["identity"]["cycle"] = 6
+    gate_path.write_text(
+        json.dumps(over_cap_gate, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    over_cap_history = getattr(
+        project_root(
+            store_root, review_root, observed_at=1_800_000_000.0
+        ).programs[0],
+        "history",
+        (),
+    )
+    gate_path.write_text(
+        json.dumps(current_gate, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    regression_check(
+        "symlinked mismatched and over-cap cycle evidence never becomes history authority",
+        tuple(item.cycle for item in symlinked_history) == (2,)
+        and tuple(item.cycle for item in mismatched_history) == (2,)
+        and over_cap_history == (),
+    )
+
+    fixing_gate = {**first_gate, "status": "changes-requested"}
+    gate_path.write_text(
+        json.dumps(fixing_gate, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    fixing_render = render(
+        project_root(store_root, review_root, observed_at=1_800_000_000.0),
+        scope="root",
+        columns=120,
+    )
+    reverifying_gate = {**first_gate, "status": "verifying"}
+    gate_path.write_text(
+        json.dumps(reverifying_gate, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    reverifying_render = render(
+        project_root(store_root, review_root, observed_at=1_800_000_000.0),
+        scope="root",
+        columns=120,
+    )
+    gate_path.write_text(
+        json.dumps(current_gate, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    regression_check(
+        "review remediation renders explicit fixing and re-verifying subphases",
+        "Fixing review findings" in fixing_render
+        and "Re-verifying" in reverifying_render,
+    )
 
     bad_liveness = _liveness(
         store,
