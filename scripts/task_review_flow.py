@@ -580,6 +580,23 @@ def _terminal_receipt(
     )
 
 
+def _reviewing_receipt(
+    meta: Mapping[str, Any],
+    vault: Path,
+    worktree: Path,
+    runtime_root: Path,
+    context_manifest: Path,
+) -> dict[str, Any]:
+    return _receipt(
+        status="reviewing",
+        meta=meta,
+        vault=vault,
+        worktree=worktree,
+        runtime_root=runtime_root,
+        context_manifest=context_manifest,
+    )
+
+
 def _run_exact_head_review(
     meta: Mapping[str, Any],
     vault: Path,
@@ -784,13 +801,8 @@ def _run_exact_head_review(
             ),
         )
     except StructuralPivotPending:
-        return _receipt(
-            status="reviewing",
-            meta=meta,
-            vault=vault,
-            worktree=worktree,
-            runtime_root=runtime_root,
-            context_manifest=context_manifest,
+        return _reviewing_receipt(
+            meta, vault, worktree, runtime_root, context_manifest
         )
     _assert_frozen_topology(meta, request)
     if not gate_exists or ReviewAttempt.from_mapping(

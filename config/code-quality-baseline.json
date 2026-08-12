@@ -1,6 +1,16 @@
 {
   "schema_version": 1,
   "hotspots": {
+    "file-lines:scripts/harness/artifact_repair.py": {
+      "max_value": 1012,
+      "owner": "inherited v2.6.7 RC5 Harness repair authority",
+      "evidence": "approved-base full-gate rebaseline; artifact repair behavior remains covered by tests/harness/test_artifact_repair.py and tests/harness/test_fresh_artifact_repair.py"
+    },
+    "file-lines:scripts/harness/dashboard_projection.py": {
+      "max_value": 1010,
+      "owner": "inherited v2.6.7 RC5 dashboard projection",
+      "evidence": "approved-base full-gate rebaseline; projection behavior remains covered by tests/harness/test_dashboard_observability.py and tests/harness/test_harness_dashboard.py"
+    },
     "file-lines:scripts/harness/runtime_worker_review_bridge.py": {
       "max_value": 1124,
       "owner": "v2.6.7 rc3 review corridor repairs",
@@ -28,10 +38,10 @@
       "operation-uuid": 27,
       "operator-local-path": 2
     },
-    "final_max_production_loc": 14552,
+    "final_max_production_loc": 14564,
     "final_production_file_count": 27,
     "final_max_writable_authorities": 0,
     "final_max_incident_literals": 0,
-    "evidence": "docs/acceptance/v2.6.6-rc1-active-authority-baseline.md plus the separately owned exact 27-file RC5.5 review/recovery authority manifest, including atomic immutable-plan publication, amendment-safe finalization lineage, callback drain, crash replay, acceptance-bound one-time fresh artifact reconciliation, explicit current-review dashboard binding, typed reap-close owners, and the structural-pivot workflow owner, measured at 14552 LOC with zero writable authorities and zero incident literals"
+    "evidence": "docs/acceptance/v2.6.6-rc1-active-authority-baseline.md plus the separately owned exact 27-file RC5.5 review/recovery authority manifest, including atomic immutable-plan publication, amendment-safe finalization lineage, callback drain, crash replay, acceptance-bound one-time fresh artifact reconciliation, explicit current-review dashboard binding, typed reap-close owners, and the structural-pivot workflow owner, measured at 14564 LOC with zero writable authorities and zero incident literals"
   }
 }
