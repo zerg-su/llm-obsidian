@@ -6,6 +6,7 @@
     "scripts/harness/cli.py",
     "scripts/harness/contracts.py",
     "scripts/harness/finalization_ledger.py",
+    "scripts/harness/fresh_artifact_repair.py",
     "scripts/harness/liveness.py",
     "scripts/harness/pre_model_reviewer_retirement.py",
     "scripts/harness/provider_events.py",

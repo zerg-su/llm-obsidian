@@ -76,6 +76,11 @@ sys.modules[quality_spec.name] = quality
 quality_spec.loader.exec_module(quality)
 authority = quality.audit_rc1_active_authority(ROOT)
 authority_paths = set(quality.active_authority_files(ROOT))
+check(
+    "fresh artifact repair remains inside the measured authority contour",
+    "scripts/harness/fresh_artifact_repair.py" in authority_paths,
+    sorted(authority_paths),
+)
 amendment_owner = Path(
     sys.modules[task_review_context.load_amendments.__module__].__file__
 ).resolve().relative_to(ROOT).as_posix()
