@@ -7,6 +7,8 @@ import json
 import re
 from dataclasses import dataclass, replace
 
+from .contracts import OperationSpec
+
 
 IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 GIT_OID = re.compile(r"[0-9a-f]{40,64}\Z")
@@ -46,6 +48,81 @@ def verification_input_sha256(
             separators=(",", ":"),
         ).encode()
     ).hexdigest()
+
+
+def pipeline_verify_identity(
+    parent: OperationSpec,
+    *,
+    definition_sha256: str,
+    input_sha256: str,
+    profile: str,
+    attempt_index: int = 0,
+) -> tuple[OperationSpec, str, str]:
+    """Derive the exact child operation for one verification attempt."""
+
+    if (
+        not isinstance(parent, OperationSpec)
+        or not SHA256.fullmatch(definition_sha256)
+        or not SHA256.fullmatch(input_sha256)
+        or not IDENTIFIER.fullmatch(profile)
+        or type(attempt_index) is not int
+        or attempt_index not in {0, 1}
+    ):
+        raise VerificationAttemptError(
+            "pipeline verification identity is invalid"
+        )
+    suffix = f"-verify-{input_sha256[:16]}"
+    if attempt_index:
+        suffix += f"-a{attempt_index}"
+    operation_id = f"{parent.operation_id[: 128 - len(suffix)]}{suffix}"
+    attempt_binding = f":attempt:{attempt_index}" if attempt_index else ""
+    idempotency_key = hashlib.sha256(
+        (
+            f"{parent.idempotency_key}:pipeline-verify:{operation_id}:"
+            f"{definition_sha256}:{input_sha256}:{profile}{attempt_binding}"
+        ).encode()
+    ).hexdigest()
+    spec = OperationSpec(
+        operation_id=operation_id,
+        idempotency_key=idempotency_key,
+        kind="pipeline-verify",
+        owner_id=parent.owner_id,
+        route=parent.route,
+        context_manifest=parent.context_manifest,
+        verification_profile=profile,
+        keep_open=False,
+        contract_sha256=definition_sha256,
+        parent_operation_id=parent.operation_id,
+    )
+    lane_id = hashlib.sha256(
+        f"{idempotency_key}:lane".encode()
+    ).hexdigest()[:32]
+    run_id = hashlib.sha256(
+        f"{idempotency_key}:run".encode()
+    ).hexdigest()[:32]
+    return spec, lane_id, run_id
+
+
+def pipeline_verify_effect_id(
+    input_sha256: str, attempt_index: int = 0
+) -> str:
+    """Derive the exact effect identity for one verification attempt."""
+
+    if (
+        not isinstance(input_sha256, str)
+        or not SHA256.fullmatch(input_sha256)
+        or type(attempt_index) is not int
+        or attempt_index not in {0, 1}
+    ):
+        raise VerificationAttemptError(
+            "pipeline verification effect identity is invalid"
+        )
+    if attempt_index == 0:
+        return "pipeline-verify-" + input_sha256[:32]
+    digest = hashlib.sha256(
+        f"{input_sha256}:attempt:{attempt_index}".encode()
+    ).hexdigest()
+    return "pipeline-verify-" + digest[:32]
 
 
 @dataclass(frozen=True)

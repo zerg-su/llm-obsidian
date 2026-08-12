@@ -7,17 +7,90 @@ import re
 from pathlib import Path
 from typing import Any, Mapping
 
-from harness.contracts import (
-    ContractError as HarnessContractError,
-    EffectOutcome,
-    OwnedResources,
-    VerificationEvidence,
-)
-from harness.runtime_worker import _pipeline_verify_identity
 from harness.store import OperationStore, StoreError
-from harness.verification import output_binding_valid
+from harness.verification import (
+    VerificationAuthority,
+    VerificationAuthorityError,
+)
 from task_review_request import _canonical_sha256
 from task_review_shared import TaskReviewError, _read_json
+
+
+def _response_receipt_path(
+    receipt_path: Path,
+    response_receipt: Mapping[str, object],
+    packet_sha256: str,
+) -> Path:
+    """Preserve a valid prior response while selecting this response's path."""
+
+    fixed_path = receipt_path.with_name("response-receipt.json")
+    if not fixed_path.exists():
+        return fixed_path
+    if not fixed_path.is_file() or fixed_path.is_symlink():
+        raise TaskReviewError(
+            "finalizing review recovery response receipt changed"
+        )
+    prior = _read_json(fixed_path, "verification response receipt")
+    if prior == response_receipt:
+        return fixed_path
+    receipt_fields = {
+        "schema_version",
+        "operation_id",
+        "verification_operation_id",
+        "failed_head_sha",
+        "resubmitted_head_sha",
+        "response_sha256",
+        "status",
+    }
+    prior_head = str(prior.get("resubmitted_head_sha") or "")
+    prior_sha256 = str(prior.get("response_sha256") or "")
+    if (
+        set(prior) != receipt_fields
+        or prior.get("schema_version") != 1
+        or prior.get("operation_id") != response_receipt.get("operation_id")
+        or prior.get("verification_operation_id")
+        != response_receipt.get("verification_operation_id")
+        or prior.get("failed_head_sha")
+        != response_receipt.get("failed_head_sha")
+        or prior.get("status") != "accepted"
+        or not re.fullmatch(r"[0-9a-f]{40}", prior_head)
+        or not re.fullmatch(r"[0-9a-f]{64}", prior_sha256)
+        or not re.fullmatch(r"[0-9a-f]{64}", packet_sha256)
+    ):
+        raise TaskReviewError(
+            "finalizing review recovery response receipt changed"
+        )
+    prior_response = {
+        "schema_version": 1,
+        "operation_id": prior["operation_id"],
+        "verification_operation_id": prior["verification_operation_id"],
+        "failed_head_sha": prior["failed_head_sha"],
+        "packet_sha256": packet_sha256,
+        "response": "fix-and-resubmit",
+        "resubmitted_head_sha": prior_head,
+    }
+    if _canonical_sha256(prior_response) != prior_sha256:
+        raise TaskReviewError(
+            "finalizing review recovery response receipt changed"
+        )
+    response_sha256 = str(response_receipt.get("response_sha256") or "")
+    if not re.fullmatch(r"[0-9a-f]{64}", response_sha256):
+        raise TaskReviewError(
+            "finalizing review recovery response receipt changed"
+        )
+    content_path = receipt_path.with_name(
+        f"response-receipt-{response_sha256}.json"
+    )
+    if content_path.exists() and (
+        not content_path.is_file()
+        or content_path.is_symlink()
+        or _read_json(content_path, "verification response receipt")
+        != response_receipt
+    ):
+        raise TaskReviewError(
+            "finalizing review recovery response receipt changed"
+        )
+    return content_path
 
 
 def _durable_verification_resubmit(
@@ -68,158 +141,81 @@ def _durable_verification_resubmit(
         raise TaskReviewError(
             "finalizing review recovery verification receipt is unavailable"
         )
-    receipt = _read_json(receipt_path, "verification receipt")
-    receipt_fields = {
-        "schema_version",
-        "operation_id",
-        "parent_operation_id",
-        "lane_id",
-        "run_id",
-        "definition_sha256",
-        "step_id",
-        "head_sha",
-        "input_sha256",
-        "profile",
-        "profile_sha256",
-        "effect_id",
-        "status",
-        "evidence",
-    }
     policy = meta.get("pipeline_policy")
     review_policy = meta.get("review_policy")
-    evidence = receipt.get("evidence")
-    input_sha256 = str(receipt.get("input_sha256") or "")
-    profile = str(receipt.get("profile") or "")
     if (
-        set(receipt) != receipt_fields
-        or receipt.get("schema_version") != 1
-        or receipt.get("operation_id") != operation_id
-        or receipt.get("parent_operation_id") != task_id
-        or not isinstance(policy, Mapping)
-        or receipt.get("definition_sha256")
-        != policy.get("definition_sha256")
-        or receipt.get("step_id") != "verify"
-        or receipt.get("head_sha") != previous_head
-        or not re.fullmatch(r"[0-9a-f]{64}", input_sha256)
+        not isinstance(policy, Mapping)
         or not isinstance(review_policy, Mapping)
-        or profile != review_policy.get("verification_profile")
-        or receipt.get("profile_sha256")
-        != review_policy.get("verification_profile_sha256")
-        or receipt.get("effect_id")
-        != f"pipeline-verify-{input_sha256[:32]}"
-        or receipt.get("status") != "failed"
-        or not isinstance(evidence, list)
-        or not evidence
-        or len(evidence) > 100
     ):
         raise TaskReviewError(
             "finalizing review recovery verification receipt is invalid"
         )
     try:
         parent = store.read(task_id, task_id)
-        expected_spec, expected_lane, expected_run = (
-            _pipeline_verify_identity(
-                parent.spec,
-                definition_sha256=str(receipt["definition_sha256"]),
-                input_sha256=input_sha256,
-                profile=profile,
-            )
+        authority = VerificationAuthority.load(
+            receipt_path,
+            store=store,
+            parent=parent,
+            runtime_root=owner_runtime,
+            expected_definition_sha256=str(
+                policy.get("definition_sha256") or ""
+            ),
+            expected_profile=str(
+                review_policy.get("verification_profile") or ""
+            ),
+            expected_profile_sha256=str(
+                review_policy.get("verification_profile_sha256") or ""
+            ),
+            expected_head_sha=previous_head,
+            allowed_statuses=("failed",),
+            child_states=("attention-required", "failed"),
+            require_released=True,
+            require_effect_succeeded=True,
         )
-        child = store.read(task_id, operation_id)
-    except (StoreError, ValueError) as exc:
+    except (StoreError, VerificationAuthorityError) as exc:
         raise TaskReviewError(
-            "finalizing review recovery verification operation is unavailable"
+            "finalizing review recovery verification authority is invalid"
         ) from exc
-    if (
-        expected_spec.operation_id != operation_id
-        or receipt.get("lane_id") != expected_lane
-        or receipt.get("run_id") != expected_run
-        or child.spec != expected_spec
-        or child.lane_id != expected_lane
-        or child.run_id != expected_run
-        or child.state not in {"attention-required", "failed"}
-        or child.resources != OwnedResources()
-        or child.pending_effect
-        or child.effect_id != receipt.get("effect_id")
-        or child.effect_outcome != EffectOutcome.SUCCEEDED
-    ):
+    if authority.operation_id != operation_id:
         raise TaskReviewError(
-            "finalizing review recovery verification operation changed"
+            "finalizing review recovery verification authority changed"
         )
-    packet_evidence: list[dict[str, object]] = []
-    for row in evidence:
-        if (
-            not isinstance(row, dict)
-            or set(row)
-            != {
-                "command_id",
-                "cwd",
-                "exit_code",
-                "started_at",
-                "finished_at",
-                "head_sha",
-                "profile",
-                "profile_sha256",
-                "output_pointer",
-                "output_sha256",
-                "output_bytes",
-                "schema_version",
-            }
-            or not isinstance(row.get("command_id"), str)
-            or not row["command_id"]
-            or type(row.get("exit_code")) is not int
-            or row.get("head_sha") != previous_head
-            or row.get("profile") != profile
-            or row.get("profile_sha256")
-            != receipt.get("profile_sha256")
-        ):
-            raise TaskReviewError(
-                "finalizing review recovery verification evidence is invalid"
-            )
-        try:
-            typed_evidence = VerificationEvidence(**row)
-        except (HarnessContractError, TypeError):
-            raise TaskReviewError(
-                "finalizing review recovery verification evidence is invalid"
-            ) from None
-        pointer = Path(typed_evidence.output_pointer)
-        output = (owner_runtime / pointer).resolve()
-        evidence_root = (owner_runtime / "pipeline-verification").resolve()
-        if (
-            pointer.is_absolute()
-            or evidence_root not in output.parents
-            or not output.is_file()
-            or output.is_symlink()
-            or not output_binding_valid(
-                typed_evidence, pointer_root=owner_runtime
-            )
-        ):
-            raise TaskReviewError(
-                "finalizing review recovery verification evidence is unavailable"
-            )
-        packet_evidence.append(
-            {
-                "command_id": row["command_id"],
-                "exit_code": row["exit_code"],
-                "output_pointer": str(output),
-            }
-        )
+    packet_evidence = [
+        {
+            "command_id": item.command_id,
+            "exit_code": item.exit_code,
+            "output_pointer": str(
+                (owner_runtime / item.output_pointer).resolve()
+            ),
+        }
+        for item in authority.evidence
+    ]
     expected_packet = {
-        "schema_version": 1,
+        "schema_version": VerificationAuthority.SCHEMA_VERSION,
         "operation_id": task_id,
-        "verification_operation_id": operation_id,
-        "verification_lane_id": expected_lane,
-        "verification_run_id": expected_run,
-        "definition_sha256": receipt["definition_sha256"],
+        "verification_operation_id": authority.operation_id,
+        "verification_lane_id": authority.lane_id,
+        "verification_run_id": authority.run_id,
+        "definition_sha256": authority.definition_sha256,
         "step_id": "verify",
-        "head_sha": previous_head,
+        "head_sha": authority.head_sha,
         "status": "attention-required",
         "reason": "verification-failed",
         "safe_boundary": "tdd-slices-complete",
-        "allowed_responses": ["fix-and-resubmit", "escalate"],
+        "allowed_responses": [
+            "fix-and-resubmit",
+            *(
+                ["retry-mechanism-flake"]
+                if authority.attempt.attempt_index == 0
+                else []
+            ),
+            "escalate",
+        ],
         "response_pointer": ".task-verification-response.json",
         "receipt_pointer": str(receipt_path),
         "evidence": packet_evidence,
+        "verification_attempt": authority.attempt.as_dict(),
+        "verification_attempt_sha256": authority.attempt.sha256,
     }
     packet_sha256 = _canonical_sha256(expected_packet)
     expected_response = {
@@ -244,7 +240,9 @@ def _durable_verification_resubmit(
         "response_sha256": _canonical_sha256(expected_response),
         "status": "accepted",
     }
-    response_receipt_path = receipt_path.with_name("response-receipt.json")
+    response_receipt_path = _response_receipt_path(
+        receipt_path, response_receipt, packet_sha256
+    )
     if response_receipt_path.exists() and (
         not response_receipt_path.is_file()
         or response_receipt_path.is_symlink()

@@ -3740,8 +3740,11 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         evidence_dir.mkdir(parents=True)
         output = evidence_dir / "scoped-1.log"
         output.write_text("failed before crash\n", encoding="utf-8")
+        verification_attempt = VerificationAttempt(
+            crash_task, "scoped", profile_sha, failed_head, 0
+        )
         child_receipt = {
-            "schema_version": 1,
+            "schema_version": 2,
             "operation_id": child.operation_id,
             "parent_operation_id": crash_task,
             "lane_id": lane_id,
@@ -3754,6 +3757,8 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
             "profile_sha256": profile_sha,
             "effect_id": effect_id,
             "status": "failed",
+            "verification_attempt": verification_attempt.as_dict(),
+            "verification_attempt_sha256": verification_attempt.sha256,
             "evidence": [
                 {
                     "profile": "scoped",

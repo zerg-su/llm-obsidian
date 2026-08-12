@@ -78,6 +78,7 @@ from harness.status_segment import LiveInventory
 from harness.store import OperationStore
 from harness.supervisor import OperationSupervisor
 from harness.runtime_worker import _pipeline_verify_identity
+from harness.verification_attempt import pipeline_verify_effect_id
 from harness.review_attempt import (
     ReviewAttempt,
     ReviewAttemptIdentity,
@@ -281,24 +282,16 @@ def _verification_receipt(
 ) -> str:
     parent_record = store.read(owner, parent)
     input_sha = input_char * 64
-    operation_id, lane_id, run_id, effect_id = dashboard_receipts.verification_identity(
-        parent_record.spec, definition, input_sha, attempt_index
+    child_spec, lane_id, run_id = _pipeline_verify_identity(
+        parent_record.spec,
+        definition_sha256=definition,
+        input_sha256=input_sha,
+        profile=parent_record.spec.verification_profile,
+        attempt_index=attempt_index,
     )
-    store.create(
-        OperationSpec(
-            operation_id,
-            f"{operation_id}-key",
-            "pipeline-verify",
-            owner,
-            _route(),
-            "packets/task.json",
-            "scoped",
-            contract_sha256=definition,
-            parent_operation_id=parent,
-        ),
-        lane_id=lane_id,
-        run_id=run_id,
-    )
+    operation_id = child_spec.operation_id
+    effect_id = pipeline_verify_effect_id(input_sha, attempt_index)
+    store.create(child_spec, lane_id=lane_id, run_id=run_id)
     output = runtime / "verification-output.log"
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_bytes(b"ok\n")

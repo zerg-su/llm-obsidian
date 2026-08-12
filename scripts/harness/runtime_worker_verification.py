@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 from .runtime_worker import *
-from .contracts import ContractError, VerificationEvidence
 from .runtime_worker import (
     _atomic_json,
     _bounded_file_sha256,
@@ -11,13 +10,14 @@ from .runtime_worker import (
     _current_callback_receipt_sha256,
     _envelope,
     _normalize_fetch_errors_at_provider_boundary,
-    _pipeline_verify_effect_id,
-    _pipeline_verify_identity,
     _research_input_provenance,
     _review_resolution_handoff_ready,
     _submit_failure_requires_attention,
 )
-from .verification import output_binding_valid
+from .verification import (
+    VerificationAuthority,
+    VerificationAuthorityError,
+)
 
 
 class RuntimeWorkerVerificationMixin:
@@ -26,25 +26,8 @@ class RuntimeWorkerVerificationMixin:
         self, receipt: dict[str, object]
     ) -> VerificationAttempt:
         try:
-            if receipt.get("schema_version") == 2:
-                attempt = VerificationAttempt.from_dict(
-                    receipt.get("verification_attempt")
-                )
-                if receipt.get("verification_attempt_sha256") != attempt.sha256:
-                    raise VerificationAttemptError(
-                        "verification attempt digest is invalid"
-                    )
-            else:
-                attempt = VerificationAttempt(
-                    parent_operation_id=str(
-                        receipt.get("parent_operation_id") or ""
-                    ),
-                    profile=str(receipt.get("profile") or ""),
-                    profile_sha256=str(receipt.get("profile_sha256") or ""),
-                    exact_head_sha=str(receipt.get("head_sha") or ""),
-                    attempt_index=0,
-                )
-        except VerificationAttemptError as exc:
+            attempt = VerificationAuthority.attempt_from(receipt)
+        except VerificationAuthorityError as exc:
             raise RuntimeWorkerError(
                 "pipeline verification attempt identity is invalid"
             ) from exc
@@ -62,109 +45,31 @@ class RuntimeWorkerVerificationMixin:
     def load_verification_receipt(self, receipt_path: Path) -> dict[str, object] | None:
         if not receipt_path.exists():
             return None
-        if not receipt_path.is_file() or receipt_path.is_symlink():
-            raise RuntimeWorkerError("pipeline verification receipt is invalid")
-        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
-        evidence = receipt.get("evidence") if isinstance(receipt, dict) else None
-        if (
-            not isinstance(receipt, dict)
-            or receipt.get("schema_version") not in {1, 2}
-            or receipt.get("parent_operation_id") != self.spec["operation_id"]
-            or (receipt.get("definition_sha256") != self.pipeline.definition_sha256)
-            or (receipt.get("step_id") != "verify")
-            or (receipt.get("profile") != self.profile.name)
-            or (receipt.get("profile_sha256") != self.profile.sha256)
-            or (not re.fullmatch("[0-9a-f]{40,64}", str(receipt.get("head_sha") or "")))
-            or (receipt.get("status") not in {"complete", "failed"})
-            or (not IDENTIFIER.fullmatch(str(receipt.get("operation_id") or "")))
-            or (not IDENTIFIER.fullmatch(str(receipt.get("lane_id") or "")))
-            or (not IDENTIFIER.fullmatch(str(receipt.get("run_id") or "")))
-            or (not isinstance(evidence, list))
-            or (not evidence)
-        ):
-            raise RuntimeWorkerError("pipeline verification receipt is invalid")
-        receipt_head = str(receipt["head_sha"])
-        attempt = self.verification_attempt_from_receipt(receipt)
-        receipt_input_sha256 = str(receipt.get("input_sha256") or "")
-        if not re.fullmatch("[0-9a-f]{64}", receipt_input_sha256):
-            raise RuntimeWorkerError("pipeline verification input identity is invalid")
-        expected_spec, expected_lane_id, expected_run_id = _pipeline_verify_identity(
-            self.operation.spec,
-            definition_sha256=self.pipeline.definition_sha256,
-            input_sha256=receipt_input_sha256,
-            profile=self.profile.name,
-            attempt_index=attempt.attempt_index,
-        )
-        if (
-            receipt.get("input_sha256") != receipt_input_sha256
-            or receipt.get("operation_id") != expected_spec.operation_id
-            or receipt.get("lane_id") != expected_lane_id
-            or (receipt.get("run_id") != expected_run_id)
-            or (
-                receipt.get("effect_id")
-                != _pipeline_verify_effect_id(
-                    receipt_input_sha256, attempt.attempt_index
-                )
-            )
-        ):
-            raise RuntimeWorkerError("pipeline verification replay identity is invalid")
-        exit_codes: list[int] = []
-        heads: set[str] = set()
-        command_ids: list[str] = []
-        for row in evidence:
-            if (
-                not isinstance(row, dict)
-                or row.get("profile") != self.profile.name
-                or row.get("profile_sha256") != self.profile.sha256
-                or (type(row.get("exit_code")) is not int)
-                or (not re.fullmatch("[0-9a-f]{40,64}", str(row.get("head_sha") or "")))
-            ):
-                raise RuntimeWorkerError("pipeline verification evidence is invalid")
-            try:
-                typed_evidence = VerificationEvidence(**row)
-            except (ContractError, TypeError):
-                raise RuntimeWorkerError("pipeline verification evidence is invalid") from None
-            if not output_binding_valid(
-                typed_evidence, pointer_root=self.spec_path.parent
-            ):
-                raise RuntimeWorkerError("pipeline verification output is invalid")
-            exit_codes.append(int(row["exit_code"]))
-            heads.add(str(row["head_sha"]))
-            command_ids.append(str(row.get("command_id") or ""))
-        succeeded = all((code == 0 for code in exit_codes))
         expected_command_ids = [
             f"{self.profile.name}-{index + 1}"
             for index in range(
                 len(compose_commands(self.profile, self.pipeline_extra_commands))
             )
         ]
-        if (
-            len(heads) != 1
-            or heads != {receipt_head}
-            or command_ids != expected_command_ids[: len(command_ids)]
-            or (succeeded and len(command_ids) != len(expected_command_ids))
-            or (not succeeded and exit_codes[-1] == 0)
-            or ((receipt["status"] == "complete") != succeeded)
-        ):
-            raise RuntimeWorkerError("pipeline verification outcome is invalid")
-        stored = self.store.read(self.spec["owner_id"], expected_spec.operation_id)
-        if (
-            stored.spec != expected_spec
-            or stored.lane_id != expected_lane_id
-            or stored.run_id != expected_run_id
-        ):
-            raise RuntimeWorkerError(
-                "pipeline verification operation identity is invalid"
+        try:
+            parent = self.store.read(
+                self.spec["owner_id"], self.spec["operation_id"]
             )
-        expected_path = (
-            self.spec_path.parent
-            / "pipeline-verification"
-            / expected_spec.operation_id
-            / "receipt.json"
-        )
-        if receipt_path.resolve() != expected_path.resolve():
-            raise RuntimeWorkerError("pipeline verification receipt pointer is invalid")
-        return receipt
+            authority = VerificationAuthority.load(
+                receipt_path,
+                store=self.store,
+                parent=parent,
+                runtime_root=self.spec_path.parent,
+                expected_definition_sha256=self.pipeline.definition_sha256,
+                expected_profile=self.profile.name,
+                expected_profile_sha256=self.profile.sha256,
+                expected_command_ids=expected_command_ids,
+            )
+        except VerificationAuthorityError as exc:
+            raise RuntimeWorkerError(
+                "pipeline verification receipt is invalid"
+            ) from exc
+        return authority.to_dict()
 
     def controller_verification_receipt(self) -> dict[str, object] | None:
         linked: dict[str, object] | None = None
@@ -939,35 +844,36 @@ class RuntimeWorkerVerificationMixin:
                 return evidence
 
             def persist_verification(_record: object, evidence: list[object]) -> None:
-                rows = [to_dict(item) for item in evidence]
+                expected_command_ids = tuple(
+                    f"{self.profile.name}-{index + 1}"
+                    for index in range(
+                        len(
+                            compose_commands(
+                                self.profile, self.pipeline_extra_commands
+                            )
+                        )
+                    )
+                )
+                try:
+                    authority = VerificationAuthority.issue(
+                        store=self.store,
+                        parent=self.operation,
+                        runtime_root=self.spec_path.parent,
+                        definition_sha256=self.pipeline.definition_sha256,
+                        input_sha256=self.verification_input_sha256,
+                        profile=self.profile.name,
+                        profile_sha256=self.profile.sha256,
+                        attempt=self.verification_attempt,
+                        evidence=tuple(evidence),
+                        expected_command_ids=expected_command_ids,
+                    )
+                except VerificationAuthorityError as exc:
+                    raise RuntimeWorkerError(
+                        "pipeline verification authority is invalid"
+                    ) from exc
                 _atomic_json(
                     self.verification_receipt_path,
-                    {
-                        "schema_version": 2,
-                        "operation_id": self.verification_spec.operation_id,
-                        "parent_operation_id": self.spec["operation_id"],
-                        "lane_id": self.verification_lane_id,
-                        "run_id": self.verification_run_id,
-                        "definition_sha256": self.pipeline.definition_sha256,
-                        "step_id": "verify",
-                        "head_sha": self.verification_head,
-                        "input_sha256": self.verification_input_sha256,
-                        "profile": self.profile.name,
-                        "profile_sha256": self.profile.sha256,
-                        "effect_id": self.verification_effect_id,
-                        "verification_attempt": (
-                            self.verification_attempt.as_dict()
-                        ),
-                        "verification_attempt_sha256": (
-                            self.verification_attempt.sha256
-                        ),
-                        "status": (
-                            "complete"
-                            if all((row["exit_code"] == 0 for row in rows))
-                            else "failed"
-                        ),
-                        "evidence": rows,
-                    },
+                    authority.to_dict(),
                 )
                 persisted = json.loads(
                     self.verification_receipt_path.read_text(encoding="utf-8")

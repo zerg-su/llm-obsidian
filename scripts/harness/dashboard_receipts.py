@@ -32,8 +32,13 @@ from .review_attempt import (
 )
 from .state_machine import TERMINAL
 from .store import OperationStore, StoreError
-from .verification import output_binding_valid
-from .verification_attempt import VerificationAttempt, VerificationAttemptError
+from .verification import VerificationAuthority, VerificationAuthorityError
+from .verification_attempt import (
+    VerificationAttempt,
+    VerificationAttemptError,
+    pipeline_verify_effect_id,
+    pipeline_verify_identity,
+)
 from .workflows.engineering_fix import FixWorkflowError, load_receipt
 from .workflows.engineering_fix_model import PAYLOAD_FIELDS
 
@@ -413,28 +418,19 @@ def verification_identity(
 ) -> tuple[str, str, str, str]:
     """Derive the production verification operation, lane, run, and effect."""
 
-    suffix = f"-verify-{input_sha256[:16]}" + (
-        f"-a{attempt_index}" if attempt_index else ""
+    spec, lane, run = pipeline_verify_identity(
+        parent,
+        definition_sha256=definition_sha256,
+        input_sha256=input_sha256,
+        profile=parent.verification_profile,
+        attempt_index=attempt_index,
     )
-    operation_id = f"{parent.operation_id[: 128 - len(suffix)]}{suffix}"
-    attempt = f":attempt:{attempt_index}" if attempt_index else ""
-    key = hashlib.sha256(
-        (
-            f"{parent.idempotency_key}:pipeline-verify:{operation_id}:"
-            f"{definition_sha256}:{input_sha256}:{parent.verification_profile}{attempt}"
-        ).encode()
-    ).hexdigest()
-    lane = hashlib.sha256(f"{key}:lane".encode()).hexdigest()[:32]
-    run = hashlib.sha256(f"{key}:run".encode()).hexdigest()[:32]
-    effect = (
-        "pipeline-verify-" + input_sha256[:32]
-        if not attempt_index
-        else "pipeline-verify-"
-        + hashlib.sha256(
-            f"{input_sha256}:attempt:{attempt_index}".encode()
-        ).hexdigest()[:32]
+    return (
+        spec.operation_id,
+        lane,
+        run,
+        pipeline_verify_effect_id(input_sha256, attempt_index),
     )
-    return operation_id, lane, run, effect
 
 
 def verification_receipt_status(
@@ -445,80 +441,17 @@ def verification_receipt_status(
 ) -> str:
     """Classify one verification receipt through its accepted durable identity."""
 
-    value = _read_object(path, boundary=runtime)
-    evidence = value.get("evidence") if value else None
     try:
-        if (
-            value is None
-            or value.get("schema_version") not in {1, 2}
-            or value.get("parent_operation_id") != record.spec.operation_id
-            or value.get("definition_sha256") != record.spec.contract_sha256
-            or value.get("step_id") != "verify"
-            or value.get("profile") != record.spec.verification_profile
-            or not re.fullmatch(
-                r"[0-9a-f]{64}", str(value.get("profile_sha256") or "")
-            )
-            or not re.fullmatch(
-                r"[0-9a-f]{40,64}", str(value.get("head_sha") or "")
-            )
-            or value.get("status") not in {"complete", "failed"}
-            or not isinstance(evidence, list)
-            or not evidence
-        ):
-            raise ValueError
-        attempt = _verification_attempt(value, record)
-        input_sha = str(value.get("input_sha256") or "")
-        if not re.fullmatch(r"[0-9a-f]{64}", input_sha):
-            raise ValueError
-        operation_id, lane_id, run_id, effect_id = verification_identity(
-            record.spec,
-            record.spec.contract_sha256,
-            input_sha,
-            attempt.attempt_index,
+        authority = VerificationAuthority.load(
+            path,
+            store=store,
+            parent=record,
+            runtime_root=runtime,
+            expected_definition_sha256=record.spec.contract_sha256,
+            expected_profile=record.spec.verification_profile,
         )
-        child = store.read(record.spec.owner_id, operation_id)
-        expected_path = (
-            runtime / "pipeline-verification" / operation_id / "receipt.json"
-        )
-        if (
-            attempt.parent_operation_id != record.spec.operation_id
-            or attempt.profile != record.spec.verification_profile
-            or attempt.profile_sha256 != value["profile_sha256"]
-            or attempt.exact_head_sha != value["head_sha"]
-            or value.get("operation_id") != operation_id
-            or value.get("lane_id") != lane_id
-            or value.get("run_id") != run_id
-            or value.get("effect_id") != effect_id
-            or child.spec.kind != "pipeline-verify"
-            or child.spec.parent_operation_id != record.spec.operation_id
-            or child.spec.contract_sha256 != record.spec.contract_sha256
-            or child.lane_id != lane_id
-            or child.run_id != run_id
-            or path.resolve() != expected_path.resolve()
-        ):
-            raise ValueError
-        exit_codes: list[int] = []
-        for row in evidence:
-            typed = VerificationEvidence(**row)
-            if (
-                typed.profile != record.spec.verification_profile
-                or typed.profile_sha256 != value["profile_sha256"]
-                or typed.head_sha != value["head_sha"]
-                or not output_binding_valid(typed, pointer_root=runtime)
-            ):
-                raise ValueError
-            exit_codes.append(typed.exit_code)
-        succeeded = all(code == 0 for code in exit_codes)
-        if (value["status"] == "complete") != succeeded:
-            raise ValueError
-        return str(value["status"])
-    except (
-        ContractError,
-        StoreError,
-        TypeError,
-        ValueError,
-        VerificationAttemptError,
-    ):
+        return authority.status
+    except VerificationAuthorityError:
         return "invalid"
 
 
@@ -527,24 +460,11 @@ def _verification_attempt(
 ) -> VerificationAttempt:
     """Load the exact attempt identity carried by one receipt generation."""
 
-    if value.get("schema_version") == 2:
-        attempt = VerificationAttempt.from_dict(
-            value.get("verification_attempt")
-        )
-        if value.get("verification_attempt_sha256") != attempt.sha256:
-            raise VerificationAttemptError(
-                "verification attempt digest is invalid"
-            )
-        return attempt
-    if value.get("schema_version") == 1:
-        return VerificationAttempt(
-            record.spec.operation_id,
-            record.spec.verification_profile,
-            str(value.get("profile_sha256") or ""),
-            str(value.get("head_sha") or ""),
-            0,
-        )
-    raise VerificationAttemptError("verification attempt schema is invalid")
+    del record
+    try:
+        return VerificationAuthority.attempt_from(value)
+    except VerificationAuthorityError as exc:
+        raise VerificationAttemptError(str(exc)) from exc
 
 
 def verification_receipt_visits(

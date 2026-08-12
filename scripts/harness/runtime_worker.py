@@ -77,6 +77,8 @@ from .verification_attempt import (
     VerificationAttempt,
     VerificationAttemptError,
     mechanism_flake_decision_text,
+    pipeline_verify_effect_id,
+    pipeline_verify_identity,
     verification_input_sha256,
 )
 from .workflows.engineering_fix import (
@@ -300,53 +302,25 @@ def _pipeline_verify_identity(
 ) -> tuple[OperationSpec, str, str]:
     """Derive one immutable verify operation from its exact pipeline input."""
 
-    if type(attempt_index) is not int or attempt_index not in {0, 1}:
-        raise RuntimeWorkerError("pipeline verification attempt index is invalid")
-    suffix = f"-verify-{input_sha256[:16]}"
-    if attempt_index:
-        suffix += f"-a{attempt_index}"
-    operation_id = f"{parent.operation_id[: 128 - len(suffix)]}{suffix}"
-    attempt_binding = f":attempt:{attempt_index}" if attempt_index else ""
-    idempotency_key = hashlib.sha256(
-        (
-            f"{parent.idempotency_key}:pipeline-verify:{operation_id}:"
-            f"{definition_sha256}:{input_sha256}:{profile}{attempt_binding}"
-        ).encode()
-    ).hexdigest()
-    child = OperationSpec(
-        operation_id=operation_id,
-        idempotency_key=idempotency_key,
-        kind="pipeline-verify",
-        owner_id=parent.owner_id,
-        route=parent.route,
-        context_manifest=parent.context_manifest,
-        verification_profile=profile,
-        keep_open=False,
-        contract_sha256=definition_sha256,
-        parent_operation_id=parent.operation_id,
-    )
-    lane_id = hashlib.sha256(
-        f"{idempotency_key}:lane".encode()
-    ).hexdigest()[:32]
-    run_id = hashlib.sha256(
-        f"{idempotency_key}:run".encode()
-    ).hexdigest()[:32]
-    return child, lane_id, run_id
+    try:
+        return pipeline_verify_identity(
+            parent,
+            definition_sha256=definition_sha256,
+            input_sha256=input_sha256,
+            profile=profile,
+            attempt_index=attempt_index,
+        )
+    except VerificationAttemptError as exc:
+        raise RuntimeWorkerError(str(exc)) from exc
 
 
 def _pipeline_verify_effect_id(input_sha256: str, attempt_index: int = 0) -> str:
     """Keep attempt-zero compatibility while separating the one retry effect."""
 
-    if not re.fullmatch(r"[0-9a-f]{64}", input_sha256):
-        raise RuntimeWorkerError("pipeline verification input identity is invalid")
-    if type(attempt_index) is not int or attempt_index not in {0, 1}:
-        raise RuntimeWorkerError("pipeline verification attempt index is invalid")
-    if attempt_index == 0:
-        return "pipeline-verify-" + input_sha256[:32]
-    digest = hashlib.sha256(
-        f"{input_sha256}:attempt:{attempt_index}".encode()
-    ).hexdigest()
-    return "pipeline-verify-" + digest[:32]
+    try:
+        return pipeline_verify_effect_id(input_sha256, attempt_index)
+    except VerificationAttemptError as exc:
+        raise RuntimeWorkerError(str(exc)) from exc
 
 
 def provider_exit_is_final(
