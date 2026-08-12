@@ -273,7 +273,6 @@ def _verification_receipt(
     definition: str,
     *,
     status: str = "complete",
-    input_char: str = "6",
     head_char: str = "8",
     attempt_index: int = 0,
     owner: str = OWNER,
@@ -281,7 +280,13 @@ def _verification_receipt(
     finished_at: str = "2026-08-11T00:03:00Z",
 ) -> str:
     parent_record = store.read(owner, parent)
-    input_sha = input_char * 64
+    head_sha = head_char * 40
+    input_sha = verification_input_sha256(
+        definition,
+        head_sha,
+        "7" * 64,
+        1,
+    )
     child_spec, lane_id, run_id = _pipeline_verify_identity(
         parent_record.spec,
         definition_sha256=definition,
@@ -295,7 +300,6 @@ def _verification_receipt(
     output = runtime / "verification-output.log"
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_bytes(b"ok\n")
-    head_sha = head_char * 40
     evidence = VerificationEvidence(
         "scoped", "7" * 64, head_sha, "scoped-1", ".",
         0 if status == "complete" else 1, started_at, finished_at,
@@ -1335,10 +1339,10 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-receipts.") as raw:
     _advance(store, DISPATCH, "preflight", "starting", "running")
     runtime = store_root / "owners" / OWNER / "runtime" / DISPATCH
     first = _verification_receipt(
-        store, DISPATCH, runtime, compiled.definition_sha256, input_char="6"
+        store, DISPATCH, runtime, compiled.definition_sha256
     )
     _verification_receipt(
-        store, DISPATCH, runtime, compiled.definition_sha256, input_char="9"
+        store, DISPATCH, runtime, compiled.definition_sha256, attempt_index=1
     )
     projection = project(store_root, OWNER, inventory=LiveInventory({}))
     verify = next(step for step in projection.programs[0].steps if step.step_id == "verify")
@@ -1408,7 +1412,6 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-stale-verify.") as ra
         runtime,
         compiled.definition_sha256,
         status="failed",
-        input_char="6",
         head_char="8",
     )
     current_verification = _verification_receipt(
@@ -1416,7 +1419,6 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-stale-verify.") as ra
         DISPATCH,
         runtime,
         compiled.definition_sha256,
-        input_char="9",
         head_char="a",
     )
     _write_gate(
@@ -1482,7 +1484,6 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-missing-current-verif
         DISPATCH,
         runtime,
         compiled.definition_sha256,
-        input_char="6",
         head_char="8",
     )
     _write_gate(

@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from harness.audit_manifest import load_audit_manifest  # noqa: E402
+import task_review_context  # noqa: E402
 
 
 def check(label: str, value: bool, detail: object = "") -> None:
@@ -75,6 +76,14 @@ sys.modules[quality_spec.name] = quality
 quality_spec.loader.exec_module(quality)
 authority = quality.audit_rc1_active_authority(ROOT)
 authority_paths = set(quality.active_authority_files(ROOT))
+amendment_owner = Path(
+    sys.modules[task_review_context.load_amendments.__module__].__file__
+).resolve().relative_to(ROOT).as_posix()
+check(
+    "the amendment reader's production owner is independently measured",
+    amendment_owner in authority_paths,
+    amendment_owner,
+)
 check(
     "the separately owned authority manifest is the exact measured contour",
     authority_paths

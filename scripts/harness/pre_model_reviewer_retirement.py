@@ -63,6 +63,48 @@ def review_attempt_records_are_quiescent(
     return True
 
 
+def review_attempt_records_are_released(
+    store: object,
+    attempt: ReviewAttempt,
+) -> bool:
+    """Prove an effectful predecessor retained no runtime resources."""
+
+    try:
+        for lane in attempt.identity.lanes:
+            rows = list(store.list(lane.owner_id))
+            parents = [
+                row for row in rows
+                if row.spec.operation_id == lane.operation_id
+            ]
+            children = [
+                row for row in rows
+                if row.spec.parent_operation_id == lane.operation_id
+            ]
+            if len(parents) != 1 or len(children) > 1:
+                return False
+            parent = parents[0]
+            if any((
+                parent.lane_id != lane.lane_id,
+                parent.run_id != lane.run_id,
+                parent.state not in TERMINAL,
+                parent.resources != OwnedResources(),
+                bool(parent.pending_effect),
+            )):
+                return False
+            if any(
+                child.spec.kind != "review-round"
+                or child.lane_id != lane.lane_id
+                or child.state not in TERMINAL
+                or child.resources != OwnedResources()
+                or bool(child.pending_effect)
+                for child in children
+            ):
+                return False
+    except (AttributeError, StoreError, TypeError, ValueError):
+        return False
+    return True
+
+
 def _quiescent_parent(parent: object, lane: object) -> bool:
     route = parent.spec.route
     return not any(

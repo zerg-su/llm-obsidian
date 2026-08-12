@@ -56,6 +56,7 @@ from harness.verification import load_profiles
 from harness.verification_attempt import (  # noqa: E402
     VerificationAttempt,
     mechanism_flake_decision_text,
+    verification_input_sha256,
 )
 from harness.workflows.reap import run_reap
 from harness.workflows.review import (
@@ -3689,19 +3690,12 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
             capture_output=True,
             check=True,
         ).stdout.strip()
-        input_sha256 = hashlib.sha256(
-            json.dumps(
-                {
-                    "definition_sha256": pipeline.definition_sha256,
-                    "head_sha": failed_head,
-                    "profile_sha256": profile_sha,
-                    "schema_version": 1,
-                    "summary": valid_summary,
-                },
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode()
-        ).hexdigest()
+        input_sha256 = verification_input_sha256(
+            pipeline.definition_sha256,
+            failed_head,
+            profile_sha,
+            1,
+        )
         child, lane_id, run_id = _pipeline_verify_identity(
             parent.spec,
             definition_sha256=pipeline.definition_sha256,

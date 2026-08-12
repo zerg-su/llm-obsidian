@@ -34,8 +34,10 @@ from harness.verification import (  # noqa: E402
 )
 from harness.verification_attempt import (  # noqa: E402
     VerificationAttempt,
+    VERIFICATION_STEP_SCHEMA_VERSION,
     pipeline_verify_effect_id,
     pipeline_verify_identity,
+    verification_input_sha256,
 )
 from task_review_verification_resubmit import (  # noqa: E402
     _accepted_response_receipt,
@@ -54,10 +56,15 @@ with tempfile.TemporaryDirectory(prefix="verification-authority.") as raw:
     owner = "verification-parent"
     definition_sha256 = "3" * 64
     failed_head = "f" * 40
-    input_sha256 = "4" * 64
     profile = load_profiles(ROOT / "config/verification-profiles.toml")[
         "scoped"
     ]
+    input_sha256 = verification_input_sha256(
+        definition_sha256,
+        failed_head,
+        profile.sha256,
+        VERIFICATION_STEP_SCHEMA_VERSION,
+    )
     route = RuntimeRoute(
         "codex", "gpt-5.6-sol", "high", "executor", "7" * 64
     )
@@ -175,6 +182,50 @@ with tempfile.TemporaryDirectory(prefix="verification-authority.") as raw:
         and authority.attempt == attempt,
     )
 
+    arbitrary_input = "4" * 64
+    arbitrary_spec, arbitrary_lane, arbitrary_run = pipeline_verify_identity(
+        parent.spec,
+        definition_sha256=definition_sha256,
+        input_sha256=arbitrary_input,
+        profile=profile.name,
+        attempt_index=0,
+    )
+    store.create(
+        arbitrary_spec, lane_id=arbitrary_lane, run_id=arbitrary_run
+    )
+    for state in ("preflight", "starting", "running", "verifying"):
+        store.transition(owner, arbitrary_spec.operation_id, state)
+    arbitrary_effect = pipeline_verify_effect_id(arbitrary_input, 0)
+    store.begin_effect(owner, arbitrary_spec.operation_id, arbitrary_effect)
+    store.resolve_effect(
+        owner, arbitrary_spec.operation_id, EffectOutcome.SUCCEEDED
+    )
+    store.transition(owner, arbitrary_spec.operation_id, "failed")
+    self_consistent_arbitrary = {
+        **receipt,
+        "operation_id": arbitrary_spec.operation_id,
+        "lane_id": arbitrary_lane,
+        "run_id": arbitrary_run,
+        "input_sha256": arbitrary_input,
+        "effect_id": arbitrary_effect,
+    }
+    try:
+        VerificationAuthority.validate(
+            self_consistent_arbitrary,
+            store=store,
+            parent=parent,
+            runtime_root=runtime_root,
+            allowed_statuses=("failed",),
+            child_states=("failed",),
+            require_released=True,
+            require_effect_succeeded=True,
+        )
+    except VerificationAuthorityError:
+        pass
+    else:
+        raise AssertionError("arbitrary verification input digest was authoritative")
+    check("canonical verification input digest rejects a self-consistent fork", True)
+
     fake_worker = SimpleNamespace(
         store=store,
         operation=parent,
@@ -183,6 +234,16 @@ with tempfile.TemporaryDirectory(prefix="verification-authority.") as raw:
         pipeline=SimpleNamespace(definition_sha256=definition_sha256),
         profile=profile,
         pipeline_extra_commands=(),
+    )
+    fake_worker.load_verification_receipt = lambda path: (
+        RuntimeWorkerVerificationMixin.load_verification_receipt(
+            fake_worker, path
+        )
+    )
+    fake_worker.verification_response_accepted = lambda value: (
+        RuntimeWorkerVerificationMixin.verification_response_accepted(
+            fake_worker, value
+        )
     )
     loaded = RuntimeWorkerVerificationMixin.load_verification_receipt(
         fake_worker, receipt_path
@@ -309,19 +370,16 @@ with tempfile.TemporaryDirectory(prefix="verification-authority.") as raw:
             == "invalid",
         )
 
-    changed_response = (
-        runtime_root
-        / "pipeline-verification"
-        / "changed-head-attempt"
-        / "response-receipt.json"
+    receipt_path.write_text(
+        json.dumps(receipt, sort_keys=True) + "\n", encoding="utf-8"
     )
-    changed_response.parent.mkdir(parents=True)
+    changed_response = receipt_path.with_name("response-receipt.json")
     changed_response.write_text(
         json.dumps(
             _accepted_response_receipt(
                 owner,
-                "changed-head-attempt",
-                "a" * 40,
+                child_spec.operation_id,
+                failed_head,
                 "b" * 40,
                 "c" * 64,
             ),
@@ -359,5 +417,34 @@ with tempfile.TemporaryDirectory(prefix="verification-authority.") as raw:
     else:
         raise AssertionError("schema-v1 changed-HEAD budget receipt was accepted")
     check("malformed resubmit budget evidence fails closed", True)
+
+    changed_response.unlink()
+    foreign_response = (
+        runtime_root
+        / "pipeline-verification"
+        / "foreign-child"
+        / "response-receipt.json"
+    )
+    foreign_response.parent.mkdir(parents=True)
+    foreign_response.write_text(
+        json.dumps(
+            _accepted_response_receipt(
+                "foreign-parent",
+                "foreign-child",
+                failed_head,
+                "b" * 40,
+                "c" * 64,
+            ),
+            sort_keys=True,
+        ) + "\n",
+        encoding="utf-8",
+    )
+    try:
+        RuntimeWorkerVerificationMixin.changed_head_resubmit_count(fake_worker)
+    except RuntimeWorkerError:
+        pass
+    else:
+        raise AssertionError("foreign changed-HEAD receipt was counted")
+    check("foreign changed-HEAD budget evidence fails closed", True)
 
 print("verification authority matrix: ok")

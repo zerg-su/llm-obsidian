@@ -245,6 +245,14 @@ class RuntimeWorkerVerificationMixin:
         for path in receipts_root.glob("*/response-receipt.json"):
             if path.is_symlink() or not path.is_file():
                 raise RuntimeWorkerError("verification response receipt is invalid")
+            receipt_path = path.with_name("receipt.json")
+            receipt = self.load_verification_receipt(receipt_path)
+            if (
+                receipt is None
+                or path.parent.name != receipt.get("operation_id")
+                or not self.verification_response_accepted(receipt)
+            ):
+                raise RuntimeWorkerError("verification response receipt is invalid")
             value = json.loads(path.read_text(encoding="utf-8"))
             changed_head_fields = {
                 "schema_version",
@@ -260,15 +268,12 @@ class RuntimeWorkerVerificationMixin:
             if (
                 value.get("schema_version") != 2
                 or value.get("status") != "accepted"
-                or not IDENTIFIER.fullmatch(str(value.get("operation_id") or ""))
-                or not IDENTIFIER.fullmatch(
-                    str(value.get("verification_operation_id") or "")
-                )
+                or value.get("operation_id") != self.spec["operation_id"]
+                or value.get("verification_operation_id")
+                != receipt["operation_id"]
+                or value.get("failed_head_sha") != receipt["head_sha"]
                 or not re.fullmatch(
-                    "[0-9a-f]{40}", str(value.get("failed_head_sha") or "")
-                )
-                or not re.fullmatch(
-                    "[0-9a-f]{40}",
+                    "[0-9a-f]{40,64}",
                     str(value.get("resubmitted_head_sha") or ""),
                 )
                 or not re.fullmatch(

@@ -16,6 +16,7 @@ from ..finalization_ledger import (
 )
 from ..pre_model_reviewer_retirement import (
     review_attempt_records_are_quiescent,
+    review_attempt_records_are_released,
 )
 from ..review_input_rollover import archive_prior_review_input
 from ..store import StoreError
@@ -448,6 +449,9 @@ class ReviewGateAttemptMixin:
                         and current.get("dispatch_operation_id")
                         == dispatch_operation_id
                         and current.get("product_root") == str(product_root)
+                        and review_attempt_records_are_released(
+                            self.round_store, existing
+                        )
                     )
                     retry_callbacks_absent = (
                         runtime_root is not None

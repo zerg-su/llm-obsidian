@@ -22,6 +22,7 @@ ATTEMPT_FIELDS = {
     "attempt_index",
 }
 MAX_SAME_HEAD_ATTEMPT_INDEX = 1
+VERIFICATION_STEP_SCHEMA_VERSION = 1
 
 
 class VerificationAttemptError(ValueError):

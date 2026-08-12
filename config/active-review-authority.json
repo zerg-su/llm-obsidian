@@ -18,6 +18,7 @@
     "scripts/harness/verification_attempt.py",
     "scripts/harness/workflows/review_gate_attempt.py",
     "scripts/harness/workflows/review_gate_recovery.py",
+    "scripts/task_escalation_records.py",
     "scripts/task_review_context.py",
     "scripts/task_review_finalization_attempt.py",
     "scripts/task_review_flow.py",

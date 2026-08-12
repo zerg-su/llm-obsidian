@@ -31,6 +31,8 @@ from .verification_attempt import (
     VerificationAttemptError,
     pipeline_verify_effect_id,
     pipeline_verify_identity,
+    verification_input_sha256,
+    VERIFICATION_STEP_SCHEMA_VERSION,
 )
 
 
@@ -397,11 +399,18 @@ class VerificationAuthority:
         profile = str(value.get("profile") or "")
         profile_sha256 = str(value.get("profile_sha256") or "")
         status = str(value.get("status") or "")
+        canonical_input_sha256 = verification_input_sha256(
+            definition_sha256,
+            head_sha,
+            profile_sha256,
+            VERIFICATION_STEP_SCHEMA_VERSION,
+        )
         if (
             value.get("parent_operation_id") != parent.spec.operation_id
             or value.get("step_id") != "verify"
             or not re.fullmatch(r"[0-9a-f]{64}", definition_sha256)
             or not re.fullmatch(r"[0-9a-f]{64}", input_sha256)
+            or input_sha256 != canonical_input_sha256
             or not re.fullmatch(r"[0-9a-f]{40,64}", head_sha)
             or not re.fullmatch(r"[0-9a-f]{64}", profile_sha256)
             or status not in set(allowed_statuses)

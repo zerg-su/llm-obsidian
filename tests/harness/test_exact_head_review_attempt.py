@@ -1379,21 +1379,34 @@ with tempfile.TemporaryDirectory(prefix="exact-protocol-selector.") as raw:
     attention_terminal = finish_current_attempt(after_blocked, "approve")
     runtime.request_exit = original_request_exit
     commit_changed_head(5, "change after attention review")
-    after_attention = _run_review(
-        meta,
-        vault,
-        product,
-        task_id,
-        runtime_root,
-        runtime_manager=runtime,
-        apply_finalizing_recovery=forbidden_finalizing_recovery,
-    )
+    starts_before_attention_retry = runtime.started
+    try:
+        _run_review(
+            meta,
+            vault,
+            product,
+            task_id,
+            runtime_root,
+            runtime_manager=runtime,
+            apply_finalizing_recovery=forbidden_finalizing_recovery,
+        )
+    except ReviewAttemptError:
+        pass
+    else:
+        raise AssertionError("cleanup-retained attempt launched a successor")
     check(
-        "changed HEAD never reuses an attention terminal attempt",
+        "changed HEAD cannot replace a cleanup-retained attention attempt",
         attention_terminal["status"] == "attention-required"
-        and after_attention["status"] == "reviewing"
+        and runtime.started == starts_before_attention_retry
         and gate.read()["attempt"]["identity"]["cycle"] == 3
-        and runtime.started == 5,
+        and gate.read()["attempt"]["identity"]["exact_head_sha"]
+        != subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=product,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.strip(),
     )
 
     legacy_task_id = "22222222-2222-4222-8222-222222222222"
