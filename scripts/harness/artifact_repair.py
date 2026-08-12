@@ -362,11 +362,12 @@ def publish_pipeline_step_contract(
     request_path = owner.worktree / ".task-pipeline-step-request.json"
     if request_path.is_symlink(): raise ArtifactRepairError("pipeline-step request cannot be a symlink")
     try:
-        current = json.loads(request_path.read_text()) if request_path.is_file() else {}
-    except (OSError, json.JSONDecodeError) as exc: raise ArtifactRepairError("pipeline-step request is invalid") from exc
-    if not isinstance(current, dict) or (
-        current.get("operation_id") == enriched["operation_id"] and current != enriched
-    ):
+        if request_path.is_file() and request_path.stat().st_size > MAX_ARTIFACT_BYTES:
+            raise ValueError("pipeline-step request exceeds the artifact limit")
+        current = json.loads(request_path.read_text(encoding="utf-8")) if request_path.is_file() else {}
+    except (OSError, ValueError) as exc: raise ArtifactRepairError("pipeline-step request is invalid") from exc
+    if not isinstance(current, dict): raise ArtifactRepairError("pipeline-step request is invalid")
+    if current.get("operation_id") == enriched["operation_id"] and current != enriched:
         raise ArtifactRepairError("pipeline-step request changed during replay")
     if owner.publication_created or not owner.actual_target.exists(): owner.restore_template()
     _atomic_write(request_path, enriched)

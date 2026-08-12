@@ -18,6 +18,7 @@ from harness.artifact_repair import (  # noqa: E402
     CorrectionBudgetExhausted,
     CorrectionNotificationUncertain,
     ContractArtifactOwner,
+    MAX_ARTIFACT_BYTES,
     observe_stable_artifact,
     publish_pipeline_step_contract,
 )
@@ -129,6 +130,29 @@ with tempfile.TemporaryDirectory(prefix="artifact-repair.") as raw:
         check("pipeline-step publication rejects drift and symlink visibility", True)
     else:
         check("pipeline-step publication rejects drift and symlink visibility", False)
+    request_path.unlink()
+
+    invalid_requests = {
+        "non-UTF-8": b"\xff\xfe",
+        "oversized": b" " * (MAX_ARTIFACT_BYTES + 1),
+        "non-object": b"[]\n",
+    }
+    for label, payload in invalid_requests.items():
+        request_path.write_bytes(payload)
+        try:
+            publish_pipeline_step_contract(
+                state_root=state,
+                worktree=worktree,
+                request=step_request,
+            )
+        except ArtifactRepairError as exc:
+            check(
+                f"pipeline-step publication types {label} request failure",
+                str(exc) == "pipeline-step request is invalid",
+                exc,
+            )
+        else:
+            check(f"pipeline-step publication types {label} request failure", False)
     request_path.unlink()
 
     target.write_text(
