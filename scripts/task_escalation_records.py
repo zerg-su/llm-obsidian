@@ -351,15 +351,8 @@ def _validate_chain_semantics(
                     {
                         "previous_record_sha256": previous.sha256,
                         "decision": decision,
-                        **(
-                            {
-                                "verification_resolution": payload[
-                                    "verification_resolution"
-                                ]
-                            }
-                            if "verification_resolution" in payload
-                            else {}
-                        ),
+                        **({"verification_resolution": payload["verification_resolution"]}
+                           if "verification_resolution" in payload else {}),
                     },
                 )
             ):
@@ -374,9 +367,7 @@ def _validate_chain_semantics(
                 }
             )
             if "verification_resolution" in payload:
-                expected["verification_resolution"] = payload[
-                    "verification_resolution"
-                ]
+                expected["verification_resolution"] = payload["verification_resolution"]
             if payload != expected:
                 raise EscalationRecordError("resolution transition payload is invalid")
         elif record.record_type == "delivery-failure":
@@ -712,22 +703,12 @@ def append_resolution(
         )
         if verification_resolution is not None:
             if not isinstance(verification_resolution, dict):
-                raise EscalationRecordError(
-                    "verification resolution must be an object"
-                )
+                raise EscalationRecordError("verification resolution must be an object")
             payload["verification_resolution"] = verification_resolution
-        record_id = _derived_record_id(
-            "resolution",
-            {
-                "previous_record_sha256": latest.sha256,
-                "decision": answer,
-                **(
-                    {"verification_resolution": verification_resolution}
-                    if verification_resolution is not None
-                    else {}
-                ),
-            },
-        )
+        identity = {"previous_record_sha256": latest.sha256, "decision": answer}
+        if verification_resolution is not None:
+            identity["verification_resolution"] = verification_resolution
+        record_id = _derived_record_id("resolution", identity)
         existing = _existing_semantic_record(
             root,
             record_id,

@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
 
+from outcome_contract import OutcomeContractError, extract_from_bytes
+
 from .runtime_worker import *  # noqa: F401,F403
 from .runtime_worker import (
     _atomic_json,

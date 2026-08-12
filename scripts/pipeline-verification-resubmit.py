@@ -13,11 +13,8 @@ import tempfile
 from pathlib import Path
 from typing import NoReturn
 
-from harness.verification_attempt import (
-    VerificationAttempt,
-    VerificationAttemptError,
-    verification_resolution_authorizes,
-)
+from harness.artifact_repair import verification_resolution_authorizes
+from harness.verification_attempt import VerificationAttempt, VerificationAttemptError
 from task_escalation_records import EscalationRecordError, load_latest
 
 

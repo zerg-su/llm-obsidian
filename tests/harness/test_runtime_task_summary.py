@@ -53,10 +53,12 @@ from harness.runtime_callback_io import record_review_drive_failure
 from harness.store import OperationStore
 from harness.supervisor import OperationSupervisor
 from harness.verification import load_profiles
-from harness.verification_attempt import (  # noqa: E402
-    VerificationAttempt,
+from harness.artifact_repair import (  # noqa: E402
     build_verification_escalation,
     resolve_verification_escalation,
+)
+from harness.verification_attempt import (  # noqa: E402
+    VerificationAttempt,
     verification_input_sha256,
 )
 from harness.workflows.reap import run_reap

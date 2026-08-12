@@ -24,6 +24,13 @@ from .contracts import (
     ContractFamily,
     contract_registry,
 )
+from .verification_attempt import (
+    GIT_OID,
+    IDENTIFIER,
+    SHA256,
+    VerificationAttempt,
+    VerificationAttemptError,
+)
 
 
 MAX_ARTIFACT_BYTES = 200_000
@@ -47,6 +54,9 @@ RESERVATION_FIELDS = frozenset(
         "attempt",
         "correction_id",
     }
+)
+VERIFICATION_ACTIONS = frozenset(
+    {"authorize-one-same-head-retry", "stop", "repair-repository-mechanism"}
 )
 
 
@@ -261,6 +271,108 @@ def verification_escalation_contract_template(
         raise ArtifactRepairError(
             "verification-escalation template is invalid"
         ) from exc
+
+
+def build_verification_escalation(
+    failed_attempt: VerificationAttempt, verification_operation_id: str
+) -> dict[str, object]:
+    """Construct the exact code-owned verification escalation identity."""
+
+    if (
+        failed_attempt.attempt_index != 0
+        or not isinstance(verification_operation_id, str)
+        or not IDENTIFIER.fullmatch(verification_operation_id)
+    ):
+        raise VerificationAttemptError("verification escalation identity is invalid")
+    return {
+        "schema_version": 1,
+        "kind": "same-head-verification-retry",
+        "category": "mechanism-failure",
+        "operation_id": failed_attempt.parent_operation_id,
+        "verification_operation_id": verification_operation_id,
+        "exact_head_sha": failed_attempt.exact_head_sha,
+        "failed_attempt_sha256": failed_attempt.sha256,
+        "decision": "request-attempt-1",
+        "action": "",
+        "evidence_note": "",
+    }
+
+
+def resolve_verification_escalation(
+    escalation: object, *, action: str, evidence_note: str
+) -> dict[str, object]:
+    """Resolve only a typed escalation; prose never carries authority tokens."""
+
+    expected = {
+        "schema_version", "kind", "category", "operation_id",
+        "verification_operation_id", "exact_head_sha", "failed_attempt_sha256",
+        "decision", "action", "evidence_note",
+    }
+    note = " ".join(str(evidence_note).split()).strip()
+    if (
+        not isinstance(escalation, dict)
+        or set(escalation) != expected
+        or escalation.get("schema_version") != 1
+        or escalation.get("kind") != "same-head-verification-retry"
+        or escalation.get("category") != "mechanism-failure"
+        or escalation.get("decision") != "request-attempt-1"
+        or escalation.get("action") != ""
+        or escalation.get("evidence_note") != ""
+        or not IDENTIFIER.fullmatch(str(escalation.get("operation_id") or ""))
+        or not IDENTIFIER.fullmatch(str(escalation.get("verification_operation_id") or ""))
+        or not GIT_OID.fullmatch(str(escalation.get("exact_head_sha") or ""))
+        or not SHA256.fullmatch(str(escalation.get("failed_attempt_sha256") or ""))
+        or action not in VERIFICATION_ACTIONS
+        or not note
+        or len(note) > 1000
+    ):
+        raise VerificationAttemptError("verification escalation resolution is invalid")
+    return {
+        **escalation,
+        "decision": "authorize-attempt-1" if action == "authorize-one-same-head-retry" else "do-not-authorize",
+        "action": action,
+        "evidence_note": note,
+    }
+
+
+def verification_resolution_authorizes(
+    resolution: object,
+    failed_attempt: VerificationAttempt,
+    verification_operation_id: str,
+) -> bool:
+    """Validate a typed retry grant against code-owned attempt authority."""
+
+    if not isinstance(resolution, dict):
+        return False
+    try:
+        expected = resolve_verification_escalation(
+            build_verification_escalation(failed_attempt, verification_operation_id),
+            action="authorize-one-same-head-retry",
+            evidence_note=str(resolution.get("evidence_note") or ""),
+        )
+    except VerificationAttemptError:
+        return False
+    return resolution == expected
+
+
+def publish_verification_escalation(
+    *, state_root: Path, worktree: Path, failed_attempt: VerificationAttempt,
+    verification_operation_id: str,
+) -> "ContractArtifactOwner":
+    owner = ContractArtifactOwner.publish(
+        state_root=state_root,
+        worktree=worktree,
+        template=verification_escalation_contract_template(
+            attempt_id=verification_operation_id,
+            value=build_verification_escalation(
+                failed_attempt, verification_operation_id
+            ),
+        ),
+        actual_target=worktree / ".task-verification-contract.json",
+    )
+    if owner.publication_created or not owner.actual_target.exists():
+        owner.restore_template()
+    return owner
 
 
 def _canonical_bytes(value: object) -> bytes:
@@ -869,9 +981,13 @@ __all__ = (
     "CorrectionBudgetExhausted",
     "CorrectionNotificationUncertain",
     "CorrectionReservation",
+    "build_verification_escalation",
     "observe_stable_artifact",
     "pipeline_step_contract_template",
+    "publish_verification_escalation",
     "review_input_contract_template",
     "review_resolution_contract_template",
+    "resolve_verification_escalation",
     "verification_escalation_contract_template",
+    "verification_resolution_authorizes",
 )

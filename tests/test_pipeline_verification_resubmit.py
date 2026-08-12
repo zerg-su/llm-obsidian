@@ -15,11 +15,11 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "pipeline-verification-resubmit.py"
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from harness.verification_attempt import (  # noqa: E402
-    VerificationAttempt,
+from harness.artifact_repair import (  # noqa: E402
     build_verification_escalation,
     resolve_verification_escalation,
 )
+from harness.verification_attempt import VerificationAttempt  # noqa: E402
 from task_escalation_records import append_raise, append_resolution, load_latest  # noqa: E402
 
 

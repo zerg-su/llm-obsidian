@@ -26,11 +26,13 @@ from task_escalation_records import (
     load_latest,
 )
 from harness.adapters.cmux import run_cmux
+from harness.artifact_repair import (
+    build_verification_escalation,
+    resolve_verification_escalation,
+)
 from harness.verification_attempt import (
     VerificationAttempt,
     VerificationAttemptError,
-    build_verification_escalation,
-    resolve_verification_escalation,
 )
 
 

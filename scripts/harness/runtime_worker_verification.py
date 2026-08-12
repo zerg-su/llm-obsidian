@@ -4,8 +4,8 @@ from __future__ import annotations
 
 MODEL_JSON_BOUNDARIES = ("verification-escalation",)
 from .artifact_repair import (
-    ContractArtifactOwner,
-    verification_escalation_contract_template,
+    publish_verification_escalation,
+    verification_resolution_authorizes,
 )
 from .runtime_worker import *
 from .runtime_worker import (
@@ -546,27 +546,13 @@ class RuntimeWorkerVerificationMixin:
             allow_resubmit=allow_resubmit,
             allow_same_head_retry=allow_same_head_retry,
         )
-        attempt = self.verification_attempt_from_receipt(receipt)
         if allow_same_head_retry:
-            escalation = build_verification_escalation(
-                attempt, str(receipt["operation_id"])
-            )
-            escalation_owner = ContractArtifactOwner.publish(
+            publish_verification_escalation(
                 state_root=self.spec_path.parent,
                 worktree=self.spec["cwd"],
-                template=verification_escalation_contract_template(
-                    attempt_id=str(receipt["operation_id"]),
-                    value=escalation,
-                ),
-                actual_target=(
-                    self.spec["cwd"] / ".task-verification-contract.json"
-                ),
+                failed_attempt=self.verification_attempt_from_receipt(receipt),
+                verification_operation_id=str(receipt["operation_id"]),
             )
-            if (
-                escalation_owner.publication_created
-                or not escalation_owner.actual_target.exists()
-            ):
-                escalation_owner.restore_template()
         packet_path = self.spec["cwd"] / ".task-verification.json"
         if packet_path.is_symlink():
             raise RuntimeWorkerError(

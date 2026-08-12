@@ -11,13 +11,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from harness.verification_attempt import (  # noqa: E402
-    VerificationAttempt,
-    VerificationAttemptError,
+from harness.artifact_repair import (  # noqa: E402
     build_verification_escalation,
     resolve_verification_escalation,
     verification_resolution_authorizes,
 )
+from harness.verification_attempt import VerificationAttempt, VerificationAttemptError  # noqa: E402
 
 
 def check(label: str, value: bool, detail: object = "") -> None:
