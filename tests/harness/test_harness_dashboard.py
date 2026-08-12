@@ -343,10 +343,11 @@ def _running_current_verification(
     *,
     head_sha: str,
     profile_sha256: str = "7" * 64,
+    owner: str = OWNER,
 ) -> str:
     """Create the exact production-shaped child for the current verify attempt."""
 
-    parent_record = store.read(OWNER, parent)
+    parent_record = store.read(owner, parent)
     verify_step = next(
         step for step in compiled.definition.steps if step.primitive_id == "verify"
     )
@@ -370,6 +371,7 @@ def _running_current_verification(
         "starting",
         "running",
         "verifying",
+        owner=owner,
     )
     return child.operation_id
 
@@ -4236,14 +4238,28 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-time.") as raw:
         scope="root",
         columns=120,
     )
-    reverifying_gate = {**first_gate, "status": "verifying"}
+    resolved_head = "d" * 40
+    active_verification = _running_current_verification(
+        store,
+        review_root,
+        compiled,
+        head_sha=resolved_head,
+        owner=review_root,
+    )
+    reverifying_gate = {
+        **first_gate,
+        "status": "verifying",
+        "context": {**first_gate["context"], "head_sha": resolved_head},
+    }
     gate_path.write_text(
         json.dumps(reverifying_gate, sort_keys=True) + "\n", encoding="utf-8"
     )
+    reverifying_projection = project_root(
+        store_root, review_root, observed_at=1_800_000_000.0
+    )
+    reverifying_program = reverifying_projection.programs[0]
     reverifying_render = render(
-        project_root(store_root, review_root, observed_at=1_800_000_000.0),
-        scope="root",
-        columns=120,
+        reverifying_projection, scope="root", columns=120
     )
     gate_path.write_text(
         json.dumps(current_gate, sort_keys=True) + "\n", encoding="utf-8"
@@ -4251,7 +4267,15 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-time.") as raw:
     regression_check(
         "review remediation renders explicit fixing and re-verifying subphases",
         "Fixing review findings" in fixing_render
-        and "Re-verifying" in reverifying_render,
+        and "Re-verifying" in reverifying_render
+        and reverifying_program.current_stage == "Re-verifying"
+        and any(
+            phase.kind == "reverify"
+            and phase.status == "running"
+            and active_verification
+            in {child.operation_id for child in phase.children}
+            for phase in reverifying_program.history
+        ),
     )
 
     bad_liveness = _liveness(

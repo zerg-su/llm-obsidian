@@ -154,6 +154,10 @@ def _verification_phase(
     )
     if len(children) == 1 and timing.mode != UNKNOWN:
         children = (replace(children[0], timing=timing),)
+    active = active and any(
+        child.state not in {"complete", "failed", "cancelled"}
+        for child in children
+    )
     if active:
         status = "running"
     elif issue:
@@ -255,7 +259,9 @@ def project_history(
         verification_head = (
             following[1].identity.exact_head_sha
             if following is not None
-            else identity.exact_head_sha
+            else str(
+                (cycle_gate.get("context") or {}).get("head_sha") or ""
+            )
         )
         phases.append(
             _verification_phase(

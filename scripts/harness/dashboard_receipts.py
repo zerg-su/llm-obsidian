@@ -779,13 +779,34 @@ def _review_attempt_is_bound(
     identity = attempt.identity
     context = gate.get("context")
     raw_lanes = gate.get("lanes")
+    status = gate.get("status")
+    context_head = context.get("head_sha") if isinstance(context, Mapping) else None
+    advanced_resolution = (
+        attempt.status == "terminal"
+        and attempt.terminal is not None
+        and attempt.terminal.result
+        == ReviewAttemptTerminalResult.CHANGES_REQUESTED
+        and status
+        in {
+            "verifying",
+            "recovery-verification-required",
+            "fresh-boundary-authorized",
+        }
+        and isinstance(context_head, str)
+        and context_head != identity.exact_head_sha
+        and re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", context_head)
+        is not None
+    )
     if (
         gate.get("schema_version") != 1
         or gate.get("dispatch_operation_id") != record.spec.operation_id
         or gate.get("owner_id") != record.spec.owner_id
         or gate.get("active_review_operation_id") != identity.attempt_id
         or not isinstance(context, Mapping)
-        or context.get("head_sha") != identity.exact_head_sha
+        or (
+            context_head != identity.exact_head_sha
+            and not advanced_resolution
+        )
         or not isinstance(raw_lanes, list)
         or len(raw_lanes) != len(identity.lanes)
         or any(lane.owner_id != record.spec.owner_id for lane in identity.lanes)
@@ -808,7 +829,6 @@ def _review_attempt_is_bound(
     ):
         return False
     if attempt.status == "terminal" and attempt.terminal is not None:
-        status = gate.get("status")
         if attempt.terminal.result == ReviewAttemptTerminalResult.CHANGES_REQUESTED:
             return status in {
                 "changes-requested",
@@ -885,7 +905,8 @@ def review_attempt_history(
         ):
             continue
         accepted.append((archived, attempt))
-    assert gate is not None
+    if gate is None:
+        return tuple(accepted)
     accepted.append((gate, current))
     return tuple(accepted)
 
