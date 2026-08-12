@@ -11,6 +11,7 @@ import tempfile
 from typing import Any
 
 from harness.contracts import to_dict
+from harness.review_submit import publish_review_input_template
 from harness.workflows.review import (
     ReviewResult,
     review_round_envelope,
@@ -124,6 +125,12 @@ def prepare_review_probe_lane(
             "sha256": fingerprint,
         },
     }
+    meta = publish_review_input_template(
+        state_root=scratch,
+        state_dir=callback_dir,
+        worktree=root,
+        meta=meta,
+    )
     round_input = {
         "schema_version": 1,
         "axis": axis,

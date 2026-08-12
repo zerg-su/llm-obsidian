@@ -547,22 +547,26 @@ class RuntimeWorkerVerificationMixin:
             allow_same_head_retry=allow_same_head_retry,
         )
         attempt = self.verification_attempt_from_receipt(receipt)
-        escalation = build_verification_escalation(
-            attempt, str(receipt["operation_id"])
-        )
-        escalation_owner = ContractArtifactOwner.publish(
-            state_root=self.spec_path.parent,
-            worktree=self.spec["cwd"],
-            template=verification_escalation_contract_template(
-                attempt_id=str(receipt["operation_id"]),
-                value=escalation,
-            ),
-            actual_target=(
-                self.spec["cwd"] / ".task-verification-contract.json"
-            ),
-        )
-        if escalation_owner.publication_created or not escalation_owner.actual_target.exists():
-            escalation_owner.restore_template()
+        if allow_same_head_retry:
+            escalation = build_verification_escalation(
+                attempt, str(receipt["operation_id"])
+            )
+            escalation_owner = ContractArtifactOwner.publish(
+                state_root=self.spec_path.parent,
+                worktree=self.spec["cwd"],
+                template=verification_escalation_contract_template(
+                    attempt_id=str(receipt["operation_id"]),
+                    value=escalation,
+                ),
+                actual_target=(
+                    self.spec["cwd"] / ".task-verification-contract.json"
+                ),
+            )
+            if (
+                escalation_owner.publication_created
+                or not escalation_owner.actual_target.exists()
+            ):
+                escalation_owner.restore_template()
         packet_path = self.spec["cwd"] / ".task-verification.json"
         if packet_path.is_symlink():
             raise RuntimeWorkerError(

@@ -476,7 +476,33 @@ class FakeRuntimeSessions:
             callback_dir = (request.cwd / request.callback_pointer).parent
             check(
                 "review probe materializes code-owned submit metadata",
-                (callback_dir / ".review-meta.json").is_file(),
+                (callback_dir / ".review-meta.json").is_file()
+                and Path(
+                    json.loads(
+                        (callback_dir / ".review-meta.json").read_text(
+                            encoding="utf-8"
+                        )
+                    )["contract_template_pointer"]
+                ).is_file(),
+            )
+            check(
+                "review probe publishes the immutable contract before model input",
+                json.loads(
+                    (callback_dir / ".review-input.json").read_text(
+                        encoding="utf-8"
+                    )
+                )
+                == {
+                    "schema_version": 1,
+                    "axis": json.loads(
+                        (callback_dir / ".review-meta.json").read_text(
+                            encoding="utf-8"
+                        )
+                    )["axis"],
+                    "verdict": "",
+                    "verification_iteration": 0,
+                    "findings": [],
+                },
             )
             check(
                 "review probe materializes a bounded round input template",
