@@ -47,6 +47,29 @@ class DashboardLaunchReceipt:
             raise ValueError("dashboard launch receipt is invalid")
 
 
+@dataclass(frozen=True)
+class DashboardBinding:
+    """Explicit observer authority for facades without dispatched-task metadata."""
+
+    vault: Path
+    store: Path
+    caller_surface: str
+    request_id: str
+
+    def __post_init__(self) -> None:
+        root = Path(self.vault).expanduser().resolve()
+        state = Path(self.store).expanduser().resolve()
+        if (
+            not root.is_dir()
+            or not state.is_relative_to(root)
+            or not ID_RE.fullmatch(self.caller_surface)
+            or not ID_RE.fullmatch(self.request_id)
+        ):
+            raise ValueError("dashboard binding is invalid")
+        object.__setattr__(self, "vault", root)
+        object.__setattr__(self, "store", state)
+
+
 def facade_dashboard_command(
     *,
     vault: Path,
@@ -98,6 +121,50 @@ def _run(argv: Sequence[str]) -> None:
     )
 
 
+def rebind_facade_dashboard(
+    *,
+    vault: Path,
+    store: Path,
+    caller_surface: str,
+    facade: str,
+    temporary_request_id: str,
+    root_operation_id: str,
+    runner: Callable[[Sequence[str]], None] = _run,
+) -> DashboardLaunchReceipt:
+    """Best-effort temporary-to-root observer convergence at root creation."""
+
+    binding = DashboardBinding(
+        vault=vault,
+        store=store,
+        caller_surface=caller_surface,
+        request_id=temporary_request_id,
+    )
+    if facade not in FACADE_KINDS or not ID_RE.fullmatch(root_operation_id):
+        raise ValueError("dashboard rebind identity is invalid")
+    command = [
+        sys.executable,
+        str(binding.vault / "scripts" / "harness-dashboard.py"),
+        "rebind",
+        "--vault",
+        str(binding.vault),
+        "--store",
+        str(binding.store),
+        "--surface",
+        binding.caller_surface,
+        "--temporary",
+        binding.request_id,
+        "--root",
+        root_operation_id,
+        "--facade",
+        facade,
+    ]
+    try:
+        runner(command)
+    except Exception:
+        return DashboardLaunchReceipt("degraded", facade, "root", root_operation_id)
+    return DashboardLaunchReceipt("launched", facade, "root", root_operation_id)
+
+
 def launch_facade_dashboard(
     *,
     vault: Path,
@@ -126,6 +193,28 @@ def launch_facade_dashboard(
             "degraded", facade, scope, root_operation_id
         )
     return DashboardLaunchReceipt("launched", facade, scope, root_operation_id)
+
+
+def launch_review_facade_dashboard(
+    *,
+    binding: DashboardBinding,
+    facade: str,
+    root_operation_id: str,
+    runner: Callable[[Sequence[str]], None] = _run,
+) -> DashboardLaunchReceipt:
+    """Launch current/plan review from its explicit runtime authority."""
+
+    if facade not in {"review", "plan-review"}:
+        raise ValueError("explicit review dashboard facade is invalid")
+    return launch_facade_dashboard(
+        vault=binding.vault,
+        store=binding.store,
+        caller_surface=binding.caller_surface,
+        facade=facade,
+        request_id=binding.request_id,
+        root_operation_id=root_operation_id,
+        runner=runner,
+    )
 
 
 def launch_bound_facade_dashboard(
@@ -166,9 +255,12 @@ def launch_bound_facade_dashboard(
 
 
 __all__ = [
+    "DashboardBinding",
     "DashboardLaunchReceipt",
     "FACADE_KINDS",
     "facade_dashboard_command",
     "launch_bound_facade_dashboard",
     "launch_facade_dashboard",
+    "launch_review_facade_dashboard",
+    "rebind_facade_dashboard",
 ]

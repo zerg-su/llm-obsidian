@@ -723,31 +723,29 @@ class RuntimeWorkerSummaryMixin:
         if isinstance(owner, ContractArtifactOwner):
             try:
                 fresh = FreshArtifactRepair.load(owner=owner)
-                callback = fresh.scratch / ".artifact-repair-callback.json"
                 fresh_record = self.store.read(
                     self.spec["owner_id"],
                     str(fresh.reservation["operation_id"]),
                 )
-                if (
-                    callback.is_file()
-                    and not callback.is_symlink()
-                    and fresh_record.accepted_callback_kind == "result"
-                ):
-                    meta = json.loads(
-                        (self.spec["cwd"] / ".task-meta.json").read_text(
-                            encoding="utf-8"
-                        )
+                meta = json.loads(
+                    (self.spec["cwd"] / ".task-meta.json").read_text(
+                        encoding="utf-8"
                     )
-                    fresh.accept(
-                        lambda value: validate_summary_for_task(
-                            value,
-                            meta,
-                            allow_missing_session=True,
-                            require_schema=True,
-                        )
+                )
+                reconciliation = fresh.reconcile(
+                    fresh_record,
+                    lambda value: validate_summary_for_task(
+                        value,
+                        meta,
+                        allow_missing_session=True,
+                        require_schema=True,
                     )
+                )
+                if reconciliation.status == "adopted":
                     self.summary_digest = ""
                     self.summary_stable_reads = 0
+                    return
+                if reconciliation.status == "pending":
                     return
             except FreshRepairInvalid:
                 self.summary_attention(

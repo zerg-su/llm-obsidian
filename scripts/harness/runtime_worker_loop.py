@@ -148,6 +148,29 @@ class RuntimeWorkerLoopMixin:
         except Exception:
             pass
 
+    def mark_failed_artifact_repair_runtime(self) -> None:
+        """Terminalize a one-shot artifact worker that returned no result."""
+
+        if (
+            not self.provider_exited
+            or self.callback_handled
+            or self.spec["callback_mode"] != "artifact-repair"
+        ):
+            return
+        try:
+            current = self.store.read(
+                self.spec["owner_id"], self.spec["operation_id"]
+            )
+            if current.state not in TERMINAL and current.state != "attention-required":
+                self.store.transition(
+                    self.spec["owner_id"],
+                    self.spec["operation_id"],
+                    "attention-required",
+                    reason=AttentionReason.CALLBACK_INVALID,
+                )
+        except Exception:
+            pass
+
     def needs_provider_restart(self) -> bool:
         pending_fix = (
             self._pipeline_name == "engineering/fix" and not self.fix_transport_complete
@@ -329,6 +352,7 @@ class RuntimeWorkerLoopMixin:
         """Classify one observed exit and decide restart versus finality."""
 
         self.mark_failed_research_runtime()
+        self.mark_failed_artifact_repair_runtime()
         self.mark_failed_task_summary_correction_runtime()
         self.mark_failed_pipeline_step_correction_runtime()
         if self.needs_provider_restart():

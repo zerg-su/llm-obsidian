@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 from harness.contracts import AttentionReason
+from harness.dashboard_facade import DashboardBinding
 from harness.review_attempt import (
     EXACT_HEAD_REVIEW_PROTOCOL,
     LEGACY_CROSS_HEAD_RESUME_DISABLED,
@@ -167,6 +168,12 @@ def _start_review(
             prompt_pointer=prompt_pointers[request.policy.axes[0]],
             prompt_pointers=prompt_pointers,
             callback_root="callbacks",
+            dashboard_binding=DashboardBinding(
+                vault=vault,
+                store=vault / ".vault-meta" / "harness",
+                caller_surface=str(meta.get("task_surface") or ""),
+                request_id=task_id,
+            ),
             callback_wake=_callback_wake(meta, vault, worktree),
             prepare_lane=prepare_lane,
         )
@@ -384,6 +391,12 @@ def _start_exact_head_review(
         prompt_pointer=prompt_pointers[request.policy.axes[0]],
         prompt_pointers=prompt_pointers,
         callback_root="callbacks",
+        dashboard_binding=DashboardBinding(
+            vault=vault,
+            store=vault / ".vault-meta" / "harness",
+            caller_surface=origin_surface,
+            request_id=task_id,
+        ),
         callback_wake=_callback_wake(meta, vault, worktree),
         approved_plan_amendment=approved_plan_amendment,
         prepare_lane=prepare_lane,

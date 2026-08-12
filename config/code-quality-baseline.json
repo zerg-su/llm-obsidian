@@ -28,10 +28,10 @@
       "operation-uuid": 27,
       "operator-local-path": 2
     },
-    "final_max_production_loc": 13598,
+    "final_max_production_loc": 13700,
     "final_production_file_count": 26,
     "final_max_writable_authorities": 0,
     "final_max_incident_literals": 0,
-    "evidence": "docs/acceptance/v2.6.6-rc1-active-authority-baseline.md plus the separately owned exact 26-file RC5.4 review/recovery authority manifest, including atomic immutable-plan publication, amendment-safe finalization lineage, callback drain, crash replay, fresh artifact-only repair, and typed reap-close owners, measured at 13598 LOC with zero writable authorities and zero incident literals"
+    "evidence": "docs/acceptance/v2.6.6-rc1-active-authority-baseline.md plus the separately owned exact 26-file RC5.4 review/recovery authority manifest, including atomic immutable-plan publication, amendment-safe finalization lineage, callback drain, crash replay, one-time fresh artifact reconciliation, explicit current-review dashboard binding, and typed reap-close owners, measured at 13700 LOC with zero writable authorities and zero incident literals"
   }
 }

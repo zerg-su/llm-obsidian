@@ -338,7 +338,7 @@ def provider_exit_is_final(
     if callback_handled:
         return True
     if (
-        callback_mode == "task-summary"
+        callback_mode in {"task-summary", "artifact-repair"}
         or (
             operation_profile in REVIEWER_PROFILES
             and callback_deadline_at > 0

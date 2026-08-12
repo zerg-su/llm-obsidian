@@ -27,6 +27,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from harness.callbacks import CallbackBroker
 from harness import cli as harness_cli
+from harness.workflows import review as review_workflow
 from harness.adapters.claude import ClaudeDriver
 from harness.contracts import (
     AttentionReason,
@@ -2602,15 +2603,28 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
             raise RuntimeError("pre-provider fixture failure")
 
     try:
-        started = task_review_runner.run_current_review(
-            product,
-            purpose="implementation",
-            boundary_input_file=current_boundary_path,
-            plan_file=review_plan,
-            origin_surface="33333333-3333-4333-8333-333333333333",
-            scratch_root=scratch,
-            runtime_manager=current_runtime,
-        )
+        dashboard_commands: list[list[str]] = []
+        original_review_dashboard = review_workflow.launch_review_facade_dashboard
+
+        def capture_review_dashboard(**kwargs):
+            return original_review_dashboard(
+                **kwargs,
+                runner=lambda argv: dashboard_commands.append(list(argv)),
+            )
+
+        review_workflow.launch_review_facade_dashboard = capture_review_dashboard
+        try:
+            started = task_review_runner.run_current_review(
+                product,
+                purpose="implementation",
+                boundary_input_file=current_boundary_path,
+                plan_file=review_plan,
+                origin_surface="33333333-3333-4333-8333-333333333333",
+                scratch_root=scratch,
+                runtime_manager=current_runtime,
+            )
+        finally:
+            review_workflow.launch_review_facade_dashboard = original_review_dashboard
         current_gate_root = (
             product
             / ".vault-meta/harness/review-data"
@@ -2637,6 +2651,13 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
             not in current_runtime.started[0].callback_wake
             and manifest.is_file()
             and product.resolve() not in manifest.parents,
+        )
+        check(
+            "current review launches one explicit root observer without task metadata",
+            started["dashboard"]["status"] == "launched"
+            and len(dashboard_commands) == 1
+            and dashboard_commands[0][-4:]
+            == ["--root", started["task_id"], "--facade", "review"],
         )
         check(
             "current checkout review resumes its initialized pre-launch gate",

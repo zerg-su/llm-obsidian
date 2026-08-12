@@ -20,6 +20,7 @@ from ..pre_model_reviewer_retirement import (
 )
 from ..review_input_rollover import archive_prior_review_input
 from ..store import StoreError
+from ..dashboard_facade import DashboardBinding
 from ..review_attempt import (
     EXACT_HEAD_REVIEW_PROTOCOL,
     ReviewAttempt,
@@ -619,6 +620,7 @@ class ReviewGateAttemptMixin:
         product_root: Path,
         prompt_pointer: str,
         callback_root: str,
+        dashboard_binding: DashboardBinding | None = None,
         callback_wake: str = "",
         approved_plan_amendment: bool = False,
         prompt_pointers: Mapping[str, str] | None = None,
@@ -652,6 +654,7 @@ class ReviewGateAttemptMixin:
             product_root=product_root,
             prompt_pointer=prompt_pointer,
             callback_root=callback_root,
+            dashboard_binding=dashboard_binding,
             callback_wake=callback_wake,
             prompt_pointers=prompt_pointers,
             prepare_lane=prepare_lane,

@@ -57,7 +57,7 @@ def run_command(
 
 
 def observer_command(vault_root: Path, request_id: str) -> list[str]:
-    """Exact root-scoped observer open argv for one approved request identity.
+    """Exact temporary observer argv before durable task-root creation.
 
     The caller appends its own exact coordinator surface. The observer stays
     outside Harness ownership and carries no lifecycle authority, so this
@@ -71,7 +71,6 @@ def observer_command(vault_root: Path, request_id: str) -> list[str]:
         caller_surface="",
         facade="dispatch",
         request_id=request_id,
-        root_operation_id=request_id,
     )
 
 

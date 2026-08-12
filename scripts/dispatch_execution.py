@@ -13,6 +13,7 @@ from harness.runtime_sessions import (
     RuntimeSessionResult,
 )
 from harness.workflows.dispatch import start_dispatch
+from harness.dashboard_facade import rebind_facade_dashboard
 from dispatch_contracts import (
     COORDINATOR_ACTION,
     DispatchError,
@@ -86,6 +87,14 @@ def start(
         stage_started = time.monotonic()
         create_worktree(request)
         identity = initialize_task(request)
+        dashboard_rebind = rebind_facade_dashboard(
+            vault=request["vault_root"],
+            store=request["vault_root"] / ".vault-meta" / "harness",
+            caller_surface=request["origin_surface"],
+            facade="dispatch",
+            temporary_request_id=request["request_id"],
+            root_operation_id=identity["task_id"],
+        )
         atomic_text(
             request["worktree"] / ".task-prompt.md",
             render_task_prompt(request, config),
@@ -208,6 +217,7 @@ def start(
             "task_window": prepared["window"],
             "task_window_ref": prepared["window_ref"],
             "log_status": log_status,
+            "observer": dashboard_rebind.__dict__,
             "coordinator_action": COORDINATOR_ACTION,
             "setup_duration_ms": round(
                 (time.monotonic() - run_started) * 1000

@@ -203,17 +203,10 @@ class RuntimeWorkerControlMixin:
             return False
         try:
             fresh = FreshArtifactRepair.load(owner=owner)
-            callback = fresh.scratch / ".artifact-repair-callback.json"
             record = self.store.read(
                 self.spec["owner_id"],
                 str(fresh.reservation["operation_id"]),
             )
-            if (
-                not callback.is_file()
-                or callback.is_symlink()
-                or record.accepted_callback_kind != "result"
-            ):
-                return False
 
             def validate(value: Mapping[str, object]) -> object:
                 if value.get("status") not in {"complete", "cannot-reproduce"}:
@@ -225,12 +218,13 @@ class RuntimeWorkerControlMixin:
                     raise ValueError("pipeline result outcome is invalid")
                 return value
 
-            fresh.accept(validate)
-            self.fix_result_digest = ""
-            self.fix_result_stable_reads = 0
-            self.custom_result_digest = ""
-            self.custom_result_stable_reads = 0
-            return True
+            reconciliation = fresh.reconcile(record, validate)
+            if reconciliation.status == "adopted":
+                self.fix_result_digest = ""
+                self.fix_result_stable_reads = 0
+                self.custom_result_digest = ""
+                self.custom_result_stable_reads = 0
+            return reconciliation.status != "accepted"
         except FreshRepairInvalid:
             self.summary_attention(
                 "pipeline-step-fresh-repair-invalid",

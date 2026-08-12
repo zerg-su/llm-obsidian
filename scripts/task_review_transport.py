@@ -193,6 +193,7 @@ def _receipt(
             }
             for lane in run.execution.lanes
         ]
+    dashboard = None if run is None else run.execution.dashboard
     return {
         "schema_version": 1,
         "status": status,
@@ -212,6 +213,11 @@ def _receipt(
         "vault_root": str(vault),
         "context_manifest": str(context_manifest),
         "lanes": lanes,
+        **(
+            {"dashboard": dashboard.__dict__}
+            if dashboard is not None
+            else {}
+        ),
     }
 
 

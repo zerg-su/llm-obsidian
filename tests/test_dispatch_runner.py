@@ -41,6 +41,7 @@ from harness.split_contracts import (
 from harness.review_finalization import task_finalization_policy
 from harness.runtime_sessions import RuntimeSessionResult
 from harness.store import OperationStore
+from harness.dashboard_facade import DashboardLaunchReceipt
 from harness.supervisor import OperationSupervisor
 from harness.workflows.dispatch import operation_spec
 from task_contract import normalize as normalize_task_meta
@@ -211,11 +212,11 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     )
     observer_echo = validate_payload.get("observer") or {}
     check(
-        "validate exposes the exact root-scoped observer command without new identity",
+        "validate exposes the exact temporary observer command before root creation",
         builtin_validate.returncode == 0
-        and observer_echo.get("root") == request_id
+        and observer_echo.get("temporary") == request_id
         and observer_echo.get("argv") == observer_argv
-        and observer_argv[observer_argv.index("--root") + 1] == request_id
+        and observer_argv[observer_argv.index("--temporary") + 1] == request_id
         and observer_argv[observer_argv.index("--vault") + 1]
         == str(resolved_vault)
         and observer_argv[observer_argv.index("--store") + 1]
@@ -1737,6 +1738,8 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
 
     original_sync = dispatch_execution.sync_codex_profile
     original_log = dispatch_execution.dispatch_log
+    original_rebind = dispatch_execution.rebind_facade_dashboard
+    rebound_dashboards: list[dict[str, object]] = []
     sync_failure_raw = json.loads(json.dumps(raw_request))
     sync_failure_raw["request_id"] = str(uuid.uuid4())
     sync_failure_raw["task_name"] = "runtime-sync-failure"
@@ -1760,6 +1763,12 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     )
     dispatch_execution.sync_codex_profile = lambda *_args, **_kwargs: None
     dispatch_execution.dispatch_log = lambda *_args, **_kwargs: None
+    dispatch_execution.rebind_facade_dashboard = lambda **kwargs: (
+        rebound_dashboards.append(kwargs)
+        or DashboardLaunchReceipt(
+            "launched", "dispatch", "root", str(kwargs["root_operation_id"])
+        )
+    )
     try:
         harness_result = runner.start(
             harness_request, "c" * 64, runtime_manager=fake_runtime
@@ -1773,6 +1782,7 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     finally:
         dispatch_execution.sync_codex_profile = original_sync
         dispatch_execution.dispatch_log = original_log
+        dispatch_execution.rebind_facade_dashboard = original_rebind
     harness_record = OperationStore(vault / ".vault-meta/harness").read(
         harness_request["request_id"], harness_request["request_id"]
     )
@@ -1786,6 +1796,15 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         and harness_result["harness"]["run_id"] == harness_record.run_id
         and harness_replay == harness_result
         and harness_record.state == "awaiting-callback",
+    )
+    check(
+        "durable task creation rebinds the temporary observer exactly once",
+        len(rebound_dashboards) == 2
+        and rebound_dashboards[0]["temporary_request_id"]
+        == harness_request["request_id"]
+        and rebound_dashboards[0]["root_operation_id"]
+        == harness_result["task_id"]
+        and harness_result["observer"]["status"] == "launched",
     )
     check(
         "dispatch binds the product root for provider permission compilation",

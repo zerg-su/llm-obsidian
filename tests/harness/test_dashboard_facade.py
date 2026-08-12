@@ -14,11 +14,14 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from harness.dashboard_facade import (  # noqa: E402
+    DashboardBinding,
     FACADE_KINDS,
     DashboardLaunchReceipt,
     facade_dashboard_command,
     launch_bound_facade_dashboard,
     launch_facade_dashboard,
+    launch_review_facade_dashboard,
+    rebind_facade_dashboard,
 )
 
 
@@ -190,6 +193,50 @@ with tempfile.TemporaryDirectory(prefix="dashboard-facade.") as raw:
             root_operation_id="",
         )
         and len(captured) == 1,
+    )
+
+    (vault / ".task-meta.json").unlink()
+    explicit_commands: list[list[str]] = []
+    explicit = launch_review_facade_dashboard(
+        binding=DashboardBinding(
+            vault=vault,
+            store=store,
+            caller_surface=caller,
+            request_id=root,
+        ),
+        facade="plan-review",
+        root_operation_id=root,
+        runner=lambda argv: explicit_commands.append(list(argv)),
+    )
+    check(
+        "current and plan review launch from explicit authority without task metadata",
+        explicit.status == "launched"
+        and explicit_commands[0][-4:]
+        == ["--root", root, "--facade", "plan-review"],
+    )
+
+    rebind_commands: list[list[str]] = []
+    rebound_receipt = rebind_facade_dashboard(
+        vault=vault,
+        store=store,
+        caller_surface=caller,
+        facade="dispatch",
+        temporary_request_id=request,
+        root_operation_id=root,
+        runner=lambda argv: rebind_commands.append(list(argv)),
+    )
+    check(
+        "root creation compiles one temporary-to-durable rebind effect",
+        rebound_receipt.status == "launched"
+        and rebind_commands[0][-6:]
+        == [
+            "--temporary",
+            request,
+            "--root",
+            root,
+            "--facade",
+            "dispatch",
+        ],
     )
 
     def fail(_argv: list[str]) -> None:

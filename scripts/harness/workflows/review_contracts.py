@@ -20,6 +20,7 @@ from ..contracts import (
     RuntimeRoute,
 )
 from ..runtime_sessions import RuntimeSessionRequest
+from ..dashboard_facade import DashboardLaunchReceipt
 from ..state_machine import TERMINAL
 from ..review_program import PURPOSES
 from review_contract import (
@@ -421,6 +422,7 @@ class ReviewLaneSession:
 class ReviewExecution:
     request: ReviewOperationRequest
     lanes: tuple[ReviewLaneSession, ...]
+    dashboard: DashboardLaunchReceipt | None = None
 
     def __post_init__(self) -> None:
         if tuple(lane.axis for lane in self.lanes) != self.request.policy.axes:

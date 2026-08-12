@@ -121,6 +121,20 @@ class FreshRepairReceipt:
     route_sha256: str
 
 
+@dataclass(frozen=True)
+class FreshRepairReconciliation:
+    """One durable child-to-parent adoption state."""
+
+    status: str
+    receipt: FreshRepairReceipt | None = None
+
+    def __post_init__(self) -> None:
+        if self.status not in {"pending", "adopted", "accepted"}:
+            raise ValueError("fresh repair reconciliation status is invalid")
+        if (self.status == "pending") != (self.receipt is None):
+            raise ValueError("fresh repair reconciliation receipt is invalid")
+
+
 class FreshArtifactRepair:
     """Durable fresh-repair authority bound to one ContractArtifactOwner."""
 
@@ -409,6 +423,9 @@ class FreshArtifactRepair:
         failed_path = self.root / "failed.json"
         if failed_path.exists() or failed_path.is_symlink():
             raise FreshRepairInvalid("fresh repair is terminally invalid")
+        existing = self._accepted_receipt()
+        if existing is not None:
+            return existing
         callback_sha256 = ""
         try:
             raw = callback_path.read_bytes()
@@ -465,6 +482,75 @@ class FreshArtifactRepair:
         )
         _write_once(self.root / "receipt.json", receipt.__dict__)
         return receipt
+
+    def _accepted_receipt(self) -> FreshRepairReceipt | None:
+        path = self.root / "receipt.json"
+        if not path.exists() and not path.is_symlink():
+            return None
+        try:
+            if path.is_symlink() or not path.is_file():
+                raise FreshRepairError("fresh repair receipt is invalid")
+            value = json.loads(path.read_bytes())
+            receipt = FreshRepairReceipt(**value)
+        except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise FreshRepairError("fresh repair receipt is unreadable") from exc
+        if (
+            set(value) != set(receipt.__dict__)
+            or receipt.status != "self-healed"
+            or receipt.family != self.owner.template.family.value
+            or receipt.stage != "fresh-context"
+            or receipt.repair_id != self.repair_id
+            or receipt.input_sha256 != self.reservation["invalid_sha256"]
+            or not SHA256.fullmatch(receipt.output_sha256)
+            or receipt.route_sha256 != self._route().routing_sha256
+        ):
+            raise FreshRepairError("fresh repair receipt identity changed")
+        return receipt
+
+    def reconcile(
+        self,
+        child: OperationRecord,
+        validator: Callable[[Mapping[str, object]], object],
+    ) -> FreshRepairReconciliation:
+        """Adopt one child result, then expose the ordinary submit path."""
+
+        receipt = self._accepted_receipt()
+        if receipt is not None:
+            return FreshRepairReconciliation("accepted", receipt)
+        failed_path = self.root / "failed.json"
+        if failed_path.exists() or failed_path.is_symlink():
+            raise FreshRepairInvalid("fresh repair is terminally invalid")
+        if (
+            child.spec.operation_id != self.reservation["operation_id"]
+            or child.spec.owner_id != self.reservation["owner_id"]
+            or child.run_id != self.repair_id[:32]
+            or child.spec.parent_operation_id
+            != self.reservation["parent_operation_id"]
+            or child.spec.root_operation_id != self.reservation["root_operation_id"]
+        ):
+            raise FreshRepairError("fresh repair child identity changed")
+        if child.accepted_callback_kind:
+            if child.accepted_callback_kind != "result":
+                self._record_invalid("callback-invalid", "")
+                raise FreshRepairInvalid("fresh repair callback kind is invalid")
+            receipt = self.accept(validator)
+            return FreshRepairReconciliation("adopted", receipt)
+        if child.state in {
+            "attention-required",
+            "complete",
+            "failed",
+            "cancelled",
+        }:
+            stage = (
+                "callback-invalid"
+                if child.attention_reason is AttentionReason.CALLBACK_INVALID
+                else "provider-exited-without-result"
+            )
+            self._record_invalid(stage, "")
+            raise FreshRepairInvalid(
+                "fresh repair child terminated without an accepted result"
+            )
+        return FreshRepairReconciliation("pending")
 
     def _record_invalid(self, stage: str, output_sha256: str) -> None:
         self.owner.restore_template()

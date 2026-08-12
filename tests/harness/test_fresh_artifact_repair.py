@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import sys
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 
 
@@ -17,6 +18,7 @@ from harness.adapters.claude import ClaudeDriver  # noqa: E402
 from harness.adapters.codex import CodexDriver, REVIEWER_CONFIG  # noqa: E402
 from harness.adapters.process import ProcessAdapter  # noqa: E402
 from harness.contracts import (  # noqa: E402
+    AttentionReason,
     CanonicalContractTemplate,
     ContractFamily,
     OperationRecord,
@@ -32,6 +34,9 @@ from harness.fresh_artifact_repair import (  # noqa: E402
     ProviderAvailability,
     select_fresh_repair_route,
 )
+from harness.runtime_worker_control import RuntimeWorkerControlMixin  # noqa: E402
+from harness.runtime_worker_summary import RuntimeWorkerSummaryMixin  # noqa: E402
+import harness.runtime_worker_summary as summary_runtime  # noqa: E402
 from model_routing_config import load_config  # noqa: E402
 
 
@@ -361,6 +366,299 @@ with tempfile.TemporaryDirectory(prefix="fresh-artifact-invalid.") as raw:
         }
         and restored == invalid_owner.template_value,
     )
+
+with tempfile.TemporaryDirectory(prefix="fresh-artifact-reconcile.") as raw:
+    base = Path(raw)
+    for family in (
+        ContractFamily.TASK_SUMMARY,
+        ContractFamily.PIPELINE_STEP_RESULT,
+    ):
+        family_root = base / family.value
+        worktree = family_root / "product"
+        state = family_root / "state"
+        worktree.mkdir(parents=True)
+        state.mkdir(parents=True)
+        attempt_id = f"reconcile-{family.value}"
+        if family is ContractFamily.TASK_SUMMARY:
+            pointer = ".task-summary.json"
+            template_value = {
+                "schema_version": 2,
+                "type": "repo-touch",
+                "session": "session-1",
+                "title": "",
+                "body": "",
+            }
+            code_fields = {"schema_version", "type", "session"}
+        else:
+            pointer = ".task-pipeline-step-result.json"
+            template_value = {
+                "schema_version": 1,
+                "output_sha256": "8" * 64,
+                "head_sha": "9" * 40,
+                "status": "",
+                "outcome": "",
+            }
+            code_fields = {"schema_version", "output_sha256", "head_sha"}
+        target = worktree / pointer
+        family_template = CanonicalContractTemplate.create(
+            family,
+            attempt_id=attempt_id,
+            target_pointer=pointer,
+            value=template_value,
+            code_owned_fields=code_fields,
+            model_owned_fields=set(template_value) - code_fields,
+        )
+        family_owner = ContractArtifactOwner.publish(
+            state_root=state,
+            worktree=worktree,
+            template=family_template,
+            actual_target=target,
+        )
+        family_owner.restore_template()
+        family_spec = OperationSpec(
+            operation_id=attempt_id,
+            idempotency_key=f"key-{attempt_id}",
+            kind="dispatch",
+            owner_id=attempt_id,
+            route=prior,
+            context_manifest="packets/root/manifest.json",
+            verification_profile="scoped",
+            root_operation_id=attempt_id,
+        )
+        family_parent = OperationRecord(
+            family_spec,
+            "running",
+            1,
+            f"lane-{family.value}",
+            f"run-{family.value}",
+        )
+        family_repair = FreshArtifactRepair.reserve(
+            owner=family_owner,
+            parent=family_parent,
+            invalid_sha256="6" * 64,
+            route=opposite,
+            origin_surface="11111111-1111-4111-8111-111111111111",
+        )
+        family_manager = FakeManager()
+        family_repair.start(family_manager)
+        family_request = family_manager.requests[0]
+        artifact = dict(template_value)
+        if family is ContractFamily.TASK_SUMMARY:
+            artifact.update({"title": "Repaired", "body": "Ready"})
+        else:
+            artifact.update({"status": "complete", "outcome": "ok"})
+        payload = {
+            "schema_version": 1,
+            "family": family.value,
+            "repair_id": family_repair.repair_id,
+            "artifact": artifact,
+        }
+        payload_sha = hashlib.sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        callback_id = f"result-{payload_sha[:24]}"
+        (family_repair.scratch / family_request.callback_pointer).write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "callback_id": callback_id,
+                    "operation_id": family_request.spec.operation_id,
+                    "run_id": family_request.run_id,
+                    "kind": "result",
+                    "payload": payload,
+                    "payload_sha256": payload_sha,
+                },
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        accepted_child = OperationRecord(
+            family_request.spec,
+            "verifying",
+            4,
+            family_request.lane_id,
+            family_request.run_id,
+            attempt=1,
+            attempt_limit=1,
+            model_restart_limit=0,
+            accepted_callback_id=callback_id,
+            accepted_callback_kind="result",
+            accepted_callback_sha256=payload_sha,
+        )
+        class AcceptedStore:
+            def read(self, _owner_id: str, _operation_id: str) -> OperationRecord:
+                return accepted_child
+
+        if family is ContractFamily.TASK_SUMMARY:
+            (worktree / ".task-meta.json").write_text("{}\n", encoding="utf-8")
+            published: list[dict[str, object]] = []
+
+            class SummaryWorker(RuntimeWorkerSummaryMixin):
+                def __init__(self) -> None:
+                    self.task_summary_artifact_owner = family_owner
+                    self.store = AcceptedStore()
+                    self.spec = {"owner_id": attempt_id, "cwd": worktree}
+                    self.summary_digest = ""
+                    self.summary_stable_reads = 0
+
+                def summary_is_stable(self, _raw: bytes) -> bool:
+                    return True
+
+                def load_summary_contract(self, _raw: bytes) -> dict[str, object]:
+                    return artifact
+
+                def build_summary_pipeline_state(
+                    self, _raw: bytes, *, summary: dict[str, object]
+                ) -> object:
+                    return type("State", (), {"summary": summary})()
+
+                def advance_compiled_pipeline(self, _state: object) -> bool:
+                    return True
+
+                def publish_summary_callback(self, value: dict[str, object]) -> None:
+                    published.append(value)
+
+                def summary_attention(self, *_args: object, **_kwargs: object) -> None:
+                    raise AssertionError("valid fresh summary reached attention")
+
+            original_validate_summary = summary_runtime.validate_summary_for_task
+            summary_runtime.validate_summary_for_task = lambda value, *_args, **_kwargs: value
+            try:
+                summary_worker = SummaryWorker()
+                summary_worker.finish_task_summary(target.read_bytes())
+                summary_worker.finish_task_summary(target.read_bytes())
+            finally:
+                summary_runtime.validate_summary_for_task = original_validate_summary
+            production_transition = len(published) == 1
+        else:
+            class PipelineWorker(RuntimeWorkerControlMixin):
+                def __init__(self) -> None:
+                    self.pipeline_step_artifact_owner = family_owner
+                    self.store = AcceptedStore()
+                    self.spec = {"owner_id": attempt_id}
+                    self.fix_result_digest = "prior"
+                    self.fix_result_stable_reads = 2
+                    self.custom_result_digest = "prior"
+                    self.custom_result_stable_reads = 2
+
+                def summary_attention(self, *_args: object, **_kwargs: object) -> None:
+                    raise AssertionError("valid fresh result reached attention")
+
+            pipeline_worker = PipelineWorker()
+            production_transition = (
+                pipeline_worker.adopt_fresh_pipeline_step_result() is True
+                and pipeline_worker.adopt_fresh_pipeline_step_result() is False
+            )
+        check(
+            f"{family.value} production consumer adopts once then submits normally",
+            production_transition,
+        )
+
+        failure_attempt = f"failure-{family.value}"
+        failure_worktree = family_root / "failure-product"
+        failure_worktree.mkdir()
+        failure_target = failure_worktree / pointer
+        failure_template = CanonicalContractTemplate.create(
+            family,
+            attempt_id=failure_attempt,
+            target_pointer=pointer,
+            value=template_value,
+            code_owned_fields=code_fields,
+            model_owned_fields=set(template_value) - code_fields,
+        )
+        failure_owner = ContractArtifactOwner.publish(
+            state_root=state / "failure",
+            worktree=failure_worktree,
+            template=failure_template,
+            actual_target=failure_target,
+        )
+        failure_owner.restore_template()
+        failure_spec = replace(
+            family_spec,
+            operation_id=failure_attempt,
+            idempotency_key=f"key-{failure_attempt}",
+            owner_id=failure_attempt,
+            root_operation_id=failure_attempt,
+        )
+        failure_parent = OperationRecord(
+            failure_spec,
+            "running",
+            1,
+            f"failure-lane-{family.value}",
+            f"failure-run-{family.value}",
+        )
+        failed_repair = FreshArtifactRepair.reserve(
+            owner=failure_owner,
+            parent=failure_parent,
+            invalid_sha256="7" * 64,
+            route=opposite,
+            origin_surface="11111111-1111-4111-8111-111111111111",
+        )
+        failed_manager = FakeManager()
+        failed_repair.start(failed_manager)
+        failed_request = failed_manager.requests[0]
+        failed_child = OperationRecord(
+            failed_request.spec,
+            "attention-required",
+            4,
+            failed_request.lane_id,
+            failed_request.run_id,
+            attempt=1,
+            attempt_limit=1,
+            model_restart_limit=0,
+            attention_reason=AttentionReason.CALLBACK_INVALID,
+        )
+        try:
+            failed_repair.reconcile(failed_child, lambda value: value)
+        except FreshRepairInvalid:
+            propagated = True
+        else:
+            propagated = False
+        failure_receipt = json.loads(
+            (failed_repair.root / "failed.json").read_text()
+        )
+        class FailedStore:
+            def read(self, _owner_id: str, _operation_id: str) -> OperationRecord:
+                return failed_child
+
+        terminal_attention: list[tuple[str, object]] = []
+        if family is ContractFamily.TASK_SUMMARY:
+            (failure_worktree / ".task-meta.json").write_text("{}\n", encoding="utf-8")
+
+            class FailedSummaryWorker(RuntimeWorkerSummaryMixin):
+                def __init__(self) -> None:
+                    self.task_summary_artifact_owner = failure_owner
+                    self.store = FailedStore()
+                    self.spec = {
+                        "owner_id": failure_attempt,
+                        "cwd": failure_worktree,
+                    }
+
+                def summary_attention(self, status: str, reason: object = None) -> None:
+                    terminal_attention.append((status, reason))
+
+            FailedSummaryWorker().finish_task_summary(failure_target.read_bytes())
+        else:
+            class FailedPipelineWorker(RuntimeWorkerControlMixin):
+                def __init__(self) -> None:
+                    self.pipeline_step_artifact_owner = failure_owner
+                    self.store = FailedStore()
+                    self.spec = {"owner_id": failure_attempt}
+
+                def summary_attention(self, status: str, reason: object = None) -> None:
+                    terminal_attention.append((status, reason))
+
+            FailedPipelineWorker().adopt_fresh_pipeline_step_result()
+        check(
+            f"{family.value} production consumer terminalizes child failure once",
+            propagated
+            and failure_receipt["stage"] == "callback-invalid"
+            and json.loads(failure_target.read_text())
+            == failure_owner.template_value
+            and terminal_attention
+            and terminal_attention[-1][1] is AttentionReason.RETRY_EXHAUSTED,
+        )
 
 with tempfile.TemporaryDirectory(prefix="fresh-artifact-crash.") as raw:
     base = Path(raw)

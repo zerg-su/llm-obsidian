@@ -331,6 +331,25 @@ check(
         callback_deadline_at=1_300,
     ),
 )
+check(
+    "artifact repair exit waits for typed terminal child state",
+    not provider_exit_is_final(
+        provider_exited=True,
+        callback_mode="artifact-repair",
+        callback_handled=False,
+        operation_state="awaiting-callback",
+        operation_profile="artifact-repair",
+        callback_deadline_at=0,
+    )
+    and provider_exit_is_final(
+        provider_exited=True,
+        callback_mode="artifact-repair",
+        callback_handled=False,
+        operation_state="attention-required",
+        operation_profile="artifact-repair",
+        callback_deadline_at=0,
+    ),
+)
 
 
 # --- Golden supported corridor (E267.RC1.CORRIDOR) -------------------------

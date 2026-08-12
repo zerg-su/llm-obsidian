@@ -315,7 +315,7 @@ def main() -> int:
                 "session_source": session["source"],
                 "placement": request["placement"],
                 "observer": {
-                    "root": request["request_id"],
+                    "temporary": request["request_id"],
                     "argv": observer_command(
                         request["vault_root"], request["request_id"]
                     ),

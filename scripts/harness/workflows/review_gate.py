@@ -22,6 +22,7 @@ from ..contracts import (
     to_dict,
 )
 from ..state_machine import TERMINAL
+from ..dashboard_facade import DashboardBinding
 from ..review_attempt import (
     EXACT_HEAD_REVIEW_PROTOCOL,
     ReviewAttempt,
@@ -122,6 +123,7 @@ class ReviewGateController(
         product_root: Path,
         prompt_pointer: str,
         callback_root: str,
+        dashboard_binding: DashboardBinding | None = None,
         callback_wake: str = "",
         prompt_pointers: Mapping[str, str] | None = None,
         prepare_lane: (
@@ -155,6 +157,7 @@ class ReviewGateController(
                 product_root=product_root,
                 prompt_pointer=prompt_pointer,
                 callback_root=callback_root,
+                dashboard_binding=dashboard_binding,
                 callback_wake=callback_wake,
                 round_store=self.round_store,
                 prompt_pointers=prompt_pointers,
@@ -202,6 +205,7 @@ class ReviewGateController(
         product_root: Path,
         prompt_pointer: str,
         callback_root: str,
+        dashboard_binding: DashboardBinding | None = None,
         callback_wake: str = "",
         prompt_pointers: Mapping[str, str] | None = None,
         prepare_lane: (
@@ -221,6 +225,7 @@ class ReviewGateController(
             product_root=product_root,
             prompt_pointer=prompt_pointer,
             callback_root=callback_root,
+            dashboard_binding=dashboard_binding,
             callback_wake=callback_wake,
             prompt_pointers=prompt_pointers,
             prepare_lane=prepare_lane,

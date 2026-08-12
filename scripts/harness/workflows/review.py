@@ -20,7 +20,11 @@ from ..contracts import (
 )
 from ..state_machine import TERMINAL
 from ..runtime_session_contracts import RuntimeSessionError
-from ..dashboard_facade import launch_bound_facade_dashboard
+from ..dashboard_facade import (
+    DashboardBinding,
+    launch_bound_facade_dashboard,
+    launch_review_facade_dashboard,
+)
 from review_contract import MATERIAL_SEVERITIES, SEVERITIES, VERIFY_BUDGETS
 
 
@@ -75,6 +79,7 @@ def start_review(
     prompt_pointer: str,
     callback_root: str,
     round_store: ReviewRoundStore,
+    dashboard_binding: DashboardBinding | None = None,
     callback_wake: str = "",
     prompt_pointers: Mapping[str, str] | None = None,
     prepare_lane: (
@@ -103,14 +108,21 @@ def start_review(
     callback_root = _owner_relative(
         callback_root, "review callback root"
     ).rstrip("/")
-    launch_bound_facade_dashboard(
-        worktree=product_root,
-        facade=(
-            "plan-review"
-            if request.context.purpose == "intent"
-            else "review"
-        ),
-        root_operation_id=request.root_operation_id,
+    facade = (
+        "plan-review" if request.context.purpose == "intent" else "review"
+    )
+    dashboard = (
+        launch_review_facade_dashboard(
+            binding=dashboard_binding,
+            facade=facade,
+            root_operation_id=request.root_operation_id,
+        )
+        if dashboard_binding is not None
+        else launch_bound_facade_dashboard(
+            worktree=product_root,
+            facade=facade,
+            root_operation_id=request.root_operation_id,
+        )
     )
     lanes: list[ReviewLaneSession] = []
     started_lanes: list[ReviewLaneSession] = []
@@ -290,7 +302,7 @@ def start_review(
             except Exception:
                 pass
         raise
-    return ReviewExecution(request, tuple(lanes))
+    return ReviewExecution(request, tuple(lanes), dashboard)
 
 
 def verify_review_lane(
