@@ -442,6 +442,7 @@ class RuntimeWorkerExecution(
         self.poll_seconds = poll_seconds
         self.checkpoint_probe = checkpoint_probe
         self.cmux_adapter = cmux_adapter
+        self._injected_cmux_adapter = cmux_adapter is not None
         self.review_launcher = review_launcher
         self.verification_runner = verification_runner
         self.wall_clock = wall_clock or clock or time.time
@@ -540,7 +541,7 @@ class RuntimeWorkerExecution(
                 _SleeperWakeSource(
                     self.sleeper, self.monotonic_clock, self.poll_seconds
                 )
-                if sleeper is not None
+                if sleeper is not None or self._injected_cmux_adapter
                 else CmuxWakeSource(
                     WakeBinding(
                         runtime_root=self.spec_path.parent,
