@@ -23,6 +23,33 @@ assert audit.coverage_percent(0, 0) == 100.0
 assert audit.coverage_percent(3, 4) == 75.0
 assert round(audit.coverage_percent(1, 3), 2) == 33.33
 assert audit.trace_environment()["PYTHONHASHSEED"] == "0"
+traceable_fixture = '''"""module docs"""
+
+def choose(flag):
+    """function docs"""
+    if (
+        flag
+        and True
+    ):
+        return 1
+    return 0
+'''
+assert audit.executable_trace_lines(
+    traceable_fixture, filename="traceable-fixture.py"
+) == {1, 3, 6, 9, 10}
+assert 4 not in audit.executable_trace_lines(
+    traceable_fixture, filename="traceable-fixture.py"
+), "function docstring-only positions are not executable trace events"
+assert 5 not in audit.executable_trace_lines(
+    traceable_fixture, filename="traceable-fixture.py"
+), "multi-line compound headers are not executable trace events"
+assert 7 not in audit.executable_trace_lines(
+    traceable_fixture, filename="traceable-fixture.py"
+), "expression continuations do not widen statement-line coverage"
+sentinel_fixture = "def values(items):\n    return (item for item in items)\n"
+assert audit.executable_trace_lines(
+    sentinel_fixture, filename="sentinel-fixture.py"
+) == {1, 2}, "interpreter non-line sentinels are not executable positions"
 assert "scripts.task-review-runner" in audit.source_modules()
 assert "scripts.dispatch-runner" in audit.source_modules()
 assert "scripts.dispatch_contracts" in audit.source_modules()

@@ -1,17 +1,10 @@
 #!/usr/bin/env python3
-"""Measure and ratchet hermetic statement-line coverage for the harness.
-
-The standard-library ``trace`` summary can display a misleading 100% over only
-observed lines. This audit combines its runtime counts with an AST-derived statement
-denominator, runs the existing fake/unit harness suite, requires every repo-owned
-harness module to appear, and enforces conservative release floors for the stateful
-core. Provider-backed and platform acceptance remain separate gates.
-"""
+"""Ratchet hermetic statement coverage at interpreter-emittable positions."""
 
 from __future__ import annotations
 
 import argparse
-import ast
+import ast, dis
 import json
 import os
 import re
@@ -49,6 +42,17 @@ def coverage_percent(covered: int, executable: int) -> float:
     if executable == 0:
         return 100.0
     return covered * 100 / executable
+
+
+def executable_trace_lines(source: str, *, filename: str) -> set[int]:
+    """Map source statements onto line events this interpreter can emit."""
+    def positions(code: object) -> set[int]:
+        nested = (positions(value) for value in code.co_consts if isinstance(value, type(code)))
+        return {line for _offset, line in dis.findlinestarts(code) if line is not None and line > 0}.union(*nested)
+    traceable = positions(compile(source, filename, "exec", dont_inherit=True, optimize=0))
+    statements = ast.walk(ast.parse(source, filename=filename))
+    return {candidates[0] for node in statements if isinstance(node, ast.stmt) and (candidates := sorted(
+        line for line in traceable if node.lineno <= line <= (node.end_lineno or node.lineno)))}
 
 
 def transition_matrix_case_count(output: str) -> int:
@@ -139,19 +143,15 @@ def run_trace() -> tuple[dict[str, dict[str, object]], int]:
 
     rows: dict[str, dict[str, object]] = {}
     for path in MANIFEST.source_paths(ROOT):
-        statement_lines = {
-            node.lineno
-            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
-            if isinstance(node, ast.stmt)
-        }
-        hit_lines = statement_lines & hit_by_path.get(str(path.resolve()), set())
+        executable_lines = executable_trace_lines(path.read_text(encoding="utf-8"), filename=str(path))
+        hit_lines = executable_lines & hit_by_path.get(str(path.resolve()), set())
         module = ".".join(path.relative_to(ROOT).with_suffix("").parts)
-        executable = len(statement_lines)
+        executable = len(executable_lines)
         covered = len(hit_lines)
         rows[module] = {
             "executable_lines": executable,
             "covered_lines": covered,
-            "missing_lines": sorted(statement_lines - hit_lines),
+            "missing_lines": sorted(executable_lines - hit_lines),
             "percent": round(coverage_percent(covered, executable), 1),
             "path": str(path.relative_to(ROOT)),
         }
