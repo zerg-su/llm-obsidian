@@ -525,7 +525,7 @@ def _classify_accepted_callback(
         snapshot.root.state != "attention-required"
         or snapshot.root.resume_state
         not in {"running", "awaiting-callback", "verifying"}
-        or snapshot.attention_status != "callback-invalid"
+        or snapshot.attention_status != "review-drive-failed"
     ):
         return _refuse(RecoveryReason.ATTENTION_NOT_RECOVERABLE)
     if (

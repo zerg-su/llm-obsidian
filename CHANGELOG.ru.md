@@ -29,7 +29,8 @@
   identity-bound resolution, изменения product HEAD и успешной exact-HEAD
   verification, если нет pending effect и доступна следующая review iteration.
 - Immutable review callback, уже принятый operation store, но ещё не
-  обработанный точным gate, проходит через зарегистрированный gate workflow
+  обработанный точным gate, проходит из durable boundary
+  `review-drive-failed` dispatch root через зарегистрированный gate workflow
   без повторного acceptance или delivery callback.
 - Terminal approval переиспользуется только при совпадении exact product HEAD
   и digest проверенного implementer summary. Изменение только summary на том

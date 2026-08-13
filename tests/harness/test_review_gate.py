@@ -45,6 +45,7 @@ from harness.state_machine import TERMINAL
 from harness.store import OperationStore
 from harness.verification import load_profiles
 from harness.runtime_worker import _pipeline_verify_identity
+from harness.runtime_worker_control import RuntimeWorkerControlMixin
 from harness.runtime_worker_custom import RuntimeWorkerCustomMixin
 from harness.runtime_worker_review_bridge import RuntimeWorkerReviewBridgeMixin
 from harness.review_continuation_recovery import RecoveryDisposition
@@ -1139,10 +1140,6 @@ with tempfile.TemporaryDirectory(prefix="review-continuation-real-gate.") as raw
         store.root / "owners" / "owner-1" / "runtime" / "dispatch-1"
     )
     root_runtime.mkdir(parents=True, exist_ok=True)
-    (root_runtime / "callback-error.json").write_text(
-        '{"schema_version":1,"status":"callback-invalid"}\n',
-        encoding="utf-8",
-    )
     ingestions: list[str] = []
 
     class AliveReviewProcess:
@@ -1191,6 +1188,9 @@ with tempfile.TemporaryDirectory(prefix="review-continuation-real-gate.") as raw
             self.review_launcher = ingest
 
     worker = RegisteredIngestionWorker()
+    RuntimeWorkerControlMixin.publish_error_latch(
+        worker, "review-drive-failed"
+    )
     recovery_decision = worker.review_continuation_decision()
     worker.recover_review_continuation()
     root_record = store.read("owner-1", "dispatch-1")

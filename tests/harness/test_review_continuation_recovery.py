@@ -66,6 +66,7 @@ check(
 
 for latch in (
     "",
+    "callback-invalid",
     "wiki-summary-invalid",
     "callback-wake-effect-uncertain",
     "pipeline-verification-effect-uncertain",

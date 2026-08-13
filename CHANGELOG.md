@@ -22,8 +22,9 @@ scheduler, provider retry, callback replay, or generic attention self-heal.
   identity-bound resolution changes product HEAD and exact-HEAD verification
   succeeds, provided no effect is pending and a review iteration remains.
 - An immutable review callback already accepted by the operation store but
-  not yet consumed by its exact gate is ingested through the registered gate
-  workflow without accepting or delivering the callback again.
+  not yet consumed by its exact gate is ingested from the dispatch root's
+  durable `review-drive-failed` boundary through the registered gate workflow,
+  without accepting or delivering the callback again.
 - A terminal approval is reused only while both its exact product HEAD and
   reviewed implementer-summary digest still match. A summary-only refresh at
   the same HEAD reserves one ordinary predecessor-bound follow-up review;

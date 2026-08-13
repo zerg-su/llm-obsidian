@@ -12,7 +12,7 @@
       "run_id": "156b8dfed33160c5d4efec089320d4ae"
     }
   ],
-  "attention_status": "callback-invalid",
+  "attention_status": "review-drive-failed",
   "attempt": {
     "attempt_id": "c34845ba-fe50-54db-a80e-75ab454b558c",
     "cycle": 1,

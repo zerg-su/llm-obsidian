@@ -31,6 +31,7 @@ from harness.review_continuation_recovery import (  # noqa: E402
     RecoveryReason,
     classify_review_continuation,
 )
+from harness.runtime_worker_control import RuntimeWorkerControlMixin  # noqa: E402
 from harness.state_machine import begin_effect  # noqa: E402
 from harness.store import OperationStore  # noqa: E402
 
@@ -293,9 +294,9 @@ with tempfile.TemporaryDirectory(prefix="review-continuation-observation.") as r
         / callback_operation
     )
     callback_runtime.mkdir(parents=True)
-    (callback_runtime / "callback-error.json").write_text(
-        '{"schema_version":1,"status":"callback-invalid"}\n',
-        encoding="utf-8",
+    RuntimeWorkerControlMixin.publish_error_latch(
+        SimpleNamespace(spec_path=callback_runtime / "launch.json"),
+        "review-drive-failed",
     )
     attempt_id = "observation-callback-attempt"
     parent_id = f"{attempt_id}-holistic"
@@ -417,7 +418,7 @@ with tempfile.TemporaryDirectory(prefix="review-continuation-observation.") as r
     check(
         "durable callback records reconstruct exact ingestion authority",
         len(callback_snapshot.accepted_callbacks) == 1
-        and callback_snapshot.attention_status == "callback-invalid"
+        and callback_snapshot.attention_status == "review-drive-failed"
         and callback_snapshot.accepted_callbacks[0].callback_id
         == envelope.callback_id
         and callback_decision.disposition

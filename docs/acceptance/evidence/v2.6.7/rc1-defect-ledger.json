@@ -91,10 +91,10 @@
       "seam": "callback-finalization",
       "alias_of": null,
       "reproducer": "tests/harness/fixtures/review-continuation/accepted-callback-pending-ingestion.json",
-      "durable_pre_state": "dispatch latched callback-invalid after one immutable exact review callback was accepted by OperationStore while the gate remained reviewing, the matching round was finalizing, and round_results lacked its axis",
+      "durable_pre_state": "dispatch latched review-drive-failed after one immutable exact review callback was accepted by OperationStore while the gate remained reviewing, the matching round was finalizing, and round_results lacked its axis",
       "expected_owner": "RuntimeWorkerReviewBridgeMixin.drive_review",
       "expected_transition": "prepare one receipt and invoke the registered review gate workflow to ingest the existing accepted callback exactly once",
-      "observed_post_state": "the root remained callback-invalid with a pending-ingestion diagnostic until coordinator continuation",
+      "observed_post_state": "the root remained review-drive-failed with a pending-ingestion diagnostic until coordinator continuation",
       "effect_ambiguity": "none: exact owner, operation, run, lane, attempt, callback id, kind, and payload hash prove ingestion is the only missing transition",
       "focused_regression": "tests/harness/test_callback_submit_recovery_runtime.py",
       "disposition": "repaired"

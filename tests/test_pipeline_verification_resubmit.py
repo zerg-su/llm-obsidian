@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -133,7 +134,6 @@ with tempfile.TemporaryDirectory(prefix="verification-resubmit.") as raw:
     relayed: list[str] = []
     task_escalation.send = lambda _surface, message, **_kwargs: relayed.append(message)
     task_escalation.emit_lifecycle_event = lambda *_args, **_kwargs: None
-    os.environ["CODEX_THREAD_ID"] = str(task_meta["origin_session"])
     prior_argv = sys.argv
     sys.argv = [
         "task_escalation.py",
@@ -148,10 +148,15 @@ with tempfile.TemporaryDirectory(prefix="verification-resubmit.") as raw:
         "--question",
         "Authorize one exact same-HEAD verification retry?",
     ]
-    try:
-        task_escalation.main()
-    finally:
-        sys.argv = prior_argv
+    with mock.patch.dict(
+        os.environ,
+        {"CODEX_THREAD_ID": str(task_meta["origin_session"])},
+        clear=True,
+    ):
+        try:
+            task_escalation.main()
+        finally:
+            sys.argv = prior_argv
     raised = load_latest(worktree)
     if (
         raised is None
@@ -162,7 +167,14 @@ with tempfile.TemporaryDirectory(prefix="verification-resubmit.") as raw:
     ):
         raise AssertionError((raised, relayed))
     escalation_id = str(raised.payload["id"])
-    task_escalation.resolve_escalation(worktree, "retry-mechanism-flake")
+    with mock.patch.dict(
+        os.environ,
+        {"CODEX_THREAD_ID": str(task_meta["origin_session"])},
+        clear=True,
+    ):
+        task_escalation.resolve_escalation(
+            worktree, "retry-mechanism-flake"
+        )
     resolved = load_latest(worktree)
     if resolved is None:
         raise AssertionError("typed resolution was not published")
