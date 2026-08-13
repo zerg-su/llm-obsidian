@@ -72,7 +72,7 @@ with tempfile.TemporaryDirectory(prefix="harness-review-transport.") as raw:
         ROOT / "config/verification-profiles.toml",
         worktree / "config/verification-profiles.toml",
     )
-    shutil.copy2(
+    shutil.copyfile(
         ROOT / "config/verification-profiles.toml",
         vault / "config/verification-profiles.toml",
     )
@@ -755,7 +755,7 @@ raise SystemExit(9 if calls == 1 else 0)
         "archive rejects evidence for a stale verification profile",
         rejected.returncode == 3,
     )
-    shutil.copy2(ROOT / "config/verification-profiles.toml", profile_path)
+    shutil.copyfile(ROOT / "config/verification-profiles.toml", profile_path)
     (worktree / "tracked.txt").write_text("new HEAD\n", encoding="utf-8")
     subprocess.run(["git", "add", "tracked.txt"], cwd=worktree, check=True)
     subprocess.run(
