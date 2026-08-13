@@ -129,6 +129,28 @@ with tempfile.TemporaryDirectory(prefix="harness-diagnostics.") as raw:
         '{"schema_version":1,"secret":"DO_NOT_LEAK"}\n',
         encoding="utf-8",
     )
+    runtime_root = (
+        store_root / "owners" / owner / "runtime" / operation
+    )
+    runtime_root.mkdir(parents=True)
+    wake_receipt = {
+        "schema_version": 1,
+        "owner_id": owner,
+        "operation_id": operation,
+        "run_id": "diagnostic-run",
+        "generation": 2,
+        "source": "cmux-event",
+        "event_name": "agent.hook.PostToolUse",
+        "sequence": 17,
+        "observed_at": 42.5,
+        "outcome": "progressed",
+        "private_screen": "DO_NOT_LEAK_WAKE",
+    }
+    for filename in ("wake-observation.json", "wake-progress.json"):
+        (runtime_root / filename).write_text(
+            json.dumps(wake_receipt, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
 
     packet = observe(store_root, owner)
     encoded = json.dumps(packet, sort_keys=True)
@@ -143,12 +165,34 @@ with tempfile.TemporaryDirectory(prefix="harness-diagnostics.") as raw:
     check(
         "diagnostic packet is content-free and bounded",
         "DO_NOT_LEAK" not in encoded
+        and "DO_NOT_LEAK_WAKE" not in encoded
         and len(encoded.encode()) < 4096
         and packet["signals"][0]["evidence"]
         == [
             "review-data/diagnostic-owner/diagnostic-owner/review-gate.json",
             "review-runtime/diagnostic-owner/callbacks",
         ],
+    )
+    check(
+        "diagnostics expose only bounded latest wake identities",
+        packet["counts"]["wake_observations"] == 2
+        and packet["wake_observations"][0]
+        == {
+            "kind": "latest-full-reconcile",
+            "owner_id": owner,
+            "operation_id": operation,
+            "run_id": "diagnostic-run",
+            "generation": 2,
+            "source": "cmux-event",
+            "event_name": "agent.hook.PostToolUse",
+            "sequence": 17,
+            "observed_at": 42.5,
+            "outcome": "progressed",
+            "evidence": (
+                "owners/diagnostic-owner/runtime/"
+                "diagnostic-operation/wake-observation.json"
+            ),
+        },
     )
 
     legacy_callback_receipt = (

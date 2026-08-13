@@ -4,11 +4,168 @@ from __future__ import annotations
 
 from .runtime_worker import *  # noqa: F401,F403
 from .runtime_worker import _atomic_json
+from .runtime_callback_io import _callback_target
+from .cmux_wake_source import WakeObservation
+
+
+FULL_TRANSPORT_FALLBACK_SECONDS = 30.0
+TRANSPORT_STABILITY_FIELDS = (
+    "stable_reads",
+    "review_input_stable_reads",
+    "summary_stable_reads",
+    "callback_recovery_input_reads",
+    "callback_recovery_reads",
+    "fix_callback_stable_reads",
+    "fix_result_stable_reads",
+    "fix_output_stable_reads",
+    "custom_callback_stable_reads",
+    "custom_result_stable_reads",
+    "custom_output_stable_reads",
+)
 
 
 class RuntimeWorkerLoopMixin:
+    def transport_confirmation_pending(self) -> bool:
+        """Preserve every existing two-read guard across event wakeups."""
+
+        return any(getattr(self, field, 0) == 1 for field in TRANSPORT_STABILITY_FIELDS)
+
+    def callback_deadline_monotonic(self, now: float) -> float:
+        """Project the durable wall-clock callback deadline onto this wait."""
+
+        try:
+            record = self.store.read(
+                self.spec["owner_id"], self.spec["operation_id"]
+            )
+            if self.callback_handled or not record.deadline_at:
+                return float("inf")
+            remaining = max(0.0, record.deadline_at - self.wall_clock())
+            return now + remaining
+        except Exception:
+            # The ordinary fallback reconciliation remains authoritative.
+            return float("inf")
+
+    def _next_light_deadline(self, now: float) -> float:
+        deadlines = [
+            self.next_prompt_probe,
+            self.next_liveness_probe,
+            self.next_provider_exit_probe,
+            self.callback_deadline_monotonic(now),
+        ]
+        if not self.checkpoint:
+            deadlines.append(self.next_checkpoint_probe)
+        return min(deadlines)
+
+    def _next_wake_deadline(self, now: float) -> float:
+        return min(
+            self.next_full_reconcile,
+            self.next_transport_confirmation,
+            self._next_light_deadline(now),
+        )
+
+    def transport_snapshot(self) -> dict[str, object]:
+        """Return bounded durable identities, never provider content."""
+
+        snapshot: dict[str, object] = {}
+        try:
+            parent = self.store.read(
+                self.spec["owner_id"], self.spec["operation_id"]
+            )
+            snapshot["parent"] = {
+                "operation_id": self.spec["operation_id"],
+                "run_id": parent.run_id,
+                "revision": parent.revision,
+                "state": parent.state,
+                "accepted_callback_id": parent.accepted_callback_id,
+                "accepted_callback_kind": parent.accepted_callback_kind,
+                "accepted_callback_sha256": parent.accepted_callback_sha256,
+            }
+        except Exception:
+            snapshot["parent"] = {"operation_id": self.spec["operation_id"]}
+        try:
+            generation, operation_id, run_id, _pointer = _callback_target(self.spec)
+            child = self.store.read(self.spec["owner_id"], operation_id)
+            snapshot["callback"] = {
+                "generation": generation,
+                "operation_id": operation_id,
+                "run_id": run_id,
+                "revision": child.revision,
+                "state": child.state,
+                "accepted_callback_id": child.accepted_callback_id,
+                "accepted_callback_kind": child.accepted_callback_kind,
+                "accepted_callback_sha256": child.accepted_callback_sha256,
+            }
+        except Exception:
+            snapshot["callback"] = {}
+        return snapshot
+
+    def _wake_generation(self) -> int:
+        try:
+            return _callback_target(self.spec)[0]
+        except Exception:
+            return int(getattr(self, "initial_generation", 1))
+
+    def record_transport_wake(
+        self,
+        observation: WakeObservation,
+        before: object,
+        after: object,
+    ) -> None:
+        """Publish one crash-safe, content-free reconciliation receipt."""
+
+        outcome = "progressed" if before != after else "no-change"
+        payload = {
+            "schema_version": 1,
+            "owner_id": self.spec["owner_id"],
+            "operation_id": self.spec["operation_id"],
+            "run_id": self.spec["run_id"],
+            "generation": self._wake_generation(),
+            "source": observation.source,
+            "event_name": observation.event_name,
+            "sequence": observation.sequence,
+            "observed_at": observation.observed_at,
+            "recorded_at": self.wall_clock(),
+            "outcome": outcome,
+            "before": before,
+            "after": after,
+        }
+        _atomic_json(self.spec_path.parent / "wake-observation.json", payload)
+        if outcome == "progressed":
+            _atomic_json(self.spec_path.parent / "wake-progress.json", payload)
+
+    def record_wake_source_state(self, observation: WakeObservation) -> None:
+        if getattr(self, "_last_wake_source_state", "") == observation.source:
+            return
+        self._last_wake_source_state = observation.source
+        _atomic_json(
+            self.spec_path.parent / "wake-source-state.json",
+            {
+                "schema_version": 1,
+                "owner_id": self.spec["owner_id"],
+                "operation_id": self.spec["operation_id"],
+                "run_id": self.spec["run_id"],
+                "generation": self._wake_generation(),
+                "source": observation.source,
+                "observed_at": observation.observed_at,
+            },
+        )
+
+    def _full_reconcile(self, observation: WakeObservation, now: float) -> None:
+        before = self.transport_snapshot()
+        self.inspect_transport()
+        after = self.transport_snapshot()
+        self.record_transport_wake(observation, before, after)
+        self.next_full_reconcile = now + FULL_TRANSPORT_FALLBACK_SECONDS
+        self.next_transport_confirmation = (
+            round(now + max(0.02, self.poll_seconds), 9)
+            if self.transport_confirmation_pending()
+            else float("inf")
+        )
+
     def inspect_transport(self) -> None:
-        self.inspect_control()
+        inspect_control = getattr(self, "inspect_control", None)
+        if inspect_control is not None:
+            inspect_control()
         if self.spec["callback_mode"] == "task-summary":
             self.recover_task_summary_attention()
             self.drive_fix_transport()
@@ -25,6 +182,12 @@ class RuntimeWorkerLoopMixin:
                 inspect_rejections()
 
     def tick_observers(self) -> None:
+        # Guardian control is a narrow identity-bound duty.  It must remain
+        # prompt even when the optional event source is unavailable, without
+        # turning the rest of transport inspection back into a fast poll.
+        inspect_control = getattr(self, "inspect_control", None)
+        if inspect_control is not None:
+            inspect_control()
         wall_clock = getattr(self, "wall_clock", time.time)
         if enforce_callback_deadline(
             self.store,
@@ -344,9 +507,77 @@ class RuntimeWorkerLoopMixin:
     def poll_once(self) -> bool:
         """Run one production transport/observer/exit-observation iteration."""
 
-        self.inspect_transport()
+        # Small mixin-only simulators predate event transport.  Their lack of
+        # a source is an explicit test seam, not a production polling mode.
+        if not hasattr(self, "wake_source"):
+            self.inspect_transport()
+            self.tick_observers()
+            return self.observe_provider_exit()
+
+        now = self.monotonic_clock()
+        observation: WakeObservation | None = None
+        if now >= self.next_transport_confirmation:
+            observation = WakeObservation("stability-confirmation", "", 0, now)
+        elif now >= self.next_full_reconcile:
+            observation = WakeObservation("fallback-poll", "", 0, now)
+        else:
+            generation = self._wake_generation()
+            if generation != getattr(self, "_last_wake_generation", generation):
+                refresh = getattr(self.wake_source, "refresh_generation", None)
+                if refresh is not None:
+                    refresh(generation)
+                self._last_wake_generation = generation
+            timeout = max(0.0, self._next_wake_deadline(now) - now)
+            if (
+                self.next_wake_retry != float("inf")
+                and now < self.next_wake_retry
+            ):
+                self.sleeper(min(timeout, self.next_wake_retry - now))
+            else:
+                observation = self.wake_source.wait(timeout)
+            now = self.monotonic_clock()
+            if observation is None and now >= self.next_transport_confirmation:
+                observation = WakeObservation(
+                    "stability-confirmation", "", 0, now
+                )
+            elif observation is None and now >= self.next_full_reconcile:
+                observation = WakeObservation("fallback-poll", "", 0, now)
+
+        # The loop accepts only the adapter's closed hints plus its two
+        # code-owned full-reconcile reasons.
+        if observation is not None and observation.source in {
+            "cmux-event",
+            "reconnect",
+            "cursor-gap",
+            "degraded",
+            "fallback-poll",
+            "stability-confirmation",
+        }:
+            if observation.source == "degraded":
+                self.record_wake_source_state(observation)
+                self.next_wake_retry = now + max(0.1, self.poll_seconds)
+                observation = WakeObservation(
+                    "fallback-poll", "", 0, observation.observed_at
+                )
+            else:
+                self._last_wake_source_state = ""
+            self._full_reconcile(observation, now)
+        elif observation is not None and observation.source == "unavailable":
+            self.record_wake_source_state(observation)
+            self.next_wake_retry = now + max(1.0, self.poll_seconds)
+
+        if (
+            self.next_wake_retry != float("inf")
+            and now >= self.next_wake_retry
+            and hasattr(self.wake_source, "retry")
+        ):
+            self.wake_source.retry()
+            self.next_wake_retry = float("inf")
         self.tick_observers()
-        return self.observe_provider_exit()
+        if now >= self.next_provider_exit_probe:
+            self.next_provider_exit_probe = now + max(0.02, self.poll_seconds)
+            return self.observe_provider_exit()
+        return True
 
     def settle_exit_once(self) -> bool:
         """Classify one observed exit and decide restart versus finality."""
@@ -360,20 +591,23 @@ class RuntimeWorkerLoopMixin:
         return self.provider_exit_is_final()
 
     def run_provider_loop(self) -> int:
-        while True:
-            if not self.poll_once():
-                self.sleeper(max(0.02, self.poll_seconds))
-                continue
-            if self.settle_exit_once():
-                break
-            self.sleeper(max(0.02, self.poll_seconds))
-        self.drain_callbacks()
-        _atomic_json(
-            self.exit_path,
-            {
-                "schema_version": 1,
-                "status": "exited",
-                "exit_code": self.exit_code,
-            },
-        )
-        return self.exit_code
+        try:
+            while True:
+                if not self.poll_once():
+                    continue
+                if self.settle_exit_once():
+                    break
+            self.drain_callbacks()
+            _atomic_json(
+                self.exit_path,
+                {
+                    "schema_version": 1,
+                    "status": "exited",
+                    "exit_code": self.exit_code,
+                },
+            )
+            return self.exit_code
+        finally:
+            source = getattr(self, "wake_source", None)
+            if source is not None:
+                source.close()

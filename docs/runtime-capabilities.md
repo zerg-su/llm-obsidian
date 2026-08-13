@@ -70,6 +70,26 @@ payload, prompt, output, notification body, screen content, and hook data are
 never persisted; only bounded wake source/name/sequence plus worker identity
 may enter diagnostics.
 
+The worker starts this optional subscription before provider launch. Its
+reason-aware wait invokes the complete durable transport reconciler only for a
+matching event, reconnect, cursor gap, a pending two-read stability
+confirmation, or `fallback-poll` no later than 30 seconds after the preceding
+full reconcile. Every existing two-read guard remains explicit. Prompt probes
+remain due every 0.2 seconds, checkpoint probes every 0.5 seconds until
+capture, and provider-exit, callback, liveness, and guardian-control deadlines
+remain independent light duties. Optional-source failure never becomes
+lifecycle attention; malformed/EOF sources reconcile once and retry with
+backoff, while unavailable sources retain the same deadlines and fallback.
+
+Each runtime root atomically replaces `wake-observation.json` after a full
+reconcile and replaces `wake-progress.json` only when durable identities or
+state progressed. Receipts contain only owner/operation/run/generation,
+`cmux-event`, `reconnect`, `cursor-gap`, `stability-confirmation`, or
+`fallback-poll`, optional closed event name and sequence, timestamps, outcome,
+and bounded durable revision/state/callback identities. Diagnostics select
+only those fields; provider output, prompt, screen, notification body, and raw
+cmux payload remain absent.
+
 `pipeline-events.jsonl` is local and gitignored. Its schema accepts only
 runtime/session identifiers, actor/operation/status, relative vault paths, and
 numeric counters. Prompt text, search queries, commands, snippets, page bodies,

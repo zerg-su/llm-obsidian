@@ -44,7 +44,15 @@ SURFACE_EVENTS = frozenset(
 )
 WORKSPACE_EVENTS = frozenset({"workspace.created", "workspace.closed"})
 WAKE_SOURCES = frozenset(
-    {"cmux-event", "reconnect", "cursor-gap", "unavailable", "degraded"}
+    {
+        "cmux-event",
+        "reconnect",
+        "cursor-gap",
+        "unavailable",
+        "degraded",
+        "fallback-poll",
+        "stability-confirmation",
+    }
 )
 EVENT_KEYS = frozenset(
     {
@@ -349,6 +357,36 @@ class CmuxWakeSource:
         self.process: object | None = None
         self._capability: bool | None = None
         self._closed = False
+
+    def start(self) -> bool:
+        """Subscribe before provider launch so replay can cover that window."""
+
+        return not self._closed and self._ensure_started()
+
+    def retry(self) -> bool:
+        """Retry capability/process acquisition after a bounded backoff."""
+
+        if self._closed:
+            return False
+        self._capability = None
+        return self._ensure_started()
+
+    def refresh_generation(self, generation: int) -> None:
+        """Refresh callback routing identity without changing process scope."""
+
+        if type(generation) is not int or generation < 1:
+            return
+        binding = WakeBinding(
+            runtime_root=self.binding.runtime_root,
+            workspace_id=self.binding.workspace_id,
+            surface_id=self.binding.surface_id,
+            owner_id=self.binding.owner_id,
+            operation_id=self.binding.operation_id,
+            run_id=self.binding.run_id,
+            generation=generation,
+        )
+        self.binding = binding
+        self.policy.binding = binding
 
     def wait(self, timeout: float) -> WakeObservation | None:
         if self._closed or not isinstance(timeout, (int, float)) or timeout < 0:

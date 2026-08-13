@@ -80,6 +80,7 @@ except ImportError:
         )
 from harness.runtime_provider_input import interactive_provider_input
 from harness.runtime_provider_events import RuntimeProviderEventStream
+from harness.cmux_wake_source import WakeObservation
 from harness.runtime_worker import (
     load_spec as load_runtime_spec,
     provider_argv as runtime_provider_argv,
@@ -87,6 +88,7 @@ from harness.runtime_worker import (
 )
 from harness.runtime_provider import provider_environment
 from harness.runtime_worker_contracts import RuntimeWorkerError
+from harness.runtime_worker_loop import RuntimeWorkerLoopMixin
 from harness.store import OperationStore
 from harness.supervisor import OperationSupervisor
 
@@ -103,6 +105,275 @@ def check(label: str, value: bool, detail: object = "") -> None:
     if not value:
         raise AssertionError(f"{label}: {detail}")
     print(f"OK   {label}")
+
+
+class EventFirstClock:
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+class EventFirstSource:
+    def __init__(
+        self,
+        clock: EventFirstClock,
+        scheduled: list[tuple[float, WakeObservation]],
+    ) -> None:
+        self.clock = clock
+        self.scheduled = scheduled
+        self.waits: list[float] = []
+
+    def wait(self, timeout: float) -> WakeObservation | None:
+        self.waits.append(timeout)
+        deadline = self.clock.now + timeout
+        if self.scheduled and self.scheduled[0][0] <= deadline:
+            at, observation = self.scheduled.pop(0)
+            self.clock.now = at
+            return replace(observation, observed_at=at)
+        self.clock.now = deadline
+        return None
+
+    def retry(self) -> None:
+        return None
+
+
+class EventFirstLoopProbe(RuntimeWorkerLoopMixin):
+    def __init__(self) -> None:
+        self.clock = EventFirstClock()
+        self.monotonic_clock = self.clock
+        self.wall_clock = self.clock
+        self.poll_seconds = 0.1
+        self.wake_source = EventFirstSource(
+            self.clock,
+            [
+                (
+                    0.05,
+                    WakeObservation(
+                        "cmux-event", "agent.hook.PostToolUse", 9, 0.05
+                    ),
+                )
+            ],
+        )
+        self.next_full_reconcile = 30.0
+        self.next_transport_confirmation = float("inf")
+        self.next_provider_exit_probe = 0.1
+        self.next_wake_retry = 0.0
+        self.next_prompt_probe = 0.2
+        self.next_checkpoint_probe = 0.5
+        self.next_liveness_probe = 60.0
+        self.checkpoint = ""
+        self.provider_exited = False
+        self.callback_handled = False
+        self.liveness_policy = type("Policy", (), {"probe_seconds": 60})()
+        self.stable_reads = 0
+        for field in (
+            "review_input_stable_reads",
+            "summary_stable_reads",
+            "callback_recovery_input_reads",
+            "callback_recovery_reads",
+            "fix_callback_stable_reads",
+            "fix_result_stable_reads",
+            "fix_output_stable_reads",
+            "custom_callback_stable_reads",
+            "custom_result_stable_reads",
+            "custom_output_stable_reads",
+        ):
+            setattr(self, field, 0)
+        self.inspections: list[float] = []
+        self.prompt_ticks: list[float] = []
+        self.exit_ticks: list[float] = []
+        self.receipts: list[tuple[str, str]] = []
+        self.source_states: list[str] = []
+
+    def inspect_transport(self) -> None:
+        self.inspections.append(self.clock.now)
+        self.stable_reads += 1
+
+    def tick_observers(self) -> None:
+        if self.clock.now >= self.next_prompt_probe:
+            self.prompt_ticks.append(self.clock.now)
+            self.next_prompt_probe = self.clock.now + 0.2
+
+    def observe_provider_exit(self) -> bool:
+        self.exit_ticks.append(self.clock.now)
+        return True
+
+    def callback_deadline_monotonic(self, now: float) -> float:
+        return float("inf")
+
+    def record_transport_wake(
+        self, observation: WakeObservation, before: object, after: object
+    ) -> None:
+        self.receipts.append((observation.source, "progressed" if before != after else "no-change"))
+
+    def transport_snapshot(self) -> object:
+        return tuple(self.inspections)
+
+    def record_wake_source_state(self, observation: WakeObservation) -> None:
+        self.source_states.append(observation.source)
+
+
+_event_first = EventFirstLoopProbe()
+check(
+    "event wake performs the full durable inspection before the fallback",
+    _event_first.poll_once() is True
+    and _event_first.inspections == [0.05]
+    and _event_first.receipts == [("cmux-event", "progressed")],
+    (_event_first.inspections, _event_first.receipts),
+)
+check(
+    "provider exit remains independently observable without a full reconcile",
+    _event_first.poll_once() is True
+    and _event_first.exit_ticks == [0.1]
+    and _event_first.inspections == [0.05],
+    (_event_first.exit_ticks, _event_first.inspections),
+)
+check(
+    "one-read transport evidence schedules the unchanged short confirmation",
+    _event_first.poll_once() is True
+    and _event_first.inspections == [0.05, 0.15]
+    and _event_first.stable_reads == 2
+    and _event_first.receipts[-1][0] == "stability-confirmation",
+    (_event_first.inspections, _event_first.stable_reads, _event_first.receipts),
+)
+check(
+    "prompt cadence remains light-only after stable confirmation",
+    _event_first.poll_once() is True
+    and _event_first.prompt_ticks == [0.2]
+    and _event_first.inspections == [0.05, 0.15],
+    (_event_first.prompt_ticks, _event_first.inspections),
+)
+
+_fallback = EventFirstLoopProbe()
+_fallback.wake_source = EventFirstSource(_fallback.clock, [])
+_fallback.next_prompt_probe = float("inf")
+_fallback.next_checkpoint_probe = float("inf")
+_fallback.next_liveness_probe = float("inf")
+_fallback.next_provider_exit_probe = float("inf")
+check(
+    "eventless transport retains the exact thirty-second full fallback",
+    _fallback.poll_once() is True
+    and _fallback.inspections == [30.0]
+    and _fallback.receipts[-1][0] == "fallback-poll",
+    (_fallback.inspections, _fallback.receipts),
+)
+
+_control_wakes = EventFirstLoopProbe()
+_control_wakes.wake_source = EventFirstSource(
+    _control_wakes.clock,
+    [
+        (0.01, WakeObservation("reconnect", sequence=20)),
+        (0.02, WakeObservation("cursor-gap", sequence=21)),
+    ],
+)
+_control_wakes.next_provider_exit_probe = float("inf")
+_control_wakes.next_prompt_probe = float("inf")
+_control_wakes.next_checkpoint_probe = float("inf")
+_control_wakes.next_liveness_probe = float("inf")
+_control_wakes.poll_once()
+_control_wakes.poll_once()
+check(
+    "reconnect and cursor gaps only request durable reconciliation",
+    [source for source, _outcome in _control_wakes.receipts]
+    == ["reconnect", "cursor-gap"],
+    _control_wakes.receipts,
+)
+
+_degraded = EventFirstLoopProbe()
+_degraded.wake_source = EventFirstSource(
+    _degraded.clock,
+    [(0.01, WakeObservation("degraded"))],
+)
+_degraded.next_provider_exit_probe = float("inf")
+_degraded.next_prompt_probe = float("inf")
+_degraded.next_checkpoint_probe = float("inf")
+_degraded.next_liveness_probe = float("inf")
+check(
+    "a degraded source reconciles once and enters bounded retry without attention",
+    _degraded.poll_once() is True
+    and _degraded.inspections == [0.01]
+    and _degraded.source_states == ["degraded"]
+    and _degraded.next_wake_retry > _degraded.clock.now,
+    (_degraded.inspections, _degraded.source_states, _degraded.next_wake_retry),
+)
+
+_unavailable = EventFirstLoopProbe()
+_unavailable.wake_source = EventFirstSource(
+    _unavailable.clock,
+    [(0.01, WakeObservation("unavailable"))],
+)
+_unavailable.next_provider_exit_probe = float("inf")
+_unavailable.next_prompt_probe = float("inf")
+_unavailable.next_checkpoint_probe = float("inf")
+_unavailable.next_liveness_probe = float("inf")
+check(
+    "an unavailable optional source degrades to deadlines without a full poll",
+    _unavailable.poll_once() is True
+    and not _unavailable.inspections
+    and _unavailable.source_states == ["unavailable"],
+    (_unavailable.inspections, _unavailable.source_states),
+)
+
+
+class DeadlineLoopProbe(EventFirstLoopProbe):
+    def __init__(self) -> None:
+        super().__init__()
+        self.wake_source = EventFirstSource(self.clock, [])
+        self.next_provider_exit_probe = float("inf")
+        self.next_prompt_probe = float("inf")
+        self.next_checkpoint_probe = 0.5
+        self.next_liveness_probe = 0.3
+        self.callback_due = 0.25
+        self.deadline_ticks: list[str] = []
+
+    def callback_deadline_monotonic(self, _now: float) -> float:
+        return self.callback_due
+
+    def tick_observers(self) -> None:
+        if self.clock.now >= self.callback_due:
+            self.deadline_ticks.append("callback")
+            self.callback_due = float("inf")
+        if self.clock.now >= self.next_liveness_probe:
+            self.deadline_ticks.append("liveness")
+            self.next_liveness_probe = float("inf")
+        if not self.checkpoint and self.clock.now >= self.next_checkpoint_probe:
+            self.deadline_ticks.append("checkpoint")
+            self.checkpoint = "captured"
+
+
+_deadlines = DeadlineLoopProbe()
+_deadlines.poll_once()
+_deadlines.poll_once()
+_deadlines.poll_once()
+check(
+    "callback liveness and checkpoint deadlines stay independent of full transport",
+    _deadlines.deadline_ticks == ["callback", "liveness", "checkpoint"]
+    and not _deadlines.inspections,
+    (_deadlines.deadline_ticks, _deadlines.inspections),
+)
+
+for _field in (
+    "stable_reads",
+    "review_input_stable_reads",
+    "summary_stable_reads",
+    "callback_recovery_input_reads",
+    "callback_recovery_reads",
+    "fix_callback_stable_reads",
+    "fix_result_stable_reads",
+    "fix_output_stable_reads",
+    "custom_callback_stable_reads",
+    "custom_result_stable_reads",
+    "custom_output_stable_reads",
+):
+    _confirmation = EventFirstLoopProbe()
+    _confirmation.stable_reads = 0
+    setattr(_confirmation, _field, 1)
+    check(
+        f"transport confirmation inventory includes {_field}",
+        _confirmation.transport_confirmation_pending(),
+    )
 
 
 class FakeCmux:
@@ -3167,6 +3438,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
                 poll_seconds=0.02,
                 checkpoint_probe=lambda _surface, _runtime: "checkpoint-worker",
                 cmux_adapter=worker_cmux,
+                sleeper=time.sleep,
             )
         )
     )
@@ -3375,6 +3647,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         poll_seconds=0.02,
         checkpoint_probe=lambda _surface, _runtime: "checkpoint-compact",
         cmux_adapter=compact_cmux,
+        sleeper=time.sleep,
     )
     expected_compact_input = interactive_provider_input(
         "codex", compact_prompt_path.resolve(), compact_prompt
@@ -4215,6 +4488,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-review-timeout.") as raw:
         poll_seconds=0.02,
         checkpoint_probe=lambda _surface, _runtime: "",
         cmux_adapter=object(),
+        sleeper=time.sleep,
     )
     timeout_record = timeout_store.read(
         "owner-review-timeout", "runtime-review-timeout"
@@ -4315,6 +4589,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-review-early-exit.") as raw:
         poll_seconds=0.02,
         checkpoint_probe=lambda _surface, _runtime: "",
         cmux_adapter=object(),
+        sleeper=time.sleep,
     )
     timeout_record = timeout_store.read(
         "owner-review-early-exit", "runtime-review-early-exit"
@@ -4766,6 +5041,7 @@ def _initial_start_worker(
                     poll_seconds=0.02,
                     checkpoint_probe=lambda _surface, _runtime: cmux.checkpoint,
                     cmux_adapter=cmux,
+                    sleeper=time.sleep,
                     initial_start_observation_limit=limit,
                 )
             )

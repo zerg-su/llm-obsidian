@@ -19,6 +19,8 @@ from harness.runtime_sessions import RuntimeSessionManager  # noqa: E402
 from harness.runtime_worker import run as runtime_worker_run  # noqa: E402
 from harness.runtime_worker_execution import RuntimeWorkerExecution  # noqa: E402
 from harness.runtime_worker_custom import RuntimeWorkerCustomMixin  # noqa: E402
+from harness.runtime_worker_loop import RuntimeWorkerLoopMixin  # noqa: E402
+from harness.cmux_wake_source import WakeObservation  # noqa: E402
 from harness.review_continuation_recovery import (  # noqa: E402
     RecoverySnapshot,
     classify_review_continuation,
@@ -664,3 +666,53 @@ for recovery_name, fixture_name in (
             and drifted["reason"] == "recovery-identity-drift"
             and current.state == "attention-required",
         )
+
+
+with tempfile.TemporaryDirectory(prefix="wake-receipt-crash.") as raw:
+    runtime_root = Path(raw)
+    (runtime_root / "wake-observation.json").write_text(
+        '{"partial":"DO_NOT_REPLAY"', encoding="utf-8"
+    )
+    (runtime_root / "wake-progress.json").write_text(
+        '{"partial":"DO_NOT_REPLAY"', encoding="utf-8"
+    )
+
+    class WakeReceiptWorker(RuntimeWorkerLoopMixin):
+        def __init__(self) -> None:
+            self.spec_path = runtime_root / "launch.json"
+            self.spec = {
+                "owner_id": "wake-owner",
+                "operation_id": "wake-operation",
+                "run_id": "wake-run",
+            }
+            self.initial_generation = 3
+            self.wall_clock = lambda: 12.0
+
+    receipt_worker = WakeReceiptWorker()
+    receipt_worker.record_transport_wake(
+        WakeObservation(
+            "cmux-event", "agent.hook.PostToolUse", 11, 10.0
+        ),
+        {"revision": 1},
+        {"revision": 2},
+    )
+    progressed = json.loads(
+        (runtime_root / "wake-progress.json").read_text(encoding="utf-8")
+    )
+    receipt_worker.record_transport_wake(
+        WakeObservation("fallback-poll", "", 0, 40.0),
+        {"revision": 2},
+        {"revision": 2},
+    )
+    latest = json.loads(
+        (runtime_root / "wake-observation.json").read_text(encoding="utf-8")
+    )
+    check(
+        "restart overwrites partial wake diagnostics without replay authority",
+        latest["source"] == "fallback-poll"
+        and latest["outcome"] == "no-change"
+        and progressed["source"] == "cmux-event"
+        and progressed["outcome"] == "progressed"
+        and "DO_NOT_REPLAY" not in json.dumps((latest, progressed)),
+        (latest, progressed),
+    )

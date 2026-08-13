@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,33 @@ from .store import OperationStore, StoreError
 
 
 MAX_SIGNALS = 8
+MAX_WAKE_OBSERVATIONS = 8
+IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
+WAKE_SOURCES = frozenset(
+    {
+        "cmux-event",
+        "reconnect",
+        "cursor-gap",
+        "degraded",
+        "unavailable",
+        "fallback-poll",
+        "stability-confirmation",
+    }
+)
+WAKE_EVENTS = frozenset(
+    {
+        "",
+        "agent.hook.SessionStart",
+        "agent.hook.PostToolUse",
+        "agent.hook.Stop",
+        "agent.hook.SessionEnd",
+        "notification.created",
+        "surface.created",
+        "surface.closed",
+        "workspace.created",
+        "workspace.closed",
+    }
+)
 MODEL_POLICY = {
     "role": "diagnostic-fast",
     "context": "minimal",
@@ -135,11 +163,91 @@ def _recovery_signals(
     return values[:1]
 
 
+def _wake_observation(
+    store: OperationStore,
+    owner_id: str,
+    operation_id: str,
+    path: Path,
+    kind: str,
+) -> dict[str, Any] | None:
+    if path.is_symlink() or not path.is_file():
+        return None
+    value = _read_object(path)
+    if value is None:
+        return None
+    scalar_identity = (
+        value.get("owner_id"),
+        value.get("operation_id"),
+        value.get("run_id"),
+    )
+    source = value.get("source")
+    event_name = value.get("event_name")
+    sequence = value.get("sequence")
+    generation = value.get("generation")
+    observed_at = value.get("observed_at")
+    outcome = value.get("outcome")
+    if (
+        value.get("schema_version") != 1
+        or scalar_identity[0] != owner_id
+        or scalar_identity[1] != operation_id
+        or any(
+            not isinstance(item, str) or not IDENTIFIER.fullmatch(item)
+            for item in scalar_identity
+        )
+        or source not in WAKE_SOURCES
+        or event_name not in WAKE_EVENTS
+        or type(sequence) is not int
+        or sequence < 0
+        or type(generation) is not int
+        or generation < 1
+        or not isinstance(observed_at, (int, float))
+        or observed_at < 0
+        or outcome not in {"progressed", "no-change"}
+    ):
+        return None
+    return {
+        "kind": kind,
+        "owner_id": owner_id,
+        "operation_id": operation_id,
+        "run_id": scalar_identity[2],
+        "generation": generation,
+        "source": source,
+        "event_name": event_name,
+        "sequence": sequence,
+        "observed_at": observed_at,
+        "outcome": outcome,
+        "evidence": _relative(store.root, path),
+    }
+
+
 def observe(store_root: Path | str, owner_id: str) -> dict[str, Any]:
     """Classify durable invariants without reading callback or prompt bodies."""
 
     store = OperationStore(store_root)
     records = store.list(owner_id)
+    wake_observations = [
+        observation
+        for record in records
+        for kind, filename in (
+            ("latest-full-reconcile", "wake-observation.json"),
+            ("latest-progress", "wake-progress.json"),
+        )
+        if (
+            observation := _wake_observation(
+                store,
+                owner_id,
+                record.spec.operation_id,
+                store.root
+                / "owners"
+                / owner_id
+                / "runtime"
+                / record.spec.operation_id
+                / filename,
+                kind,
+            )
+        )
+        is not None
+    ][:MAX_WAKE_OBSERVATIONS]
     signals = [
         signal
         for record in records
@@ -297,6 +405,8 @@ def observe(store_root: Path | str, owner_id: str) -> dict[str, Any]:
                 record.state not in TERMINAL for record in records
             ),
             "signals": len(signals),
+            "wake_observations": len(wake_observations),
         },
         "signals": signals,
+        "wake_observations": wake_observations,
     }
