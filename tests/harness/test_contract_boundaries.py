@@ -105,6 +105,22 @@ for label, call in (
         lambda: replace(RECORD, attempt_limit=0),
     ),
     (
+        "operation records reject boolean deadlines",
+        lambda: replace(RECORD, deadline_at=True),
+    ),
+    (
+        "operation records reject non-finite deadlines",
+        lambda: replace(RECORD, deadline_at=float("inf")),
+    ),
+    (
+        "operations cannot parent themselves",
+        lambda: replace(SPEC, parent_operation_id=SPEC.operation_id),
+    ),
+    (
+        "root lineage requires a parent operation",
+        lambda: replace(SPEC, root_operation_id="foreign-root"),
+    ),
+    (
         "resume state is limited to attention-required",
         lambda: replace(RECORD, resume_state="running"),
     ),

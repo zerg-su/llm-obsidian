@@ -6,6 +6,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -14,10 +15,12 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from harness.contracts import (  # noqa: E402
     CanonicalContractTemplate,
+    ContractAuditEntry,
     ContractDisposition,
     ContractBoundaryInventoryEntry,
     ContractError,
     ContractFamily,
+    ModelContract,
     contract_boundary_inventory,
     contract_registry,
     contract_registry_audit,
@@ -177,6 +180,22 @@ faults = {
         code_owned_fields={"schema_version", "type", "session"},
         model_owned_fields=set(summary) - {"schema_version", "type", "session"},
     ),
+    "registered target mismatch": lambda: CanonicalContractTemplate.create(
+        ContractFamily.TASK_SUMMARY,
+        attempt_id="attempt-1",
+        target_pointer="artifact.json",
+        value=summary,
+        code_owned_fields={"schema_version", "type", "session"},
+        model_owned_fields=set(summary) - {"schema_version", "type", "session"},
+    ),
+    "non-JSON template value": lambda: CanonicalContractTemplate.create(
+        ContractFamily.TASK_SUMMARY,
+        attempt_id="attempt-1",
+        target_pointer=".task-summary.json",
+        value={**summary, "body": {"not-json"}},
+        code_owned_fields={"schema_version", "type", "session"},
+        model_owned_fields=set(summary) - {"schema_version", "type", "session"},
+    ),
     "overlapping ownership": lambda: CanonicalContractTemplate.create(
         ContractFamily.TASK_SUMMARY,
         attempt_id="attempt-1",
@@ -201,5 +220,64 @@ for label, action in faults.items():
         check(f"fault table rejects {label}", True)
     else:
         check(f"fault table rejects {label}", False)
+
+for label, action in {
+    "overlapping registry ownership": lambda: ModelContract(
+        ContractFamily.TASK_SUMMARY,
+        ".task-summary.json",
+        frozenset({"body"}),
+        frozenset({"body"}),
+        frozenset(),
+        1,
+        "validator",
+    ),
+    "registry target traversal": lambda: ModelContract(
+        ContractFamily.TASK_SUMMARY,
+        "../task-summary.json",
+        frozenset({"body"}),
+        frozenset(),
+        frozenset(),
+        1,
+        "validator",
+    ),
+    "invalid audit identity": lambda: ContractAuditEntry(
+        "", ContractDisposition.COVERED
+    ),
+    "invalid inventory owner": lambda: ContractBoundaryInventoryEntry(
+        "task-summary", ""
+    ),
+}.items():
+    try:
+        action()
+    except ContractError:
+        check(f"registry boundary rejects {label}", True)
+    else:
+        check(f"registry boundary rejects {label}", False)
+
+for label, declaration in {
+    "syntax-invalid declaration": "MODEL_JSON_BOUNDARIES = (\n",
+    "non-literal declaration": "MODEL_JSON_BOUNDARIES = tuple(['task-summary'])\n",
+    "empty declaration": "MODEL_JSON_BOUNDARIES = ()\n",
+    "duplicate declarations": (
+        "MODEL_JSON_BOUNDARIES = ('task-summary',)\n"
+        "SECOND = 1\n"
+    ),
+}.items():
+    with tempfile.TemporaryDirectory(prefix="contract-inventory.") as raw:
+        fake = Path(raw)
+        scripts = fake / "scripts"
+        scripts.mkdir()
+        (scripts / "one.py").write_text(declaration, encoding="utf-8")
+        if label == "duplicate declarations":
+            (scripts / "two.py").write_text(
+                "MODEL_JSON_BOUNDARIES = ('task-summary',)\n",
+                encoding="utf-8",
+            )
+        try:
+            contract_boundary_inventory(fake)
+        except ContractError:
+            check(f"inventory rejects {label}", True)
+        else:
+            check(f"inventory rejects {label}", False)
 
 print("contract registry fault table: ok")
