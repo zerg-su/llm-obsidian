@@ -27,6 +27,49 @@ must not be inferred from another runtime.
 | Persistent task lanes | Exact owner/task/model/domain cmux resume with anchored right splits | Same harness and typed checkpoint contract | Script-only state; visible cmux resume requires supported host |
 | Router/operation telemetry | Runtime-tagged, content-free hook/script events | Runtime-tagged, content-free hook/script events | Limited to explicit scripts |
 
+## Optional cmux `events.v1` wake contract
+
+Each interactive Harness runtime worker may own one optional `cmux events`
+subscription. This is a lossy wake optimization for the existing durable
+transport reconciler, not another provider event stream or lifecycle owner. A
+missing command, launch error, malformed or oversized line, EOF, reconnect, or
+cursor gap can only degrade to polling or request an immediate durable reread.
+It cannot authorize a transition, callback, provider input, replay, recovery,
+cleanup, completion, or attention state.
+
+The adapter probes only `cmux events --help` for `--cursor-file`, `--name`,
+`--reconnect`, and `--no-heartbeat`, then launches one fixed argv with a
+worker-local non-symlink cursor and one repeated `--name` for each closed name:
+completed `agent.hook.SessionStart`, `agent.hook.PostToolUse`,
+`agent.hook.Stop`, and `agent.hook.SessionEnd`; `notification.created`;
+`surface.created`/`surface.closed`; and
+`workspace.created`/`workspace.closed`. Heartbeats and every other name are
+excluded.
+
+The consumed NDJSON envelope is cmux protocol `cmux-events`, version `1`.
+Event frames carry `type=event`, `boot_id`, positive numeric `seq`, exact
+`id=<boot_id>-<seq>`, `name`, `category`, `source`, `occurred_at`, nullable
+workspace/surface/pane/window UUIDs, and one object `payload`; the line limit is
+16 KiB. Subscription acknowledgement frames carry `type=ack`, the same
+protocol/version, exact boot and subscription UUIDs, heartbeat interval,
+replay count, the exact requested filters, and `resume` with `after_seq`,
+`requested_after_seq`, `oldest_seq`, `latest_seq`, `next_seq`, `gap`, and a
+bounded `gap_reason` only when `gap=true`. A first non-gap acknowledgement
+establishes the source cursor without waking. A later acknowledgement requests
+a `reconnect` reread; a gap acknowledgement requests a `cursor-gap` reread.
+
+Routing is hierarchical and closed. An exact completed `SessionStart` whose
+outer workspace and surface match the durable worker binding establishes the
+external session ID. Later completed session hooks require that session and
+reject any contradictory optional outer identity. Notification and surface
+events require the exact bound workspace and surface. Workspace lifecycle
+events require the exact bound workspace and fan out only because each already
+bound worker has its own subscriber. Unknown, incomplete, duplicate, stale,
+unbound, truncated, and contradictory frames are no-wake observations. Raw
+payload, prompt, output, notification body, screen content, and hook data are
+never persisted; only bounded wake source/name/sequence plus worker identity
+may enter diagnostics.
+
 `pipeline-events.jsonl` is local and gitignored. Its schema accepts only
 runtime/session identifiers, actor/operation/status, relative vault paths, and
 numeric counters. Prompt text, search queries, commands, snippets, page bodies,
