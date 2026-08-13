@@ -233,9 +233,10 @@ with tempfile.TemporaryDirectory(prefix="dashboard-observability.") as raw:
     check(
         "dashboard projects compact self-heal count and current stage",
         program.self_healed_count == 1
-        and program.current_stage == "complete"
+        and program.current_stage == "structural-pivot"
         and "self-healed 1" in text
-        and "stage complete" in text,
+        and "stage structural-pivot" in text
+        and "Executor codex/gpt-5.6-sol · xhigh  structural-pivot" in text,
     )
     check(
         "terminal result is exact-summary-bound and content-free",
