@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import inspect
+import json
 import sys
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 
 
@@ -16,6 +18,16 @@ sys.path.insert(0, str(ROOT / "tests" / "harness"))
 from harness.runtime_sessions import RuntimeSessionManager  # noqa: E402
 from harness.runtime_worker import run as runtime_worker_run  # noqa: E402
 from harness.runtime_worker_execution import RuntimeWorkerExecution  # noqa: E402
+from harness.runtime_worker_custom import RuntimeWorkerCustomMixin  # noqa: E402
+from harness.review_continuation_recovery import (  # noqa: E402
+    RecoverySnapshot,
+    classify_review_continuation,
+)
+from harness.contracts import (  # noqa: E402
+    AttentionReason,
+    OperationSpec,
+    RuntimeRoute,
+)
 from harness.store import OperationStore  # noqa: E402
 from lifecycle_simulator import (  # noqa: E402
     LifecycleWorld,
@@ -457,3 +469,182 @@ with tempfile.TemporaryDirectory(prefix="corridor-crash-reap.") as raw:
     )
 
 print("\nAll lifecycle crash-matrix tests passed.")
+
+
+def continuation_decision(name: str, record) -> object:
+    fixture = (
+        ROOT
+        / "tests/harness/fixtures/review-continuation"
+        / name
+    )
+    captured = RecoverySnapshot.from_mapping(
+        json.loads(fixture.read_text(encoding="utf-8"))
+    )
+    return classify_review_continuation(
+        replace(
+            captured,
+            root=replace(
+                captured.root,
+                owner_id=record.spec.owner_id,
+                operation_id=record.spec.operation_id,
+                run_id=record.run_id,
+                revision=record.revision,
+            ),
+        )
+    )
+
+
+def continuation_world(base: Path, suffix: str):
+    store = OperationStore(base / "harness")
+    owner = f"continuation-owner-{suffix}"
+    operation_id = f"continuation-root-{suffix}"
+    run_id = f"continuation-run-{suffix}"
+    store.create(
+        OperationSpec(
+            operation_id,
+            f"continuation-key-{suffix}",
+            "dispatch",
+            owner,
+            RuntimeRoute(
+                "codex", "gpt-5.6-sol", "high", "executor", "d" * 64
+            ),
+            "packets/task.json",
+            "scoped",
+        ),
+        lane_id=f"continuation-lane-{suffix}",
+        run_id=run_id,
+    )
+    for state in ("preflight", "starting", "running", "awaiting-callback"):
+        store.transition(owner, operation_id, state)
+    store.transition(
+        owner,
+        operation_id,
+        "attention-required",
+        reason=AttentionReason.ATTENTION_REQUIRED,
+    )
+    return store, store.read(owner, operation_id)
+
+
+for recovery_name, fixture_name in (
+    ("review-drive", "review-drive-failed-after-reverify.json"),
+    ("accepted-callback", "accepted-callback-pending-ingestion.json"),
+):
+    with tempfile.TemporaryDirectory(
+        prefix=f"continuation-crash-{recovery_name}."
+    ) as raw:
+        base = Path(raw)
+        store, record = continuation_world(base, recovery_name)
+        decision = continuation_decision(fixture_name, record)
+        state_root = base / "runtime"
+        state_root.mkdir()
+        receipt_path = state_root / "review-continuation-recovery.json"
+        receipt_path.write_text(
+            json.dumps(decision.receipt.payload(), sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        durable_completed = {"value": False}
+        executions: list[str] = []
+
+        class CrashRecoveryWorker(RuntimeWorkerCustomMixin):
+            def __init__(self) -> None:
+                self.spec = {
+                    "callback_mode": "task-summary",
+                    "owner_id": record.spec.owner_id,
+                    "operation_id": record.spec.operation_id,
+                }
+                self.spec_path = state_root / "launch.json"
+                self.store = store
+                self.callback_handled = True
+                self.summary_attention_revision = record.revision
+
+            def review_continuation_decision(self):
+                return decision
+
+            def execute_review_continuation(self, _decision) -> bool:
+                executions.append(recovery_name)
+                durable_completed["value"] = True
+                raise RuntimeError("crash after registered workflow")
+
+            def review_continuation_recovery_completed(self, _identity) -> bool:
+                return durable_completed["value"]
+
+        worker = CrashRecoveryWorker()
+        worker.recover_review_continuation()
+        transitioned = store.read(record.spec.owner_id, record.spec.operation_id)
+        prepared = json.loads(receipt_path.read_text(encoding="utf-8"))
+        check(
+            f"{recovery_name} crash after workflow preserves one prepared receipt",
+            transitioned.state == "awaiting-callback"
+            and transitioned.revision == record.revision + 1
+            and prepared["status"] == "prepared"
+            and executions == [recovery_name],
+            (transitioned, prepared, executions),
+        )
+        restarted = CrashRecoveryWorker()
+        restarted.recover_review_continuation()
+        finalized = json.loads(receipt_path.read_text(encoding="utf-8"))
+        check(
+            f"{recovery_name} restart observes durable progress without replay",
+            finalized["status"] == "finalized"
+            and finalized["outcome"] == "advanced"
+            and executions == [recovery_name],
+            (finalized, executions),
+        )
+        restarted.recover_review_continuation()
+        check(
+            f"{recovery_name} finalized receipt never re-attempts",
+            executions == [recovery_name]
+            and store.read(
+                record.spec.owner_id, record.spec.operation_id
+            ).revision
+            == transitioned.revision,
+        )
+
+    with tempfile.TemporaryDirectory(
+        prefix=f"continuation-drift-{recovery_name}."
+    ) as raw:
+        base = Path(raw)
+        store, record = continuation_world(base, f"drift-{recovery_name}")
+        decision = continuation_decision(fixture_name, record)
+        state_root = base / "runtime"
+        state_root.mkdir()
+        receipt_path = state_root / "review-continuation-recovery.json"
+        prepared_bytes = (
+            json.dumps(decision.receipt.payload(), sort_keys=True) + "\n"
+        ).encode()
+        receipt_path.write_bytes(prepared_bytes)
+        store.transition(
+            record.spec.owner_id,
+            record.spec.operation_id,
+            "awaiting-callback",
+        )
+        store.transition(
+            record.spec.owner_id,
+            record.spec.operation_id,
+            "attention-required",
+            reason=AttentionReason.ATTENTION_REQUIRED,
+        )
+        attempts: list[str] = []
+
+        class DriftWorker(RuntimeWorkerCustomMixin):
+            def __init__(self) -> None:
+                self.spec = {
+                    "callback_mode": "task-summary",
+                    "owner_id": record.spec.owner_id,
+                    "operation_id": record.spec.operation_id,
+                }
+                self.spec_path = state_root / "launch.json"
+                self.store = store
+
+            def review_continuation_decision(self):
+                return decision
+
+            def execute_review_continuation(self, _decision) -> bool:
+                attempts.append("executed")
+                return True
+
+        DriftWorker().recover_review_continuation()
+        check(
+            f"{recovery_name} prepared receipt refuses revision drift mutation-free",
+            not attempts and receipt_path.read_bytes() == prepared_bytes,
+        )

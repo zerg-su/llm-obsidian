@@ -23,6 +23,51 @@ def check(label: str, condition: bool) -> None:
     print(f"OK   {label}")
 
 
+def recovery_receipt(
+    *,
+    recovery_class: str,
+    operation_id: str,
+    status: str,
+    outcome: str = "",
+    owner_id: str = "",
+) -> dict[str, object]:
+    identity = {
+        "recovery_class": recovery_class,
+        "owner_id": owner_id or operation_id,
+        "root_operation_id": operation_id,
+        "root_run_id": f"run-{operation_id}",
+        "root_revision": 5,
+        "attempt_id": f"attempt-{operation_id}",
+        "gate_sha256": "a" * 64,
+        "authority_sha256": "b" * 64,
+        "lane_id": "lane-review" if recovery_class == "accepted-callback" else "",
+        "round_operation_id": (
+            "round-review" if recovery_class == "accepted-callback" else ""
+        ),
+        "round_run_id": (
+            "round-run" if recovery_class == "accepted-callback" else ""
+        ),
+        "callback_id": (
+            "review-callback" if recovery_class == "accepted-callback" else ""
+        ),
+    }
+    import hashlib
+
+    identity_sha256 = hashlib.sha256(
+        json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    value = {
+        "schema_version": 1,
+        "status": status,
+        "identity": identity,
+        "identity_sha256": identity_sha256,
+    }
+    if outcome:
+        value["outcome"] = outcome
+        value["reason"] = "test-reason"
+    return value
+
+
 with tempfile.TemporaryDirectory(prefix="harness-diagnostics.") as raw:
     root = Path(raw)
     store_root = root / "harness"
@@ -106,6 +151,37 @@ with tempfile.TemporaryDirectory(prefix="harness-diagnostics.") as raw:
         ],
     )
 
+    callback_receipt = (
+        store_root
+        / "owners"
+        / owner
+        / "runtime"
+        / operation
+        / "review-continuation-recovery.json"
+    )
+    callback_receipt.parent.mkdir(parents=True, exist_ok=True)
+    callback_receipt.write_text(
+        json.dumps(
+            recovery_receipt(
+                recovery_class="accepted-callback",
+                operation_id=operation,
+                owner_id=owner,
+                status="prepared",
+            ),
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    packet = observe(store_root, owner)
+    check(
+        "accepted callback receipt refines the pending-ingestion diagnostic",
+        [signal["code"] for signal in packet["signals"]]
+        == ["review-callback-ingestion-prepared"]
+        and packet["model_required"] is False,
+    )
+    callback_receipt.unlink()
+
     gate = json.loads(
         (gate_root / "review-gate.json").read_text(encoding="utf-8")
     )
@@ -166,6 +242,77 @@ with tempfile.TemporaryDirectory(prefix="harness-diagnostics.") as raw:
             "context": "minimal",
             "write": False,
         },
+    )
+
+    drive_owner = "review-drive-diagnostic"
+    store.create(
+        OperationSpec(
+            drive_owner,
+            "review-drive-key",
+            "dispatch",
+            drive_owner,
+            RuntimeRoute(
+                "codex",
+                "gpt-5.6-sol",
+                "high",
+                "executor",
+                "c" * 64,
+            ),
+            "packets/task.json",
+            "scoped",
+        ),
+        lane_id="review-drive-lane",
+        run_id=f"run-{drive_owner}",
+    )
+    store.transition(
+        drive_owner,
+        drive_owner,
+        "attention-required",
+        reason="attention-required",
+    )
+    drive_receipt = (
+        store_root
+        / "owners"
+        / drive_owner
+        / "runtime"
+        / drive_owner
+        / "review-continuation-recovery.json"
+    )
+    drive_receipt.parent.mkdir(parents=True, exist_ok=True)
+    drive_receipt.write_text(
+        json.dumps(
+            recovery_receipt(
+                recovery_class="review-drive",
+                operation_id=drive_owner,
+                status="finalized",
+                outcome="advanced",
+            ),
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    packet = observe(store_root, drive_owner)
+    check(
+        "review drive receipt replaces unclassified attention",
+        [signal["code"] for signal in packet["signals"]]
+        == ["review-drive-recovery-advanced"]
+        and packet["model_required"] is False,
+    )
+    refused = recovery_receipt(
+        recovery_class="review-drive",
+        operation_id=drive_owner,
+        status="finalized",
+        outcome="refused",
+    )
+    drive_receipt.write_text(
+        json.dumps(refused, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    packet = observe(store_root, drive_owner)
+    check(
+        "review drive refusal remains typed and receipt-bound",
+        [signal["code"] for signal in packet["signals"]]
+        == ["review-drive-recovery-refused"],
     )
 
 print("harness diagnostics tests passed")

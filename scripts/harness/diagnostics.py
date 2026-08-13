@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .state_machine import TERMINAL
+from .review_continuation_recovery import RecoveryReceipt
 from .store import OperationStore, StoreError
 
 
@@ -45,12 +46,75 @@ def _signal(
     }
 
 
+def _recovery_signal(
+    store: OperationStore,
+    owner_id: str,
+    operation_id: str,
+) -> dict[str, Any] | None:
+    path = (
+        store.root
+        / "owners"
+        / owner_id
+        / "runtime"
+        / operation_id
+        / "review-continuation-recovery.json"
+    )
+    if not path.exists():
+        return None
+    evidence = [_relative(store.root, path)]
+    raw = None if path.is_symlink() or not path.is_file() else _read_object(path)
+    recovery_class = ""
+    if isinstance(raw, dict):
+        identity = raw.get("identity")
+        if isinstance(identity, dict):
+            recovery_class = str(identity.get("recovery_class") or "")
+    prefix = {
+        "review-drive": "review-drive-recovery",
+        "accepted-callback": "review-callback-ingestion",
+    }.get(recovery_class, "review-continuation")
+    try:
+        if raw is None or raw.get("schema_version") != 1:
+            raise ValueError("receipt unavailable")
+        receipt = RecoveryReceipt.from_mapping(raw)
+        if (
+            receipt.identity.owner_id != owner_id
+            or receipt.identity.root_operation_id != operation_id
+        ):
+            raise ValueError("receipt owner changed")
+        if receipt.status == "prepared":
+            outcome = "prepared"
+        else:
+            outcome = str(raw.get("outcome") or "")
+            if outcome not in {"advanced", "refused"}:
+                raise ValueError("receipt outcome changed")
+        state = str(raw.get("reason") or outcome)
+        code = f"{prefix}-{outcome}"
+    except (TypeError, ValueError):
+        state = "attention-required"
+        code = f"{prefix}-receipt-invalid"
+    return _signal(
+        code,
+        operation_id=operation_id,
+        state=state,
+        evidence=evidence,
+    )
+
+
 def observe(store_root: Path | str, owner_id: str) -> dict[str, Any]:
     """Classify durable invariants without reading callback or prompt bodies."""
 
     store = OperationStore(store_root)
     records = store.list(owner_id)
-    signals: list[dict[str, Any]] = []
+    signals = [
+        signal
+        for record in records
+        if (
+            signal := _recovery_signal(
+                store, owner_id, record.spec.operation_id
+            )
+        )
+        is not None
+    ]
     gate_path = (
         store.root
         / "review-data"
@@ -103,6 +167,12 @@ def observe(store_root: Path | str, owner_id: str) -> dict[str, Any]:
         if (
             gate.get("status") in {"reviewing", "verifying"}
             and len(callbacks) > result_count
+            and not any(
+                str(signal.get("code") or "").startswith(
+                    "review-callback-ingestion-"
+                )
+                for signal in signals
+            )
         ):
             signals.append(
                 _signal(
@@ -139,7 +209,10 @@ def observe(store_root: Path | str, owner_id: str) -> dict[str, Any]:
                     )
                 )
 
-    model_required = False
+    model_required = any(
+        str(signal.get("code") or "").endswith("receipt-invalid")
+        for signal in signals
+    )
     if not signals:
         for record in records:
             if record.state != "attention-required":

@@ -6,6 +6,8 @@ from __future__ import annotations
 import hashlib
 import json
 import sys
+import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 
@@ -23,6 +25,17 @@ from harness.pipeline_builtins import compiled_builtin  # noqa: E402
 from harness.pipelines import reconcile_pipeline  # noqa: E402
 from harness.runtime_worker import provider_exit_is_final  # noqa: E402
 from harness.runtime_worker_loop import RuntimeWorkerLoopMixin  # noqa: E402
+from harness.runtime_worker_custom import RuntimeWorkerCustomMixin  # noqa: E402
+from harness.review_continuation_recovery import (  # noqa: E402
+    RecoverySnapshot,
+    classify_review_continuation,
+)
+from harness.contracts import (  # noqa: E402
+    AttentionReason,
+    OperationSpec,
+    RuntimeRoute,
+)
+from harness.store import OperationStore  # noqa: E402
 import v267_stabilization as stab  # noqa: E402
 
 
@@ -665,3 +678,100 @@ with tempfile.TemporaryDirectory(prefix="golden-corridor.") as raw:
     )
 
 print("harness control-plane tests passed")
+
+
+for recovery_name, fixture_name in (
+    ("review-drive", "review-drive-failed-after-reverify.json"),
+    ("accepted-callback", "accepted-callback-pending-ingestion.json"),
+):
+    with tempfile.TemporaryDirectory(
+        prefix=f"continuation-concurrency-{recovery_name}."
+    ) as raw:
+        base = Path(raw)
+        state_root = base / "runtime"
+        state_root.mkdir()
+        store = OperationStore(base / "harness")
+        owner = f"concurrent-owner-{recovery_name}"
+        operation_id = f"concurrent-root-{recovery_name}"
+        run_id = f"concurrent-run-{recovery_name}"
+        store.create(
+            OperationSpec(
+                operation_id,
+                f"concurrent-key-{recovery_name}",
+                "dispatch",
+                owner,
+                RuntimeRoute(
+                    "codex", "gpt-5.6-sol", "high", "executor", "e" * 64
+                ),
+                "packets/task.json",
+                "scoped",
+            ),
+            lane_id=f"concurrent-lane-{recovery_name}",
+            run_id=run_id,
+        )
+        for state in ("preflight", "starting", "running", "awaiting-callback"):
+            store.transition(owner, operation_id, state)
+        store.transition(
+            owner,
+            operation_id,
+            "attention-required",
+            reason=AttentionReason.ATTENTION_REQUIRED,
+        )
+        record = store.read(owner, operation_id)
+        fixture = (
+            ROOT
+            / "tests/harness/fixtures/review-continuation"
+            / fixture_name
+        )
+        captured = RecoverySnapshot.from_mapping(
+            json.loads(fixture.read_text(encoding="utf-8"))
+        )
+        decision = classify_review_continuation(
+            replace(
+                captured,
+                root=replace(
+                    captured.root,
+                    owner_id=owner,
+                    operation_id=operation_id,
+                    run_id=run_id,
+                    revision=record.revision,
+                ),
+            )
+        )
+        effects: list[str] = []
+
+        class ConcurrentWorker(RuntimeWorkerCustomMixin):
+            def __init__(self) -> None:
+                self.spec = {
+                    "callback_mode": "task-summary",
+                    "owner_id": owner,
+                    "operation_id": operation_id,
+                }
+                self.spec_path = state_root / "launch.json"
+                self.store = store
+                self.callback_handled = True
+                self.summary_attention_revision = record.revision
+
+            def review_continuation_decision(self):
+                return decision
+
+            def execute_review_continuation(self, _decision) -> bool:
+                effects.append(recovery_name)
+                return True
+
+        workers = [ConcurrentWorker(), ConcurrentWorker()]
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            list(pool.map(lambda worker: worker.recover_review_continuation(), workers))
+        final_record = store.read(owner, operation_id)
+        receipt = json.loads(
+            (state_root / "review-continuation-recovery.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        check(
+            f"concurrent {recovery_name} ticks linearize one transition and workflow",
+            effects == [recovery_name]
+            and final_record.revision == record.revision + 1
+            and receipt["status"] == "finalized",
+            (effects, final_record, receipt),
+        )
