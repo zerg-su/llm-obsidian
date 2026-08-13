@@ -1,0 +1,37 @@
+{
+  "attention_status": "review-drive-failed",
+  "attempt": {
+    "attempt_id": "cf7d4579-0ffd-5191-bca0-ab95241b677a",
+    "cycle": 1,
+    "exact_head": "dd5d60f8460f17d74bb3d0a015e41cf42f5cda14",
+    "max_cycles": 5,
+    "status": "terminal"
+  },
+  "current_head": "0062a5b0378632f1f2a56092ffb1633307451bcd",
+  "gate": {
+    "sha256": "132dac89914fa2ed0d330b3dccc5c4afd1e063e799a5125c27d2b7f49edae6d0",
+    "status": "changes-requested"
+  },
+  "provenance": "live-captured:403bf646-59d3-40f9-9e42-f21353b94f9b",
+  "recovery_class": "review-drive",
+  "resolution": {
+    "current_head": "0062a5b0378632f1f2a56092ffb1633307451bcd",
+    "reviewed_head": "dd5d60f8460f17d74bb3d0a015e41cf42f5cda14",
+    "sha256": "5fa6a3fc1c160ec0cf64584703e8a3b3fc7b0e6ca9f4e1b6aeab5d1fe6e6ace2"
+  },
+  "root": {
+    "operation_id": "403bf646-59d3-40f9-9e42-f21353b94f9b",
+    "owner_id": "403bf646-59d3-40f9-9e42-f21353b94f9b",
+    "pending_effect": "",
+    "resume_state": "awaiting-callback",
+    "revision": 13,
+    "run_id": "35be9d6f-2b1a-5db2-85a6-2f041cfeeafc",
+    "state": "attention-required"
+  },
+  "schema_version": 1,
+  "verification": {
+    "head": "0062a5b0378632f1f2a56092ffb1633307451bcd",
+    "receipt_sha256": "54489555363b13094818d0f069a845d958f4d883d39d62e296dc1c2b172e4f8d",
+    "status": "complete"
+  }
+}

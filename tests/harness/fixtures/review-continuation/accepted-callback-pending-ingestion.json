@@ -1,0 +1,52 @@
+{
+  "accepted_callbacks": [
+    {
+      "attempt_id": "c34845ba-fe50-54db-a80e-75ab454b558c",
+      "axis": "openai-holistic",
+      "callback_id": "review-0e2f254b321ab0d29439bc82",
+      "kind": "review",
+      "lane_id": "1fb789a81949bc818f15073206607ca5",
+      "operation_id": "c34845ba-fe50-54db-a80e-75ab454b558c-holistic-23af2b2d-round-799f0261",
+      "parent_operation_id": "c34845ba-fe50-54db-a80e-75ab454b558c-holistic-23af2b2d",
+      "payload_sha256": "0e2f254b321ab0d29439bc826429aab2f5e103e978c1f223f3953b086007ffd4",
+      "run_id": "156b8dfed33160c5d4efec089320d4ae"
+    }
+  ],
+  "attempt": {
+    "attempt_id": "c34845ba-fe50-54db-a80e-75ab454b558c",
+    "cycle": 1,
+    "exact_head": "063fe2ef949f1807aa4fa8af163764dbba26e2b0",
+    "max_cycles": 5,
+    "status": "awaiting-callback"
+  },
+  "consumed_callback_ids": [],
+  "current_head": "063fe2ef949f1807aa4fa8af163764dbba26e2b0",
+  "gate": {
+    "sha256": "71b2e0a8283dc9bfea61b1144a868c1dfb92cff91e6a5381c6309d1d7d45180b",
+    "status": "reviewing"
+  },
+  "lanes": [
+    {
+      "axis": "openai-holistic",
+      "lane_id": "1fb789a81949bc818f15073206607ca5",
+      "operation_id": "c34845ba-fe50-54db-a80e-75ab454b558c-holistic-23af2b2d",
+      "round_operation_id": "c34845ba-fe50-54db-a80e-75ab454b558c-holistic-23af2b2d-round-799f0261",
+      "round_run_id": "156b8dfed33160c5d4efec089320d4ae",
+      "round_state": "finalizing",
+      "run_id": "8d506091601f764c46222df7f960fb03",
+      "state": "awaiting-callback"
+    }
+  ],
+  "provenance": "live-captured:c1599b81-14a0-432f-93ff-695e84c64099",
+  "recovery_class": "accepted-callback",
+  "root": {
+    "operation_id": "c1599b81-14a0-432f-93ff-695e84c64099",
+    "owner_id": "c1599b81-14a0-432f-93ff-695e84c64099",
+    "pending_effect": "",
+    "resume_state": "awaiting-callback",
+    "revision": 13,
+    "run_id": "e58b6e86-ccef-5836-9336-d082aa6d16a0",
+    "state": "attention-required"
+  },
+  "schema_version": 1
+}
