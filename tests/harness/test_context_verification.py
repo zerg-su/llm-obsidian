@@ -465,8 +465,13 @@ check(
     == profiles["baseline"].commands
     + ("python3 -m py_compile scripts/harness/context.py",),
 )
-with tempfile.TemporaryDirectory(dir=ROOT, prefix=".verify-test.") as raw:
-    evidence_dir = Path(raw).relative_to(ROOT) / "evidence"
+with tempfile.TemporaryDirectory(prefix="harness-verify.") as raw:
+    scratch_root = Path(raw).resolve()
+    check(
+        "verification scratch is caller-owned outside the product checkout",
+        scratch_root != ROOT and ROOT not in scratch_root.parents,
+    )
+    evidence_dir = scratch_root / "evidence"
     invoked: list[tuple[str, ...]] = []
     def fake_verify(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         if command[:3] == ["git", "rev-parse", "HEAD"]:
@@ -476,9 +481,10 @@ with tempfile.TemporaryDirectory(dir=ROOT, prefix=".verify-test.") as raw:
     evidence = run_profile(
         profiles["baseline"],
         root=ROOT,
-        evidence_dir=ROOT / evidence_dir,
+        evidence_dir=evidence_dir,
         runner=fake_verify,
         extra_commands=("python3 -m py_compile scripts/harness/context.py",),
+        pointer_root=scratch_root,
     )
     check(
         "verification executes configured order before appended model checks",
@@ -498,16 +504,17 @@ with tempfile.TemporaryDirectory(dir=ROOT, prefix=".verify-test.") as raw:
             row.schema_version == 2
             and row.output_sha256
             and row.output_bytes == len(b"green\n")
-            and output_binding_valid(row, pointer_root=ROOT)
+            and not Path(row.output_pointer).is_absolute()
+            and output_binding_valid(row, pointer_root=scratch_root)
             for row in evidence
         ),
     )
-    first_output = ROOT / evidence[0].output_pointer
+    first_output = scratch_root / evidence[0].output_pointer
     original_output = first_output.read_bytes()
     first_output.write_bytes(original_output + b"tampered\n")
     check(
         "verification output tamper invalidates the evidence binding",
-        not output_binding_valid(evidence[0], pointer_root=ROOT),
+        not output_binding_valid(evidence[0], pointer_root=scratch_root),
     )
     first_output.write_bytes(original_output)
     check("stale HEAD evidence rejected", not valid_for(evidence[0], head="d" * 40, profile=profiles["baseline"]))
