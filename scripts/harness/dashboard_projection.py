@@ -29,11 +29,13 @@ from .store import OperationStore, StoreError
 from .dashboard_receipts import (
     absolute_path_is_safe,
     fix_receipt_visits,
+    liveness_interval_start,
     read_gate,
     review_summary,
     root_task_name,
     repair_receipt_count,
     root_task_result,
+    root_interval_start,
     root_timing,
     verification_receipt_timing,
     verification_receipt_visits,
@@ -61,6 +63,7 @@ from .dashboard_policy import (
     ProgramView,
     RouteView,
     StepView,
+    TimingView,
     aggregate as _aggregate,
     current_verification_ids as _current_verification_ids,
     escalate,
@@ -327,6 +330,15 @@ def _steps(
 ) -> tuple[tuple[StepView, ...], str]:
     """Project every compiled step, then ask the compiler for the next action."""
 
+    root_step_interval = _root_step_interval(
+        store,
+        record,
+        compiled,
+        children,
+        observed_at,
+        root_interval,
+    )
+
     raw = [
         _step_view(
             step,
@@ -341,7 +353,7 @@ def _steps(
                 item.total_pass_limit
                 for item in compiled.definition.completion_policies
             ),
-            root_interval=root_interval,
+            root_interval=root_step_interval,
             root_owned=index == 0,
         )
         for index, (step, identity) in enumerate(zip(
@@ -436,6 +448,55 @@ def _steps(
     except Exception:
         return views, "unknown"
     return views, progress.action
+
+
+def _root_step_interval(
+    store: OperationStore,
+    record: OperationRecord,
+    compiled: CompiledPipeline,
+    children: Mapping[str, list[ChildView]],
+    observed_at: float,
+    root_interval: object,
+) -> object:
+    """Freeze the first root-owned model step at exact later-step liveness."""
+
+    steps = compiled.definition.steps
+    if (
+        not isinstance(root_interval, TimingView)
+        or not steps
+        or steps[0].primitive_id != "model_step"
+        or steps[0].session_mode != "worktree"
+    ):
+        return root_interval
+    if root_interval.mode == "duration":
+        return root_interval
+    later = tuple(
+        child
+        for step in steps[1:]
+        for child in children.get(step.step_id, ())
+    )
+    if not later:
+        return root_interval
+    root_start = root_interval_start(store, record, observed_at)
+    if root_start is None:
+        return UNKNOWN_TIMING
+    starts: list[float] = []
+    for child in later:
+        try:
+            child_record = store.read(record.spec.owner_id, child.operation_id)
+        except StoreError:
+            return UNKNOWN_TIMING
+        if (
+            child_record.spec.parent_operation_id != record.spec.operation_id
+            or child_record.spec.root_operation_id
+            not in {"", record.spec.operation_id}
+        ):
+            return UNKNOWN_TIMING
+        start = liveness_interval_start(store, child_record, observed_at)
+        if start is None or start < root_start:
+            return UNKNOWN_TIMING
+        starts.append(start)
+    return TimingView("duration", int(min(starts) - root_start))
 
 
 def _loop_limit(compiled: CompiledPipeline) -> int:

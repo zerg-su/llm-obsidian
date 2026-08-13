@@ -201,22 +201,46 @@ def liveness_timing(
     observed = _epoch(observed_at)
     if observed is None or record.state in TERMINAL:
         return UNKNOWN_TIMING
-    path = (
+    start = liveness_interval_start(store, record, observed)
+    if start is None:
+        return UNKNOWN_TIMING
+    return _timing("elapsed", start, observed)
+
+
+def liveness_interval_start(
+    store: OperationStore,
+    record: OperationRecord,
+    observed_at: float,
+) -> float | None:
+    """Validate and expose one exact durable liveness interval start."""
+
+    observed = _epoch(observed_at)
+    if observed is None:
+        return None
+    runtime = (
         store.root
         / "owners"
         / record.spec.owner_id
         / "runtime"
         / record.spec.operation_id
-        / "liveness"
-        / "state.json"
     )
-    raw = _read_object(path, boundary=store.root)
+    session_path = runtime / "session.json"
+    if session_path.exists():
+        session = _read_object(session_path, boundary=store.root)
+        if (
+            session is None
+            or session.get("schema_version") != 1
+            or session.get("operation_id") != record.spec.operation_id
+            or session.get("run_id") != record.run_id
+        ):
+            return None
+    raw = _read_object(runtime / "liveness" / "state.json", boundary=store.root)
     try:
         state = LivenessState(**raw) if raw is not None else None
     except (TypeError, ValueError):
         state = None
     if state is None:
-        return UNKNOWN_TIMING
+        return None
     start = _epoch(state.started_at)
     progress = _epoch(state.last_progress_at)
     revision = state.operation_revision
@@ -230,8 +254,8 @@ def liveness_timing(
         or start > progress
         or progress > observed
     ):
-        return UNKNOWN_TIMING
-    return _timing("elapsed", start, observed)
+        return None
+    return start
 
 
 def _vault_for_store(store: OperationStore) -> Path | None:
@@ -410,6 +434,22 @@ def root_task_result(
     return TaskResultView(
         "complete", disposition, len(evidence), len(gaps), close
     )
+
+
+def root_interval_start(
+    store: OperationStore,
+    record: OperationRecord,
+    observed_at: float,
+) -> float | None:
+    """Return the exact validated start used by the root timing projection."""
+
+    observed = _epoch(observed_at)
+    if observed is None:
+        return None
+    bound = _bound_task_start(store, record)
+    if bound is not None:
+        return bound[0] if bound[0] <= observed else None
+    return liveness_interval_start(store, record, observed)
 
 
 def root_timing(

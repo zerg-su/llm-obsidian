@@ -3513,8 +3513,114 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-time.") as raw:
         and timed_verify.children[0].timing.seconds == 150,
     )
     regression_check(
-        "the root-owned TDD step reuses the validated active root interval",
-        timed_tdd.timing == TimingView("elapsed", 300),
+        "the root-owned TDD step freezes when exact verification begins",
+        timed_tdd.timing == TimingView("duration", 150),
+    )
+    timed_tdd_line = next(
+        (line for line in render(timed).splitlines() if "tdd-slices" in line),
+        "",
+    )
+    regression_check(
+        "the frozen TDD token renders as duration with complete semantics",
+        "complete" in timed_tdd_line and "duration 2m 30s" in timed_tdd_line,
+    )
+    later_timed = project_root(store_root, timed_root, observed_at=1_600.0)
+    later_tdd = next(
+        step
+        for step in later_timed.programs[0].steps
+        if step.step_id == "tdd-slices"
+    )
+    regression_check(
+        "later dashboard frames cannot increase completed TDD duration",
+        later_tdd.timing == TimingView("duration", 150),
+    )
+    timed_child_liveness = (
+        store_root
+        / "owners"
+        / timed_root
+        / "runtime"
+        / timed_child
+        / "liveness"
+        / "state.json"
+    )
+    invalid_liveness = json.loads(
+        timed_child_liveness.read_text(encoding="utf-8")
+    )
+    invalid_liveness["operation_revision"] = (
+        store.read(timed_root, timed_child).revision + 1
+    )
+    timed_child_liveness.write_text(
+        json.dumps(invalid_liveness, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    invalid_timed = project_root(store_root, timed_root, observed_at=1_600.0)
+    invalid_tdd = next(
+        step
+        for step in invalid_timed.programs[0].steps
+        if step.step_id == "tdd-slices"
+    )
+    regression_check(
+        "invalid later-step liveness makes the TDD freeze unavailable",
+        invalid_tdd.timing == TimingView(),
+    )
+    invalid_liveness["operation_revision"] = store.read(
+        timed_root, timed_child
+    ).revision
+    invalid_liveness["started_at"] = 1_250.0
+    invalid_liveness["last_progress_at"] = 1_200.0
+    timed_child_liveness.write_text(
+        json.dumps(invalid_liveness, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    reversed_timed = project_root(store_root, timed_root, observed_at=1_600.0)
+    reversed_tdd = next(
+        step
+        for step in reversed_timed.programs[0].steps
+        if step.step_id == "tdd-slices"
+    )
+    regression_check(
+        "reversed later-step timestamps cannot freeze TDD",
+        reversed_tdd.timing == TimingView(),
+    )
+    child_session = timed_child_liveness.parents[1] / "session.json"
+    child_session.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "operation_id": timed_child,
+                "run_id": "foreign-run",
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    _liveness(
+        store,
+        timed_root,
+        timed_child,
+        started_at=1_150.0,
+        last_progress_at=1_200.0,
+    )
+    foreign_run_timed = project_root(
+        store_root, timed_root, observed_at=1_600.0
+    )
+    foreign_run_tdd = next(
+        step
+        for step in foreign_run_timed.programs[0].steps
+        if step.step_id == "tdd-slices"
+    )
+    regression_check(
+        "non-current child run identity cannot freeze TDD",
+        foreign_run_tdd.timing == TimingView(),
+    )
+    child_session.unlink()
+    _liveness(
+        store,
+        timed_root,
+        timed_child,
+        started_at=1_150.0,
+        last_progress_at=1_200.0,
     )
 
     receipt_operation = _verification_receipt(
