@@ -89,6 +89,45 @@ class FallbackWakeSource:
 
     def close(self) -> None:
         return None
+
+
+class FakeMonotonicClock:
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += max(0.0, seconds)
+
+
+class EventlessWakeSource:
+    """Advance a fake clock through the requested wait without an event."""
+
+    def __init__(self, clock: FakeMonotonicClock) -> None:
+        self.clock = clock
+        self.waits: list[float] = []
+
+    def start(self) -> bool:
+        return True
+
+    def wait(self, timeout: float) -> None:
+        self.waits.append(timeout)
+        self.clock.advance(timeout)
+        time.sleep(0.002)
+        return None
+
+    def retry(self) -> bool:
+        return True
+
+    def refresh_generation(self, _generation: int) -> None:
+        return None
+
+    def close(self) -> None:
+        return None
+
+
 from harness.workflows.reap import run_reap
 from harness.workflows.review import (
     ReviewContext,
@@ -1422,6 +1461,8 @@ def run_case(
     typed_review: bool = False,
     atomic_publication_barrier: bool = False,
     phase_callback_publication_barrier_step: str = "",
+    wake_source: object | None = None,
+    monotonic_clock: Callable[[], float] | None = None,
 ) -> tuple[
     OperationStore, FakeCmux, Path, int
 ]:
@@ -1900,7 +1941,8 @@ def run_case(
                 cmux_adapter=cmux,
                 review_launcher=review_launcher,
                 verification_runner=verification_runner,
-                wake_source=FallbackWakeSource(),
+                wake_source=wake_source or FallbackWakeSource(),
+                monotonic_clock=monotonic_clock,
             )
         )
     )
@@ -2013,7 +2055,11 @@ def run_case(
             ),
             product_root=worktree,
         )
-    thread.join(timeout=8 if pipeline_name == "engineering/fix" else 3)
+    thread.join(
+        timeout=12
+        if wake_source is not None
+        else (8 if pipeline_name == "engineering/fix" else 3)
+    )
     if original_inspect_task_summary is not None:
         RuntimeWorkerExecution.inspect_task_summary = (
             original_inspect_task_summary
@@ -4386,6 +4432,8 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
             product_root=worktree,
         )
 
+    eventless_clock = FakeMonotonicClock()
+    eventless_wake = EventlessWakeSource(eventless_clock)
     (
         default_resolution_store,
         _default_resolution_cmux,
@@ -4398,6 +4446,8 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         review_state="missing",
         review_launcher=resolve_default_review,
         pipeline_name="lifecycle/default",
+        wake_source=eventless_wake,
+        monotonic_clock=eventless_clock,
     )
     default_resolution_record = default_resolution_store.read(
         "owner-1", default_resolution_task
@@ -4410,6 +4460,12 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         and default_resolution_record.accepted_callback_kind
         == "wiki-summary",
         (default_resolution_calls, default_resolution_record),
+    )
+    check(
+        "eventless review handoff stays within the cross-session bound",
+        bool(eventless_wake.waits)
+        and max(eventless_wake.waits) <= 1.0,
+        eventless_wake.waits,
     )
 
     asynchronous_task = "99999999-9999-4999-8999-999999999999"

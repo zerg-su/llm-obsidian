@@ -584,6 +584,7 @@ class RuntimeWorkerExecution(
         self.next_checkpoint_probe = 0.0
         self.next_full_reconcile = 0.0
         self.next_transport_confirmation = float("inf")
+        self.next_cross_session_reconcile = float("inf")
         self.next_provider_exit_probe = 0.0
         self.next_wake_retry = float("inf")
         self.wake_retry_attempts = 0

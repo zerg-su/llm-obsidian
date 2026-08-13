@@ -324,6 +324,22 @@ check(
     (_fallback.inspections, _fallback.receipts),
 )
 
+_cross_session = EventFirstLoopProbe()
+_cross_session.spec = {"callback_mode": "task-summary"}
+_cross_session.provider_exited = True
+_cross_session.wake_source = EventFirstSource(_cross_session.clock, [])
+_cross_session.next_prompt_probe = float("inf")
+_cross_session.next_checkpoint_probe = float("inf")
+_cross_session.next_liveness_probe = float("inf")
+_cross_session.next_provider_exit_probe = float("inf")
+check(
+    "eventless parent transport observes cross-session progress within one second",
+    _cross_session.poll_once() is True
+    and _cross_session.inspections == [1.0]
+    and _cross_session.receipts[-1][0] == "fallback-poll",
+    (_cross_session.inspections, _cross_session.receipts),
+)
+
 _control_wakes = EventFirstLoopProbe()
 _control_wakes.wake_source = EventFirstSource(
     _control_wakes.clock,

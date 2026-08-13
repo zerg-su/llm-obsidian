@@ -9,6 +9,7 @@ from .cmux_wake_source import WakeObservation
 
 
 FULL_TRANSPORT_FALLBACK_SECONDS = 30.0
+CROSS_SESSION_TRANSPORT_POLL_SECONDS = 1.0
 MAX_WAKE_RETRIES = 5
 TRANSPORT_STABILITY_FIELDS = (
     "stable_reads",
@@ -60,8 +61,31 @@ class RuntimeWorkerLoopMixin:
         return min(
             self.next_full_reconcile,
             self.next_transport_confirmation,
+            getattr(self, "next_cross_session_reconcile", float("inf")),
             self._next_light_deadline(now),
         )
+
+    def cross_session_transport_pending(self) -> bool:
+        """Keep parent-owned child handoffs prompt after its provider exits."""
+
+        spec = getattr(self, "spec", {})
+        return bool(
+            isinstance(spec, dict)
+            and spec.get("callback_mode") == "task-summary"
+            and self.provider_exited
+            and not self.callback_handled
+        )
+
+    def refresh_cross_session_reconcile(self, now: float) -> None:
+        if self.cross_session_transport_pending():
+            if getattr(
+                self, "next_cross_session_reconcile", float("inf")
+            ) == float("inf"):
+                self.next_cross_session_reconcile = (
+                    now + CROSS_SESSION_TRANSPORT_POLL_SECONDS
+                )
+        else:
+            self.next_cross_session_reconcile = float("inf")
 
     def transport_snapshot(self) -> dict[str, object]:
         """Return bounded durable identities, never provider content."""
@@ -158,6 +182,11 @@ class RuntimeWorkerLoopMixin:
         self.next_transport_confirmation = (
             round(now + max(0.02, self.poll_seconds), 9)
             if self.transport_confirmation_pending()
+            else float("inf")
+        )
+        self.next_cross_session_reconcile = (
+            now + CROSS_SESSION_TRANSPORT_POLL_SECONDS
+            if self.cross_session_transport_pending()
             else float("inf")
         )
 
@@ -514,9 +543,12 @@ class RuntimeWorkerLoopMixin:
             return self.observe_provider_exit()
 
         now = self.monotonic_clock()
+        self.refresh_cross_session_reconcile(now)
         observation: WakeObservation | None = None
         if now >= self.next_transport_confirmation:
             observation = WakeObservation("stability-confirmation", "", 0, now)
+        elif now >= self.next_cross_session_reconcile:
+            observation = WakeObservation("fallback-poll", "", 0, now)
         elif now >= self.next_full_reconcile:
             observation = WakeObservation("fallback-poll", "", 0, now)
         else:
@@ -541,6 +573,8 @@ class RuntimeWorkerLoopMixin:
                 observation = WakeObservation(
                     "stability-confirmation", "", 0, now
                 )
+            elif observation is None and now >= self.next_cross_session_reconcile:
+                observation = WakeObservation("fallback-poll", "", 0, now)
             elif observation is None and now >= self.next_full_reconcile:
                 observation = WakeObservation("fallback-poll", "", 0, now)
 

@@ -31,12 +31,17 @@ state and callback artifacts remain the only lifecycle authority.
   fallback. Existing two-read stability confirmation and the prompt,
   checkpoint, provider-exit, callback, liveness, and guardian-control
   deadlines remain independently effective.
+- After a task-summary provider exits, its parent reconciles child-session
+  review, fix, custom, and verification handoffs within one second because
+  those events cannot route through the parent's session-bound subscription.
+  The ordinary eventless idle fallback remains 30 seconds.
 - The root-owned `TDD slices` dashboard step freezes as a completed duration
   when exact later-step liveness begins, while invalid or contradictory timing
   remains unavailable. Dashboard layout and non-timing labels are unchanged.
-- The live scripts ratchet is pinned to the measured RC6.5 candidate at 287
-  Python files / 107,183 lines: one new wake adapter module, its bounded
-  partial-frame read repair, and no blanket headroom.
+- The live scripts ratchet is pinned to the measured final RC6.5 candidate at
+  287 Python files / 107,218 lines: one new wake adapter module, its bounded
+  partial-frame read repair and cross-session reconcile deadline, and no
+  blanket headroom.
 
 ### Candidate boundary
 

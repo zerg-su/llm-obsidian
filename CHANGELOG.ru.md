@@ -38,13 +38,18 @@ callback artifacts.
   30 секунд. Существующая two-read stability confirmation и независимые
   deadlines для prompt, checkpoint, provider exit, callback, liveness и
   guardian control сохранены.
+- После завершения task-summary provider его parent сверяет handoff от
+  child-session для review, fix, custom и verification не позднее чем через
+  одну секунду: такие events не маршрутизируются через session-bound подписку
+  parent. Обычный eventless idle fallback остаётся равным 30 секундам.
 - Root-owned шаг `TDD slices` теперь фиксируется как завершённая duration при
   начале точного later-step liveness. Некорректные или противоречивые timing
   evidence остаются unavailable. Layout и не-временные labels dashboard не
   изменены.
-- Live scripts ratchet закреплён на измеренном RC6.5 candidate: 287 Python
-  files / 107 183 lines, один новый модуль wake adapter, его ограниченное
-  исправление чтения partial frame и без запасного headroom.
+- Live scripts ratchet закреплён на измеренном final RC6.5 candidate: 287
+  Python files / 107 218 lines, один новый модуль wake adapter, его
+  ограниченные исправление чтения partial frame и cross-session reconcile
+  deadline, без запасного headroom.
 
 ### Граница кандидата
 
