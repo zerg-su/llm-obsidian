@@ -9,6 +9,8 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 from pathlib import Path
 
 
@@ -352,6 +354,39 @@ for label, lines in (
         )
         check(label, source.wait(0.1).source == "degraded")
         source.close()
+
+
+with tempfile.TemporaryDirectory() as raw_root:
+    read_fd, write_fd = os.pipe()
+    process = FakeProcess([])
+    process.stdout = os.fdopen(read_fd, "rb", buffering=0)
+    source = CmuxWakeSource(
+        binding(Path(raw_root)),
+        runner=capable,
+        popen=Factory(process),
+    )
+    os.write(write_fd, b'{"partial":1')
+    observations: list[WakeObservation | None] = []
+    started = time.monotonic()
+    waiter = threading.Thread(
+        target=lambda: observations.append(source.wait(0.05)),
+        daemon=True,
+    )
+    waiter.start()
+    waiter.join(0.25)
+    returned_in_budget = not waiter.is_alive()
+    elapsed = time.monotonic() - started
+    os.close(write_fd)
+    waiter.join(0.5)
+    check(
+        "partial NDJSON cannot block past the event wait deadline",
+        returned_in_budget
+        and elapsed < 0.25
+        and observations
+        and observations[0] is not None
+        and observations[0].source == "degraded",
+    )
+    source.close()
 
 
 with tempfile.TemporaryDirectory() as raw_root:

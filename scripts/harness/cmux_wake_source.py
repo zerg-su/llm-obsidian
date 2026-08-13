@@ -356,6 +356,7 @@ class CmuxWakeSource:
         self.policy = CmuxWakePolicy(binding)
         self.process: object | None = None
         self._capability: bool | None = None
+        self._frame_buffer = bytearray()
         self._degraded = False
         self._closed = False
 
@@ -404,28 +405,52 @@ class CmuxWakeSource:
             stream = getattr(self.process, "stdout", None)
             if stream is None:
                 return self._degrade()
+            newline = self._frame_buffer.find(b"\n")
+            if newline >= 0:
+                raw = bytes(self._frame_buffer[: newline + 1])
+                del self._frame_buffer[: newline + 1]
+                if len(raw) > MAX_FRAME_BYTES + 1:
+                    return self._degrade()
+                try:
+                    frame = json.loads(raw)
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    return self._degrade()
+                observation = self.policy.observe(frame, self.monotonic())
+                if observation is not None:
+                    if observation.source == "degraded":
+                        self._close_process()
+                    return observation
+                if self.monotonic() >= deadline:
+                    return None
+                continue
+            if len(self._frame_buffer) >= MAX_FRAME_BYTES + 2:
+                return self._degrade()
             remaining = max(0.0, deadline - self.monotonic())
             if not self.wait_readable(stream, remaining):
+                if self._frame_buffer:
+                    return self._degrade()
                 if getattr(self.process, "poll")() is not None:
                     return self._degrade()
                 return None
-            raw = stream.readline(MAX_FRAME_BYTES + 2)
-            if not raw:
-                return self._degrade()
-            if len(raw) > MAX_FRAME_BYTES + 1 or not raw.endswith(b"\n"):
-                return self._degrade()
             try:
-                frame = json.loads(raw)
-            except (UnicodeDecodeError, json.JSONDecodeError):
+                chunk = self._read_available(
+                    stream,
+                    MAX_FRAME_BYTES + 2 - len(self._frame_buffer),
+                )
+            except (OSError, ValueError):
                 return self._degrade()
-            observation = self.policy.observe(frame, self.monotonic())
-            if observation is not None:
-                if observation.source == "degraded":
-                    self._close_process()
-                return observation
-            if self.monotonic() >= deadline:
-                return None
+            if not isinstance(chunk, bytes) or not chunk:
+                return self._degrade()
+            self._frame_buffer.extend(chunk)
         return WakeObservation("degraded", observed_at=self.monotonic())
+
+    @staticmethod
+    def _read_available(stream: BinaryIO, limit: int) -> bytes:
+        try:
+            descriptor = stream.fileno()
+        except (AttributeError, OSError):
+            return stream.read(limit)
+        return os.read(descriptor, limit)
 
     def _ensure_started(self) -> bool:
         if self.process is not None:
@@ -495,6 +520,7 @@ class CmuxWakeSource:
 
     def _close_process(self) -> None:
         process, self.process = self.process, None
+        self._frame_buffer.clear()
         if process is None:
             return
         try:

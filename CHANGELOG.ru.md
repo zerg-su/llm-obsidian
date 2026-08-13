@@ -43,8 +43,8 @@ callback artifacts.
   evidence остаются unavailable. Layout и не-временные labels dashboard не
   изменены.
 - Live scripts ratchet закреплён на измеренном RC6.5 candidate: 287 Python
-  files / 107 157 lines, один новый модуль wake adapter и без запасного
-  headroom.
+  files / 107 183 lines, один новый модуль wake adapter, его ограниченное
+  исправление чтения partial frame и без запасного headroom.
 
 ### Граница кандидата
 

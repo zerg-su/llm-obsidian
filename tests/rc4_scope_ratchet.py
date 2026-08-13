@@ -223,8 +223,9 @@ lines after the bounded RC6.1--RC6.4 review-continuation owners. RC6.5 adds
 exactly one production module, ``harness/cmux_wake_source.py``, for its strict
 per-worker event parser/subprocess boundary. The reason-aware wait, bounded
 wake diagnostics, and validated dashboard timing seam remain in existing
-owners. The measured candidate is 287 files / 107,157 lines, so both ceilings
-are pinned to those exact values with no speculative headroom.
+owners. The review-resolved candidate is 287 files / 107,183 lines after its
+bounded partial-frame read repair, so both ceilings are pinned to those exact
+values with no speculative headroom.
 """
 
 from __future__ import annotations
@@ -236,7 +237,7 @@ from pathlib import Path
 SCRIPT_FILE_CEILING = 287
 
 #: Maximum total lines across those files for the 2.6.7 RC6.5 candidate.
-SCRIPT_LINE_CEILING = 107_157
+SCRIPT_LINE_CEILING = 107_183
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

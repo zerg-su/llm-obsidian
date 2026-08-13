@@ -35,8 +35,8 @@ state and callback artifacts remain the only lifecycle authority.
   when exact later-step liveness begins, while invalid or contradictory timing
   remains unavailable. Dashboard layout and non-timing labels are unchanged.
 - The live scripts ratchet is pinned to the measured RC6.5 candidate at 287
-  Python files / 107,157 lines: one new wake adapter module and no blanket
-  headroom.
+  Python files / 107,183 lines: one new wake adapter module, its bounded
+  partial-frame read repair, and no blanket headroom.
 
 ### Candidate boundary
 
