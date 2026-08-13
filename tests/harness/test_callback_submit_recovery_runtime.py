@@ -48,6 +48,11 @@ from harness.runtime_worker_summary import (  # noqa: E402
 from harness.runtime_worker_review_bridge import (  # noqa: E402
     RuntimeWorkerReviewBridgeMixin,
 )
+from harness.runtime_worker_custom import RuntimeWorkerCustomMixin  # noqa: E402
+from harness.review_continuation_recovery import (  # noqa: E402
+    RecoverySnapshot,
+    classify_review_continuation,
+)
 from harness.runtime_worker_execution import RuntimeWorkerExecution  # noqa: E402
 from harness.runtime_provider_events import (  # noqa: E402
     RuntimeProviderEventStream,
@@ -1075,3 +1080,103 @@ with tempfile.TemporaryDirectory(prefix="review-input-runtime.") as raw:
 
 
 print("\nAll callback-submit recovery runtime tests passed.")
+
+
+with tempfile.TemporaryDirectory(prefix="accepted-callback-ingestion.") as raw:
+    base = Path(raw)
+    state_root = base / "runtime"
+    state_root.mkdir()
+    store = OperationStore(base / "harness")
+    owner = "accepted-ingestion-owner"
+    operation_id = "accepted-ingestion-root"
+    run_id = "accepted-ingestion-run"
+    spec = OperationSpec(
+        operation_id,
+        "accepted-ingestion-key",
+        "dispatch",
+        owner,
+        RuntimeRoute("codex", "gpt-5.6-sol", "high", "executor", "c" * 64),
+        "packets/task.json",
+        "scoped",
+    )
+    store.create(spec, lane_id="accepted-ingestion-lane", run_id=run_id)
+    for next_state in ("preflight", "starting", "running", "awaiting-callback"):
+        store.transition(owner, operation_id, next_state)
+    store.transition(
+        owner,
+        operation_id,
+        "attention-required",
+        reason=AttentionReason.CALLBACK_INVALID,
+    )
+    root_record = store.read(owner, operation_id)
+    fixture_path = (
+        ROOT
+        / "tests/harness/fixtures/review-continuation"
+        / "accepted-callback-pending-ingestion.json"
+    )
+    captured = RecoverySnapshot.from_mapping(
+        json.loads(fixture_path.read_text(encoding="utf-8"))
+    )
+    snapshot = replace(
+        captured,
+        root=replace(
+            captured.root,
+            owner_id=owner,
+            operation_id=operation_id,
+            run_id=run_id,
+            revision=root_record.revision,
+        ),
+    )
+    decision = classify_review_continuation(snapshot)
+
+    class AcceptedIngestionWorker(
+        RuntimeWorkerCustomMixin, RuntimeWorkerReviewBridgeMixin
+    ):
+        def __init__(self) -> None:
+            self.spec = {
+                "callback_mode": "task-summary",
+                "owner_id": owner,
+                "operation_id": operation_id,
+            }
+            self.spec_path = state_root / "launch.json"
+            self.store = store
+            self.callback_handled = True
+            self.summary_attention_revision = root_record.revision
+            self.restart_attention_recovery_done = True
+            self.review_drives = 0
+            self.gate_results: dict[str, str] = {}
+            self.callback_acceptances = 0
+            self.provider_effects = 0
+
+        def review_continuation_decision(self):
+            return decision
+
+        def drive_review(self) -> bool:
+            self.review_drives += 1
+            self.gate_results["openai-holistic"] = "accepted-result.json"
+            return True
+
+    worker = AcceptedIngestionWorker()
+    worker.recover_task_summary_attention()
+    first_record = store.read(owner, operation_id)
+    worker.recover_task_summary_attention()
+    repeated_record = store.read(owner, operation_id)
+    receipt = json.loads(
+        (state_root / "review-continuation-recovery.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    check(
+        "accepted callback recovery uses the registered review drive without replay",
+        first_record.state == "awaiting-callback"
+        and repeated_record.revision == first_record.revision
+        and worker.review_drives == 1
+        and worker.gate_results == {
+            "openai-holistic": "accepted-result.json"
+        }
+        and worker.callback_acceptances == 0
+        and worker.provider_effects == 0
+        and receipt["status"] == "finalized"
+        and receipt["identity"]["recovery_class"] == "accepted-callback",
+        (first_record, repeated_record, receipt),
+    )

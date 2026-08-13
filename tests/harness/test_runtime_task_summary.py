@@ -49,6 +49,12 @@ from harness.runtime_worker_review_bridge import (
     RuntimeWorkerReviewBridgeMixin,
     _review_drive_failure_receipt,
 )
+from harness.runtime_worker_custom import RuntimeWorkerCustomMixin
+from harness.review_continuation_recovery import (
+    RecoveryReason,
+    RecoverySnapshot,
+    classify_review_continuation,
+)
 from harness.runtime_callback_io import record_review_drive_failure
 from harness.store import OperationStore
 from harness.supervisor import OperationSupervisor
@@ -5104,3 +5110,178 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         > recovery["attention_revision"],
         (resumed_calls, resumed_record, recovery),
     )
+
+
+def _continuation_fixture(name: str) -> RecoverySnapshot:
+    path = (
+        ROOT
+        / "tests/harness/fixtures/review-continuation"
+        / name
+    )
+    return RecoverySnapshot.from_mapping(
+        json.loads(path.read_text(encoding="utf-8"))
+    )
+
+
+with tempfile.TemporaryDirectory(prefix="review-continuation-rearm.") as raw:
+    base = Path(raw)
+    store = OperationStore(base / "harness")
+    owner = "review-continuation-owner"
+    operation_id = "review-continuation-root"
+    run_id = "review-continuation-run"
+    spec = OperationSpec(
+        operation_id,
+        "review-continuation-key",
+        "dispatch",
+        owner,
+        RuntimeRoute("codex", "gpt-5.6-sol", "high", "executor", "a" * 64),
+        "packets/task.json",
+        "scoped",
+    )
+    store.create(spec, lane_id="continuation-lane", run_id=run_id)
+    for next_state in ("preflight", "starting", "running", "awaiting-callback"):
+        store.transition(owner, operation_id, next_state)
+    store.transition(
+        owner,
+        operation_id,
+        "attention-required",
+        reason=AttentionReason.ATTENTION_REQUIRED,
+    )
+    current = store.read(owner, operation_id)
+    state_root = base / "runtime"
+    state_root.mkdir()
+    write_json(
+        state_root / "callback-error.json",
+        {"schema_version": 1, "status": "review-drive-failed"},
+    )
+    captured = _continuation_fixture(
+        "review-drive-failed-after-reverify.json"
+    )
+    snapshot = replace(
+        captured,
+        root=replace(
+            captured.root,
+            owner_id=owner,
+            operation_id=operation_id,
+            run_id=run_id,
+            revision=current.revision,
+        ),
+    )
+    decision = classify_review_continuation(snapshot)
+
+    class SameGenerationWorker(RuntimeWorkerCustomMixin):
+        def __init__(self) -> None:
+            self.spec = {
+                "callback_mode": "task-summary",
+                "owner_id": owner,
+                "operation_id": operation_id,
+            }
+            self.spec_path = state_root / "launch.json"
+            self.store = store
+            self.callback_handled = True
+            self.summary_attention_revision = current.revision
+            self.restart_attention_recovery_done = True
+            self.executions = 0
+
+        def review_continuation_decision(self):
+            return decision
+
+        def execute_review_continuation(self, _decision) -> bool:
+            self.executions += 1
+            return True
+
+    worker = SameGenerationWorker()
+    worker.recover_task_summary_attention()
+    recovered = store.read(owner, operation_id)
+    receipt_path = state_root / "review-continuation-recovery.json"
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    recovered_revision = recovered.revision
+    worker.recover_task_summary_attention()
+    repeated = store.read(owner, operation_id)
+    check(
+        "same-generation review-drive recovery is receipt-bound and exactly once",
+        recovered.state == "awaiting-callback"
+        and recovered.revision == current.revision + 1
+        and receipt["status"] == "finalized"
+        and receipt["outcome"] == "advanced"
+        and receipt["identity_sha256"] == decision.receipt.identity_sha256
+        and worker.executions == 1
+        and repeated.revision == recovered_revision,
+        (recovered, receipt, worker.executions, repeated),
+    )
+
+    for status in (
+        "wiki-summary-invalid",
+        "callback-wake-effect-uncertain",
+        "pipeline-verification-effect-uncertain",
+    ):
+        isolated_owner = f"owner-{status}"
+        isolated_operation = f"operation-{status}"
+        isolated_spec = OperationSpec(
+            isolated_operation,
+            f"key-{status}",
+            "dispatch",
+            isolated_owner,
+            RuntimeRoute(
+                "codex", "gpt-5.6-sol", "high", "executor", "b" * 64
+            ),
+            "packets/task.json",
+            "scoped",
+        )
+        store.create(
+            isolated_spec,
+            lane_id=f"lane-{status}",
+            run_id=f"run-{status}",
+        )
+        for next_state in (
+            "preflight",
+            "starting",
+            "running",
+            "awaiting-callback",
+        ):
+            store.transition(isolated_owner, isolated_operation, next_state)
+        store.transition(
+            isolated_owner,
+            isolated_operation,
+            "attention-required",
+            reason=AttentionReason.ATTENTION_REQUIRED,
+        )
+        isolated = store.read(isolated_owner, isolated_operation)
+        refusal = classify_review_continuation(
+            replace(
+                captured,
+                attention_status=status,
+                root=replace(
+                    captured.root,
+                    owner_id=isolated_owner,
+                    operation_id=isolated_operation,
+                    run_id=isolated.run_id,
+                    revision=isolated.revision,
+                ),
+            )
+        )
+        worker.spec = {
+            "callback_mode": "task-summary",
+            "owner_id": isolated_owner,
+            "operation_id": isolated_operation,
+        }
+        status_root = state_root / status
+        status_root.mkdir()
+        worker.spec_path = status_root / "launch.json"
+        worker.callback_handled = True
+        worker.summary_attention_revision = isolated.revision
+        worker.review_continuation_decision = lambda refusal=refusal: refusal
+        worker.recover_task_summary_attention()
+        unchanged = store.read(isolated_owner, isolated_operation)
+        check(
+            f"{status} remains mutation-free in the same generation",
+            refusal.reason is RecoveryReason.ATTENTION_NOT_RECOVERABLE
+            and unchanged == isolated
+            and not worker.spec_path.with_name(
+                "review-continuation-recovery.json"
+            ).exists()
+            and not worker.spec_path.with_name(
+                "review-continuation-recovery.lock"
+            ).exists(),
+            (refusal, isolated, unchanged),
+        )

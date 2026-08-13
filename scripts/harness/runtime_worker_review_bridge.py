@@ -16,6 +16,21 @@ from .runtime_worker import (
     _review_resolution_handoff_ready,
 )
 from . import runtime_callback_io
+from .review_continuation_recovery import (
+    AcceptedCallback,
+    AttemptSnapshot,
+    GateSnapshot,
+    RecoveryDecision,
+    RecoveryDisposition,
+    RecoveryIdentity,
+    RecoveryReason,
+    RecoverySnapshot,
+    ResolutionSnapshot,
+    ReviewLane,
+    RootSnapshot,
+    VerificationSnapshot,
+    classify_review_continuation,
+)
 from review_contract import ReviewContractError, axis_finding_id
 
 
@@ -445,140 +460,296 @@ class RuntimeWorkerReviewBridgeMixin:
             and evidence[0].get("head_sha") == current_head
         )
 
-    def _durable_review_in_progress(self) -> bool:
-        """Classify a rejected drive whose exact review is already running.
-
-        The runner's checkpoint-resurrection rejection can race a reviewer it
-        partially launched.  Positive authority is re-derived from durable
-        records only: the bound attempt at the exact current HEAD, every gate
-        lane's parent awaiting its callback (or finalizing), every bound
-        round in a live non-terminal progress state (including verifying
-        between resolution steps), and the reviewer's live ready ownership
-        whose identities match the parent record's owned resources.  Absent,
-        dead, ambiguous, or mismatched identity, a changed HEAD, a terminal,
-        attention-latched, or cancelling round, or a wrong lane/run fails
-        closed to the existing attention boundary.
-        """
-
-        try:
-            gate_state = self.review_gate_state()
-            raw_attempt = gate_state.get("attempt")
-            lanes = gate_state.get("lanes")
-            context = gate_state.get("context")
-            if (
-                not isinstance(raw_attempt, dict)
-                or raw_attempt.get("status") != "awaiting-callback"
-                or not isinstance(lanes, list)
-                or not lanes
-                or not isinstance(context, dict)
-            ):
-                return False
-            identity = raw_attempt.get("identity")
-            if not isinstance(identity, dict):
-                return False
-            head_result = subprocess.run(
-                ["git", "rev-parse", "HEAD"],
-                cwd=self.spec["cwd"],
-                text=True,
-                capture_output=True,
-                check=False,
+    def _review_continuation_snapshot(self) -> RecoverySnapshot:
+        gate_path = self.review.gate_root / "review-gate.json"
+        if not gate_path.is_file() or gate_path.is_symlink():
+            raise RuntimeWorkerError("review gate state is unavailable")
+        gate_raw = gate_path.read_bytes()
+        gate_state = json.loads(gate_raw)
+        if (
+            not isinstance(gate_state, dict)
+            or gate_state.get("schema_version") != 1
+            or gate_state.get("dispatch_operation_id")
+            != self.spec["operation_id"]
+        ):
+            raise RuntimeWorkerError("review gate state is invalid")
+        raw_attempt = gate_state.get("attempt")
+        attempt_identity = (
+            raw_attempt.get("identity")
+            if isinstance(raw_attempt, dict)
+            else None
+        )
+        context = gate_state.get("context")
+        raw_lanes = gate_state.get("lanes")
+        if (
+            not isinstance(raw_attempt, dict)
+            or not isinstance(attempt_identity, dict)
+            or not isinstance(context, dict)
+            or not isinstance(raw_lanes, list)
+        ):
+            raise RuntimeWorkerError("review continuation evidence is invalid")
+        head_result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=self.spec["cwd"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        current_head = head_result.stdout.strip()
+        if head_result.returncode:
+            raise RuntimeWorkerError("review continuation HEAD is unavailable")
+        root = self.store.read(
+            self.spec["owner_id"], self.spec["operation_id"]
+        )
+        rows = self.store.list(self.spec["owner_id"])
+        process = getattr(self, "process", None) or ProcessAdapter()
+        lanes: list[ReviewLane] = []
+        parent_by_operation: dict[str, tuple[object, str, bool]] = {}
+        effect_requires_replay = False
+        for raw_lane in raw_lanes:
+            if not isinstance(raw_lane, dict):
+                raise RuntimeWorkerError("review lane evidence is invalid")
+            axis = str(raw_lane.get("axis") or "")
+            operation_id = str(raw_lane.get("operation_id") or "")
+            run_id = str(raw_lane.get("run_id") or "")
+            lane_id = str(raw_lane.get("lane_id") or "")
+            parent = self.store.read(self.spec["owner_id"], operation_id)
+            parent_identity_exact = (
+                parent.spec.kind.startswith(
+                    ("simple-review-", "deep-review-", "full-review-")
+                )
+                and parent.run_id == run_id
+                and parent.lane_id == lane_id
             )
-            current_head = head_result.stdout.strip()
-            if (
-                head_result.returncode
-                or not re.fullmatch("[0-9a-f]{40,64}", current_head)
-                or identity.get("exact_head_sha") != current_head
-                or context.get("head_sha") != current_head
-            ):
-                return False
-            process = getattr(self, "process", None) or ProcessAdapter()
-            rows = self.store.list(self.spec["owner_id"])
-            for lane in lanes:
-                if not isinstance(lane, dict):
-                    return False
-                operation_id = str(lane.get("operation_id") or "")
-                run_id = str(lane.get("run_id") or "")
-                lane_id = str(lane.get("lane_id") or "")
-                if not operation_id or not run_id or not lane_id:
-                    return False
-                parent = self.store.read(self.spec["owner_id"], operation_id)
-                if (
-                    not parent.spec.kind.startswith(
-                        ("simple-review-", "deep-review-", "full-review-")
+            launch_in_progress = (
+                parent.state in {"preflight", "starting", "running"}
+                or parent.pending_effect == "start-provider"
+            )
+            ready_path = (
+                Path(self.store.root)
+                / "owners"
+                / self.spec["owner_id"]
+                / "runtime"
+                / operation_id
+                / "ready.json"
+            )
+            ready_identity_exact = parent_identity_exact
+            process_alive = False
+            if launch_in_progress:
+                if ready_path.is_symlink():
+                    ready_identity_exact = False
+                elif ready_path.is_file():
+                    early = json.loads(ready_path.read_text(encoding="utf-8"))
+                    ready_identity_exact = (
+                        ready_identity_exact
+                        and isinstance(early, dict)
+                        and early.get("status") == "ready"
                     )
-                    or parent.run_id != run_id
-                    or parent.lane_id != lane_id
-                ):
-                    return False
-                launch_in_progress = (
-                    parent.state in {"preflight", "starting", "running"}
-                    or parent.pending_effect == "start-provider"
-                )
-                if launch_in_progress:
-                    # The exact bound reviewer is still inside its launch
-                    # window; readiness may not exist yet, but a failed
-                    # handshake already published stays fail-closed.
-                    ready_path = (
-                        Path(self.store.root)
-                        / "owners"
-                        / self.spec["owner_id"]
-                        / "runtime"
-                        / operation_id
-                        / "ready.json"
-                    )
-                    if ready_path.is_symlink():
-                        return False
-                    if ready_path.is_file():
-                        early = json.loads(
-                            ready_path.read_text(encoding="utf-8")
-                        )
-                        if (
-                            not isinstance(early, dict)
-                            or early.get("status") != "ready"
-                        ):
-                            return False
-                    continue
-                if (
-                    parent.state not in {"awaiting-callback", "finalizing"}
-                    or parent.pending_effect
-                ):
-                    return False
-                rounds = [
-                    row
-                    for row in rows
-                    if row.spec.kind == "review-round"
-                    and row.spec.parent_operation_id == operation_id
-                ]
-                if not rounds or any(
-                    row.state not in _LIVE_ROUND_STATES for row in rounds
-                ):
-                    return False
-                ready_path = (
-                    Path(self.store.root)
-                    / "owners"
-                    / self.spec["owner_id"]
-                    / "runtime"
-                    / operation_id
-                    / "ready.json"
-                )
+            else:
                 if ready_path.is_symlink() or not ready_path.is_file():
-                    return False
-                ready = json.loads(ready_path.read_text(encoding="utf-8"))
-                process_group = ready.get("process_group")
-                process_identity = str(ready.get("process_identity") or "")
-                if (
-                    not isinstance(ready, dict)
-                    or ready.get("status") != "ready"
-                    or type(process_group) is not int
-                    or process_group <= 1
-                    or not re.fullmatch("[0-9a-f]{64}", process_identity)
-                    or parent.resources.process_group != process_group
-                    or parent.resources.process_identity != process_identity
-                    or process.process_status(process_group, process_identity)
-                    != "alive"
-                ):
-                    return False
-            return True
+                    ready_identity_exact = False
+                else:
+                    ready = json.loads(ready_path.read_text(encoding="utf-8"))
+                    process_group = ready.get("process_group")
+                    process_identity = str(ready.get("process_identity") or "")
+                    ready_identity_exact = (
+                        ready_identity_exact
+                        and isinstance(ready, dict)
+                        and ready.get("status") == "ready"
+                        and type(process_group) is int
+                        and process_group > 1
+                        and bool(re.fullmatch("[0-9a-f]{64}", process_identity))
+                        and parent.resources.process_group == process_group
+                        and parent.resources.process_identity == process_identity
+                    )
+                    process_alive = (
+                        ready_identity_exact
+                        and process.process_status(
+                            process_group, process_identity
+                        )
+                        == "alive"
+                    )
+            parent_by_operation[operation_id] = (
+                parent,
+                axis,
+                parent_identity_exact,
+            )
+            rounds = [
+                row
+                for row in rows
+                if row.spec.kind == "review-round"
+                and row.spec.parent_operation_id == operation_id
+            ]
+            if launch_in_progress and not rounds:
+                lanes.append(
+                    ReviewLane(
+                        axis=axis,
+                        operation_id=operation_id,
+                        run_id=run_id,
+                        lane_id=lane_id,
+                        state=parent.state,
+                        round_operation_id="",
+                        round_run_id="",
+                        round_state="",
+                        launch_in_progress=True,
+                        ready_identity_exact=ready_identity_exact,
+                    )
+                )
+            for round_record in rounds:
+                lanes.append(
+                    ReviewLane(
+                        axis=axis,
+                        operation_id=operation_id,
+                        run_id=run_id,
+                        lane_id=lane_id,
+                        state=parent.state,
+                        round_operation_id=round_record.spec.operation_id,
+                        round_run_id=round_record.run_id,
+                        round_state=round_record.state,
+                        launch_in_progress=launch_in_progress,
+                        ready_identity_exact=ready_identity_exact,
+                        process_alive=process_alive,
+                    )
+                )
+
+        accepted_callbacks: list[AcceptedCallback] = []
+        consumed_callback_ids: set[str] = set()
+        round_results = gate_state.get("round_results")
+        consumed_axes = (
+            set(round_results)
+            if isinstance(round_results, dict)
+            else set()
+        )
+        for row in rows:
+            parent_data = parent_by_operation.get(
+                row.spec.parent_operation_id
+            )
+            if (
+                row.spec.kind != "review-round"
+                or not row.accepted_callback_id
+                or parent_data is None
+            ):
+                continue
+            parent, axis, parent_identity_exact = parent_data
+            accepted_callbacks.append(
+                AcceptedCallback(
+                    attempt_id=str(attempt_identity.get("attempt_id") or ""),
+                    axis=axis,
+                    callback_id=row.accepted_callback_id,
+                    kind=row.accepted_callback_kind,
+                    lane_id=row.lane_id,
+                    operation_id=row.spec.operation_id,
+                    parent_operation_id=row.spec.parent_operation_id,
+                    payload_sha256=row.accepted_callback_sha256,
+                    run_id=row.run_id,
+                )
+            )
+            if axis in consumed_axes:
+                consumed_callback_ids.add(row.accepted_callback_id)
+            if (
+                not parent_identity_exact
+                or parent.pending_effect
+                or row.pending_effect
+            ):
+                effect_requires_replay = True
+
+        latch_status = ""
+        latch_path = self.spec_path.parent / "callback-error.json"
+        if latch_path.is_file() and not latch_path.is_symlink():
+            latch = json.loads(latch_path.read_text(encoding="utf-8"))
+            if isinstance(latch, dict):
+                latch_status = str(latch.get("status") or "")
+
+        resolution: ResolutionSnapshot | None = None
+        resolution_path = (
+            self.spec_path.parent / "pipeline-review-resolution-notify.json"
+        )
+        if resolution_path.is_file() and not resolution_path.is_symlink():
+            resolution_raw = resolution_path.read_bytes()
+            resolution_value = json.loads(resolution_raw)
+            if isinstance(resolution_value, dict):
+                resolution = ResolutionSnapshot(
+                    reviewed_head=str(
+                        resolution_value.get("reviewed_head_sha") or ""
+                    ),
+                    current_head=current_head,
+                    sha256=hashlib.sha256(resolution_raw).hexdigest(),
+                )
+
+        verification: VerificationSnapshot | None = None
+        if hasattr(self, "verification_receipt"):
+            verification_value = self.verification_receipt()
+            if isinstance(verification_value, dict):
+                verification_sha256 = _bounded_file_sha256(
+                    self.verification_receipt_path
+                )
+                verification = VerificationSnapshot(
+                    status=str(verification_value.get("status") or ""),
+                    head=str(verification_value.get("head_sha") or ""),
+                    receipt_sha256=verification_sha256 or "",
+                )
+
+        cycle = attempt_identity.get("cycle")
+        cycle_number = cycle if type(cycle) is int else -1
+        finalization_policy = (
+            self.meta.get("finalization_policy")
+            if isinstance(getattr(self, "meta", None), dict)
+            else None
+        )
+        configured_max = (
+            finalization_policy.get("max_cycles")
+            if isinstance(finalization_policy, dict)
+            else None
+        )
+        max_cycles = (
+            configured_max
+            if type(configured_max) is int and configured_max > 0
+            else max(cycle_number + 1, 1)
+        )
+        recovery_class = (
+            "accepted-callback"
+            if accepted_callbacks
+            and gate_state.get("status") in {"reviewing", "verifying"}
+            else "review-drive"
+        )
+        return RecoverySnapshot(
+            recovery_class=recovery_class,
+            root=RootSnapshot(
+                owner_id=self.spec["owner_id"],
+                operation_id=self.spec["operation_id"],
+                run_id=root.run_id,
+                revision=root.revision,
+                state=root.state,
+                resume_state=root.resume_state,
+                pending_effect=root.pending_effect,
+            ),
+            gate=GateSnapshot(
+                status=str(gate_state.get("status") or ""),
+                sha256=hashlib.sha256(gate_raw).hexdigest(),
+                context_head=str(context.get("head_sha") or ""),
+            ),
+            attempt=AttemptSnapshot(
+                attempt_id=str(attempt_identity.get("attempt_id") or ""),
+                status=str(raw_attempt.get("status") or ""),
+                exact_head=str(attempt_identity.get("exact_head_sha") or ""),
+                cycle=cycle_number,
+                max_cycles=max_cycles,
+            ),
+            current_head=current_head,
+            attention_status=latch_status,
+            resolution=resolution,
+            verification=verification,
+            lanes=tuple(lanes),
+            accepted_callbacks=tuple(accepted_callbacks),
+            consumed_callback_ids=frozenset(consumed_callback_ids),
+            effect_requires_replay=effect_requires_replay,
+        )
+
+    def review_continuation_decision(self) -> RecoveryDecision:
+        try:
+            return classify_review_continuation(
+                self._review_continuation_snapshot()
+            )
         except (
             OSError,
             RuntimeWorkerError,
@@ -586,9 +757,73 @@ class RuntimeWorkerReviewBridgeMixin:
             ValueError,
             TypeError,
             KeyError,
+            AttributeError,
             json.JSONDecodeError,
         ):
+            return RecoveryDecision(
+                RecoveryDisposition.REFUSE,
+                RecoveryReason.MALFORMED_EVIDENCE,
+            )
+
+    def _durable_review_in_progress(self) -> bool:
+        """Delegate the pre-latch durable predicate to the shared policy."""
+
+        return (
+            self.review_continuation_decision().disposition
+            is RecoveryDisposition.REVIEW_IN_PROGRESS
+        )
+
+    def execute_review_continuation(
+        self, decision: RecoveryDecision
+    ) -> bool:
+        if (
+            decision.receipt is None
+            or decision.disposition
+            not in {
+                RecoveryDisposition.REVIEW_DRIVE_REARM,
+                RecoveryDisposition.ACCEPTED_CALLBACK_INGEST,
+            }
+        ):
             return False
+        return self.drive_review()
+
+    def review_continuation_recovery_completed(
+        self, identity: RecoveryIdentity
+    ) -> bool:
+        gate_state = self.review_gate_state()
+        raw_attempt = gate_state.get("attempt")
+        attempt_identity = (
+            raw_attempt.get("identity")
+            if isinstance(raw_attempt, dict)
+            else None
+        )
+        if identity.recovery_class == "accepted-callback":
+            lanes = gate_state.get("lanes")
+            results = gate_state.get("round_results")
+            if not isinstance(lanes, list) or not isinstance(results, dict):
+                return False
+            axes = {
+                str(lane.get("axis") or "")
+                for lane in lanes
+                if isinstance(lane, dict)
+                and lane.get("lane_id") == identity.lane_id
+            }
+            return len(axes) == 1 and next(iter(axes)) in results
+        if not isinstance(attempt_identity, dict):
+            return False
+        head_result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=self.spec["cwd"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        return (
+            head_result.returncode == 0
+            and attempt_identity.get("attempt_id") != identity.attempt_id
+            and attempt_identity.get("exact_head_sha")
+            == head_result.stdout.strip()
+        )
 
     def _review_drive_started_marker(self, input_sha256: str) -> None:
         _atomic_json(

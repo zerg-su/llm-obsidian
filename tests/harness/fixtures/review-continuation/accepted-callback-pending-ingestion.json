@@ -22,6 +22,7 @@
   "consumed_callback_ids": [],
   "current_head": "063fe2ef949f1807aa4fa8af163764dbba26e2b0",
   "gate": {
+    "context_head": "063fe2ef949f1807aa4fa8af163764dbba26e2b0",
     "sha256": "71b2e0a8283dc9bfea61b1144a868c1dfb92cff91e6a5381c6309d1d7d45180b",
     "status": "reviewing"
   },
@@ -30,6 +31,7 @@
       "axis": "openai-holistic",
       "lane_id": "1fb789a81949bc818f15073206607ca5",
       "operation_id": "c34845ba-fe50-54db-a80e-75ab454b558c-holistic-23af2b2d",
+      "ready_identity_exact": true,
       "round_operation_id": "c34845ba-fe50-54db-a80e-75ab454b558c-holistic-23af2b2d-round-799f0261",
       "round_run_id": "156b8dfed33160c5d4efec089320d4ae",
       "round_state": "finalizing",

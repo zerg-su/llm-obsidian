@@ -316,6 +316,29 @@ with tempfile.TemporaryDirectory(prefix="finalization-ledger-mechanism.") as raw
         "the released cycle number is reserved again by the retry",
         retry.allowed and retry.created and retry.cycle_number == 1,
     )
+    before_retry_replay = ledger.path.read_bytes()
+    retry_replay = ledger.reserve_from_policy_matrix(
+        attempt_id=retry_id,
+        exact_head="a" * 40,
+        task_id=attempt(1031),
+        worktree="/tmp/finalization-task-31",
+        provider_policies={
+            cycle: {
+                "routes": ["finalization-primary"],
+                "reason": "primary-only",
+            }
+            for cycle in range(1, ledger.max_cycles + 1)
+        },
+        predecessor_attempt_id=attempt(30),
+    )
+    check(
+        "autonomous continuation repeat ticks do not duplicate a product cycle",
+        retry_replay.reason == "already-reserved"
+        and not retry_replay.allowed
+        and not retry_replay.created
+        and retry_replay.cycle_number == 1
+        and ledger.path.read_bytes() == before_retry_replay,
+    )
     blocked = ledger.record_terminal(
         attempt_id=retry_id, terminal_result="blocked"
     )

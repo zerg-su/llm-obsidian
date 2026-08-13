@@ -81,6 +81,7 @@ class AttemptSnapshot:
 class GateSnapshot:
     status: str
     sha256: str
+    context_head: str
 
 
 @dataclass(frozen=True)
@@ -107,6 +108,7 @@ class ReviewLane:
     round_operation_id: str
     round_run_id: str
     round_state: str
+    launch_in_progress: bool = False
     ready_identity_exact: bool = False
     process_alive: bool = False
 
@@ -139,6 +141,26 @@ class RecoveryIdentity:
     round_run_id: str = ""
     callback_id: str = ""
 
+    @classmethod
+    def from_mapping(cls, raw: Mapping[str, object]) -> "RecoveryIdentity":
+        try:
+            return cls(
+                recovery_class=str(raw["recovery_class"]),
+                owner_id=str(raw["owner_id"]),
+                root_operation_id=str(raw["root_operation_id"]),
+                root_run_id=str(raw["root_run_id"]),
+                root_revision=_integer(raw["root_revision"]),
+                attempt_id=str(raw["attempt_id"]),
+                gate_sha256=str(raw["gate_sha256"]),
+                authority_sha256=str(raw["authority_sha256"]),
+                lane_id=str(raw.get("lane_id") or ""),
+                round_operation_id=str(raw.get("round_operation_id") or ""),
+                round_run_id=str(raw.get("round_run_id") or ""),
+                callback_id=str(raw.get("callback_id") or ""),
+            )
+        except KeyError as exc:
+            raise ValueError("recovery identity is incomplete") from exc
+
     @property
     def sha256(self) -> str:
         encoded = json.dumps(
@@ -152,6 +174,43 @@ class RecoveryReceipt:
     identity: RecoveryIdentity
     identity_sha256: str
     status: str = "prepared"
+
+    @classmethod
+    def from_mapping(cls, raw: Mapping[str, object]) -> "RecoveryReceipt":
+        identity_raw = raw.get("identity")
+        if not isinstance(identity_raw, Mapping):
+            raise ValueError("recovery receipt identity is unavailable")
+        identity = RecoveryIdentity.from_mapping(identity_raw)
+        receipt = cls(
+            identity=identity,
+            identity_sha256=str(raw.get("identity_sha256") or ""),
+            status=str(raw.get("status") or ""),
+        )
+        if (
+            receipt.status not in {"prepared", "finalized"}
+            or receipt.identity_sha256 != identity.sha256
+        ):
+            raise ValueError("recovery receipt identity changed")
+        return receipt
+
+    def payload(
+        self,
+        *,
+        status: str | None = None,
+        outcome: str = "",
+        reason: str = "",
+    ) -> dict[str, object]:
+        value: dict[str, object] = {
+            "schema_version": 1,
+            "status": status or self.status,
+            "identity": asdict(self.identity),
+            "identity_sha256": self.identity_sha256,
+        }
+        if outcome:
+            value["outcome"] = outcome
+        if reason:
+            value["reason"] = reason
+        return value
 
 
 @dataclass(frozen=True)
@@ -200,6 +259,7 @@ class RecoverySnapshot:
             gate=GateSnapshot(
                 status=str(gate.get("status") or ""),
                 sha256=str(gate.get("sha256") or ""),
+                context_head=str(gate.get("context_head") or ""),
             ),
             attempt=AttemptSnapshot(
                 attempt_id=str(attempt.get("attempt_id") or ""),
@@ -274,6 +334,7 @@ def _lane(raw: Mapping[str, object]) -> ReviewLane:
         round_operation_id=str(raw.get("round_operation_id") or ""),
         round_run_id=str(raw.get("round_run_id") or ""),
         round_state=str(raw.get("round_state") or ""),
+        launch_in_progress=raw.get("launch_in_progress") is True,
         ready_identity_exact=raw.get("ready_identity_exact") is True,
         process_alive=raw.get("process_alive") is True,
     )
@@ -313,6 +374,7 @@ def _common_evidence_valid(snapshot: RecoverySnapshot) -> bool:
         and snapshot.attempt.max_cycles > 0
         and bool(_HEAD_RE.fullmatch(snapshot.current_head))
         and bool(_HEAD_RE.fullmatch(snapshot.attempt.exact_head))
+        and bool(_HEAD_RE.fullmatch(snapshot.gate.context_head))
         and bool(_SHA256_RE.fullmatch(snapshot.gate.sha256))
     )
 
@@ -323,6 +385,7 @@ def _live_review(snapshot: RecoverySnapshot) -> bool:
         and snapshot.gate.status in {"reviewing", "verifying"}
         and snapshot.attempt.status == "awaiting-callback"
         and snapshot.attempt.exact_head == snapshot.current_head
+        and snapshot.gate.context_head == snapshot.current_head
         and not snapshot.accepted_callbacks
         and bool(snapshot.lanes)
         and all(
@@ -330,12 +393,21 @@ def _live_review(snapshot: RecoverySnapshot) -> bool:
             and lane.operation_id
             and lane.run_id
             and lane.lane_id
-            and lane.round_operation_id
-            and lane.round_run_id
-            and lane.state in {"awaiting-callback", "finalizing"}
-            and lane.round_state in _LIVE_ROUND_STATES
-            and lane.ready_identity_exact
-            and lane.process_alive
+            and (
+                (
+                    lane.launch_in_progress
+                    and lane.state in {"preflight", "starting", "running"}
+                    and lane.ready_identity_exact
+                )
+                or (
+                    lane.round_operation_id
+                    and lane.round_run_id
+                    and lane.state in {"awaiting-callback", "finalizing"}
+                    and lane.round_state in _LIVE_ROUND_STATES
+                    and lane.ready_identity_exact
+                    and lane.process_alive
+                )
+            )
             for lane in snapshot.lanes
         )
     )
@@ -386,6 +458,7 @@ def _classify_review_drive(snapshot: RecoverySnapshot) -> RecoveryDecision:
         or not _HEAD_RE.fullmatch(resolution.current_head)
         or not _SHA256_RE.fullmatch(resolution.sha256)
         or snapshot.attempt.exact_head != resolution.reviewed_head
+        or snapshot.gate.context_head != resolution.reviewed_head
         or snapshot.current_head != resolution.current_head
     ):
         return _refuse(RecoveryReason.RESOLUTION_IDENTITY_MISMATCH)
@@ -421,6 +494,7 @@ def _classify_accepted_callback(
         snapshot.gate.status not in {"reviewing", "verifying"}
         or snapshot.attempt.status != "awaiting-callback"
         or snapshot.attempt.exact_head != snapshot.current_head
+        or snapshot.gate.context_head != snapshot.current_head
     ):
         return _refuse(RecoveryReason.GATE_STATE_MISMATCH)
     if not snapshot.accepted_callbacks:
@@ -451,6 +525,7 @@ def _classify_accepted_callback(
     if (
         lane.state not in {"awaiting-callback", "finalizing"}
         or lane.round_state not in _LIVE_ROUND_STATES
+        or not lane.ready_identity_exact
     ):
         return _refuse(RecoveryReason.CALLBACK_IDENTITY_MISMATCH)
     identity = RecoveryIdentity(
