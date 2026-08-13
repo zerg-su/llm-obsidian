@@ -662,9 +662,9 @@ def build_corridor_world(
     (vault / "scripts").mkdir(exist_ok=True)
     (vault / "config").mkdir(exist_ok=True)
     for name in ("verification-profiles.toml", "model-routing.toml"):
-        shutil.copy2(ROOT / "config" / name, vault / "config" / name)
+        shutil.copyfile(ROOT / "config" / name, vault / "config" / name)
     (vault / "skills" / "review").mkdir(parents=True, exist_ok=True)
-    shutil.copy2(
+    shutil.copyfile(
         ROOT / "skills" / "review" / "SKILL.md",
         vault / "skills" / "review" / "SKILL.md",
     )
