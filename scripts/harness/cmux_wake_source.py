@@ -241,6 +241,16 @@ class CmuxWakePolicy:
     def _observe_event(
         self, frame: Mapping[str, object], observed_at: float
     ) -> WakeObservation | None:
+        if any(
+            _uuid_or_none(frame.get(field)) is False
+            for field in ("pane_id", "window_id")
+        ):
+            return None
+        if (
+            "payload_truncated" in frame
+            and type(frame["payload_truncated"]) is not bool
+        ):
+            return None
         valid = self._valid_event(frame)
         if valid is None:
             return WakeObservation("degraded", observed_at=observed_at)

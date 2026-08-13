@@ -32,6 +32,8 @@ SURFACE = "22222222-2222-4222-8222-222222222222"
 OTHER_SURFACE = "33333333-3333-4333-8333-333333333333"
 BOOT = "44444444-4444-4444-8444-444444444444"
 SUBSCRIPTION = "55555555-5555-4555-8555-555555555555"
+PANE = "66666666-6666-4666-8666-666666666666"
+WINDOW = "77777777-7777-4777-8777-777777777777"
 SESSION = "session-exact"
 
 
@@ -223,6 +225,53 @@ with tempfile.TemporaryDirectory() as raw_root:
     check(
         "contradictory SessionStart never creates a binding",
         unbound.observe(event("agent.hook.Stop", 3), 1.3) is None,
+    )
+
+
+malformed_optional_fields = (
+    ("pane_id", "not-a-uuid"),
+    ("pane_id", 7),
+    ("pane_id", {}),
+    ("window_id", "not-a-uuid"),
+    ("window_id", 7),
+    ("window_id", {}),
+    ("payload_truncated", "false"),
+    ("payload_truncated", 0),
+    ("payload_truncated", {}),
+)
+for malformed_field, malformed_value in malformed_optional_fields:
+    with tempfile.TemporaryDirectory() as raw_root:
+        malformed = CmuxWakePolicy(binding(Path(raw_root)))
+        malformed.observe(ack(), 1.0)
+        malformed_start = event("agent.hook.SessionStart", 1)
+        malformed_start[malformed_field] = malformed_value
+        check(
+            f"malformed optional {malformed_field}={malformed_value!r} is no-wake",
+            malformed.observe(malformed_start, 1.1) is None,
+        )
+        check(
+            f"malformed optional {malformed_field}={malformed_value!r} cannot bind a session",
+            malformed.observe(event("agent.hook.Stop", 2), 1.2) is None,
+        )
+
+
+with tempfile.TemporaryDirectory() as raw_root:
+    valid_optional = CmuxWakePolicy(binding(Path(raw_root)))
+    valid_optional.observe(ack(), 1.0)
+    valid_start = event("agent.hook.SessionStart", 1)
+    valid_start.update(
+        {"pane_id": PANE, "window_id": WINDOW, "payload_truncated": False}
+    )
+    check(
+        "UUID pane/window and false payload_truncated preserve the event payload",
+        valid_optional.observe(valid_start, 1.1)
+        == WakeObservation("cmux-event", "agent.hook.SessionStart", 1, 1.1),
+    )
+    truncated = event("agent.hook.Stop", 2)
+    truncated["payload_truncated"] = True
+    check(
+        "true payload_truncated remains a valid content-free no-wake frame",
+        valid_optional.observe(truncated, 1.2) is None,
     )
 
 
