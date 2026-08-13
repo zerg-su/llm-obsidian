@@ -142,8 +142,8 @@ seconds, marks ten-minute idle, permits at most one 15-minute nudge and one
 identity-bound 20-minute restart, then creates durable attention. Disabling
 `features.custom_pipeline_authoring` blocks new custom definitions without
 invalidating frozen active runs or built-ins.
-After the semantic pipeline and verification finish, the task writes
-`.task-summary.json` and remains available. The harness then drives
+After verification, the task writes `.task-summary.json` and follows the
+rendered idle contract. The harness drives
 `task-review-runner.py` idempotently through callback consumption, executor
 resolution, same-session verification, and terminal authorization. Material
 findings arrive as a typed `.task-review.json` packet plus one exact-surface
