@@ -228,8 +228,11 @@ bounded partial-frame read repair. A later holistic review found that a
 task-summary parent cannot receive child-session progress events after its own
 provider exits; the narrow one-second cross-session reconcile deadline adds 35
 lines in the existing worker owners. The final candidate is therefore 287
-files / 107,218 lines, with both ceilings pinned exactly and no speculative
-headroom.
+files / 107,218 lines at that boundary. The final timing/oracle review repair
+adds 21 production lines: verification receipts supply the start that
+non-interactive verify children cannot publish through liveness, and the
+worker loop rejects a missing wake source. The final candidate is 287 files /
+107,239 lines, with both ceilings pinned exactly and no speculative headroom.
 """
 
 from __future__ import annotations
@@ -241,7 +244,7 @@ from pathlib import Path
 SCRIPT_FILE_CEILING = 287
 
 #: Maximum total lines across those files for the 2.6.7 RC6.5 candidate.
-SCRIPT_LINE_CEILING = 107_218
+SCRIPT_LINE_CEILING = 107_239
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

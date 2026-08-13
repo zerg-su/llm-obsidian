@@ -37,6 +37,7 @@ from .dashboard_receipts import (
     root_task_result,
     root_interval_start,
     root_timing,
+    verification_receipt_interval,
     verification_receipt_timing,
     verification_receipt_visits,
 )
@@ -459,7 +460,6 @@ def _root_step_interval(
     root_interval: object,
 ) -> object:
     """Freeze the first root-owned model step at exact later-step liveness."""
-
     steps = compiled.definition.steps
     if (
         not isinstance(root_interval, TimingView)
@@ -491,9 +491,27 @@ def _root_step_interval(
         ):
             return UNKNOWN_TIMING
         start = liveness_interval_start(store, child_record, observed_at)
+        if start is None and child_record.spec.kind == "pipeline-verify":
+            liveness_path = store.root / "owners" / child_record.spec.owner_id
+            liveness_path /= f"runtime/{child.operation_id}/liveness/state.json"
+            if liveness_path.exists():
+                return UNKNOWN_TIMING
+            runtime = _runtime_root(store, record)
+            interval = verification_receipt_interval(
+                store, record, runtime, observed_at,
+                operation_id=child.operation_id,
+            )
+            if interval is None:
+                receipt = runtime / f"pipeline-verification/{child.operation_id}/receipt.json"
+                if receipt.exists():
+                    return UNKNOWN_TIMING
+                continue
+            start = interval[0]
         if start is None or start < root_start:
             return UNKNOWN_TIMING
         starts.append(start)
+    if not starts:
+        return root_interval
     return TimingView("duration", int(min(starts) - root_start))
 
 

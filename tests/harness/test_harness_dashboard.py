@@ -3524,6 +3524,100 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-time.") as raw:
         "the frozen TDD token renders as duration with complete semantics",
         "complete" in timed_tdd_line and "duration 2m 30s" in timed_tdd_line,
     )
+
+    receipt_root = "dashboard-receipt-timed-root"
+    _create(
+        store,
+        receipt_root,
+        "dispatch",
+        lane_id="receipt-timed-root-lane",
+        contract_sha256=compiled.definition_sha256,
+        owner=receipt_root,
+    )
+    _advance(
+        store,
+        receipt_root,
+        "preflight",
+        "starting",
+        "running",
+        owner=receipt_root,
+    )
+    _liveness(
+        store,
+        receipt_root,
+        receipt_root,
+        started_at=1_000.0,
+        last_progress_at=1_100.0,
+    )
+    receipt_runtime = (
+        store_root / "owners" / receipt_root / "runtime" / receipt_root
+    )
+    receipt_child = _verification_receipt(
+        store,
+        receipt_root,
+        receipt_runtime,
+        compiled.definition_sha256,
+        owner=receipt_root,
+        started_at="1150",
+        finished_at="1200",
+    )
+    _advance(
+        store,
+        receipt_child,
+        "preflight",
+        "starting",
+        "running",
+        "finalizing",
+        "exiting",
+        "complete",
+        owner=receipt_root,
+    )
+    receipt_timed = project_root(
+        store_root, receipt_root, observed_at=1_300.0
+    )
+    receipt_tdd = next(
+        step
+        for step in receipt_timed.programs[0].steps
+        if step.step_id == "tdd-slices"
+    )
+    regression_check(
+        "verification receipt freezes TDD without synthetic child liveness",
+        receipt_tdd.timing == TimingView("duration", 150)
+        and not (
+            store_root
+            / "owners"
+            / receipt_root
+            / "runtime"
+            / receipt_child
+            / "liveness"
+            / "state.json"
+        ).exists(),
+    )
+    receipt_path = (
+        receipt_runtime
+        / "pipeline-verification"
+        / receipt_child
+        / "receipt.json"
+    )
+    invalid_receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    invalid_receipt["evidence"][0]["started_at"] = "1250"
+    invalid_receipt["evidence"][0]["finished_at"] = "1200"
+    receipt_path.write_text(
+        json.dumps(invalid_receipt, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    invalid_receipt_timed = project_root(
+        store_root, receipt_root, observed_at=1_300.0
+    )
+    invalid_receipt_tdd = next(
+        step
+        for step in invalid_receipt_timed.programs[0].steps
+        if step.step_id == "tdd-slices"
+    )
+    regression_check(
+        "contradictory verification receipt cannot freeze TDD",
+        invalid_receipt_tdd.timing == TimingView(),
+    )
+
     later_timed = project_root(store_root, timed_root, observed_at=1_600.0)
     later_tdd = next(
         step

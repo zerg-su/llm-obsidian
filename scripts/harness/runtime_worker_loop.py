@@ -535,12 +535,8 @@ class RuntimeWorkerLoopMixin:
     def poll_once(self) -> bool:
         """Run one production transport/observer/exit-observation iteration."""
 
-        # Small mixin-only simulators predate event transport.  Their lack of
-        # a source is an explicit test seam, not a production polling mode.
         if not hasattr(self, "wake_source"):
-            self.inspect_transport()
-            self.tick_observers()
-            return self.observe_provider_exit()
+            raise RuntimeWorkerError("runtime worker wake source is unavailable")
 
         now = self.monotonic_clock()
         self.refresh_cross_session_reconcile(now)

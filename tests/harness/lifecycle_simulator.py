@@ -504,6 +504,19 @@ class DeterministicCallbackSource:
         return self.events.pop(0) if self.events else None
 
 
+class EventlessWakeSource:
+    """Advance only the simulator clock when the shipped loop waits."""
+
+    def __init__(self, world: "LifecycleWorld") -> None:
+        self.world = world
+
+    def wait(self, timeout: float) -> None:
+        self.world.clock.sleep(timeout)
+
+    def retry(self) -> bool:
+        return True
+
+
 class LifecycleWorker(RuntimeWorkerControlMixin, RuntimeWorkerLoopMixin):
     """Minimal volatile shell around the production poll/exit decision seam."""
 
@@ -517,6 +530,7 @@ class LifecycleWorker(RuntimeWorkerControlMixin, RuntimeWorkerLoopMixin):
             "run_id": RUN_ID,
         }
         self.spec_path = world.runtime_root / "runtime.json"
+        self.spec_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         self.callback_handled = bool(world.record().accepted_callback_id)
         self.provider_exited = world.process.process_status_value == "dead"
         self.exit_code = 0
@@ -529,6 +543,14 @@ class LifecycleWorker(RuntimeWorkerControlMixin, RuntimeWorkerLoopMixin):
         self.wall_clock = world.clock
         self.monotonic_clock = world.clock
         self.sleeper = world.clock.sleep
+        self.wake_source = EventlessWakeSource(world)
+        self.next_full_reconcile = 0.0
+        self.next_transport_confirmation = float("inf")
+        self.next_cross_session_reconcile = float("inf")
+        self.next_provider_exit_probe = 0.0
+        self.next_wake_retry = float("inf")
+        self.wake_retry_attempts = 0
+        self.wake_source_disabled = False
         self.liveness_policy = LivenessPolicy.default()
         self.next_liveness_probe = world.clock()
         self.next_prompt_probe = float("inf")

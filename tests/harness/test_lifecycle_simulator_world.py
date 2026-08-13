@@ -29,6 +29,24 @@ class PollProbe(RuntimeWorkerLoopMixin):
     def __init__(self) -> None:
         self.events: list[str] = []
         self.provider_exited = False
+        self.wake_source = SimpleNamespace(wait=lambda _timeout: None)
+        self.monotonic_clock = lambda: 0.0
+        self.next_full_reconcile = 0.0
+        self.next_transport_confirmation = float("inf")
+        self.next_cross_session_reconcile = float("inf")
+        self.next_provider_exit_probe = 0.0
+        self.next_wake_retry = float("inf")
+        self.wake_retry_attempts = 0
+        self.wake_source_disabled = False
+        self.poll_seconds = 0.1
+
+    def transport_snapshot(self) -> tuple[str, ...]:
+        return tuple(self.events)
+
+    def record_transport_wake(
+        self, _observation: object, _before: object, _after: object
+    ) -> None:
+        self.events.append("wake")
 
     def inspect_transport(self) -> None:
         self.events.append("inspect")
@@ -65,7 +83,7 @@ probe = PollProbe()
 check(
     "production poll_once owns inspect, observer, and exit observation order",
     probe.poll_once() is True
-    and probe.events == ["inspect", "tick", "observe-exit"],
+    and probe.events == ["inspect", "wake", "tick", "observe-exit"],
     probe.events,
 )
 check(

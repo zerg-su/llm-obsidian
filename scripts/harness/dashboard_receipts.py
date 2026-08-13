@@ -670,27 +670,22 @@ def verification_receipt_visits(
     return visits, issue
 
 
-def verification_receipt_timing(
-    store: OperationStore,
-    record: OperationRecord,
-    runtime: Path,
-    observed_at: float,
-    *,
-    exact_head_sha: str = "",
-) -> TimingView:
-    """Freeze the accepted verification interval selected for display."""
-
+def verification_receipt_interval(
+    store: OperationStore, record: OperationRecord, runtime: Path,
+    observed_at: float, *, exact_head_sha: str = "", operation_id: str = "",
+) -> tuple[float, float] | None:
+    """Return the accepted verification interval for one exact boundary."""
     observed = _epoch(observed_at)
     root = runtime / "pipeline-verification"
     if observed is None or not root.is_dir():
-        return UNKNOWN_TIMING
+        return None
     intervals: list[tuple[float, float]] = []
     candidates: list[tuple[int, str, Path, dict[str, Any]]] = []
     for path in sorted(root.glob("*/receipt.json")):
+        if operation_id and path.parent.name != operation_id:
+            continue
         raw = _read_object(path, boundary=runtime)
-        if raw is None or verification_receipt_status(
-            store, record, runtime, path
-        ) != "complete":
+        if raw is None or verification_receipt_status(store, record, runtime, path) != "complete":
             continue
         try:
             attempt = _verification_attempt(raw, record)
@@ -720,12 +715,24 @@ def verification_receipt_timing(
             receipt_intervals.append((start, end))
         intervals.extend(receipt_intervals)
     if not intervals:
-        return UNKNOWN_TIMING
-    return _timing(
-        "duration",
-        min(item[0] for item in intervals),
-        max(item[1] for item in intervals),
+        return None
+    return min(start for start, _end in intervals), max(end for _start, end in intervals)
+
+
+def verification_receipt_timing(
+    store: OperationStore,
+    record: OperationRecord,
+    runtime: Path,
+    observed_at: float,
+    *,
+    exact_head_sha: str = "",
+) -> TimingView:
+    """Freeze the accepted verification interval selected for display."""
+
+    interval = verification_receipt_interval(
+        store, record, runtime, observed_at, exact_head_sha=exact_head_sha
     )
+    return UNKNOWN_TIMING if interval is None else _timing("duration", *interval)
 
 
 def _review_material_count(

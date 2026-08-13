@@ -340,6 +340,19 @@ check(
     (_cross_session.inspections, _cross_session.receipts),
 )
 
+_missing_source = EventFirstLoopProbe()
+del _missing_source.wake_source
+try:
+    _missing_source.poll_once()
+except RuntimeWorkerError:
+    _missing_source_rejected = True
+else:
+    _missing_source_rejected = False
+check(
+    "production polling requires one explicit wake source",
+    _missing_source_rejected,
+)
+
 _control_wakes = EventFirstLoopProbe()
 _control_wakes.wake_source = EventFirstSource(
     _control_wakes.clock,

@@ -36,12 +36,18 @@ state and callback artifacts remain the only lifecycle authority.
   those events cannot route through the parent's session-bound subscription.
   The ordinary eventless idle fallback remains 30 seconds.
 - The root-owned `TDD slices` dashboard step freezes as a completed duration
-  when exact later-step liveness begins, while invalid or contradictory timing
-  remains unavailable. Dashboard layout and non-timing labels are unchanged.
+  when exact later-step liveness begins. In-process verification children use
+  their accepted durable receipt start because they do not own interactive
+  liveness state; invalid or contradictory timing remains unavailable.
+  Dashboard layout and non-timing labels are unchanged.
+- Runtime polling requires an explicit wake source. The lifecycle simulator,
+  crash matrix, and production-path oracle now inject an eventless source and
+  execute the same event-first branch that ships instead of a legacy test-only
+  polling branch.
 - The live scripts ratchet is pinned to the measured final RC6.5 candidate at
-  287 Python files / 107,218 lines: one new wake adapter module, its bounded
-  partial-frame read repair and cross-session reconcile deadline, and no
-  blanket headroom.
+  287 Python files / 107,239 lines: one new wake adapter module, its bounded
+  partial-frame read repair, cross-session reconcile deadline, and final
+  timing/oracle corrections, with no blanket headroom.
 
 ### Candidate boundary
 

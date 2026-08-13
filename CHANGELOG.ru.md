@@ -43,13 +43,17 @@ callback artifacts.
   одну секунду: такие events не маршрутизируются через session-bound подписку
   parent. Обычный eventless idle fallback остаётся равным 30 секундам.
 - Root-owned шаг `TDD slices` теперь фиксируется как завершённая duration при
-  начале точного later-step liveness. Некорректные или противоречивые timing
-  evidence остаются unavailable. Layout и не-временные labels dashboard не
-  изменены.
+  начале точного later-step liveness. In-process verification children
+  используют start из accepted durable receipt, потому что у них нет
+  interactive liveness state; некорректные или противоречивые timing evidence
+  остаются unavailable. Layout и не-временные labels dashboard не изменены.
+- Runtime polling требует явный wake source. Lifecycle simulator, crash matrix
+  и production-path oracle теперь получают eventless source и исполняют тот же
+  event-first branch, что и product, вместо legacy test-only polling branch.
 - Live scripts ratchet закреплён на измеренном final RC6.5 candidate: 287
-  Python files / 107 218 lines, один новый модуль wake adapter, его
-  ограниченные исправление чтения partial frame и cross-session reconcile
-  deadline, без запасного headroom.
+  Python files / 107 239 lines, один новый модуль wake adapter, его
+  ограниченные исправления чтения partial frame, cross-session reconcile
+  deadline и final timing/oracle, без запасного headroom.
 
 ### Граница кандидата
 
