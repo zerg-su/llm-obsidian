@@ -233,6 +233,10 @@ adds 21 production lines: verification receipts supply the start that
 non-interactive verify children cannot publish through liveness, and the
 worker loop rejects a missing wake source. The final candidate is 287 files /
 107,239 lines, with both ceilings pinned exactly and no speculative headroom.
+The RC6.5 final-review closure adds 54 net production lines for strict optional
+event-envelope validation and the display-only active structural-pivot route.
+The closure candidate is therefore 287 files / 107,293 lines, again pinned
+exactly with no speculative headroom.
 """
 
 from __future__ import annotations
@@ -244,7 +248,7 @@ from pathlib import Path
 SCRIPT_FILE_CEILING = 287
 
 #: Maximum total lines across those files for the 2.6.7 RC6.5 candidate.
-SCRIPT_LINE_CEILING = 107_239
+SCRIPT_LINE_CEILING = 107_293
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:
