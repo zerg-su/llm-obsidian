@@ -35,6 +35,10 @@
   и digest проверенного implementer summary. Изменение только summary на том
   же HEAD резервирует один обычный predecessor-bound follow-up review;
   дополнительный дрейф context остаётся fail-closed.
+- Если такой follow-up завершается до создания lane, следующая ограниченная
+  попытка переносит callback scratch только после доказательства, что он
+  однозначно принадлежит архивному approved predecessor. Zero-effect attempt
+  заменяется без повтора callback/provider и без нового product cycle.
 
 ### Изменено
 
@@ -48,7 +52,7 @@
   задачи до общего cross-runtime helper, поэтому унаследованная переменная
   чужого runtime не отклоняет точную зарегистрированную границу reap.
 - Контур active review/recovery authority закреплён на точном знаменателе
-  RC6.4: 27 файлов / 14 896 строк при нуле writable authorities и incident
+  RC6.4: 27 файлов / 14 909 строк при нуле writable authorities и incident
   literals.
 
 ### Граница кандидата

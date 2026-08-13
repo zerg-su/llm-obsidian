@@ -28,6 +28,11 @@ scheduler, provider retry, callback replay, or generic attention self-heal.
   reviewed implementer-summary digest still match. A summary-only refresh at
   the same HEAD reserves one ordinary predecessor-bound follow-up review;
   any additional context drift remains fail-closed.
+- If that follow-up fails before creating a lane, its next bounded invocation
+  may roll over callback scratch only when the existing content-addressed
+  authority proves it belongs uniquely to the archived approved predecessor.
+  The zero-effect attempt is superseded without callback or provider replay
+  and without consuming another product cycle.
 
 ### Changed
 
@@ -42,7 +47,7 @@ scheduler, provider retry, callback replay, or generic attention self-heal.
   runtime before consulting the generic cross-runtime helper, so an inherited
   foreign runtime variable cannot reject the exact registered reap boundary.
 - The active review/recovery authority contour is pinned to its exact RC6.4
-  denominator of 27 files / 14,896 lines, with zero writable authorities and
+  denominator of 27 files / 14,909 lines, with zero writable authorities and
   zero incident literals.
 
 ### Candidate boundary

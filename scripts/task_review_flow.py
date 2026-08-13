@@ -62,6 +62,7 @@ from task_review_finalization_attempt import (
     reserve_exact_head_attempt,
 )
 from task_review_resolution_bundle import (
+    _approved_summary_predecessor_state,
     _archive_prior_terminal_callbacks,
     _archive_resolution_callbacks,
     _resolution_bundle,
@@ -737,7 +738,13 @@ def _run_exact_head_review(
         )
         current_context = current_state.get("context")
         approved_summary_drift = False
-        active_summary_follow_up = False
+        active_summary_follow_up = (
+            current_attempt.identity.exact_head_sha == current_head
+            and _approved_summary_predecessor_state(
+                gate_root, current_state
+            )
+            is not None
+        )
         if (
             current_attempt.status == "terminal"
             and current_attempt.terminal is not None
@@ -758,7 +765,8 @@ def _run_exact_head_review(
                     and prior_summary_sha256 != current_summary_sha256
                 )
         if (
-            current_attempt.status != "terminal"
+            not active_summary_follow_up
+            and current_attempt.status != "terminal"
             and current_attempt.identity.cycle > 1
         ):
             previous_pointer = (
@@ -956,15 +964,20 @@ def _run_exact_head_review(
                 raise ReviewAttemptError(
                     "zero-lane review predecessor may own a provider effect"
                 )
-            if zero_lane_preflight and any(
-                path.exists() or path.is_symlink()
-                for path in (
-                    _callback_path(runtime_root, axis)
-                    for axis in request.policy.axes
+            if zero_lane_preflight:
+                approved_summary_predecessor = (
+                    _approved_summary_predecessor_state(
+                        gate_root, prior_state
+                    )
                 )
-            ):
-                raise ReviewAttemptError(
-                    "zero-lane review preflight found a callback artifact"
+                _archive_prior_terminal_callbacks(
+                    runtime_root,
+                    gate_root,
+                    prior_state,
+                    store,
+                    approved_summary_predecessor_only=(
+                        approved_summary_predecessor is not None
+                    ),
                 )
             terminal_decision = ledger.record_terminal(
                 attempt_id=prior_attempt.identity.attempt_id,
@@ -985,7 +998,7 @@ def _run_exact_head_review(
                     context_manifest=context_manifest,
                     run=None,
                 )
-            if zero_lane_preflight or summary_only_drift:
+            if summary_only_drift:
                 _archive_prior_terminal_callbacks(
                     runtime_root,
                     gate_root,

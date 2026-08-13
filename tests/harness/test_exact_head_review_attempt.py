@@ -1386,7 +1386,19 @@ with tempfile.TemporaryDirectory(prefix="exact-protocol-selector.") as raw:
         )
 
     approved_terminal = finish_current_attempt(second, "approve")
-    approved_attempt_id = gate.read()["attempt"]["identity"]["attempt_id"]
+    approved_state = gate.read()
+    approved_attempt_id = approved_state["attempt"]["identity"]["attempt_id"]
+    approved_callback_envelope = json.loads(
+        callback_path.read_text(encoding="utf-8")
+    )
+    approved_callback_archive = (
+        callback_path.parent
+        / "accepted"
+        / (
+            f"{approved_callback_envelope['payload_sha256']}"
+            ".review-callback.json"
+        )
+    )
     summary_path = product / ".task-summary.json"
     changed_summary = json.loads(summary_path.read_text(encoding="utf-8"))
     changed_summary["body"] = (
@@ -1426,6 +1438,47 @@ with tempfile.TemporaryDirectory(prefix="exact-protocol-selector.") as raw:
         runtime.started == starts_before_ambiguous_context
         and ledger_path.read_bytes() == ledger_before_ambiguous_context,
     )
+    failing_summary_runtime = FailingStartRuntime(
+        store, owner_id=task_id
+    )
+    try:
+        _run_review(
+            meta,
+            vault,
+            product,
+            task_id,
+            runtime_root,
+            runtime_manager=failing_summary_runtime,
+            apply_finalizing_recovery=forbidden_finalizing_recovery,
+        )
+    except RuntimeError as exc:
+        if str(exc) != "provider start failed":
+            raise
+    else:
+        raise AssertionError("summary follow-up start failure was hidden")
+    failed_summary_state = gate.read()
+    failed_summary_attempt_id = failed_summary_state["attempt"][
+        "identity"
+    ]["attempt_id"]
+    check(
+        "summary follow-up launch failure is zero-effect cycle 3",
+        failed_summary_state["status"] == "attention-required"
+        and failed_summary_state["lanes"] == []
+        and failed_summary_state["attempt"]["identity"]["cycle"] == 3
+        and failed_summary_state["attempt"]["terminal"]["lane_results"]
+        == []
+        and failed_summary_attempt_id
+        == predecessor_bound_attempt_id(
+            lineage_id=task_id,
+            predecessor_attempt_id=approved_attempt_id,
+            exact_head=resolved_head,
+            cycle_number=3,
+        )
+        and failing_summary_runtime.started == 1
+        and approved_callback_archive.is_file()
+        and not callback_path.exists(),
+    )
+    approved_callback_archive.replace(callback_path)
     summary_follow_up = _run_review(
         meta,
         vault,
@@ -1438,7 +1491,7 @@ with tempfile.TemporaryDirectory(prefix="exact-protocol-selector.") as raw:
     summary_follow_up_state = gate.read()
     expected_summary_attempt_id = predecessor_bound_attempt_id(
         lineage_id=task_id,
-        predecessor_attempt_id=approved_attempt_id,
+        predecessor_attempt_id=failed_summary_attempt_id,
         exact_head=resolved_head,
         cycle_number=3,
     )
@@ -1464,6 +1517,14 @@ with tempfile.TemporaryDirectory(prefix="exact-protocol-selector.") as raw:
             "implementer_summary_sha256"
         ]
         == hashlib.sha256(summary_path.read_bytes()).hexdigest()
+        and approved_callback_archive.is_file()
+        and not callback_path.exists()
+        and len(
+            json.loads(ledger_path.read_text(encoding="utf-8"))[
+                "cycles"
+            ]
+        )
+        == 3
         and runtime.started == starts_after_summary_follow_up == 3,
     )
     summary_approved = finish_current_attempt(summary_follow_up, "approve")

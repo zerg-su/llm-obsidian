@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from harness.context import ContextInput
+from harness.finalization_ledger import predecessor_bound_attempt_id
 from harness.review_attempt import (
     ReviewAttempt,
     ReviewAttemptError,
@@ -26,6 +27,7 @@ from review_resolution import (
     validate_resolution_evidence,
 )
 from review_contract import axis_finding_id
+from review_zero_effect import zero_effect_gate_shape
 from task_review_delta_packet import build_delta_packet
 from task_review_request import _callback_path
 from task_review_shared import (
@@ -102,6 +104,103 @@ def _resolution_source_state(
         ):
             return None
     return None
+
+
+def _approved_summary_predecessor_state(
+    gate_root: Path,
+    state: Mapping[str, Any],
+) -> Mapping[str, Any] | None:
+    """Return the exact approved predecessor of one summary follow-up."""
+
+    current = ReviewAttempt.from_mapping(state["attempt"])
+    if current.identity.cycle <= 1:
+        return None
+    pointer = (
+        gate_root
+        / "attempts"
+        / f"cycle-{current.identity.cycle - 1}.json"
+    )
+    if not pointer.is_file() or pointer.is_symlink():
+        return None
+    previous = _read_json(pointer, "approved summary predecessor")
+    approved = ReviewAttempt.from_mapping(previous.get("attempt"))
+    previous_context = previous.get("context")
+    current_context = state.get("context")
+    boundary_mismatch = (
+        approved.status != "terminal"
+        or approved.terminal is None
+        or approved.terminal.result
+        != ReviewAttemptTerminalResult.APPROVED
+        or approved.identity.cycle != current.identity.cycle - 1
+        or approved.identity.finalization_lineage_id
+        != current.identity.finalization_lineage_id
+        or approved.identity.exact_head_sha
+        != current.identity.exact_head_sha
+        or approved.identity.plan_sha256 != current.identity.plan_sha256
+        or approved.identity.outcome_sha256
+        != current.identity.outcome_sha256
+        or approved.identity.policy != current.identity.policy
+        or not isinstance(previous_context, Mapping)
+        or not isinstance(current_context, Mapping)
+        or previous_context.get("implementer_summary_sha256")
+        == current_context.get("implementer_summary_sha256")
+    )
+    if boundary_mismatch:
+        return None
+    direct_attempt_id = predecessor_bound_attempt_id(
+        lineage_id=current.identity.finalization_lineage_id,
+        predecessor_attempt_id=approved.identity.attempt_id,
+        exact_head=current.identity.exact_head_sha,
+        cycle_number=current.identity.cycle,
+    )
+    if current.identity.attempt_id == direct_attempt_id:
+        return previous
+
+    retry_matches = 0
+    attempts_root = gate_root / "attempts"
+    for retry_pointer in sorted(attempts_root.glob("attempt-*.json")):
+        if not retry_pointer.is_file() or retry_pointer.is_symlink():
+            raise ReviewAttemptError(
+                "summary follow-up retry archive path is invalid"
+            )
+        retry_state = _read_json(
+            retry_pointer, "summary follow-up retry archive"
+        )
+        retry = ReviewAttempt.from_mapping(retry_state.get("attempt"))
+        if retry_pointer.name != (
+            f"attempt-{retry.identity.attempt_id}.json"
+        ):
+            raise ReviewAttemptError(
+                "summary follow-up retry archive identity drifted"
+            )
+        if (
+            retry.identity.attempt_id != direct_attempt_id
+            or retry.identity.cycle != current.identity.cycle
+            or retry.identity.finalization_lineage_id
+            != current.identity.finalization_lineage_id
+            or retry.identity.exact_head_sha
+            != current.identity.exact_head_sha
+            or retry.identity.plan_sha256 != current.identity.plan_sha256
+            or retry.identity.outcome_sha256
+            != current.identity.outcome_sha256
+            or retry.identity.policy != current.identity.policy
+            or retry_state.get("context") != current_context
+            or not zero_effect_gate_shape(retry_state)
+            or current.identity.attempt_id
+            != predecessor_bound_attempt_id(
+                lineage_id=current.identity.finalization_lineage_id,
+                predecessor_attempt_id=retry.identity.attempt_id,
+                exact_head=current.identity.exact_head_sha,
+                cycle_number=current.identity.cycle,
+            )
+        ):
+            continue
+        retry_matches += 1
+    if retry_matches > 1:
+        raise ReviewAttemptError(
+            "summary follow-up retry predecessor is ambiguous"
+        )
+    return previous if retry_matches == 1 else None
 
 
 def _archive_resolution_callbacks(
@@ -187,6 +286,7 @@ def _archive_prior_terminal_callbacks(
     store: OperationStore,
     *,
     current_attempt_only: bool = False,
+    approved_summary_predecessor_only: bool = False,
 ) -> None:
     """Free callbacks proved accepted by an earlier terminal attempt."""
 
@@ -201,16 +301,34 @@ def _archive_prior_terminal_callbacks(
     if any(path.is_symlink() for path in callbacks.values()):
         raise ReviewAttemptError("prior review callback path is invalid")
 
-    archives: list[ReviewAttempt] = (
-        [current]
-        if current_attempt_only
+    approved_summary_predecessor = (
+        _approved_summary_predecessor_state(gate_root, state)
+        if approved_summary_predecessor_only
+        else None
+    )
+    if (
+        approved_summary_predecessor_only
+        and approved_summary_predecessor is None
+    ):
+        raise ReviewAttemptError(
+            "approved summary callback predecessor is unavailable"
+        )
+    archives: list[ReviewAttempt] = []
+    if approved_summary_predecessor is not None:
+        archives.append(
+            ReviewAttempt.from_mapping(
+                approved_summary_predecessor.get("attempt")
+            )
+        )
+    elif (
+        current_attempt_only
         and current.terminal is not None
         and bool(current.terminal.lane_results)
-        else []
-    )
+    ):
+        archives.append(current)
     for cycle in (
         ()
-        if current_attempt_only
+        if current_attempt_only or approved_summary_predecessor_only
         else range(current.identity.cycle - 1, 0, -1)
     ):
         pointer = gate_root / "attempts" / f"cycle-{cycle}.json"

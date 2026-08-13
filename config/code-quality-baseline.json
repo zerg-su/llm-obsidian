@@ -22,9 +22,9 @@
       "evidence": "exact same-HEAD implementer-summary follow-up admission and fail-closed context-drift coverage in tests/harness/test_exact_head_review_attempt.py"
     },
     "file-lines:scripts/task_review_flow.py": {
-      "max_value": 1176,
+      "max_value": 1189,
       "owner": "v2.6.7 RC6.4 reviewed-summary identity boundary",
-      "evidence": "manifest-proven summary-only drift, predecessor-bound reservation, active replay, and unchanged-summary idempotency coverage in tests/harness/test_exact_head_review_attempt.py"
+      "evidence": "manifest-proven summary-only drift, predecessor-bound reservation, accepted predecessor-callback rollover after a zero-effect launch failure, active replay, and unchanged-summary idempotency coverage in tests/harness/test_exact_head_review_attempt.py"
     },
     "function-branches:scripts/harness/workflows/review_gate_attempt.py:recover_late_started_attempt": {
       "max_value": 80,
@@ -47,9 +47,9 @@
       "evidence": "registered gate admission preserves plan amendment, mechanism retry, ceiling, and summary-only follow-up boundaries"
     },
     "function-lines:scripts/task_review_flow.py:_run_exact_head_review": {
-      "max_value": 435,
+      "max_value": 447,
       "owner": "v2.6.7 RC6.4 reviewed-summary identity boundary",
-      "evidence": "canonical flow preserves resolution inputs and deterministic attempt identity across one active summary follow-up replay"
+      "evidence": "canonical flow preserves resolution inputs and deterministic attempt identity across one active summary follow-up replay and one zero-effect predecessor rearm"
     }
   },
   "rc1_active_authority": {
@@ -63,10 +63,10 @@
       "operation-uuid": 27,
       "operator-local-path": 2
     },
-    "final_max_production_loc": 14896,
+    "final_max_production_loc": 14909,
     "final_production_file_count": 27,
     "final_max_writable_authorities": 0,
     "final_max_incident_literals": 0,
-    "evidence": "docs/acceptance/v2.6.6-rc1-active-authority-baseline.md plus the separately owned exact 27-file RC5.5 review/recovery authority manifest, including atomic immutable-plan publication, amendment-safe finalization lineage, callback drain, crash replay, acceptance-bound one-time fresh artifact reconciliation, explicit current-review dashboard binding, typed reap-close owners, the crash-resumable structural-pivot workflow owner, the directly tested pending-pivot reviewing-receipt seam, and the RC6.4 exact-HEAD plus implementer-summary approval binding with one predecessor-bound follow-up, measured at 14896 LOC with zero writable authorities and zero incident literals"
+    "evidence": "docs/acceptance/v2.6.6-rc1-active-authority-baseline.md plus the separately owned exact 27-file RC5.5 review/recovery authority manifest, including atomic immutable-plan publication, amendment-safe finalization lineage, callback drain, crash replay, acceptance-bound one-time fresh artifact reconciliation, explicit current-review dashboard binding, typed reap-close owners, the crash-resumable structural-pivot workflow owner, the directly tested pending-pivot reviewing-receipt seam, and the RC6.4 exact-HEAD plus implementer-summary approval binding with one predecessor-bound follow-up and accepted predecessor-callback rollover after a zero-effect launch failure, measured at 14909 LOC with zero writable authorities and zero incident literals"
   }
 }
