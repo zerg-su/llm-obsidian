@@ -16,6 +16,47 @@
 внутренними контрольными точками и вошли в следующие публичные релизы; тегов и
 пакетов с этими номерами не выпускалось.
 
+## [2.6.7-rc6.5] — 2026-08-13
+
+Кандидат event-first wake для runtime и исправления таймера шага dashboard.
+Единственным lifecycle authority остаются существующее durable state и
+callback artifacts.
+
+### Добавлено
+
+- Каждый interactive runtime worker может использовать одну строгую
+  identity-bound подписку `cmux events.v1` как lossy wake hint. Закрытая
+  маршрутизация охватывает точные session, notification, surface, workspace,
+  reconnect и cursor-gap observations без сохранения сырого event content.
+- Ограниченные атомарные diagnostics сохраняют последний full-reconcile wake
+  и последний progressing wake только с content-free identity, source,
+  sequence, timing и outcome.
+
+### Изменено
+
+- Full transport reconciliation стал event-first с максимальным fallback в
+  30 секунд. Существующая two-read stability confirmation и независимые
+  deadlines для prompt, checkpoint, provider exit, callback, liveness и
+  guardian control сохранены.
+- Root-owned шаг `TDD slices` теперь фиксируется как завершённая duration при
+  начале точного later-step liveness. Некорректные или противоречивые timing
+  evidence остаются unavailable. Layout и не-временные labels dashboard не
+  изменены.
+- Live scripts ratchet закреплён на измеренном RC6.5 candidate: 287 Python
+  files / 107 157 lines, один новый модуль wake adapter и без запасного
+  headroom.
+
+### Граница кандидата
+
+- Отсутствие event source, malformed frames, EOF и identity ambiguity приводят
+  к ограниченному retry или fallback polling без pipeline attention. Wake
+  hints не разрешают transitions, callbacks, provider effects, recovery,
+  cleanup или completion.
+- Post-install dogfood для встроенного и custom pipeline остаётся отдельным
+  coordinator-owned release evidence после merge и обновления plugin. Этот
+  кандидат не выполняет merge, push, tag, publish, обновление plugins или
+  promotion финального релиза.
+
 ## [2.6.7-rc6.4] — 2026-08-13
 
 Кандидат ограниченного автономного продолжения review. Он добавляет в

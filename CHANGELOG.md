@@ -10,6 +10,44 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.6.7-rc6.5] - 2026-08-13
+
+Event-first runtime wake and dashboard step-timing candidate. Existing durable
+state and callback artifacts remain the only lifecycle authority.
+
+### Added
+
+- Each interactive runtime worker may use one strict identity-bound
+  `cmux events.v1` subscription as a lossy wake hint. Closed routing covers
+  exact session, notification, surface, workspace, reconnect, and cursor-gap
+  observations without persisting raw event content.
+- Bounded atomic diagnostics retain the latest full-reconcile wake and latest
+  progressing wake with content-free identity, source, sequence, timing, and
+  outcome fields.
+
+### Changed
+
+- Full transport reconciliation is event-first with a 30-second maximum
+  fallback. Existing two-read stability confirmation and the prompt,
+  checkpoint, provider-exit, callback, liveness, and guardian-control
+  deadlines remain independently effective.
+- The root-owned `TDD slices` dashboard step freezes as a completed duration
+  when exact later-step liveness begins, while invalid or contradictory timing
+  remains unavailable. Dashboard layout and non-timing labels are unchanged.
+- The live scripts ratchet is pinned to the measured RC6.5 candidate at 287
+  Python files / 107,157 lines: one new wake adapter module and no blanket
+  headroom.
+
+### Candidate boundary
+
+- Event-source absence, malformed frames, EOF, and identity ambiguity degrade
+  to bounded retry or fallback polling without pipeline attention. Wake hints
+  never authorize transitions, callbacks, provider effects, recovery, cleanup,
+  or completion.
+- Post-install built-in and custom dogfood remain separate coordinator-owned
+  release evidence after merge and plugin update. This candidate does not
+  merge, push, tag, publish, update plugins, or promote the final release.
+
 ## [2.6.7-rc6.4] - 2026-08-13
 
 Bounded autonomous-review continuation candidate. It adds two exact

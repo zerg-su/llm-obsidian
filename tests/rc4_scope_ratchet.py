@@ -217,6 +217,14 @@ and cleanup. Existing ledger, route, runtime, callback, and dashboard owners
 remain in place. The exact post-review-resolution tree is 281 files / 103,731
 lines after the narrow pending-pivot receipt seam was made directly testable;
 both ceilings are pinned there with no blanket headroom.
+
+The exact RC6.4 product base inherited by RC6.5 contains 286 files / 106,100
+lines after the bounded RC6.1--RC6.4 review-continuation owners. RC6.5 adds
+exactly one production module, ``harness/cmux_wake_source.py``, for its strict
+per-worker event parser/subprocess boundary. The reason-aware wait, bounded
+wake diagnostics, and validated dashboard timing seam remain in existing
+owners. The measured candidate is 287 files / 107,157 lines, so both ceilings
+are pinned to those exact values with no speculative headroom.
 """
 
 from __future__ import annotations
@@ -224,11 +232,11 @@ from __future__ import annotations
 from pathlib import Path
 
 
-#: Maximum tracked Python files under ``scripts/`` for the 2.6.7 RC5 candidate.
-SCRIPT_FILE_CEILING = 281
+#: Maximum tracked Python files under ``scripts/`` for the 2.6.7 RC6.5 candidate.
+SCRIPT_FILE_CEILING = 287
 
-#: Maximum total lines across those files for the 2.6.7 RC5 candidate.
-SCRIPT_LINE_CEILING = 103_731
+#: Maximum total lines across those files for the 2.6.7 RC6.5 candidate.
+SCRIPT_LINE_CEILING = 107_157
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:
@@ -247,13 +255,13 @@ def assert_within_ceilings(scripts_dir: Path) -> tuple[int, int]:
     files, lines = measure(scripts_dir)
     if files > SCRIPT_FILE_CEILING:
         raise AssertionError(
-            f"scripts/ holds {files} Python files, above the RC4 ceiling "
+            f"scripts/ holds {files} Python files, above the RC6.5 ceiling "
             f"{SCRIPT_FILE_CEILING}; justify and raise the ceiling in the same "
             "commit as the growth"
         )
     if lines > SCRIPT_LINE_CEILING:
         raise AssertionError(
-            f"scripts/ holds {lines} lines, above the RC4 ceiling "
+            f"scripts/ holds {lines} lines, above the RC6.5 ceiling "
             f"{SCRIPT_LINE_CEILING}; justify and raise the ceiling in the same "
             "commit as the growth"
         )
