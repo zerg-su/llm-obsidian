@@ -29,6 +29,7 @@ from harness.review_attempt import (  # noqa: E402
     LEGACY_CROSS_HEAD_RESUME_DISABLED,
     ReviewAttemptError,
 )
+from harness.finalization_ledger import predecessor_bound_attempt_id  # noqa: E402
 from harness.runtime_session_contracts import (  # noqa: E402
     RuntimeCheckpointEvidenceMissing,
 )
@@ -1385,6 +1386,103 @@ with tempfile.TemporaryDirectory(prefix="exact-protocol-selector.") as raw:
         )
 
     approved_terminal = finish_current_attempt(second, "approve")
+    approved_attempt_id = gate.read()["attempt"]["identity"]["attempt_id"]
+    summary_path = product / ".task-summary.json"
+    changed_summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    changed_summary["body"] = (
+        "The exact selector fixture was refreshed after review launch."
+    )
+    summary_path.write_text(
+        json.dumps(changed_summary, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    review_skill = vault / "skills/review/SKILL.md"
+    stable_review_skill = review_skill.read_bytes()
+    review_skill.write_bytes(stable_review_skill + b"\nDrifted input.\n")
+    ledger_path = (
+        vault
+        / ".vault-meta/harness/finalization-ledger"
+        / f"{task_id}.json"
+    )
+    ledger_before_ambiguous_context = ledger_path.read_bytes()
+    starts_before_ambiguous_context = runtime.started
+    try:
+        _run_review(
+            meta,
+            vault,
+            product,
+            task_id,
+            runtime_root,
+            runtime_manager=runtime,
+            apply_finalizing_recovery=forbidden_finalizing_recovery,
+        )
+    except ReviewAttemptError:
+        pass
+    else:
+        raise AssertionError("ambiguous same-HEAD context drift was accepted")
+    review_skill.write_bytes(stable_review_skill)
+    check(
+        "same-HEAD summary follow-up refuses any additional context drift",
+        runtime.started == starts_before_ambiguous_context
+        and ledger_path.read_bytes() == ledger_before_ambiguous_context,
+    )
+    summary_follow_up = _run_review(
+        meta,
+        vault,
+        product,
+        task_id,
+        runtime_root,
+        runtime_manager=runtime,
+        apply_finalizing_recovery=forbidden_finalizing_recovery,
+    )
+    summary_follow_up_state = gate.read()
+    expected_summary_attempt_id = predecessor_bound_attempt_id(
+        lineage_id=task_id,
+        predecessor_attempt_id=approved_attempt_id,
+        exact_head=resolved_head,
+        cycle_number=3,
+    )
+    starts_after_summary_follow_up = runtime.started
+    summary_follow_up_replay = _run_review(
+        meta,
+        vault,
+        product,
+        task_id,
+        runtime_root,
+        runtime_manager=runtime,
+        apply_finalizing_recovery=forbidden_finalizing_recovery,
+    )
+    check(
+        "same-HEAD summary drift reserves one predecessor-bound follow-up",
+        approved_terminal["status"] == "approved"
+        and summary_follow_up["status"] == "reviewing"
+        and summary_follow_up_replay["status"] == "reviewing"
+        and summary_follow_up_state["attempt"]["identity"]["cycle"] == 3
+        and summary_follow_up_state["attempt"]["identity"]["attempt_id"]
+        == expected_summary_attempt_id
+        and summary_follow_up_state["context"][
+            "implementer_summary_sha256"
+        ]
+        == hashlib.sha256(summary_path.read_bytes()).hexdigest()
+        and runtime.started == starts_after_summary_follow_up == 3,
+    )
+    summary_approved = finish_current_attempt(summary_follow_up, "approve")
+    starts_after_summary_approval = runtime.started
+    unchanged_summary = _run_review(
+        meta,
+        vault,
+        product,
+        task_id,
+        runtime_root,
+        runtime_manager=runtime,
+        apply_finalizing_recovery=forbidden_finalizing_recovery,
+    )
+    check(
+        "unchanged reviewed summary reuses terminal approval idempotently",
+        summary_approved["status"] == "approved"
+        and unchanged_summary["status"] == "approved"
+        and runtime.started == starts_after_summary_approval == 3,
+    )
     commit_changed_head(3, "change after approval")
     after_approved = _run_review(
         meta,
@@ -1399,8 +1497,8 @@ with tempfile.TemporaryDirectory(prefix="exact-protocol-selector.") as raw:
         "changed HEAD never reuses an approved terminal attempt",
         approved_terminal["status"] == "approved"
         and after_approved["status"] == "reviewing"
-        and gate.read()["attempt"]["identity"]["cycle"] == 3
-        and runtime.started == 3,
+        and gate.read()["attempt"]["identity"]["cycle"] == 4
+        and runtime.started == 4,
     )
 
     blocked_terminal = finish_current_attempt(after_approved, "blocked")
@@ -1418,8 +1516,8 @@ with tempfile.TemporaryDirectory(prefix="exact-protocol-selector.") as raw:
         "changed HEAD never reuses a blocked terminal attempt",
         blocked_terminal["status"] == "blocked"
         and after_blocked["status"] == "reviewing"
-        and gate.read()["attempt"]["identity"]["cycle"] == 3
-        and runtime.started == 4,
+        and gate.read()["attempt"]["identity"]["cycle"] == 4
+        and runtime.started == 5,
     )
 
     original_request_exit = runtime.request_exit
@@ -1458,7 +1556,7 @@ with tempfile.TemporaryDirectory(prefix="exact-protocol-selector.") as raw:
         "changed HEAD cannot replace a cleanup-retained attention attempt",
         attention_terminal["status"] == "attention-required"
         and runtime.started == starts_before_attention_retry
-        and gate.read()["attempt"]["identity"]["cycle"] == 3
+        and gate.read()["attempt"]["identity"]["cycle"] == 4
         and gate.read()["attempt"]["identity"]["exact_head_sha"]
         != subprocess.run(
             ["git", "rev-parse", "HEAD"],

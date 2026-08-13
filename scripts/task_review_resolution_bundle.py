@@ -41,6 +41,8 @@ from task_review_shared import (
 def _resolution_source_state(
     gate_root: Path,
     state: Mapping[str, Any],
+    *,
+    include_approved_history: bool = False,
 ) -> Mapping[str, Any] | None:
     """Recover the exact prior finding boundary for a changed-HEAD attempt."""
 
@@ -51,6 +53,12 @@ def _resolution_source_state(
         if attempt.terminal.result == ReviewAttemptTerminalResult.CHANGES_REQUESTED:
             return state
         if (
+            include_approved_history
+            and attempt.terminal.result
+            == ReviewAttemptTerminalResult.APPROVED
+        ):
+            pass
+        elif (
             attempt.terminal.result
             != ReviewAttemptTerminalResult.ATTENTION_REQUIRED
             or attempt.terminal.lane_results
@@ -81,6 +89,12 @@ def _resolution_source_state(
                     "review resolution source did not move the exact HEAD"
                 )
             return candidate
+        if (
+            include_approved_history
+            and archived.terminal.result
+            == ReviewAttemptTerminalResult.APPROVED
+        ):
+            continue
         if (
             archived.terminal.result
             != ReviewAttemptTerminalResult.ATTENTION_REQUIRED
@@ -171,6 +185,8 @@ def _archive_prior_terminal_callbacks(
     gate_root: Path,
     state: Mapping[str, Any],
     store: OperationStore,
+    *,
+    current_attempt_only: bool = False,
 ) -> None:
     """Free callbacks proved accepted by an earlier terminal attempt."""
 
@@ -185,8 +201,18 @@ def _archive_prior_terminal_callbacks(
     if any(path.is_symlink() for path in callbacks.values()):
         raise ReviewAttemptError("prior review callback path is invalid")
 
-    archives: list[ReviewAttempt] = []
-    for cycle in range(current.identity.cycle - 1, 0, -1):
+    archives: list[ReviewAttempt] = (
+        [current]
+        if current_attempt_only
+        and current.terminal is not None
+        and bool(current.terminal.lane_results)
+        else []
+    )
+    for cycle in (
+        ()
+        if current_attempt_only
+        else range(current.identity.cycle - 1, 0, -1)
+    ):
         pointer = gate_root / "attempts" / f"cycle-{cycle}.json"
         if not pointer.is_file() or pointer.is_symlink():
             raise ReviewAttemptError("prior review attempt archive is unavailable")

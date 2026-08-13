@@ -352,6 +352,7 @@ class ReviewGateAttemptMixin:
         runtime_root: Path | None = None,
         callback_root: str = "",
         approved_plan_amendment: bool = False,
+        approved_summary_refresh: bool = False,
     ) -> ReviewAttempt:
         preset = ReviewPreset(
             depth=request.policy.depth,
@@ -436,6 +437,63 @@ class ReviewGateAttemptMixin:
                         normal_next=normal_next,
                         approved_plan_amendment=approved_plan_amendment,
                     )
+                    previous_context = current.get("context")
+                    next_context = initial["context"]
+                    summary_context_keys = {
+                        "manifest",
+                        "sha256",
+                        "implementer_summary_sha256",
+                    }
+                    previous_summary = (
+                        str(
+                            previous_context.get(
+                                "implementer_summary_sha256"
+                            )
+                            or ""
+                        )
+                        if isinstance(previous_context, Mapping)
+                        else ""
+                    )
+                    next_summary = str(
+                        next_context.get("implementer_summary_sha256")
+                        or ""
+                    )
+                    summary_only_context = (
+                        isinstance(previous_context, Mapping)
+                        and bool(previous_summary)
+                        and bool(next_summary)
+                        and previous_summary != next_summary
+                        and previous_context.get("manifest")
+                        != next_context.get("manifest")
+                        and {
+                            key: value
+                            for key, value in previous_context.items()
+                            if key not in summary_context_keys
+                        }
+                        == {
+                            key: value
+                            for key, value in next_context.items()
+                            if key not in summary_context_keys
+                        }
+                    )
+                    approved_summary_boundary = (
+                        approved_summary_refresh
+                        and normal_next
+                        and retry_next
+                        and terminal is not None
+                        and terminal.result
+                        == ReviewAttemptTerminalResult.APPROVED
+                        and existing.identity.exact_head_sha
+                        == identity.exact_head_sha
+                        and existing.identity.plan_sha256
+                        == identity.plan_sha256
+                        and existing.identity.outcome_sha256
+                        == identity.outcome_sha256
+                        and summary_only_context
+                        and review_attempt_records_are_released(
+                            self.round_store, existing
+                        )
+                    )
                     zero_effect_boundary = (
                         terminal is not None
                         and terminal.result
@@ -513,7 +571,8 @@ class ReviewGateAttemptMixin:
                         or (
                             retry_next
                             and not (
-                                (
+                                approved_summary_boundary
+                                or (
                                     zero_effect_boundary
                                     and retry_callbacks_absent
                                 )
@@ -524,7 +583,10 @@ class ReviewGateAttemptMixin:
                             existing.identity.exact_head_sha
                             == identity.exact_head_sha
                             and normal_next
-                            and not amended_identity
+                            and not (
+                                amended_identity
+                                or approved_summary_boundary
+                            )
                         )
                     ):
                         raise ReviewAttemptError(
@@ -532,7 +594,7 @@ class ReviewGateAttemptMixin:
                         )
                     archive_name = (
                         f"attempt-{existing.identity.attempt_id}.json"
-                        if retry_next
+                        if retry_next and not approved_summary_boundary
                         else f"cycle-{existing.identity.cycle}.json"
                     )
                     archive = self.root / "attempts" / archive_name
@@ -623,6 +685,7 @@ class ReviewGateAttemptMixin:
         dashboard_binding: DashboardBinding | None = None,
         callback_wake: str = "",
         approved_plan_amendment: bool = False,
+        approved_summary_refresh: bool = False,
         prompt_pointers: Mapping[str, str] | None = None,
         prepare_lane: (
             Callable[[str, object, object, ReviewRound], None] | None
@@ -646,6 +709,7 @@ class ReviewGateAttemptMixin:
             runtime_root=cwd,
             callback_root=callback_root,
             approved_plan_amendment=approved_plan_amendment,
+            approved_summary_refresh=approved_summary_refresh,
         )
         return self._start_execution(
             request=request,

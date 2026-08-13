@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 import shlex
 import sys
 from datetime import datetime, timezone
@@ -11,6 +13,7 @@ from typing import Any, Callable, Mapping, Sequence
 
 from harness.contracts import AttentionReason
 from harness.dashboard_facade import DashboardBinding
+from harness.finalization_ledger import predecessor_bound_attempt_id
 from harness.review_attempt import (
     EXACT_HEAD_REVIEW_PROTOCOL,
     LEGACY_CROSS_HEAD_RESUME_DISABLED,
@@ -340,6 +343,7 @@ def _start_exact_head_review(
     cycle: int,
     origin_surface: str,
     approved_plan_amendment: bool = False,
+    approved_summary_refresh: bool = False,
 ) -> dict[str, Any]:
     if not preset.enabled:
         raise TaskReviewError(
@@ -400,6 +404,7 @@ def _start_exact_head_review(
         ),
         callback_wake=_callback_wake(meta, vault, worktree),
         approved_plan_amendment=approved_plan_amendment,
+        approved_summary_refresh=approved_summary_refresh,
         prepare_lane=prepare_lane,
     )
     return _receipt(
@@ -608,6 +613,93 @@ def _reserve_or_reviewing(
         return reviewing_receipt()
 
 
+def _summary_only_manifest_change(
+    runtime_root: Path,
+    previous_context: Mapping[str, object],
+    context: ReviewContext,
+    context_manifest: Path,
+) -> bool:
+    """Prove that two same-HEAD packets differ only by summary bytes."""
+
+    previous_pointer = str(previous_context.get("manifest") or "")
+    if not previous_pointer or Path(previous_pointer).is_absolute():
+        return False
+    root = runtime_root.expanduser().resolve()
+    previous_path = (root / previous_pointer).resolve()
+    current_path = context_manifest.expanduser().resolve()
+    try:
+        previous_path.relative_to(root)
+        current_path.relative_to(root)
+    except ValueError:
+        return False
+    if (
+        not previous_path.is_file()
+        or previous_path.is_symlink()
+        or not current_path.is_file()
+        or current_path.is_symlink()
+    ):
+        return False
+    try:
+        previous = _read_json(previous_path, "previous review context")
+        current = _read_json(current_path, "current review context")
+    except TaskReviewError:
+        return False
+    if (
+        previous.get("schema_version") != 1
+        or current.get("schema_version") != 1
+        or previous.get("operation_id") != current.get("operation_id")
+        or previous.get("metadata") != current.get("metadata")
+        or not isinstance(previous.get("inputs"), list)
+        or not isinstance(current.get("inputs"), list)
+    ):
+        return False
+    previous_inputs = {
+        str(item.get("name") or ""): item
+        for item in previous["inputs"]
+        if isinstance(item, Mapping) and item.get("name")
+    }
+    current_inputs = {
+        str(item.get("name") or ""): item
+        for item in current["inputs"]
+        if isinstance(item, Mapping) and item.get("name")
+    }
+    if (
+        len(previous_inputs) != len(previous["inputs"])
+        or len(current_inputs) != len(current["inputs"])
+        or set(previous_inputs) != set(current_inputs)
+        or "implementer-summary.json" not in previous_inputs
+    ):
+        return False
+    summary_name = "implementer-summary.json"
+    if any(
+        previous_inputs[name] != current_inputs[name]
+        for name in previous_inputs
+        if name != summary_name
+    ):
+        return False
+    previous_summary = previous_inputs[summary_name]
+    current_summary = current_inputs[summary_name]
+    changing_summary_fields = {"sha256", "bytes"}
+    return (
+        previous_summary.get("sha256")
+        == previous_context.get("implementer_summary_sha256")
+        and current_summary.get("sha256")
+        == context.implementer_summary_sha256
+        and previous_summary.get("sha256")
+        != current_summary.get("sha256")
+        and {
+            key: value
+            for key, value in previous_summary.items()
+            if key not in changing_summary_fields
+        }
+        == {
+            key: value
+            for key, value in current_summary.items()
+            if key not in changing_summary_fields
+        }
+    )
+
+
 def _run_exact_head_review(
     meta: Mapping[str, Any],
     vault: Path,
@@ -639,7 +731,84 @@ def _run_exact_head_review(
     resolution_bundle = None
     current_head = _git(worktree, "rev-parse", "HEAD")
     if gate_exists:
-        source_state = _resolution_source_state(gate_root, gate.read())
+        current_state = gate.read()
+        current_attempt = ReviewAttempt.from_mapping(
+            current_state["attempt"]
+        )
+        current_context = current_state.get("context")
+        approved_summary_drift = False
+        active_summary_follow_up = False
+        if (
+            current_attempt.status == "terminal"
+            and current_attempt.terminal is not None
+            and current_attempt.terminal.result.value == "approved"
+            and current_attempt.identity.exact_head_sha == current_head
+            and isinstance(current_context, Mapping)
+        ):
+            summary_path = worktree / ".task-summary.json"
+            prior_summary_sha256 = str(
+                current_context.get("implementer_summary_sha256") or ""
+            )
+            if summary_path.is_file() and not summary_path.is_symlink():
+                current_summary_sha256 = hashlib.sha256(
+                    summary_path.read_bytes()
+                ).hexdigest()
+                approved_summary_drift = (
+                    bool(prior_summary_sha256)
+                    and prior_summary_sha256 != current_summary_sha256
+                )
+        if (
+            current_attempt.status != "terminal"
+            and current_attempt.identity.cycle > 1
+        ):
+            previous_pointer = (
+                gate_root
+                / "attempts"
+                / f"cycle-{current_attempt.identity.cycle - 1}.json"
+            )
+            if previous_pointer.is_file() and not previous_pointer.is_symlink():
+                previous_state = _read_json(
+                    previous_pointer, "previous review attempt"
+                )
+                previous_attempt = ReviewAttempt.from_mapping(
+                    previous_state.get("attempt")
+                )
+                previous_context = previous_state.get("context")
+                active_summary_follow_up = (
+                    previous_attempt.status == "terminal"
+                    and previous_attempt.terminal is not None
+                    and previous_attempt.terminal.result.value == "approved"
+                    and previous_attempt.identity.finalization_lineage_id
+                    == current_attempt.identity.finalization_lineage_id
+                    and previous_attempt.identity.exact_head_sha
+                    == current_attempt.identity.exact_head_sha
+                    and previous_attempt.identity.plan_sha256
+                    == current_attempt.identity.plan_sha256
+                    and previous_attempt.identity.outcome_sha256
+                    == current_attempt.identity.outcome_sha256
+                    and current_attempt.identity.attempt_id
+                    == predecessor_bound_attempt_id(
+                        lineage_id=(
+                            current_attempt.identity.finalization_lineage_id
+                        ),
+                        predecessor_attempt_id=(
+                            previous_attempt.identity.attempt_id
+                        ),
+                        exact_head=current_attempt.identity.exact_head_sha,
+                        cycle_number=current_attempt.identity.cycle,
+                    )
+                    and isinstance(previous_context, Mapping)
+                    and isinstance(current_context, Mapping)
+                    and previous_context.get("implementer_summary_sha256")
+                    != current_context.get("implementer_summary_sha256")
+                )
+        source_state = _resolution_source_state(
+            gate_root,
+            current_state,
+            include_approved_history=(
+                approved_summary_drift or active_summary_follow_up
+            ),
+        )
         if source_state is not None:
             source_attempt = ReviewAttempt.from_mapping(
                 source_state["attempt"]
@@ -692,6 +861,7 @@ def _run_exact_head_review(
     predecessor_attempt_id = ""
     reserved_attempt_id = ""
     supersedes_approved_attempt_id = ""
+    approved_summary_predecessor_attempt_id = ""
     amended_boundary = False
     if gate_exists:
         prior_state = gate.read()
@@ -720,6 +890,52 @@ def _run_exact_head_review(
                 or prior_attempt.identity.outcome_sha256
                 != active_outcome_sha256
             )
+            summary_only_drift = False
+            if (
+                prior_attempt.terminal.result.value == "approved"
+                and context.head_sha
+                == prior_attempt.identity.exact_head_sha
+                and not amended_boundary
+            ):
+                prior_context = prior_state.get("context")
+                prior_summary_sha256 = (
+                    str(
+                        prior_context.get(
+                            "implementer_summary_sha256"
+                        )
+                        or ""
+                    )
+                    if isinstance(prior_context, Mapping)
+                    else ""
+                )
+                current_summary_sha256 = (
+                    context.implementer_summary_sha256
+                )
+                if (
+                    re.fullmatch(
+                        r"[0-9a-f]{64}", prior_summary_sha256
+                    )
+                    is None
+                    or re.fullmatch(
+                        r"[0-9a-f]{64}", current_summary_sha256
+                    )
+                    is None
+                ):
+                    raise ReviewAttemptError(
+                        "approved review summary identity is unavailable"
+                    )
+                summary_only_drift = (
+                    prior_summary_sha256 != current_summary_sha256
+                )
+                if summary_only_drift and not _summary_only_manifest_change(
+                    runtime_root,
+                    prior_context,
+                    context,
+                    context_manifest,
+                ):
+                    raise ReviewAttemptError(
+                        "approved review context drift is not summary-only"
+                    )
             ledger = finalization_ledger(meta, vault, task_id, worktree)
             # The one narrow same-HEAD relaxation: an attempt that terminated
             # before the provider launched owns no durable effect, so it may be
@@ -758,6 +974,7 @@ def _run_exact_head_review(
                 context.head_sha == prior_attempt.identity.exact_head_sha
                 and not zero_lane_preflight
                 and not amended_boundary
+                and not summary_only_drift
             ):
                 return _receipt(
                     status=prior_attempt.terminal.result.value,
@@ -768,12 +985,13 @@ def _run_exact_head_review(
                     context_manifest=context_manifest,
                     run=None,
                 )
-            if zero_lane_preflight:
+            if zero_lane_preflight or summary_only_drift:
                 _archive_prior_terminal_callbacks(
                     runtime_root,
                     gate_root,
                     prior_state,
                     store,
+                    current_attempt_only=summary_only_drift,
                 )
             if terminal_decision.cycle_number is None:
                 raise ReviewAttemptError(
@@ -787,7 +1005,11 @@ def _run_exact_head_review(
                 predecessor_attempt_id = prior_attempt.identity.attempt_id
             else:
                 cycle = terminal_decision.cycle_number + 1
-                if (
+                if summary_only_drift:
+                    approved_summary_predecessor_attempt_id = (
+                        prior_attempt.identity.attempt_id
+                    )
+                elif (
                     amended_boundary
                     and prior_attempt.terminal.result.value == "approved"
                 ):
@@ -809,6 +1031,9 @@ def _run_exact_head_review(
             reserved_attempt_id=reserved_attempt_id,
             supersedes_approved_attempt_id=(
                 supersedes_approved_attempt_id
+            ),
+            approved_summary_predecessor_attempt_id=(
+                approved_summary_predecessor_attempt_id
             ),
         ),
         lambda: _reviewing_receipt(
@@ -838,6 +1063,9 @@ def _run_exact_head_review(
                 meta, runtime, allow_fallback=zero_lane_preflight
             ),
             approved_plan_amendment=amended_boundary,
+            approved_summary_refresh=bool(
+                approved_summary_predecessor_attempt_id
+            ),
         )
 
     state = gate.read()

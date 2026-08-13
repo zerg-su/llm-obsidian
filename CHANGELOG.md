@@ -24,6 +24,10 @@ scheduler, provider retry, callback replay, or generic attention self-heal.
 - An immutable review callback already accepted by the operation store but
   not yet consumed by its exact gate is ingested through the registered gate
   workflow without accepting or delivering the callback again.
+- A terminal approval is reused only while both its exact product HEAD and
+  reviewed implementer-summary digest still match. A summary-only refresh at
+  the same HEAD reserves one ordinary predecessor-bound follow-up review;
+  any additional context drift remains fail-closed.
 
 ### Changed
 
@@ -37,6 +41,9 @@ scheduler, provider retry, callback replay, or generic attention self-heal.
 - Coordinator-owned reap now resolves its session from the task's frozen
   runtime before consulting the generic cross-runtime helper, so an inherited
   foreign runtime variable cannot reject the exact registered reap boundary.
+- The active review/recovery authority contour is pinned to its exact RC6.4
+  denominator of 27 files / 14,896 lines, with zero writable authorities and
+  zero incident literals.
 
 ### Candidate boundary
 

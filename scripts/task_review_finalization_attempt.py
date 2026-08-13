@@ -191,6 +191,7 @@ def reserve_exact_head_attempt(
     predecessor_attempt_id: str = "",
     reserved_attempt_id: str = "",
     supersedes_approved_attempt_id: str = "",
+    approved_summary_predecessor_attempt_id: str = "",
 ) -> tuple[ReviewOperationRequest, FinalizationLedger, int]:
     config = load_config(vault)
     ledger = finalization_ledger(meta, vault, task_id, worktree)
@@ -198,11 +199,30 @@ def reserve_exact_head_attempt(
         task_id,
         request.context.head_sha,
         cycle,
-        predecessor_attempt_id=predecessor_attempt_id,
+        predecessor_attempt_id=(
+            predecessor_attempt_id
+            or approved_summary_predecessor_attempt_id
+        ),
     )
-    if reserved_attempt_id and predecessor_attempt_id:
+    if reserved_attempt_id and (
+        predecessor_attempt_id
+        or approved_summary_predecessor_attempt_id
+    ):
         raise FinalizationAttemptError(
             "reserved attempt cannot also declare a predecessor"
+        )
+    if predecessor_attempt_id and approved_summary_predecessor_attempt_id:
+        raise FinalizationAttemptError(
+            "review attempt cannot declare two predecessors"
+        )
+    if (
+        approved_summary_predecessor_attempt_id
+        and supersedes_approved_attempt_id
+        and approved_summary_predecessor_attempt_id
+        != supersedes_approved_attempt_id
+    ):
+        raise FinalizationAttemptError(
+            "approved summary predecessor identity changed"
         )
     reservation = reserve_task_finalization_cycle(
         meta,
@@ -217,7 +237,8 @@ def reserve_exact_head_attempt(
         now_epoch=int(time.time()),
         predecessor_attempt_id=predecessor_attempt_id,
         supersedes_approved_attempt_id=(
-            supersedes_approved_attempt_id
+            approved_summary_predecessor_attempt_id
+            or supersedes_approved_attempt_id
         ),
     )
     if reservation is None or reservation.routes is None:
