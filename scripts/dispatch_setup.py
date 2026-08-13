@@ -176,7 +176,8 @@ def keep_plan_branch(body: str) -> str:
 def bind_harness_diagnostics(body: str, request: dict[str, Any]) -> str:
     generic = (
         "Use `scripts/harness-cli.py status|inspect|resume|reconcile|cancel|close|doctor`\n"
-        "for lifecycle operations; do not orchestrate cmux/model commands manually."
+        "only for a typed escalation, `attention-required`, or explicit coordinator\n"
+        "request; do not orchestrate cmux/model commands manually."
     )
     if body.count(generic) != 1:
         raise DispatchError("dispatch prompt harness completion contract is invalid")
@@ -193,7 +194,8 @@ def bind_harness_diagnostics(body: str, request: dict[str, Any]) -> str:
     prefix = shlex.join(argv)
     bound = "\n".join(
         (
-            "Use only these exact, read-only Harness diagnostics:",
+            "Use only these exact, read-only Harness diagnostics for a typed "
+            "escalation, `attention-required`, or explicit coordinator request:",
             f"- `{prefix} status`",
             f"- `{prefix} inspect <operation-id>`",
             f"- `{prefix} doctor`",

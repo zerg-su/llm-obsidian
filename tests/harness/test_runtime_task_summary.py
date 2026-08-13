@@ -4798,6 +4798,12 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         for record in asynchronous_store.list("owner-1")
         if record.spec.kind == "pipeline-verify"
     ]
+    review_idle_contract = (
+        "end the current model turn while keeping this session open. "
+        "The code-owned observer owns healthy waiting; act again in this same "
+        "session only on the next typed callback wake, typed escalation, or "
+        "explicit coordinator request."
+    )
     check(
         "summary-only refresh reuses the exact-HEAD verification identity and effect",
         asynchronous_rc == 0
@@ -4842,6 +4848,17 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
             asynchronous_verification_children,
             asynchronous_record,
         ),
+    )
+    check(
+        "typed review wakes return the original executor session to healthy idle",
+        all(
+            review_idle_contract in asynchronous_cmux.sent[index][1]
+            and "Remain available" not in asynchronous_cmux.sent[index][1]
+            for index in (0, 2)
+        )
+        and asynchronous_cmux.sent[0][0] == CHILD
+        and asynchronous_cmux.sent[2][0] == CHILD,
+        asynchronous_cmux.sent,
     )
     asynchronous_packet = (
         root / f"worktree-{asynchronous_task}" / ".task-review.json"

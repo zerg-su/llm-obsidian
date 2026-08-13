@@ -86,7 +86,8 @@ This runner requires an approved plan and fails before launch otherwise.
 ## Harness completion
 
 Use `scripts/harness-cli.py status|inspect|resume|reconcile|cancel|close|doctor`
-for lifecycle operations; do not orchestrate cmux/model commands manually.
+only for a typed escalation, `attention-required`, or explicit coordinator
+request; do not orchestrate cmux/model commands manually.
 `scripts/harness-cli.py dashboard` is read-only: it projects the compiled
 pipeline, parallel lanes, loop visits, and bounded recent issues for one owner,
 and holds no lifecycle authority. Anything it cannot resolve exactly is
@@ -104,8 +105,7 @@ trigger the automatic review gate:
 
 Do not
 invoke a review runner or orchestrate its provider/cmux lifecycle yourself.
-Remain available in this session while the harness launches review. Material
-findings arrive in `.task-review.json` plus one typed surface notification.
+End the current model turn while keeping this session open. The code-owned observer owns healthy waiting; act again in this same session only on a typed callback wake, typed escalation, or explicit coordinator request. Material findings arrive in `.task-review.json` plus one typed surface notification.
 Apply or reject every finding in a new commit, or use the normal escalation
 contract; do not invoke the review runner. The harness continues same-session
 verification and authorizes finalization. The provider worker delivers the

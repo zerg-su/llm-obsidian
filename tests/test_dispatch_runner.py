@@ -515,6 +515,44 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         not in prompt,
         prompt,
     )
+    idle_contract = (
+        "End the current model turn while keeping this session open. "
+        "The code-owned observer owns healthy waiting; act again in this same "
+        "session only on a typed callback wake, typed escalation, or explicit "
+        "coordinator request."
+    )
+    harness_completion = prompt.split("## Harness completion", 1)[1]
+    check(
+        "task prompt ends healthy callback turns without closing the session",
+        idle_contract in harness_completion
+        and "Remain available" not in harness_completion
+        and "while the harness launches review" not in harness_completion,
+        harness_completion,
+    )
+    check(
+        "task prompt reserves diagnostics for typed attention boundaries",
+        (
+            "Use only these exact, read-only Harness diagnostics for a typed "
+            "escalation, `attention-required`, or explicit coordinator request:"
+        )
+        in harness_completion,
+        harness_completion,
+    )
+    claude_raw = json.loads(json.dumps(raw_request))
+    claude_raw["executor"] = {
+        "runtime": "claude",
+        "model": "opus",
+        "effort": "high",
+    }
+    claude_prompt = runner.render_task_prompt(
+        runner.validate_request(claude_raw), config
+    )
+    check(
+        "Codex and Claude rendered prompts share the exact idle contract",
+        idle_contract in claude_prompt.split("## Harness completion", 1)[1]
+        and idle_contract in harness_completion,
+        claude_prompt,
+    )
     check(
         "default dispatch requires automatic simple review",
         "automatic review gate" in prompt

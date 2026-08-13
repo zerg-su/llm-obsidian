@@ -988,7 +988,7 @@ class RuntimeWorkerReviewBridgeMixin:
                 "status": "pending",
             },
         )
-        message = f"Typed review findings are ready in {packet_path.name}. Resolve every material finding in {resolution_path.name} as applied, rejected, or out-of-scope; include bounded rationale, and a durable follow-up pointer for out-of-scope. Commit a new HEAD and set resolved_head_sha; for a material fork use the task_escalation.py raise contract. Do not launch review. Refresh .task-summary.json after the commit so it covers the final HEAD. Remain available for same-session verification."
+        message = f"Typed review findings are ready in {packet_path.name}. Resolve every material finding in {resolution_path.name} as applied, rejected, or out-of-scope; include bounded rationale, and a durable follow-up pointer for out-of-scope. Commit a new HEAD and set resolved_head_sha; for a material fork use the task_escalation.py raise contract. Do not launch review. Refresh .task-summary.json after the commit so it covers the final HEAD. Then end the current model turn while keeping this session open. The code-owned observer owns healthy waiting; act again in this same session only on the next typed callback wake, typed escalation, or explicit coordinator request."
         if len(message.encode()) > 4096:
             raise RuntimeWorkerError("review resolution notification is too large")
         wake_spec = {
