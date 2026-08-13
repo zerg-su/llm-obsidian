@@ -39,6 +39,7 @@ from harness.pipeline_builtins import (
 from harness.pipelines import compile_pipeline
 from harness.runtime_sessions import RuntimeSessionManager, RuntimeSessionRequest
 from harness.runtime_worker_contracts import RuntimeWorkerError
+from harness.cmux_wake_source import WakeObservation
 from harness.runtime_worker_execution import RuntimeWorkerExecution
 from harness.runtime_worker import (
     _pipeline_verify_identity,
@@ -68,6 +69,26 @@ from harness.verification_attempt import (  # noqa: E402
     VerificationAttempt,
     verification_input_sha256,
 )
+
+
+class FallbackWakeSource:
+    """Hermetic pacing that never fabricates a cmux event receipt."""
+
+    def start(self) -> bool:
+        return True
+
+    def wait(self, timeout: float) -> WakeObservation:
+        time.sleep(min(max(0.0, timeout), 0.02))
+        return WakeObservation("fallback-poll", observed_at=time.monotonic())
+
+    def retry(self) -> bool:
+        return True
+
+    def refresh_generation(self, _generation: int) -> None:
+        return None
+
+    def close(self) -> None:
+        return None
 from harness.workflows.reap import run_reap
 from harness.workflows.review import (
     ReviewContext,
@@ -1879,6 +1900,7 @@ def run_case(
                 cmux_adapter=cmux,
                 review_launcher=review_launcher,
                 verification_runner=verification_runner,
+                wake_source=FallbackWakeSource(),
             )
         )
     )
@@ -4055,6 +4077,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         poll_seconds=0.02,
         checkpoint_probe=lambda _surface, _runtime: "checkpoint-1",
         cmux_adapter=cmux,
+        wake_source=FallbackWakeSource(),
     )
     check(
         "duplicate summary callback never duplicates coordinator notification",

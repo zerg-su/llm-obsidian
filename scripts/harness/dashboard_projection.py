@@ -468,8 +468,6 @@ def _root_step_interval(
         or steps[0].session_mode != "worktree"
     ):
         return root_interval
-    if root_interval.mode == "duration":
-        return root_interval
     later = tuple(
         child
         for step in steps[1:]

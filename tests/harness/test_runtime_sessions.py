@@ -89,6 +89,7 @@ from harness.runtime_worker import (
 from harness.runtime_provider import provider_environment
 from harness.runtime_worker_contracts import RuntimeWorkerError
 from harness.runtime_worker_loop import RuntimeWorkerLoopMixin
+from harness.runtime_worker_execution import RuntimeWorkerExecution
 from harness.store import OperationStore
 from harness.supervisor import OperationSupervisor
 
@@ -138,6 +139,63 @@ class EventFirstSource:
     def retry(self) -> None:
         return None
 
+    def start(self) -> bool:
+        return True
+
+    def refresh_generation(self, _generation: int) -> None:
+        return None
+
+    def close(self) -> None:
+        return None
+
+
+class ArtifactWakeSource:
+    """Script event hints when a new exact callback artifact is visible."""
+
+    def __init__(self, runtime_root: Path) -> None:
+        self.runtime_root = runtime_root
+        self.generations: set[int] = set()
+        self.sequence = 0
+
+    def start(self) -> bool:
+        return True
+
+    def wait(self, timeout: float) -> WakeObservation | None:
+        deadline = time.monotonic() + max(0.0, timeout)
+        while True:
+            try:
+                target = json.loads(
+                    (self.runtime_root / "callback-target.json").read_text(
+                        encoding="utf-8"
+                    )
+                )
+                generation = int(target["generation"])
+                pointer = Path(str(target["callback_pointer"]))
+            except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+                generation, pointer = 0, Path()
+            if generation not in self.generations and generation > 0 and pointer.is_file():
+                self.generations.add(generation)
+                self.sequence += 1
+                return WakeObservation(
+                    "cmux-event",
+                    "agent.hook.PostToolUse",
+                    self.sequence,
+                    time.monotonic(),
+                )
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return None
+            time.sleep(min(0.005, remaining))
+
+    def retry(self) -> bool:
+        return True
+
+    def refresh_generation(self, _generation: int) -> None:
+        return None
+
+    def close(self) -> None:
+        return None
+
 
 class EventFirstLoopProbe(RuntimeWorkerLoopMixin):
     def __init__(self) -> None:
@@ -145,6 +203,9 @@ class EventFirstLoopProbe(RuntimeWorkerLoopMixin):
         self.monotonic_clock = self.clock
         self.wall_clock = self.clock
         self.poll_seconds = 0.1
+        self.sleeper = lambda seconds: setattr(
+            self.clock, "now", self.clock.now + max(0.0, seconds)
+        )
         self.wake_source = EventFirstSource(
             self.clock,
             [
@@ -160,6 +221,8 @@ class EventFirstLoopProbe(RuntimeWorkerLoopMixin):
         self.next_transport_confirmation = float("inf")
         self.next_provider_exit_probe = 0.1
         self.next_wake_retry = 0.0
+        self.wake_retry_attempts = 0
+        self.wake_source_disabled = False
         self.next_prompt_probe = 0.2
         self.next_checkpoint_probe = 0.5
         self.next_liveness_probe = 60.0
@@ -212,6 +275,7 @@ class EventFirstLoopProbe(RuntimeWorkerLoopMixin):
         return tuple(self.inspections)
 
     def record_wake_source_state(self, observation: WakeObservation) -> None:
+        self._last_wake_source_state = observation.source
         self.source_states.append(observation.source)
 
 
@@ -353,6 +417,96 @@ check(
     and not _deadlines.inspections,
     (_deadlines.deadline_ticks, _deadlines.inspections),
 )
+
+
+class ElapsedDeadlineStore:
+    def read(self, _owner: str, _operation: str) -> object:
+        return type("Record", (), {"deadline_at": 100.0})()
+
+
+class ElapsedDeadlineProbe(EventFirstLoopProbe):
+    def __init__(self) -> None:
+        super().__init__()
+        self.store = ElapsedDeadlineStore()
+        self.spec = {"owner_id": "owner", "operation_id": "operation"}
+        self.wall_clock = lambda: 200.0
+        self.wake_source = EventFirstSource(self.clock, [])
+        self.next_full_reconcile = 30.0
+        self.next_provider_exit_probe = float("inf")
+        self.next_prompt_probe = float("inf")
+        self.next_checkpoint_probe = float("inf")
+        self.next_liveness_probe = float("inf")
+
+    def callback_deadline_monotonic(self, now: float) -> float:
+        return RuntimeWorkerLoopMixin.callback_deadline_monotonic(self, now)
+
+    def tick_observers(self) -> None:
+        return None
+
+
+_elapsed_deadline = ElapsedDeadlineProbe()
+for _ in range(3):
+    _elapsed_deadline.poll_once()
+check(
+    "elapsed callback deadlines retain a bounded blocking wait",
+    len(_elapsed_deadline.wake_source.waits) == 3
+    and min(_elapsed_deadline.wake_source.waits) >= 0.1,
+    _elapsed_deadline.wake_source.waits,
+)
+
+
+class PersistentDegradedSource:
+    def __init__(self, clock: EventFirstClock) -> None:
+        self.clock = clock
+        self.retry_count = 0
+
+    def wait(self, timeout: float) -> WakeObservation:
+        return WakeObservation("degraded", observed_at=self.clock.now)
+
+    def retry(self) -> bool:
+        self.retry_count += 1
+        return False
+
+
+_persistent_degraded = EventFirstLoopProbe()
+_persistent_degraded.wake_source = PersistentDegradedSource(
+    _persistent_degraded.clock
+)
+_persistent_degraded.next_provider_exit_probe = float("inf")
+_persistent_degraded.next_prompt_probe = float("inf")
+_persistent_degraded.next_checkpoint_probe = float("inf")
+_persistent_degraded.next_liveness_probe = float("inf")
+for _ in range(12):
+    _persistent_degraded.poll_once()
+check(
+    "persistent wake degradation has bounded retries and one reconcile",
+    _persistent_degraded.wake_source.retry_count <= 5
+    and len(_persistent_degraded.inspections) <= 3
+    and _persistent_degraded.wake_source_disabled,
+    (
+        _persistent_degraded.wake_source.retry_count,
+        _persistent_degraded.inspections,
+        _persistent_degraded.wake_source_disabled,
+    ),
+)
+
+with tempfile.TemporaryDirectory(prefix="wake-binding-fallback.") as raw:
+    fallback_worker = RuntimeWorkerExecution()
+    fallback_worker.spec_path = Path(raw) / "launch.json"
+    fallback_worker.monotonic_clock = lambda: 7.0
+    fallback_worker.spec = {
+        "surface_id": SURFACE,
+        "owner_id": "owner-fallback",
+        "operation_id": "operation-fallback",
+        "run_id": "run-fallback",
+    }
+    fallback_worker.initial_generation = 1
+    fallback_source = fallback_worker._optional_wake_source("not-a-uuid")
+    check(
+        "invalid optional wake identity degrades without failing worker startup",
+        fallback_source.start() is False
+        and fallback_source.wait(0.1).source == "unavailable",
+    )
 
 for _field in (
     "stable_reads",
@@ -3431,6 +3585,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         )
     worker_result: list[int] = []
     worker_cmux = FakeCmux([])
+    worker_wake_source = ArtifactWakeSource(worker_launch.spec_path.parent)
     worker_thread = threading.Thread(
         target=lambda: worker_result.append(
             run_runtime_worker(
@@ -3439,6 +3594,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
                 checkpoint_probe=lambda _surface, _runtime: "checkpoint-worker",
                 cmux_adapter=worker_cmux,
                 sleeper=time.sleep,
+                wake_source=worker_wake_source,
             )
         )
     )
@@ -3499,6 +3655,11 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
     worker_child_record = worker_store.read("owner-worker", "worker-round-2")
     worker_ready = json.loads(worker_launch.ready_path.read_text(encoding="utf-8"))
     worker_exit = json.loads(worker_launch.exit_path.read_text(encoding="utf-8"))
+    worker_wake_progress = json.loads(
+        (worker_launch.spec_path.parent / "wake-progress.json").read_text(
+            encoding="utf-8"
+        )
+    )
     check(
         "short-lived worker starts exact PGID and brokers provider outbox",
         worker_rc == 0
@@ -3522,6 +3683,14 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         == "callback-worker-round-2"
         and json.loads(receipt.read_text(encoding="utf-8"))["generation"] == 2,
         (worker_ready, worker_exit, worker_record),
+    )
+    check(
+        "scripted worker event plus confirmation accepts real stable callback transport",
+        worker_wake_source.generations == {1, 2}
+        and worker_wake_progress["source"] == "stability-confirmation"
+        and worker_wake_progress["generation"] == 2
+        and worker_wake_progress["outcome"] == "progressed",
+        (worker_wake_source.generations, worker_wake_progress),
     )
     provider_events = [
         json.loads(path.read_text(encoding="utf-8"))["kind"]
@@ -3648,6 +3817,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         checkpoint_probe=lambda _surface, _runtime: "checkpoint-compact",
         cmux_adapter=compact_cmux,
         sleeper=time.sleep,
+        wake_source=ArtifactWakeSource(compact_launch.spec_path.parent),
     )
     expected_compact_input = interactive_provider_input(
         "codex", compact_prompt_path.resolve(), compact_prompt
@@ -3709,6 +3879,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
                 guard_launch.spec_path,
                 poll_seconds=0.02,
                 checkpoint_probe=lambda _surface, _runtime: "",
+                wake_source=ArtifactWakeSource(guard_launch.spec_path.parent),
             )
         )
     )
@@ -3810,6 +3981,9 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
                     natural_launch.spec_path,
                     poll_seconds=0.02,
                     checkpoint_probe=lambda _surface, _runtime: "",
+                    wake_source=ArtifactWakeSource(
+                        natural_launch.spec_path.parent
+                    ),
                 )
             )
         )
@@ -4489,6 +4663,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-review-timeout.") as raw:
         checkpoint_probe=lambda _surface, _runtime: "",
         cmux_adapter=object(),
         sleeper=time.sleep,
+        wake_source=ArtifactWakeSource(timeout_launch.spec_path.parent),
     )
     timeout_record = timeout_store.read(
         "owner-review-timeout", "runtime-review-timeout"
@@ -4590,6 +4765,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-review-early-exit.") as raw:
         checkpoint_probe=lambda _surface, _runtime: "",
         cmux_adapter=object(),
         sleeper=time.sleep,
+        wake_source=ArtifactWakeSource(timeout_launch.spec_path.parent),
     )
     timeout_record = timeout_store.read(
         "owner-review-early-exit", "runtime-review-early-exit"
@@ -4953,6 +5129,8 @@ def _initial_start_worker(
     limit: int = 4,
     route_profile: str = "executor",
     before_join: Callable[[SurfaceLaunch], None] | None = None,
+    workspace_id: str = WORKSPACE,
+    inject_wake_source: bool = True,
 ) -> tuple[int | None, SurfaceLaunch, OperationStore, Path]:
     product_root = root / f"{name}-product"
     product_root.mkdir()
@@ -5027,7 +5205,7 @@ def _initial_start_worker(
             "schema_version": 1,
             "operation_id": f"{name}-op",
             "run_id": f"run-{name}",
-            "workspace_id": WORKSPACE,
+            "workspace_id": workspace_id,
         },
     )
     outcome: list[int] = []
@@ -5042,6 +5220,11 @@ def _initial_start_worker(
                     checkpoint_probe=lambda _surface, _runtime: cmux.checkpoint,
                     cmux_adapter=cmux,
                     sleeper=time.sleep,
+                    wake_source=(
+                        ArtifactWakeSource(launch.spec_path.parent)
+                        if inject_wake_source
+                        else None
+                    ),
                     initial_start_observation_limit=limit,
                 )
             )
@@ -5148,6 +5331,36 @@ def check_worker_accepts_acknowledged_initial_start() -> None:
             "an acknowledged initial start sends exactly one prompt and Enter",
             len(cmux.sent) == 1 and cmux.submit_count == 1 and code == 0,
             (cmux.sent, cmux.submit_count, code),
+        )
+
+
+def check_worker_degrades_invalid_optional_wake_identity() -> None:
+    """An optional malformed workspace binding cannot prevent provider start."""
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        cmux = InitialStartWorkerCmux(
+            [STUCK_CLAUDE_SCREEN, ACTIVE_CLAUDE_SCREEN]
+        )
+        code, launch, _store, _callback = _initial_start_worker(
+            root,
+            "invalid-wake-binding",
+            cmux,
+            workspace_id="not-a-uuid",
+            inject_wake_source=False,
+        )
+        ready = json.loads(launch.ready_path.read_text(encoding="utf-8"))
+        source_state = json.loads(
+            (launch.spec_path.parent / "wake-source-state.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        check(
+            "malformed optional wake binding starts and falls back without attention",
+            code == 0
+            and ready["status"] == "ready"
+            and source_state["source"] == "unavailable",
+            (code, ready, source_state),
         )
 
 
@@ -5605,6 +5818,7 @@ _INITIAL_START_FIXTURES = (
     check_initial_start_observes_within_budget,
     check_worker_contains_unconfirmed_initial_start,
     check_worker_accepts_acknowledged_initial_start,
+    check_worker_degrades_invalid_optional_wake_identity,
     check_worker_handshakes_before_semantic_initial_ack,
     check_worker_recovers_one_swallowed_initial_enter,
     check_worker_contains_double_swallowed_initial_enter,

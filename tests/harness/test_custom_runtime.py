@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -33,6 +34,7 @@ from harness.runtime_worker import (
     _submit_failure_requires_attention,
     run as run_worker,
 )
+from harness.cmux_wake_source import WakeObservation
 from harness.store import OperationStore
 from harness.verification import load_profiles
 from harness.workflows.custom_sequence import custom_step_request, prepare_custom_step
@@ -57,6 +59,26 @@ def sha(value: str | bytes) -> str:
 def write_json(path: Path, value: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, sort_keys=True) + "\n", encoding="utf-8")
+
+
+class FallbackWakeSource:
+    """Hermetic pacing that never claims a cmux event was observed."""
+
+    def start(self) -> bool:
+        return True
+
+    def wait(self, timeout: float) -> WakeObservation:
+        time.sleep(min(max(0.0, timeout), 0.02))
+        return WakeObservation("fallback-poll", observed_at=time.monotonic())
+
+    def retry(self) -> bool:
+        return True
+
+    def refresh_generation(self, _generation: int) -> None:
+        return None
+
+    def close(self) -> None:
+        return None
 
 
 def custom_spec() -> dict[str, object]:
@@ -299,6 +321,7 @@ with tempfile.TemporaryDirectory(prefix="custom-runtime.") as raw:
                     {"send": lambda *_args: None, "send_key": lambda *_args: None},
                 )(),
                 verification_runner=verify,
+                wake_source=FallbackWakeSource(),
             )
         )
     )

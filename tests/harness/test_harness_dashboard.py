@@ -3744,6 +3744,34 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-time.") as raw:
         "complete",
         owner=reaped_root,
     )
+    reaped_verify = "dashboard-reaped-verify"
+    _create(
+        store,
+        reaped_verify,
+        "pipeline-verify",
+        lane_id="reaped-verify-lane",
+        contract_sha256=compiled.definition_sha256,
+        parent=reaped_root,
+        owner=reaped_root,
+    )
+    _advance(
+        store,
+        reaped_verify,
+        "preflight",
+        "starting",
+        "running",
+        "finalizing",
+        "exiting",
+        "complete",
+        owner=reaped_root,
+    )
+    _liveness(
+        store,
+        reaped_root,
+        reaped_verify,
+        started_at=1_786_406_550.0,
+        last_progress_at=1_786_406_600.0,
+    )
     reaped_worktree = vault / "reaped-worktree"
     reaped_worktree.mkdir()
     plan_path = vault / "plans" / "approved.md"
@@ -3804,7 +3832,7 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-time.") as raw:
         reaped.programs[0].timing.mode == "duration"
         and reaped.programs[0].timing.seconds == 300
         and reaped.programs[0].task_name == "dashboard-reaped-task"
-        and reaped_tdd.timing == TimingView("duration", 300),
+        and reaped_tdd.timing == TimingView("duration", 150),
     )
 
     task_control_points = (

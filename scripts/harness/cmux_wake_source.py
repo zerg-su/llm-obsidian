@@ -356,6 +356,7 @@ class CmuxWakeSource:
         self.policy = CmuxWakePolicy(binding)
         self.process: object | None = None
         self._capability: bool | None = None
+        self._degraded = False
         self._closed = False
 
     def start(self) -> bool:
@@ -368,8 +369,10 @@ class CmuxWakeSource:
 
         if self._closed:
             return False
-        self._capability = None
-        return self._ensure_started()
+        self._degraded = False
+        started = self._ensure_started()
+        self._degraded = not started
+        return started
 
     def refresh_generation(self, generation: int) -> None:
         """Refresh callback routing identity without changing process scope."""
@@ -391,7 +394,10 @@ class CmuxWakeSource:
     def wait(self, timeout: float) -> WakeObservation | None:
         if self._closed or not isinstance(timeout, (int, float)) or timeout < 0:
             return WakeObservation("unavailable", observed_at=self.monotonic())
+        if self._degraded:
+            return WakeObservation("unavailable", observed_at=self.monotonic())
         if not self._ensure_started():
+            self._degraded = True
             return WakeObservation("unavailable", observed_at=self.monotonic())
         deadline = self.monotonic() + timeout
         while self.process is not None:
@@ -483,6 +489,7 @@ class CmuxWakeSource:
 
     def _degrade(self) -> WakeObservation:
         observation = WakeObservation("degraded", observed_at=self.monotonic())
+        self._degraded = True
         self._close_process()
         return observation
 

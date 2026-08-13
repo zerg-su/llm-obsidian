@@ -9,6 +9,7 @@ from .cmux_wake_source import WakeObservation
 
 
 FULL_TRANSPORT_FALLBACK_SECONDS = 30.0
+MAX_WAKE_RETRIES = 5
 TRANSPORT_STABILITY_FIELDS = (
     "stable_reads",
     "review_input_stable_reads",
@@ -32,15 +33,14 @@ class RuntimeWorkerLoopMixin:
 
     def callback_deadline_monotonic(self, now: float) -> float:
         """Project the durable wall-clock callback deadline onto this wait."""
-
         try:
             record = self.store.read(
                 self.spec["owner_id"], self.spec["operation_id"]
             )
             if self.callback_handled or not record.deadline_at:
                 return float("inf")
-            remaining = max(0.0, record.deadline_at - self.wall_clock())
-            return now + remaining
+            remaining = record.deadline_at - self.wall_clock()
+            return now + max(max(0.02, self.poll_seconds), remaining)
         except Exception:
             # The ordinary fallback reconciliation remains authoritative.
             return float("inf")
@@ -65,7 +65,6 @@ class RuntimeWorkerLoopMixin:
 
     def transport_snapshot(self) -> dict[str, object]:
         """Return bounded durable identities, never provider content."""
-
         snapshot: dict[str, object] = {}
         try:
             parent = self.store.read(
@@ -528,7 +527,9 @@ class RuntimeWorkerLoopMixin:
                     refresh(generation)
                 self._last_wake_generation = generation
             timeout = max(0.0, self._next_wake_deadline(now) - now)
-            if (
+            if self.wake_source_disabled:
+                self.sleeper(timeout)
+            elif (
                 self.next_wake_retry != float("inf")
                 and now < self.next_wake_retry
             ):
@@ -554,25 +555,53 @@ class RuntimeWorkerLoopMixin:
             "stability-confirmation",
         }:
             if observation.source == "degraded":
+                first_degradation = getattr(
+                    self, "_last_wake_source_state", ""
+                ) != "degraded"
                 self.record_wake_source_state(observation)
-                self.next_wake_retry = now + max(0.1, self.poll_seconds)
-                observation = WakeObservation(
-                    "fallback-poll", "", 0, observation.observed_at
+                if self.wake_retry_attempts < MAX_WAKE_RETRIES:
+                    delay = min(
+                        FULL_TRANSPORT_FALLBACK_SECONDS,
+                        max(1.0, self.poll_seconds)
+                        * (2 ** self.wake_retry_attempts),
+                    )
+                    self.next_wake_retry = now + delay
+                else:
+                    self.wake_source_disabled = True
+                observation = (
+                    WakeObservation(
+                        "fallback-poll", "", 0, observation.observed_at
+                    )
+                    if first_degradation
+                    else None
                 )
-            else:
+            elif observation.source in {"cmux-event", "reconnect", "cursor-gap"}:
                 self._last_wake_source_state = ""
-            self._full_reconcile(observation, now)
+                self.wake_retry_attempts = 0
+                self.wake_source_disabled = False
+            if observation is not None:
+                self._full_reconcile(observation, now)
         elif observation is not None and observation.source == "unavailable":
             self.record_wake_source_state(observation)
-            self.next_wake_retry = now + max(1.0, self.poll_seconds)
+            if self.wake_retry_attempts < MAX_WAKE_RETRIES:
+                self.next_wake_retry = now + min(
+                    FULL_TRANSPORT_FALLBACK_SECONDS,
+                    max(1.0, self.poll_seconds)
+                    * (2 ** self.wake_retry_attempts),
+                )
+            else:
+                self.wake_source_disabled = True
 
         if (
             self.next_wake_retry != float("inf")
             and now >= self.next_wake_retry
             and hasattr(self.wake_source, "retry")
         ):
-            self.wake_source.retry()
+            started = self.wake_source.retry()
+            self.wake_retry_attempts += 1
             self.next_wake_retry = float("inf")
+            if not started and self.wake_retry_attempts >= MAX_WAKE_RETRIES:
+                self.wake_source_disabled = True
         self.tick_observers()
         if now >= self.next_provider_exit_probe:
             self.next_provider_exit_probe = now + max(0.02, self.poll_seconds)

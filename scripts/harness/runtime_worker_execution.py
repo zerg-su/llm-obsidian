@@ -36,43 +36,6 @@ from .artifact_repair import ArtifactRepairError
 from .cmux_wake_source import CmuxWakeSource, WakeBinding, WakeObservation
 
 
-class _SleeperWakeSource:
-    """Hermetic event source for tests that already own time progression."""
-
-    def __init__(
-        self,
-        sleeper: Callable[[float], None],
-        monotonic: Callable[[], float],
-        poll_seconds: float,
-    ) -> None:
-        self.sleeper = sleeper
-        self.monotonic = monotonic
-        self.poll_seconds = poll_seconds
-        self.sequence = 0
-
-    def start(self) -> bool:
-        return True
-
-    def wait(self, timeout: float) -> WakeObservation:
-        self.sleeper(min(timeout, max(0.02, self.poll_seconds)))
-        self.sequence += 1
-        return WakeObservation(
-            "cmux-event",
-            "agent.hook.PostToolUse",
-            self.sequence,
-            self.monotonic(),
-        )
-
-    def retry(self) -> bool:
-        return True
-
-    def refresh_generation(self, _generation: int) -> None:
-        return None
-
-    def close(self) -> None:
-        return None
-
-
 class _UnavailableWakeSource:
     """Optional-source containment when no exact cmux binding is available."""
 
@@ -105,6 +68,25 @@ class RuntimeWorkerExecution(
     RuntimeWorkerLivenessMixin,
     RuntimeWorkerLoopMixin,
 ):
+    def _optional_wake_source(self, workspace_id: str) -> object:
+        """Contain an unusable optional wake identity as polling fallback."""
+
+        if not workspace_id:
+            return _UnavailableWakeSource(self.monotonic_clock)
+        try:
+            binding = WakeBinding(
+                runtime_root=self.spec_path.parent,
+                workspace_id=workspace_id,
+                surface_id=self.spec["surface_id"],
+                owner_id=self.spec["owner_id"],
+                operation_id=self.spec["operation_id"],
+                run_id=self.spec["run_id"],
+                generation=self.initial_generation,
+            )
+        except ValueError:
+            return _UnavailableWakeSource(self.monotonic_clock)
+        return CmuxWakeSource(binding, monotonic=self.monotonic_clock)
+
     def _await_parent_start_committed(
         self,
         *,
@@ -442,7 +424,6 @@ class RuntimeWorkerExecution(
         self.poll_seconds = poll_seconds
         self.checkpoint_probe = checkpoint_probe
         self.cmux_adapter = cmux_adapter
-        self._injected_cmux_adapter = cmux_adapter is not None
         self.review_launcher = review_launcher
         self.verification_runner = verification_runner
         self.wall_clock = wall_clock or clock or time.time
@@ -537,25 +518,8 @@ class RuntimeWorkerExecution(
                 wake_workspace_id = self._workspace_id()
             except RuntimeWorkerError:
                 wake_workspace_id = ""
-            self.wake_source = wake_source or (
-                _SleeperWakeSource(
-                    self.sleeper, self.monotonic_clock, self.poll_seconds
-                )
-                if sleeper is not None or self._injected_cmux_adapter
-                else CmuxWakeSource(
-                    WakeBinding(
-                        runtime_root=self.spec_path.parent,
-                        workspace_id=wake_workspace_id,
-                        surface_id=self.spec["surface_id"],
-                        owner_id=self.spec["owner_id"],
-                        operation_id=self.spec["operation_id"],
-                        run_id=self.spec["run_id"],
-                        generation=self.initial_generation,
-                    ),
-                    monotonic=self.monotonic_clock,
-                )
-                if wake_workspace_id
-                else _UnavailableWakeSource(self.monotonic_clock)
+            self.wake_source = wake_source or self._optional_wake_source(
+                wake_workspace_id
             )
             start_wake_source = getattr(self.wake_source, "start", None)
             if start_wake_source is not None:
@@ -566,7 +530,7 @@ class RuntimeWorkerExecution(
             self.supervisor_identity = self.process.capture_identity(os.getpid())
             if not self.supervisor_identity:
                 raise ProcessError("runtime worker identity is unavailable")
-        except (OSError, ProcessError, RuntimeWorkerError, ValueError):
+        except (OSError, ProcessError, RuntimeWorkerError):
             if self.handle is not None:
                 self.contain_provider_start_failure(self.process, self.handle)
             source = getattr(self, "wake_source", None)
@@ -622,6 +586,8 @@ class RuntimeWorkerExecution(
         self.next_transport_confirmation = float("inf")
         self.next_provider_exit_probe = 0.0
         self.next_wake_retry = float("inf")
+        self.wake_retry_attempts = 0
+        self.wake_source_disabled = False
         self.active_target: tuple[int, str, str, Path] | None = None
         self.last_digest = ""
         self.stable_reads = 0

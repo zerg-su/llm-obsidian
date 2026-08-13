@@ -8,6 +8,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -27,6 +28,7 @@ from harness.runtime_worker import (
     provider_argv,
     run as run_worker,
 )
+from harness.cmux_wake_source import WakeObservation
 from harness.store import OperationStore
 from research_contract import ResearchContractError, load_artifact
 
@@ -54,6 +56,26 @@ class FakeCmux:
 
     def resume_checkpoint(self, _surface_id: str, _runtime: str) -> str:
         return "research-checkpoint"
+
+
+class FallbackWakeSource:
+    """Hermetic pacing that explicitly exercises fallback reconciliation."""
+
+    def start(self) -> bool:
+        return True
+
+    def wait(self, timeout: float) -> WakeObservation:
+        time.sleep(min(max(0.0, timeout), 0.02))
+        return WakeObservation("fallback-poll", observed_at=time.monotonic())
+
+    def retry(self) -> bool:
+        return True
+
+    def refresh_generation(self, _generation: int) -> None:
+        return None
+
+    def close(self) -> None:
+        return None
 
 
 def start_record(store: OperationStore, operation_id: str, run_id: str) -> None:
@@ -280,6 +302,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-research.") as raw:
             poll_seconds=0.02,
             checkpoint_probe=cmux.resume_checkpoint,
             cmux_adapter=cmux,
+            wake_source=FallbackWakeSource(),
         )
     record = store.read("owner-research", fetch_id)
     normalized_artifact_raw = (cwd / "artifact.json").read_bytes()
@@ -360,6 +383,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-research.") as raw:
         poll_seconds=0.02,
         checkpoint_probe=duplicate_cmux.resume_checkpoint,
         cmux_adapter=duplicate_cmux,
+        wake_source=FallbackWakeSource(),
     )
     check(
         "accepted research callback never duplicates its origin wake",
@@ -468,6 +492,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-research-synth.") as raw:
             poll_seconds=0.02,
             checkpoint_probe=cmux.resume_checkpoint,
             cmux_adapter=cmux,
+            wake_source=FallbackWakeSource(),
         )
     synth_payload = {
         "stage": "synth",
@@ -576,6 +601,7 @@ with tempfile.TemporaryDirectory(
         poll_seconds=0.02,
         checkpoint_probe=cmux.resume_checkpoint,
         cmux_adapter=cmux,
+        wake_source=FallbackWakeSource(),
     )
     record = store.read("owner-research", synth_id)
     check(
@@ -610,6 +636,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-research-invalid.") as raw:
         poll_seconds=0.02,
         checkpoint_probe=cmux.resume_checkpoint,
         cmux_adapter=cmux,
+        wake_source=FallbackWakeSource(),
     )
     record = store.read("owner-research", invalid_id)
     check(
@@ -659,6 +686,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-start-failure.") as raw:
             poll_seconds=0.02,
             checkpoint_probe=FakeCmux().resume_checkpoint,
             cmux_adapter=FakeCmux(),
+            wake_source=FallbackWakeSource(),
         )
     contained_handle = contain.call_args.args[1]
     check(
@@ -692,6 +720,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-provider-exit.") as raw:
         poll_seconds=0.02,
         checkpoint_probe=FakeCmux().resume_checkpoint,
         cmux_adapter=FakeCmux(),
+        wake_source=FallbackWakeSource(),
     )
     record = store.read("owner-research", operation_id)
     check(

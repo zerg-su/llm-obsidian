@@ -39,6 +39,7 @@ from harness.pipeline_builtins import (  # noqa: E402
 from harness.pipelines import compile_pipeline  # noqa: E402
 from harness.adapters.process import ProcessAdapter  # noqa: E402
 from harness.runtime_worker import run as run_worker  # noqa: E402
+from harness.cmux_wake_source import WakeObservation  # noqa: E402
 from harness.store import OperationStore  # noqa: E402
 from harness.verification import load_profiles  # noqa: E402
 from harness.workflows.review import review_round_payload  # noqa: E402
@@ -74,6 +75,26 @@ if not summary.exists():
     os.replace(temporary, summary)
 time.sleep(0.3)
 """
+
+
+class FallbackWakeSource:
+    """Hermetic simulator pacing explicitly labelled as fallback polling."""
+
+    def start(self) -> bool:
+        return True
+
+    def wait(self, timeout: float) -> WakeObservation:
+        time.sleep(min(max(0.0, timeout), 0.02))
+        return WakeObservation("fallback-poll", observed_at=time.monotonic())
+
+    def retry(self) -> bool:
+        return True
+
+    def refresh_generation(self, _generation: int) -> None:
+        return None
+
+    def close(self) -> None:
+        return None
 
 
 def write_json(path: Path, value: object) -> None:
@@ -458,6 +479,7 @@ class CorridorWorld:
                         cmux_adapter=self.cmux,
                         review_launcher=launcher,
                         verification_runner=verification_runner,
+                        wake_source=FallbackWakeSource(),
                     )
                 )
             except BaseException as exc:  # crash boundary evidence

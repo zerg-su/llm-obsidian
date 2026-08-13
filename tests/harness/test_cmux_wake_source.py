@@ -379,6 +379,42 @@ with tempfile.TemporaryDirectory() as raw_root:
 
 
 with tempfile.TemporaryDirectory() as raw_root:
+    capability_calls: list[list[str]] = []
+    launches: list[FakeProcess] = []
+
+    def cached_capability(
+        argv: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        capability_calls.append(argv)
+        return capable(argv, **kwargs)
+
+    def persistently_invalid(
+        _argv: list[str], **_kwargs: object
+    ) -> FakeProcess:
+        process = FakeProcess([{**ack(), "protocol": "invalid"}])
+        launches.append(process)
+        return process
+
+    source = CmuxWakeSource(
+        binding(Path(raw_root)),
+        runner=cached_capability,
+        popen=persistently_invalid,
+        wait_readable=lambda stream, timeout: True,
+        monotonic=lambda: 13.0,
+    )
+    check(
+        "invalid acknowledgement degrades the first subscription",
+        source.wait(0.1).source == "degraded",
+    )
+    source.retry()
+    check(
+        "degraded retries cache capability and start only one new subscription",
+        len(capability_calls) == 1 and len(launches) == 2,
+    )
+    source.close()
+
+
+with tempfile.TemporaryDirectory() as raw_root:
     root = Path(raw_root)
     os.symlink(root, root / "linked")
     source = CmuxWakeSource(binding(root / "linked"), runner=capable)
