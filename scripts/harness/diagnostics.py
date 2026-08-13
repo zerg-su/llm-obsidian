@@ -50,16 +50,8 @@ def _recovery_signal(
     store: OperationStore,
     owner_id: str,
     operation_id: str,
-    path: Path | None = None,
+    path: Path,
 ) -> dict[str, Any] | None:
-    path = path or (
-        store.root
-        / "owners"
-        / owner_id
-        / "runtime"
-        / operation_id
-        / "review-continuation-recovery.json"
-    )
     if not path.exists():
         return None
     evidence = [_relative(store.root, path)]
@@ -109,9 +101,8 @@ def _recovery_signals(
     runtime = (
         store.root / "owners" / owner_id / "runtime" / operation_id
     )
-    legacy = runtime / "review-continuation-recovery.json"
     receipt_root = runtime / "review-continuation-recovery"
-    paths = [legacy]
+    paths: list[Path] = []
     if receipt_root.is_dir() and not receipt_root.is_symlink():
         paths.extend(sorted(receipt_root.glob("*.json")))
     values = [

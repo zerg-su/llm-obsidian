@@ -1139,6 +1139,10 @@ with tempfile.TemporaryDirectory(prefix="review-continuation-real-gate.") as raw
         store.root / "owners" / "owner-1" / "runtime" / "dispatch-1"
     )
     root_runtime.mkdir(parents=True, exist_ok=True)
+    (root_runtime / "callback-error.json").write_text(
+        '{"schema_version":1,"status":"callback-invalid"}\n',
+        encoding="utf-8",
+    )
     ingestions: list[str] = []
 
     class AliveReviewProcess:

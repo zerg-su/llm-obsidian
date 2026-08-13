@@ -191,6 +191,96 @@ with tempfile.TemporaryDirectory(prefix="review-continuation-observation.") as r
         (drive_snapshot, drive_decision),
     )
 
+    launch_owner = "observation-launch-owner"
+    launch_operation = "observation-launch-root"
+    launch_attempt = "observation-launch-attempt"
+    launch_parent = f"{launch_attempt}-holistic"
+    launch_run = "observation-launch-run"
+    launch_lane = "observation-launch-lane"
+    store.create(
+        operation_spec(launch_operation, launch_owner, "dispatch"),
+        lane_id="observation-launch-root-lane",
+        run_id="observation-launch-root-run",
+    )
+    for state in ("preflight", "starting", "running"):
+        store.transition(launch_owner, launch_operation, state)
+    store.create(
+        operation_spec(
+            launch_parent,
+            launch_owner,
+            "simple-review-holistic",
+            parent_operation_id=launch_operation,
+            root_operation_id=launch_operation,
+        ),
+        lane_id=launch_lane,
+        run_id=launch_run,
+    )
+    store.transition(launch_owner, launch_parent, "preflight")
+    store.transition(launch_owner, launch_parent, "starting")
+    launch_parent_record = store.read(launch_owner, launch_parent)
+    launch_pending = begin_effect(launch_parent_record, "start-provider")
+    store.save(
+        launch_pending,
+        expected_revision=launch_parent_record.revision,
+    )
+    launch_gate = base / "launch-gate"
+    write_gate(
+        launch_gate,
+        {
+            "schema_version": 1,
+            "dispatch_operation_id": launch_operation,
+            "status": "reviewing",
+            "context": {"head_sha": HEAD},
+            "attempt": {
+                "status": "awaiting-callback",
+                "identity": {
+                    "attempt_id": launch_attempt,
+                    "cycle": 1,
+                    "exact_head_sha": HEAD,
+                },
+            },
+            "lanes": [
+                {
+                    "axis": "openai-holistic",
+                    "operation_id": launch_parent,
+                    "run_id": launch_run,
+                    "lane_id": launch_lane,
+                }
+            ],
+            "round_results": {},
+        },
+    )
+    launch_worker = SimpleNamespace(
+        spec={
+            "owner_id": launch_owner,
+            "operation_id": launch_operation,
+            "cwd": ROOT,
+        },
+        spec_path=(
+            store.root
+            / "owners"
+            / launch_owner
+            / "runtime"
+            / launch_operation
+            / "launch.json"
+        ),
+        store=store,
+        review=SimpleNamespace(gate_root=launch_gate),
+        meta={"finalization_policy": {"max_cycles": 5}},
+    )
+    launch_snapshot = observe_review_continuation(launch_worker)
+    launch_decision = classify_review_continuation(launch_snapshot)
+    check(
+        "durable exact start-provider launch remains a live review window",
+        len(launch_snapshot.lanes) == 1
+        and launch_snapshot.lanes[0].pending_effect == "start-provider"
+        and launch_snapshot.lanes[0].launch_in_progress
+        and launch_snapshot.lanes[0].ready_identity_exact
+        and launch_decision.disposition
+        is RecoveryDisposition.REVIEW_IN_PROGRESS,
+        (launch_snapshot, launch_decision),
+    )
+
     callback_owner = "observation-callback-owner"
     callback_operation = "observation-callback-root"
     callback_run = "observation-callback-run"
@@ -203,6 +293,10 @@ with tempfile.TemporaryDirectory(prefix="review-continuation-observation.") as r
         / callback_operation
     )
     callback_runtime.mkdir(parents=True)
+    (callback_runtime / "callback-error.json").write_text(
+        '{"schema_version":1,"status":"callback-invalid"}\n',
+        encoding="utf-8",
+    )
     attempt_id = "observation-callback-attempt"
     parent_id = f"{attempt_id}-holistic"
     parent_run = "observation-parent-run"
@@ -323,6 +417,7 @@ with tempfile.TemporaryDirectory(prefix="review-continuation-observation.") as r
     check(
         "durable callback records reconstruct exact ingestion authority",
         len(callback_snapshot.accepted_callbacks) == 1
+        and callback_snapshot.attention_status == "callback-invalid"
         and callback_snapshot.accepted_callbacks[0].callback_id
         == envelope.callback_id
         and callback_decision.disposition

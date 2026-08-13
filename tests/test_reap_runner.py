@@ -47,6 +47,7 @@ with tempfile.TemporaryDirectory(prefix="reap-runner-test.") as raw:
             "CLAUDE_CODE_SESSION_ID": "stale-claude-session",
             "CODEX_THREAD_ID": "exact-codex-session",
         },
+        clear=True,
     ):
         detected_session = runner.current_session(
             vault,

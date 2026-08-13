@@ -53,8 +53,9 @@ scheduler, provider retry, callback replay, or generic attention self-heal.
 ### Candidate boundary
 
 - This work does not publish a release or update the installed RC6.3 plugin.
-  One disposable custom dogfood corridor supplies live continuation, typed
-  reap, and resource-cleanup evidence without merging its product branch.
+  A disposable custom dogfood corridor covered the pre-review candidate; the
+  post-review HEAD still requires the staged release-gate corridor after merge,
+  RC6.4 plugin update, and a fresh host session.
 - The reap session-binding change is the narrow, coordinator-authorized repair
   of a repository-owned cross-runtime adapter failure encountered by that
   corridor; it does not relax task identity or finalization checks.

@@ -64,6 +64,23 @@ check(
     callback_decision,
 )
 
+for latch in (
+    "",
+    "wiki-summary-invalid",
+    "callback-wake-effect-uncertain",
+    "pipeline-verification-effect-uncertain",
+):
+    refused_latch = classify_review_continuation(
+        replace(callback, attention_status=latch)
+    )
+    check(
+        f"accepted callback ingestion refuses non-recoverable latch {latch or 'absent'}",
+        refused_latch.disposition is RecoveryDisposition.REFUSE
+        and refused_latch.reason is RecoveryReason.ATTENTION_NOT_RECOVERABLE
+        and refused_latch.receipt is None,
+        refused_latch,
+    )
+
 def refused(label: str, snapshot: RecoverySnapshot, reason: RecoveryReason) -> None:
     decision = classify_review_continuation(snapshot)
     check(
@@ -218,6 +235,35 @@ check(
     and pre_ready_decision.reason is RecoveryReason.REVIEW_ACTIVE
     and pre_ready_decision.receipt is None,
     pre_ready_decision,
+)
+live_start_provider = replace(
+    pre_ready,
+    lanes=(replace(pre_ready.lanes[0], pending_effect="start-provider"),),
+    effect_requires_replay=True,
+)
+live_start_provider_decision = classify_review_continuation(
+    live_start_provider
+)
+check(
+    "an exact live start-provider launch remains wait-only",
+    live_start_provider_decision.disposition
+    is RecoveryDisposition.REVIEW_IN_PROGRESS
+    and live_start_provider_decision.reason is RecoveryReason.REVIEW_ACTIVE
+    and live_start_provider_decision.receipt is None,
+    live_start_provider_decision,
+)
+refused(
+    "a different pending launch effect remains fail-closed",
+    replace(
+        live_start_provider,
+        lanes=(
+            replace(
+                live_start_provider.lanes[0],
+                pending_effect="provider-input",
+            ),
+        ),
+    ),
+    RecoveryReason.EFFECT_REPLAY_REQUIRED,
 )
 refused(
     "a failed pre-ready identity cannot suppress review drive",

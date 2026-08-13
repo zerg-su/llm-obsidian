@@ -151,7 +151,7 @@ with tempfile.TemporaryDirectory(prefix="harness-diagnostics.") as raw:
         ],
     )
 
-    callback_receipt = (
+    legacy_callback_receipt = (
         store_root
         / "owners"
         / owner
@@ -159,23 +159,39 @@ with tempfile.TemporaryDirectory(prefix="harness-diagnostics.") as raw:
         / operation
         / "review-continuation-recovery.json"
     )
-    callback_receipt.parent.mkdir(parents=True, exist_ok=True)
-    callback_receipt.write_text(
-        json.dumps(
-            recovery_receipt(
-                recovery_class="accepted-callback",
-                operation_id=operation,
-                owner_id=owner,
-                status="prepared",
-            ),
-            sort_keys=True,
-        )
+    callback_receipt_value = recovery_receipt(
+        recovery_class="accepted-callback",
+        operation_id=operation,
+        owner_id=owner,
+        status="prepared",
+    )
+    legacy_callback_receipt.parent.mkdir(parents=True, exist_ok=True)
+    legacy_callback_receipt.write_text(
+        json.dumps(callback_receipt_value, sort_keys=True)
         + "\n",
         encoding="utf-8",
     )
     packet = observe(store_root, owner)
     check(
-        "accepted callback receipt refines the pending-ingestion diagnostic",
+        "unreleased single-file recovery receipt has no diagnostic authority",
+        [signal["code"] for signal in packet["signals"]]
+        == ["review-callback-pending-ingestion"]
+        and packet["model_required"] is False,
+    )
+    legacy_callback_receipt.unlink()
+    callback_receipt = (
+        legacy_callback_receipt.parent
+        / "review-continuation-recovery"
+        / f"{'c' * 64}.json"
+    )
+    callback_receipt.parent.mkdir()
+    callback_receipt.write_text(
+        json.dumps(callback_receipt_value, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    packet = observe(store_root, owner)
+    check(
+        "scoped accepted callback receipt refines the pending-ingestion diagnostic",
         [signal["code"] for signal in packet["signals"]]
         == ["review-callback-ingestion-prepared"]
         and packet["model_required"] is False,
@@ -276,7 +292,8 @@ with tempfile.TemporaryDirectory(prefix="harness-diagnostics.") as raw:
         / drive_owner
         / "runtime"
         / drive_owner
-        / "review-continuation-recovery.json"
+        / "review-continuation-recovery"
+        / f"{'d' * 64}.json"
     )
     drive_receipt.parent.mkdir(parents=True, exist_ok=True)
     drive_receipt.write_text(

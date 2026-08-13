@@ -424,6 +424,7 @@ def _live_review(snapshot: RecoverySnapshot) -> bool:
                 (
                     lane.launch_in_progress
                     and lane.state in {"preflight", "starting", "running"}
+                    and lane.pending_effect in {"", "start-provider"}
                     and lane.ready_identity_exact
                 )
                 or (
@@ -431,6 +432,7 @@ def _live_review(snapshot: RecoverySnapshot) -> bool:
                     and lane.round_run_id
                     and lane.state in {"awaiting-callback", "finalizing"}
                     and lane.round_state in _LIVE_ROUND_STATES
+                    and not lane.pending_effect
                     and lane.ready_identity_exact
                     and lane.process_alive
                 )
@@ -447,15 +449,15 @@ def classify_review_continuation(
 
     if snapshot.root.pending_effect:
         return _refuse(RecoveryReason.PENDING_EFFECT)
-    if snapshot.effect_requires_replay or any(
-        lane.pending_effect for lane in snapshot.lanes
-    ):
-        return _refuse(RecoveryReason.EFFECT_REPLAY_REQUIRED)
     if _live_review_evidence_valid(snapshot) and _live_review(snapshot):
         return RecoveryDecision(
             RecoveryDisposition.REVIEW_IN_PROGRESS,
             RecoveryReason.REVIEW_ACTIVE,
         )
+    if snapshot.effect_requires_replay or any(
+        lane.pending_effect for lane in snapshot.lanes
+    ):
+        return _refuse(RecoveryReason.EFFECT_REPLAY_REQUIRED)
     if not _common_evidence_valid(snapshot):
         return _refuse(RecoveryReason.MALFORMED_EVIDENCE)
     if snapshot.recovery_class == "review-drive":
@@ -523,6 +525,7 @@ def _classify_accepted_callback(
         snapshot.root.state != "attention-required"
         or snapshot.root.resume_state
         not in {"running", "awaiting-callback", "verifying"}
+        or snapshot.attention_status != "callback-invalid"
     ):
         return _refuse(RecoveryReason.ATTENTION_NOT_RECOVERABLE)
     if (

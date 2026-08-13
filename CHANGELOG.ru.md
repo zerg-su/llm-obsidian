@@ -58,8 +58,9 @@
 ### Граница кандидата
 
 - Эта работа не публикует релиз и не обновляет установленный RC6.3 plugin.
-  Один disposable custom dogfood corridor даёт live evidence продолжения,
-  typed reap и очистки ресурсов без merge его product branch.
+  Disposable custom dogfood corridor покрывает только pre-review candidate;
+  post-review HEAD всё ещё требует отдельного release-gate corridor после
+  merge, обновления RC6.4 plugin и запуска свежей host session.
 - Привязка session для reap — узкий, разрешённый координатором ремонт сбоя
   repository-owned cross-runtime adapter, обнаруженного этим corridor; проверки
   identity задачи и finalization при этом не ослаблены.
