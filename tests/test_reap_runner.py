@@ -6,11 +6,13 @@ from __future__ import annotations
 import importlib.util
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -39,6 +41,21 @@ def check(name: str, value: bool) -> None:
 with tempfile.TemporaryDirectory(prefix="reap-runner-test.") as raw:
     vault = Path(raw)
     (vault / "wiki/meta/sessions").mkdir(parents=True)
+    with mock.patch.dict(
+        os.environ,
+        {
+            "CLAUDE_CODE_SESSION_ID": "stale-claude-session",
+            "CODEX_THREAD_ID": "exact-codex-session",
+        },
+    ):
+        detected_session = runner.current_session(
+            vault,
+            {"routing": {"session": {"runtime": "codex"}}},
+        )
+    check(
+        "reap uses the frozen coordinator runtime over a stale foreign runtime",
+        detected_session == "exact-codex-session",
+    )
     summary = {
         "schema_version": 1,
         "type": "session",

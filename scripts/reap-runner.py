@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
@@ -86,7 +87,24 @@ def run(argv: list[str], *, cwd: Path, input_text: str | None = None, label: str
     return result.stdout
 
 
-def current_session(vault: Path) -> str:
+def current_session(vault: Path, meta: dict[str, Any]) -> str:
+    routing = meta.get("routing")
+    route_session = (
+        routing.get("session") if isinstance(routing, dict) else None
+    )
+    runtime = (
+        str(route_session.get("runtime") or "")
+        if isinstance(route_session, dict)
+        else ""
+    )
+    runtime_key = {
+        "claude": "CLAUDE_CODE_SESSION_ID",
+        "codex": "CODEX_THREAD_ID",
+    }.get(runtime)
+    if runtime_key:
+        bound = str(os.environ.get(runtime_key) or "").strip()
+        if bound:
+            return bound
     value = run([str(vault / "scripts/current-session-id.sh")], cwd=vault, label="session lookup").strip()
     if not value or value == "unknown":
         raise ReapError("current coordinator session is unknown")
@@ -629,7 +647,8 @@ def main() -> int:
     try:
         vault = args.vault_root.expanduser().resolve()
         worktree = args.worktree.expanduser().resolve()
-        session = args.current_session.strip() or current_session(vault)
+        meta = read_json(worktree / ".task-meta.json")
+        session = args.current_session.strip() or current_session(vault, meta)
         print(json.dumps(apply_reap(vault, worktree, session), ensure_ascii=False, sort_keys=True))
         return 0
     except (ReapError, ContractError, WikiSummaryError, OSError, ValueError) as exc:
