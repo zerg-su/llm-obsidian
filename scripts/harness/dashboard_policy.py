@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from .contracts import OperationRecord
 from .state_machine import TERMINAL
@@ -20,6 +20,7 @@ MAX_LANES = 8
 MAX_CHILDREN = 8
 MAX_DEPTH = 4
 MAX_REVIEW_CYCLES = 5
+FINALIZATION_INDEPENDENT_KINDS = frozenset({"structural-pivot"})
 
 UNKNOWN = "unknown"
 HEALTHY = "healthy"
@@ -240,6 +241,8 @@ class ProgramView:
     current_stage: str = UNKNOWN
     task_result: TaskResultView = UNKNOWN_TASK_RESULT
     history: tuple[LifecyclePhaseView, ...] = ()
+    active_route: RouteView = UNKNOWN_ROUTE
+    active_stage: str = ""
 
 
 @dataclass(frozen=True)
@@ -312,6 +315,28 @@ def route_view(record: OperationRecord) -> RouteView:
         route.effort or UNKNOWN,
         preset or UNKNOWN,
     )
+
+
+def active_finalization_operation(
+    root: OperationRecord,
+    records: Sequence[OperationRecord],
+) -> tuple[RouteView, str] | None:
+    """Select one exact active independent finalization display override."""
+
+    root_id = root.spec.operation_id
+    active = tuple(
+        record
+        for record in records
+        if record.spec.kind in FINALIZATION_INDEPENDENT_KINDS
+        and record.spec.parent_operation_id == root_id
+        and record.spec.root_operation_id == root_id
+        and record.state not in TERMINAL
+    )
+    if not active:
+        return None
+    if len(active) != 1:
+        return UNKNOWN_ROUTE, UNKNOWN
+    return route_view(active[0]), active[0].spec.kind
 
 
 def current_verification_ids(

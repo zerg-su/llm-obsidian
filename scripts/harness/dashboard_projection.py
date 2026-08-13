@@ -66,6 +66,7 @@ from .dashboard_policy import (
     StepView,
     TimingView,
     aggregate as _aggregate,
+    active_finalization_operation as _active_finalization_operation,
     current_verification_ids as _current_verification_ids,
     escalate,
     executor_status as _executor_status,
@@ -591,6 +592,7 @@ def _surface(
 def _uncompiled_program(
     store: OperationStore,
     record: OperationRecord,
+    members: list[OperationRecord],
     lanes: tuple[LaneView, ...],
     surface: str,
     children: tuple[ChildView, ...],
@@ -606,6 +608,8 @@ def _uncompiled_program(
     """
 
     bound = bool(record.spec.contract_sha256)
+    active = _active_finalization_operation(record, members)
+    active_route, active_stage = active or (UNKNOWN_ROUTE, "")
     return ProgramView(
         operation_id=record.spec.operation_id,
         kind=record.spec.kind,
@@ -635,9 +639,12 @@ def _uncompiled_program(
         task_name=root_task_name(store, record) or UNKNOWN,
         self_healed_count=repair_receipt_count(store, record),
         current_stage=(
-            "complete" if record.state == "complete" else record.state
+            active_stage
+            or ("complete" if record.state == "complete" else record.state)
         ),
         task_result=root_task_result(store, record),
+        active_route=active_route,
+        active_stage=active_stage,
     )
 
 
@@ -670,6 +677,7 @@ def _program(
         return _uncompiled_program(
             store,
             record,
+            members,
             lanes,
             surface,
             loose,
@@ -714,7 +722,9 @@ def _program(
         if active_phase is not None
         else ""
     )
-    current_stage = (
+    active = _active_finalization_operation(record, members)
+    active_route, active_stage = active or (UNKNOWN_ROUTE, "")
+    current_stage = active_stage or (
         "complete"
         if record.state == "complete"
         else phase_stage or next(
@@ -768,6 +778,8 @@ def _program(
         current_stage=current_stage,
         task_result=root_task_result(store, record),
         history=history,
+        active_route=active_route,
+        active_stage=active_stage,
     )
 
 

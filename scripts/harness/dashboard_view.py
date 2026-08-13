@@ -305,13 +305,14 @@ def _program_lines(program: ProgramView) -> list[str]:
         if program.loop_limit
         else "not applicable"
     )
+    active_route, active_stage = _active_route_stage(program)
     lines = [
         header,
         f"  classification {program.classification}  pipeline {program.pipeline}",
         f"  progress {sum(step.status == 'complete' for step in program.steps)}/{len(program.steps)}  root {_timing(program.timing)}",
         f"  next {NEXT_ACTION_TEXT.get(program.next_action, program.next_action)}",
         f"  surface {program.surface}  definition {_short(program.definition_sha256) or 'none'}",
-        f"  executor {_route(program.executor)}  {program.executor_status}",
+        f"  executor {_route(active_route)}  {active_stage}",
         f"  controls {controls}  loop {loop}",
     ]
     if program.self_healed_count or program.task_result.status == "complete":
@@ -644,7 +645,7 @@ def _root_summary(program: ProgramView) -> list[RootRow]:
         current=program.state not in TERMINAL,
     )
     suffix = f"  {timing}" if timing else ""
-    route = program.executor
+    route, active_stage = _active_route_stage(program)
     executor_timing = _known_timing(program.timing)
     rows = [
         RootRow(
@@ -657,7 +658,7 @@ def _root_summary(program: ProgramView) -> list[RootRow]:
         ),
         RootRow(
             f"  Executor {route.runtime}/{route.model} · {route.effort}  "
-            f"{program.executor_status}"
+            f"{active_stage}"
             + (f"  {executor_timing}" if executor_timing else ""),
             NO_EMPHASIS,
             ROOT_PRIORITY_ROUTE,
@@ -684,6 +685,12 @@ def _root_summary(program: ProgramView) -> list[RootRow]:
             )
         )
     return rows
+
+
+def _active_route_stage(program: ProgramView) -> tuple[RouteView, str]:
+    if program.active_stage:
+        return program.active_route, program.active_stage
+    return program.executor, program.executor_status
 
 
 def _root_step_lines(

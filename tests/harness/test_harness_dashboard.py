@@ -1934,6 +1934,122 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-current-tree.") as ra
         and current.truncated["lanes"] > 0,
     )
 
+with tempfile.TemporaryDirectory(prefix="harness-dashboard-pivot-route.") as raw:
+    store_root = Path(raw) / "harness"
+    store = OperationStore(store_root)
+    compiled = compiled_builtin("engineering/change")
+    pivot_root = "dashboard-pivot-root"
+    sol_high = RuntimeRoute(
+        "codex", "gpt-5.6-sol", "high", "executor", "c" * 64
+    )
+    sol_xhigh = RuntimeRoute(
+        "codex", "gpt-5.6-sol", "xhigh", "reviewer-callback", "d" * 64
+    )
+    _create(
+        store,
+        pivot_root,
+        "dispatch",
+        lane_id="pivot-root-lane",
+        contract_sha256=compiled.definition_sha256,
+        owner=pivot_root,
+        route=sol_high,
+    )
+    _advance(
+        store, pivot_root, "preflight", "starting", "running", owner=pivot_root
+    )
+    OperationSupervisor(store, pivot_root, pivot_root).bind_resources(
+        OwnedResources(surface_id=ROOT_SURFACE)
+    )
+    pivot_id = "dashboard-structural-pivot"
+    store.create(
+        OperationSpec(
+            pivot_id,
+            f"{pivot_id}-key",
+            "structural-pivot",
+            pivot_root,
+            sol_xhigh,
+            "packets/pivot.json",
+            "scoped",
+            contract_sha256="e" * 64,
+            parent_operation_id=pivot_root,
+            root_operation_id=pivot_root,
+        ),
+        lane_id="pivot-independent-lane",
+        run_id=f"{pivot_id}-run",
+    )
+    _advance(
+        store,
+        pivot_id,
+        "preflight",
+        "starting",
+        "running",
+        "awaiting-callback",
+        owner=pivot_root,
+    )
+    pivot_projection = project_root(
+        store_root,
+        pivot_root,
+        inventory=LiveInventory({ROOT_SURFACE.casefold(): "workspace-9"}),
+    )
+    pivot_program = pivot_projection.programs[0]
+    pivot_route_row = next(
+        line
+        for line in render(
+            pivot_projection, scope="root", color=False
+        ).splitlines()
+        if line.strip().startswith("Executor ")
+    )
+    check(
+        "an active Sol XHigh structural pivot replaces the Sol High display route",
+        pivot_program.executor.runtime == "codex"
+        and pivot_program.executor.model == "gpt-5.6-sol"
+        and pivot_program.executor.effort == "high"
+        and pivot_program.current_stage == "structural-pivot"
+        and "Executor codex/gpt-5.6-sol · xhigh  structural-pivot"
+        in pivot_route_row,
+    )
+
+    second_pivot = "dashboard-structural-pivot-ambiguous"
+    store.create(
+        OperationSpec(
+            second_pivot,
+            f"{second_pivot}-key",
+            "structural-pivot",
+            pivot_root,
+            sol_xhigh,
+            "packets/second-pivot.json",
+            "scoped",
+            contract_sha256="f" * 64,
+            parent_operation_id=pivot_root,
+            root_operation_id=pivot_root,
+        ),
+        lane_id="pivot-independent-lane-2",
+        run_id=f"{second_pivot}-run",
+    )
+    _advance(
+        store,
+        second_pivot,
+        "preflight",
+        "starting",
+        "running",
+        owner=pivot_root,
+    )
+    ambiguous_projection = project_root(store_root, pivot_root)
+    ambiguous_program = ambiguous_projection.programs[0]
+    ambiguous_route_row = next(
+        line
+        for line in render(
+            ambiguous_projection, scope="root", color=False
+        ).splitlines()
+        if line.strip().startswith("Executor ")
+    )
+    check(
+        "multiple active finalization-independent records fail closed as unknown",
+        ambiguous_program.current_stage == "unknown"
+        and "Executor unknown/unknown · unknown  unknown"
+        in ambiguous_route_row,
+    )
+
 with tempfile.TemporaryDirectory(prefix="harness-dashboard-closed.") as raw:
     # The harness closes a review by cancelling the parent and retaining the
     # completed round. That is the normal terminal shape, not an alarm.
