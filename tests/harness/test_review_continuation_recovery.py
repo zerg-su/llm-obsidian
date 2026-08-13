@@ -166,6 +166,52 @@ check(
     live_decision,
 )
 
+pre_ready = replace(
+    live,
+    root=replace(
+        live.root,
+        run_id="",
+        revision=-1,
+    ),
+    attempt=replace(
+        live.attempt,
+        attempt_id="",
+        cycle=-1,
+        max_cycles=-1,
+    ),
+    lanes=(
+        replace(
+            live.lanes[0],
+            axis="",
+            state="starting",
+            round_operation_id="",
+            round_run_id="",
+            round_state="",
+            launch_in_progress=True,
+            ready_identity_exact=True,
+            process_alive=False,
+        ),
+    ),
+)
+pre_ready_decision = classify_review_continuation(pre_ready)
+check(
+    "a bound pre-ready launch is wait-only without recovery identity",
+    pre_ready_decision.disposition is RecoveryDisposition.REVIEW_IN_PROGRESS
+    and pre_ready_decision.reason is RecoveryReason.REVIEW_ACTIVE
+    and pre_ready_decision.receipt is None,
+    pre_ready_decision,
+)
+refused(
+    "a failed pre-ready identity cannot suppress review drive",
+    replace(
+        pre_ready,
+        lanes=(
+            replace(pre_ready.lanes[0], ready_identity_exact=False),
+        ),
+    ),
+    RecoveryReason.MALFORMED_EVIDENCE,
+)
+
 for status in (
     "wiki-summary-invalid",
     "callback-wake-effect-uncertain",

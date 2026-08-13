@@ -16,6 +16,37 @@
 внутренними контрольными точками и вошли в следующие публичные релизы; тегов и
 пакетов с этими номерами не выпускалось.
 
+## [2.6.7-rc6.4] — 2026-08-13
+
+Кандидат ограниченного автономного продолжения review. Он добавляет в
+существующий polling worker ровно два code-owned класса восстановления и не
+добавляет scheduler, повтор provider/callback или общий self-heal для
+`attention-required`.
+
+### Исправлено
+
+- Terminal review `changes-requested` может ровно один раз продолжиться после
+  identity-bound resolution, изменения product HEAD и успешной exact-HEAD
+  verification, если нет pending effect и доступна следующая review iteration.
+- Immutable review callback, уже принятый operation store, но ещё не
+  обработанный точным gate, проходит через зарегистрированный gate workflow
+  без повторного acceptance или delivery callback.
+
+### Изменено
+
+- Оба пути используют один pure classifier и один revision-bound recovery
+  receipt со стадиями prepared/finalized. Crash, restart и concurrent ticks
+  сходятся без повторных transitions или резервирования finalization cycle.
+- Diagnostics выводит receipt-bound причины `review-drive-recovery-*` и
+  `review-callback-ingestion-*`; неоднозначные identity, uncertain effects,
+  исчерпанные ceilings и посторонние attention classes остаются fail-closed.
+
+### Граница кандидата
+
+- Эта работа не публикует релиз и не обновляет установленный RC6.3 plugin.
+  Один disposable custom dogfood corridor даёт live evidence продолжения,
+  typed reap и очистки ресурсов без merge его product branch.
+
 ## [2.6.7-rc5] — 2026-08-12
 
 Кандидат ограниченной orchestration для structural pivot. Существующие

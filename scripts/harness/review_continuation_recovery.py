@@ -379,6 +379,23 @@ def _common_evidence_valid(snapshot: RecoverySnapshot) -> bool:
     )
 
 
+def _live_review_evidence_valid(snapshot: RecoverySnapshot) -> bool:
+    """Validate the narrower wait-only authority of an active reviewer.
+
+    The pre-launch window predates a finalization attempt identity and does
+    not require a root transition.  Its decision can only suppress a duplicate
+    drive; it cannot create a recovery receipt or mutate lifecycle state.
+    """
+
+    return (
+        snapshot.recovery_class in {"review-drive", "accepted-callback"}
+        and bool(_HEAD_RE.fullmatch(snapshot.current_head))
+        and bool(_HEAD_RE.fullmatch(snapshot.attempt.exact_head))
+        and bool(_HEAD_RE.fullmatch(snapshot.gate.context_head))
+        and bool(_SHA256_RE.fullmatch(snapshot.gate.sha256))
+    )
+
+
 def _live_review(snapshot: RecoverySnapshot) -> bool:
     return (
         snapshot.root.state in {"running", "awaiting-callback", "verifying"}
@@ -389,8 +406,7 @@ def _live_review(snapshot: RecoverySnapshot) -> bool:
         and not snapshot.accepted_callbacks
         and bool(snapshot.lanes)
         and all(
-            lane.axis
-            and lane.operation_id
+            lane.operation_id
             and lane.run_id
             and lane.lane_id
             and (
@@ -418,17 +434,17 @@ def classify_review_continuation(
 ) -> RecoveryDecision:
     """Return one closed decision from immutable durable observations."""
 
-    if not _common_evidence_valid(snapshot):
-        return _refuse(RecoveryReason.MALFORMED_EVIDENCE)
     if snapshot.root.pending_effect:
         return _refuse(RecoveryReason.PENDING_EFFECT)
     if snapshot.effect_requires_replay:
         return _refuse(RecoveryReason.EFFECT_REPLAY_REQUIRED)
-    if _live_review(snapshot):
+    if _live_review_evidence_valid(snapshot) and _live_review(snapshot):
         return RecoveryDecision(
             RecoveryDisposition.REVIEW_IN_PROGRESS,
             RecoveryReason.REVIEW_ACTIVE,
         )
+    if not _common_evidence_valid(snapshot):
+        return _refuse(RecoveryReason.MALFORMED_EVIDENCE)
     if snapshot.recovery_class == "review-drive":
         return _classify_review_drive(snapshot)
     return _classify_accepted_callback(snapshot)

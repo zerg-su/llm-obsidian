@@ -70,6 +70,34 @@
       "effect_ambiguity": "none: ledger-only accounting",
       "focused_regression": "tests/harness/test_finalization_ledger.py",
       "disposition": "repaired"
+    },
+    {
+      "defect_id": "RC64-D1",
+      "root_cause_class": "attention-latch-blocks-restart-recovery",
+      "seam": "callback-finalization",
+      "alias_of": "D267-004",
+      "reproducer": "tests/harness/fixtures/review-continuation/review-drive-failed-after-reverify.json",
+      "durable_pre_state": "same-generation dispatch attention-required after review-drive-failed, with terminal changes-requested review, identity-bound resolution, changed HEAD, complete exact-HEAD verification, empty effects, and an available next cycle",
+      "expected_owner": "RuntimeWorkerCustomMixin.recover_restart_summary_attention",
+      "expected_transition": "prepare one identity- and revision-bound recovery receipt, rearm the durable review boundary once, and let the registered review drive continue",
+      "observed_post_state": "the attention latch blocked the already-authorized follow-up review until coordinator resume or worker restart",
+      "effect_ambiguity": "none: recovery replays no provider or callback effect and requires complete exact-HEAD verification",
+      "focused_regression": "tests/harness/test_runtime_task_summary.py",
+      "disposition": "repaired"
+    },
+    {
+      "defect_id": "RC64-D2",
+      "root_cause_class": "accepted-review-callback-not-ingested",
+      "seam": "callback-finalization",
+      "alias_of": null,
+      "reproducer": "tests/harness/fixtures/review-continuation/accepted-callback-pending-ingestion.json",
+      "durable_pre_state": "one immutable exact review callback accepted by OperationStore while the matching gate round remains verifying and lacks its result",
+      "expected_owner": "RuntimeWorkerReviewBridgeMixin.drive_review",
+      "expected_transition": "prepare one receipt and invoke the registered review gate workflow to ingest the existing accepted callback exactly once",
+      "observed_post_state": "the root remained callback-invalid with a pending-ingestion diagnostic until coordinator continuation",
+      "effect_ambiguity": "none: exact owner, operation, run, lane, attempt, callback id, kind, and payload hash prove ingestion is the only missing transition",
+      "focused_regression": "tests/harness/test_callback_submit_recovery_runtime.py",
+      "disposition": "repaired"
     }
   ]
 }

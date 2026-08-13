@@ -10,6 +10,37 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.6.7-rc6.4] - 2026-08-13
+
+Bounded autonomous-review continuation candidate. It adds two exact
+code-owned recovery classes to the existing worker poll and does not add a
+scheduler, provider retry, callback replay, or generic attention self-heal.
+
+### Fixed
+
+- A terminal `changes-requested` review can rearm exactly once after an
+  identity-bound resolution changes product HEAD and exact-HEAD verification
+  succeeds, provided no effect is pending and a review iteration remains.
+- An immutable review callback already accepted by the operation store but
+  not yet consumed by its exact gate is ingested through the registered gate
+  workflow without accepting or delivering the callback again.
+
+### Changed
+
+- Both paths share one pure classifier and one prepared/finalized,
+  revision-bound recovery receipt. Crash, restart, and concurrent ticks
+  converge without duplicate transitions or finalization-cycle reservations.
+- Diagnostics expose receipt-bound `review-drive-recovery-*` and
+  `review-callback-ingestion-*` outcomes; ambiguous identities, uncertain
+  effects, exhausted ceilings, and unrelated attention classes remain
+  fail-closed.
+
+### Candidate boundary
+
+- This work does not publish a release or update the installed RC6.3 plugin.
+  One disposable custom dogfood corridor supplies live continuation, typed
+  reap, and resource-cleanup evidence without merging its product branch.
+
 ## [2.6.7-rc5] - 2026-08-12
 
 Bounded structural-pivot orchestration candidate. The existing finalization
