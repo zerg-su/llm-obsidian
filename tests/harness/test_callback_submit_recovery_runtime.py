@@ -1162,9 +1162,11 @@ with tempfile.TemporaryDirectory(prefix="accepted-callback-ingestion.") as raw:
     worker.recover_task_summary_attention()
     repeated_record = store.read(owner, operation_id)
     receipt = json.loads(
-        (state_root / "review-continuation-recovery.json").read_text(
-            encoding="utf-8"
-        )
+        (
+            state_root
+            / "review-continuation-recovery"
+            / f"{decision.receipt.identity.scope_sha256}.json"
+        ).read_text(encoding="utf-8")
     )
     check(
         "accepted callback recovery uses the registered review drive without replay",

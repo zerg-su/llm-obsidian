@@ -108,6 +108,7 @@ class ReviewLane:
     round_operation_id: str
     round_run_id: str
     round_state: str
+    pending_effect: str = ""
     launch_in_progress: bool = False
     ready_identity_exact: bool = False
     process_alive: bool = False
@@ -166,6 +167,15 @@ class RecoveryIdentity:
         encoded = json.dumps(
             asdict(self), sort_keys=True, separators=(",", ":")
         ).encode()
+        return hashlib.sha256(encoded).hexdigest()
+
+    @property
+    def scope_sha256(self) -> str:
+        """Bind one exactly-once slot to durable review authority, not CAS revision."""
+
+        value = asdict(self)
+        value.pop("root_revision")
+        encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
         return hashlib.sha256(encoded).hexdigest()
 
 
@@ -334,6 +344,7 @@ def _lane(raw: Mapping[str, object]) -> ReviewLane:
         round_operation_id=str(raw.get("round_operation_id") or ""),
         round_run_id=str(raw.get("round_run_id") or ""),
         round_state=str(raw.get("round_state") or ""),
+        pending_effect=str(raw.get("pending_effect") or ""),
         launch_in_progress=raw.get("launch_in_progress") is True,
         ready_identity_exact=raw.get("ready_identity_exact") is True,
         process_alive=raw.get("process_alive") is True,
@@ -436,7 +447,9 @@ def classify_review_continuation(
 
     if snapshot.root.pending_effect:
         return _refuse(RecoveryReason.PENDING_EFFECT)
-    if snapshot.effect_requires_replay:
+    if snapshot.effect_requires_replay or any(
+        lane.pending_effect for lane in snapshot.lanes
+    ):
         return _refuse(RecoveryReason.EFFECT_REPLAY_REQUIRED)
     if _live_review_evidence_valid(snapshot) and _live_review(snapshot):
         return RecoveryDecision(
@@ -507,7 +520,13 @@ def _classify_accepted_callback(
     snapshot: RecoverySnapshot,
 ) -> RecoveryDecision:
     if (
-        snapshot.gate.status not in {"reviewing", "verifying"}
+        snapshot.root.state != "attention-required"
+        or snapshot.root.resume_state
+        not in {"running", "awaiting-callback", "verifying"}
+    ):
+        return _refuse(RecoveryReason.ATTENTION_NOT_RECOVERABLE)
+    if (
+        snapshot.gate.status != "reviewing"
         or snapshot.attempt.status != "awaiting-callback"
         or snapshot.attempt.exact_head != snapshot.current_head
         or snapshot.gate.context_head != snapshot.current_head

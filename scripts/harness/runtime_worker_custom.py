@@ -45,6 +45,48 @@ def _review_continuation_lock(path: Path):
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
+_REVIEW_CONTINUATION_RECOVERIES = frozenset(
+    {
+        RecoveryDisposition.REVIEW_DRIVE_REARM,
+        RecoveryDisposition.ACCEPTED_CALLBACK_INGEST,
+    }
+)
+
+
+def _recovery_receipt_dir(spec_path: Path) -> Path:
+    # Continuation receipts reserve root-CAS recovery authority.  They are
+    # intentionally separate from the generation-local callback-timeout
+    # receipt, which records only one accepted timeout transition.
+    return spec_path.parent / "review-continuation-recovery"
+
+
+def _recovery_receipt_path(spec_path: Path, receipt: RecoveryReceipt) -> Path:
+    return _recovery_receipt_dir(spec_path) / f"{receipt.identity.scope_sha256}.json"
+
+
+def _read_recovery_receipt(path: Path) -> RecoveryReceipt | None:
+    if path.is_symlink() or not path.is_file():
+        return None
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict) or raw.get("schema_version") != 1:
+            return None
+        return RecoveryReceipt.from_mapping(raw)
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return None
+
+
+def _prepared_recovery_receipts(root: Path) -> list[tuple[Path, RecoveryReceipt]]:
+    if not root.is_dir() or root.is_symlink():
+        return []
+    prepared: list[tuple[Path, RecoveryReceipt]] = []
+    for path in sorted(root.glob("*.json")):
+        receipt = _read_recovery_receipt(path)
+        if receipt is not None and receipt.status == "prepared":
+            prepared.append((path, receipt))
+    return prepared
+
+
 class RuntimeWorkerCustomMixin:
 
     def notify_custom_step(self, request: dict[str, object]) -> None:
@@ -443,34 +485,45 @@ class RuntimeWorkerCustomMixin:
         execution_owner = getattr(self, "execute_review_continuation", None)
         if decision_owner is None or execution_owner is None:
             return
-        receipt_path = self.spec_path.parent / "review-continuation-recovery.json"
-        if not receipt_path.exists():
+        receipt_root = _recovery_receipt_dir(self.spec_path)
+        try:
+            observed_root = self.store.read(
+                self.spec["owner_id"], self.spec["operation_id"]
+            )
+        except Exception:
+            return
+        initial: RecoveryDecision | None = None
+        if (
+            observed_root.state == "attention-required"
+            and observed_root.resume_state in CALLBACK_WAIT_STATES
+            and not observed_root.pending_effect
+        ):
             initial = decision_owner()
             if (
                 initial.receipt is None
-                or initial.disposition
-                not in {
-                    RecoveryDisposition.REVIEW_DRIVE_REARM,
-                    RecoveryDisposition.ACCEPTED_CALLBACK_INGEST,
-                }
+                or initial.disposition not in _REVIEW_CONTINUATION_RECOVERIES
             ):
-                return
-        lock_path = receipt_path.with_suffix(".lock")
+                initial = None
+        elif not receipt_root.is_dir():
+            return
+        if initial is None and not receipt_root.is_dir():
+            return
+
+        lock_path = receipt_root / ".lock"
         with _review_continuation_lock(lock_path):
             receipt: RecoveryReceipt
             decision: RecoveryDecision
-            if receipt_path.exists():
-                if receipt_path.is_symlink() or not receipt_path.is_file():
-                    return
-                try:
-                    raw = json.loads(receipt_path.read_text(encoding="utf-8"))
-                    if not isinstance(raw, dict) or raw.get("schema_version") != 1:
-                        return
-                    receipt = RecoveryReceipt.from_mapping(raw)
-                except (OSError, ValueError, TypeError, json.JSONDecodeError):
-                    return
-                if receipt.status == "finalized":
-                    return
+            prepared = _prepared_recovery_receipts(receipt_root)
+            if len(prepared) > 1:
+                attention_owner = getattr(self, "summary_attention", None)
+                if attention_owner is not None:
+                    attention_owner(
+                        "review-continuation-recovery-ambiguous",
+                        AttentionReason.ATTENTION_REQUIRED,
+                    )
+                return
+            if prepared:
+                receipt_path, receipt = prepared[0]
                 disposition = (
                     RecoveryDisposition.REVIEW_DRIVE_REARM
                     if receipt.identity.recovery_class == "review-drive"
@@ -482,18 +535,20 @@ class RuntimeWorkerCustomMixin:
                     receipt,
                 )
             else:
-                decision = decision_owner()
-                if (
-                    decision.receipt is None
-                    or decision.disposition
-                    not in {
-                        RecoveryDisposition.REVIEW_DRIVE_REARM,
-                        RecoveryDisposition.ACCEPTED_CALLBACK_INGEST,
-                    }
-                ):
+                if initial is None or initial.receipt is None:
                     return
-                receipt = decision.receipt
-                _atomic_json(receipt_path, receipt.payload())
+                decision = initial
+                receipt = initial.receipt
+                receipt_path = _recovery_receipt_path(self.spec_path, receipt)
+                existing = _read_recovery_receipt(receipt_path)
+                if existing is not None:
+                    if existing.status == "finalized":
+                        return
+                    receipt = existing
+                elif receipt_path.exists():
+                    return
+                else:
+                    _atomic_json(receipt_path, receipt.payload())
 
             identity = receipt.identity
             if (
@@ -548,6 +603,20 @@ class RuntimeWorkerCustomMixin:
                 except Exception:
                     completed = False
                 if not completed:
+                    _atomic_json(
+                        receipt_path,
+                        receipt.payload(
+                            status="finalized",
+                            outcome="refused",
+                            reason="recovery-identity-drift",
+                        ),
+                    )
+                    attention_owner = getattr(self, "summary_attention", None)
+                    if attention_owner is not None:
+                        attention_owner(
+                            "review-continuation-recovery-identity-drift",
+                            AttentionReason.ATTENTION_REQUIRED,
+                        )
                     return
                 _atomic_json(
                     receipt_path,
@@ -582,18 +651,49 @@ class RuntimeWorkerCustomMixin:
                 # Preserve the prepared receipt.  A process crash or bounded
                 # mechanism failure can converge from the durable transition.
                 return
-            _atomic_json(
-                receipt_path,
-                receipt.payload(
-                    status="finalized",
-                    outcome="advanced" if advanced else "refused",
-                    reason=(
-                        "registered-workflow-advanced"
-                        if advanced
-                        else "registered-workflow-refused"
+            if advanced:
+                _atomic_json(
+                    receipt_path,
+                    receipt.payload(
+                        status="finalized",
+                        outcome="advanced",
+                        reason="registered-workflow-advanced",
                     ),
-                ),
-            )
+                )
+                return
+            try:
+                after = self.store.read(
+                    self.spec["owner_id"], self.spec["operation_id"]
+                )
+                completed = bool(
+                    completion_owner(identity)
+                    if completion_owner is not None
+                    else False
+                )
+            except Exception:
+                return
+            if completed:
+                _atomic_json(
+                    receipt_path,
+                    receipt.payload(
+                        status="finalized",
+                        outcome="advanced",
+                        reason="durable-progress-observed",
+                    ),
+                )
+            elif after.state == "attention-required":
+                _atomic_json(
+                    receipt_path,
+                    receipt.payload(
+                        status="finalized",
+                        outcome="refused",
+                        reason="registered-workflow-refused",
+                    ),
+                )
+            # A false workflow result while the root remains on its exact
+            # callback boundary is a documented wait signal (for example an
+            # exact-HEAD verification started this tick).  Keep the prepared
+            # receipt so the next poll converges without another reservation.
 
     def recover_restart_summary_attention(self) -> None:
         """Resume once per generation from a durable mechanism attention latch.

@@ -5193,7 +5193,11 @@ with tempfile.TemporaryDirectory(prefix="review-continuation-rearm.") as raw:
     worker = SameGenerationWorker()
     worker.recover_task_summary_attention()
     recovered = store.read(owner, operation_id)
-    receipt_path = state_root / "review-continuation-recovery.json"
+    receipt_path = (
+        state_root
+        / "review-continuation-recovery"
+        / f"{decision.receipt.identity.scope_sha256}.json"
+    )
     receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
     recovered_revision = recovered.revision
     worker.recover_task_summary_attention()
@@ -5208,6 +5212,93 @@ with tempfile.TemporaryDirectory(prefix="review-continuation-rearm.") as raw:
         and worker.executions == 1
         and repeated.revision == recovered_revision,
         (recovered, receipt, worker.executions, repeated),
+    )
+
+    store.transition(
+        owner,
+        operation_id,
+        "attention-required",
+        reason=AttentionReason.ATTENTION_REQUIRED,
+    )
+    callback_shape = _continuation_fixture(
+        "accepted-callback-pending-ingestion.json"
+    )
+    callback_root = store.read(owner, operation_id)
+    callback_decision = classify_review_continuation(
+        replace(
+            callback_shape,
+            root=replace(
+                callback_shape.root,
+                owner_id=owner,
+                operation_id=operation_id,
+                run_id=run_id,
+                revision=callback_root.revision,
+            ),
+        )
+    )
+    worker.review_continuation_decision = lambda: callback_decision
+    worker.recover_review_continuation()
+    receipts = sorted(
+        (state_root / "review-continuation-recovery").glob("*.json")
+    )
+    check(
+        "distinct recovery identities retain independent exactly-once slots",
+        len(receipts) == 2
+        and worker.executions == 2
+        and {
+            json.loads(path.read_text(encoding="utf-8"))["identity"][
+                "recovery_class"
+            ]
+            for path in receipts
+        }
+        == {"review-drive", "accepted-callback"},
+        receipts,
+    )
+
+    store.transition(
+        owner,
+        operation_id,
+        "attention-required",
+        reason=AttentionReason.ATTENTION_REQUIRED,
+    )
+    waiting_root = store.read(owner, operation_id)
+    waiting_shape = replace(
+        captured,
+        gate=replace(captured.gate, sha256="e" * 64),
+        attempt=replace(captured.attempt, attempt_id="waiting-attempt"),
+        root=replace(
+            captured.root,
+            owner_id=owner,
+            operation_id=operation_id,
+            run_id=run_id,
+            revision=waiting_root.revision,
+        ),
+    )
+    waiting_decision = classify_review_continuation(waiting_shape)
+    waits = {"count": 0}
+
+    def wait_once(_decision):
+        waits["count"] += 1
+        return waits["count"] > 1
+
+    worker.review_continuation_decision = lambda: waiting_decision
+    worker.execute_review_continuation = wait_once
+    worker.recover_review_continuation()
+    waiting_path = (
+        state_root
+        / "review-continuation-recovery"
+        / f"{waiting_decision.receipt.identity.scope_sha256}.json"
+    )
+    prepared_wait = json.loads(waiting_path.read_text(encoding="utf-8"))
+    worker.recover_review_continuation()
+    completed_wait = json.loads(waiting_path.read_text(encoding="utf-8"))
+    check(
+        "a documented not-ready workflow result retries the same prepared identity",
+        prepared_wait["status"] == "prepared"
+        and completed_wait["status"] == "finalized"
+        and completed_wait["outcome"] == "advanced"
+        and waits["count"] == 2,
+        (prepared_wait, completed_wait, waits),
     )
 
     for status in (
@@ -5278,10 +5369,7 @@ with tempfile.TemporaryDirectory(prefix="review-continuation-rearm.") as raw:
             refusal.reason is RecoveryReason.ATTENTION_NOT_RECOVERABLE
             and unchanged == isolated
             and not worker.spec_path.with_name(
-                "review-continuation-recovery.json"
-            ).exists()
-            and not worker.spec_path.with_name(
-                "review-continuation-recovery.lock"
+                "review-continuation-recovery"
             ).exists(),
             (refusal, isolated, unchanged),
         )

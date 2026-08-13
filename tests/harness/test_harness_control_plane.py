@@ -764,9 +764,11 @@ for recovery_name, fixture_name in (
             list(pool.map(lambda worker: worker.recover_review_continuation(), workers))
         final_record = store.read(owner, operation_id)
         receipt = json.loads(
-            (state_root / "review-continuation-recovery.json").read_text(
-                encoding="utf-8"
-            )
+            (
+                state_root
+                / "review-continuation-recovery"
+                / f"{decision.receipt.identity.scope_sha256}.json"
+            ).read_text(encoding="utf-8")
         )
         check(
             f"concurrent {recovery_name} ticks linearize one transition and workflow",

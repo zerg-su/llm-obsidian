@@ -50,8 +50,9 @@ def _recovery_signal(
     store: OperationStore,
     owner_id: str,
     operation_id: str,
+    path: Path | None = None,
 ) -> dict[str, Any] | None:
-    path = (
+    path = path or (
         store.root
         / "owners"
         / owner_id
@@ -100,6 +101,49 @@ def _recovery_signal(
     )
 
 
+def _recovery_signals(
+    store: OperationStore,
+    owner_id: str,
+    operation_id: str,
+) -> list[dict[str, Any]]:
+    runtime = (
+        store.root / "owners" / owner_id / "runtime" / operation_id
+    )
+    legacy = runtime / "review-continuation-recovery.json"
+    receipt_root = runtime / "review-continuation-recovery"
+    paths = [legacy]
+    if receipt_root.is_dir() and not receipt_root.is_symlink():
+        paths.extend(sorted(receipt_root.glob("*.json")))
+    values = [
+        signal
+        for path in paths
+        if (signal := _recovery_signal(
+            store, owner_id, operation_id, path
+        )) is not None
+    ]
+    if not values:
+        return []
+    # Keep the current actionable state visible without allowing old finalized
+    # identities to consume the bounded diagnostic packet.
+    priority = {
+        "prepared": 0,
+        "receipt-invalid": 1,
+        "refused": 2,
+        "advanced": 3,
+    }
+    values.sort(
+        key=lambda signal: next(
+            (
+                rank
+                for suffix, rank in priority.items()
+                if str(signal.get("code") or "").endswith(suffix)
+            ),
+            4,
+        )
+    )
+    return values[:1]
+
+
 def observe(store_root: Path | str, owner_id: str) -> dict[str, Any]:
     """Classify durable invariants without reading callback or prompt bodies."""
 
@@ -108,12 +152,9 @@ def observe(store_root: Path | str, owner_id: str) -> dict[str, Any]:
     signals = [
         signal
         for record in records
-        if (
-            signal := _recovery_signal(
-                store, owner_id, record.spec.operation_id
-            )
+        for signal in _recovery_signals(
+            store, owner_id, record.spec.operation_id
         )
-        is not None
     ]
     gate_path = (
         store.root
@@ -213,32 +254,37 @@ def observe(store_root: Path | str, owner_id: str) -> dict[str, Any]:
         str(signal.get("code") or "").endswith("receipt-invalid")
         for signal in signals
     )
-    if not signals:
-        for record in records:
-            if record.state != "attention-required":
-                continue
-            reason = (
-                record.attention_reason.value
-                if record.attention_reason is not None
-                else "unknown"
+    explained_operations = {
+        str(signal.get("operation_id") or "") for signal in signals
+    }
+    for record in records:
+        if (
+            record.state != "attention-required"
+            or record.spec.operation_id in explained_operations
+        ):
+            continue
+        reason = (
+            record.attention_reason.value
+            if record.attention_reason is not None
+            else "unknown"
+        )
+        signals.append(
+            _signal(
+                "operation-attention-unclassified",
+                operation_id=record.spec.operation_id,
+                state=reason,
+                evidence=[
+                    (
+                        "owners/"
+                        f"{owner_id}/operations/"
+                        f"{record.spec.operation_id}.json"
+                    )
+                ],
             )
-            signals.append(
-                _signal(
-                    "operation-attention-unclassified",
-                    operation_id=record.spec.operation_id,
-                    state=reason,
-                    evidence=[
-                        (
-                            "owners/"
-                            f"{owner_id}/operations/"
-                            f"{record.spec.operation_id}.json"
-                        )
-                    ],
-                )
-            )
-            model_required = True
-            if len(signals) >= MAX_SIGNALS:
-                break
+        )
+        model_required = True
+        if len(signals) >= MAX_SIGNALS:
+            break
 
     signals = signals[:MAX_SIGNALS]
     status = (

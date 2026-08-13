@@ -40,12 +40,18 @@
 - Diagnostics выводит receipt-bound причины `review-drive-recovery-*` и
   `review-callback-ingestion-*`; неоднозначные identity, uncertain effects,
   исчерпанные ceilings и посторонние attention classes остаются fail-closed.
+- Coordinator-owned reap теперь определяет session по зафиксированному runtime
+  задачи до общего cross-runtime helper, поэтому унаследованная переменная
+  чужого runtime не отклоняет точную зарегистрированную границу reap.
 
 ### Граница кандидата
 
 - Эта работа не публикует релиз и не обновляет установленный RC6.3 plugin.
   Один disposable custom dogfood corridor даёт live evidence продолжения,
   typed reap и очистки ресурсов без merge его product branch.
+- Привязка session для reap — узкий, разрешённый координатором ремонт сбоя
+  repository-owned cross-runtime adapter, обнаруженного этим corridor; проверки
+  identity задачи и finalization при этом не ослаблены.
 
 ## [2.6.7-rc5] — 2026-08-12
 

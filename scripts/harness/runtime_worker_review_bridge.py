@@ -27,22 +27,6 @@ from .review_continuation_observation import observe_review_continuation
 from review_contract import ReviewContractError, axis_finding_id
 
 
-#: Review-round states that prove live bound progress for a rejected drive.
-#: Terminal, attention-required, and cancelling rounds stay fail-closed.
-_LIVE_ROUND_STATES = frozenset(
-    {
-        "created",
-        "preflight",
-        "starting",
-        "running",
-        "awaiting-callback",
-        "verifying",
-        "finalizing",
-        "exiting",
-    }
-)
-
-
 def _review_drive_failure_code(stderr: str) -> str:
     """Reduce runner stderr to one content-free repository-owned reason code."""
 

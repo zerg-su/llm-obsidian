@@ -34,12 +34,18 @@ scheduler, provider retry, callback replay, or generic attention self-heal.
   `review-callback-ingestion-*` outcomes; ambiguous identities, uncertain
   effects, exhausted ceilings, and unrelated attention classes remain
   fail-closed.
+- Coordinator-owned reap now resolves its session from the task's frozen
+  runtime before consulting the generic cross-runtime helper, so an inherited
+  foreign runtime variable cannot reject the exact registered reap boundary.
 
 ### Candidate boundary
 
 - This work does not publish a release or update the installed RC6.3 plugin.
   One disposable custom dogfood corridor supplies live continuation, typed
   reap, and resource-cleanup evidence without merging its product branch.
+- The reap session-binding change is the narrow, coordinator-authorized repair
+  of a repository-owned cross-runtime adapter failure encountered by that
+  corridor; it does not relax task identity or finalization checks.
 
 ## [2.6.7-rc5] - 2026-08-12
 

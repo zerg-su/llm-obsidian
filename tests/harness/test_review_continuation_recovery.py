@@ -64,7 +64,6 @@ check(
     callback_decision,
 )
 
-
 def refused(label: str, snapshot: RecoverySnapshot, reason: RecoveryReason) -> None:
     decision = classify_review_continuation(snapshot)
     check(
@@ -74,6 +73,25 @@ def refused(label: str, snapshot: RecoverySnapshot, reason: RecoveryReason) -> N
         and decision.receipt is None,
         decision,
     )
+
+
+refused(
+    "a healthy accepted-callback window has no recovery authority",
+    replace(
+        callback,
+        root=replace(
+            callback.root,
+            state="awaiting-callback",
+            resume_state="",
+        ),
+    ),
+    RecoveryReason.ATTENTION_NOT_RECOVERABLE,
+)
+refused(
+    "accepted callback ingestion uses only the registered reviewing seam",
+    replace(callback, gate=replace(callback.gate, status="verifying")),
+    RecoveryReason.GATE_STATE_MISMATCH,
+)
 
 
 refused(

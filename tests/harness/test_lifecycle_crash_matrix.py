@@ -537,7 +537,12 @@ for recovery_name, fixture_name in (
         decision = continuation_decision(fixture_name, record)
         state_root = base / "runtime"
         state_root.mkdir()
-        receipt_path = state_root / "review-continuation-recovery.json"
+        receipt_path = (
+            state_root
+            / "review-continuation-recovery"
+            / f"{decision.receipt.identity.scope_sha256}.json"
+        )
+        receipt_path.parent.mkdir()
         receipt_path.write_text(
             json.dumps(decision.receipt.payload(), sort_keys=True) + "\n",
             encoding="utf-8",
@@ -608,7 +613,12 @@ for recovery_name, fixture_name in (
         decision = continuation_decision(fixture_name, record)
         state_root = base / "runtime"
         state_root.mkdir()
-        receipt_path = state_root / "review-continuation-recovery.json"
+        receipt_path = (
+            state_root
+            / "review-continuation-recovery"
+            / f"{decision.receipt.identity.scope_sha256}.json"
+        )
+        receipt_path.parent.mkdir()
         prepared_bytes = (
             json.dumps(decision.receipt.payload(), sort_keys=True) + "\n"
         ).encode()
@@ -644,7 +654,13 @@ for recovery_name, fixture_name in (
                 return True
 
         DriftWorker().recover_review_continuation()
+        drifted = json.loads(receipt_path.read_text(encoding="utf-8"))
+        current = store.read(record.spec.owner_id, record.spec.operation_id)
         check(
-            f"{recovery_name} prepared receipt refuses revision drift mutation-free",
-            not attempts and receipt_path.read_bytes() == prepared_bytes,
+            f"{recovery_name} prepared receipt revision drift becomes typed refusal",
+            not attempts
+            and drifted["status"] == "finalized"
+            and drifted["outcome"] == "refused"
+            and drifted["reason"] == "recovery-identity-drift"
+            and current.state == "attention-required",
         )

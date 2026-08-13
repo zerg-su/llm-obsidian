@@ -163,7 +163,7 @@ def _lanes(
             if row.spec.kind == "review-round"
             and row.spec.parent_operation_id == operation_id
         ]
-        if launching and not rounds:
+        if not rounds:
             observed.append(
                 ReviewLane(
                     axis=axis,
@@ -174,7 +174,8 @@ def _lanes(
                     round_operation_id="",
                     round_run_id="",
                     round_state="",
-                    launch_in_progress=True,
+                    pending_effect=parent.pending_effect,
+                    launch_in_progress=launching,
                     ready_identity_exact=ready_exact,
                 )
             )
@@ -188,6 +189,7 @@ def _lanes(
                 round_operation_id=row.spec.operation_id,
                 round_run_id=row.run_id,
                 round_state=row.state,
+                pending_effect=parent.pending_effect or row.pending_effect,
                 launch_in_progress=launching,
                 ready_identity_exact=ready_exact,
                 process_alive=alive,
@@ -302,7 +304,7 @@ def observe_review_continuation(worker: Any) -> RecoverySnapshot:
     context = gate["context"]
     recovery_class = (
         "accepted-callback"
-        if callbacks and gate.get("status") in {"reviewing", "verifying"}
+        if callbacks and gate.get("status") == "reviewing"
         else "review-drive"
     )
     return RecoverySnapshot(

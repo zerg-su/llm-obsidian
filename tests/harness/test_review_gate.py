@@ -18,6 +18,7 @@ from contextlib import redirect_stdout
 from dataclasses import dataclass, replace
 from io import StringIO
 from pathlib import Path
+from types import SimpleNamespace
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -44,6 +45,9 @@ from harness.state_machine import TERMINAL
 from harness.store import OperationStore
 from harness.verification import load_profiles
 from harness.runtime_worker import _pipeline_verify_identity
+from harness.runtime_worker_custom import RuntimeWorkerCustomMixin
+from harness.runtime_worker_review_bridge import RuntimeWorkerReviewBridgeMixin
+from harness.review_continuation_recovery import RecoveryDisposition
 from harness.runtime_session_contracts import (
     RuntimeCheckpointEvidenceMissing,
     RuntimeSessionError,
@@ -1037,6 +1041,176 @@ context = ReviewContext(
     verification_profile="scoped",
     verification_profile_sha256="d" * 64,
 )
+
+with tempfile.TemporaryDirectory(prefix="review-continuation-real-gate.") as raw:
+    base = Path(raw)
+    scratch = base / "scratch"
+    scratch.mkdir()
+    store = OperationStore(base / "store")
+    current_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout.strip()
+    exact_context = replace(context, head_sha=current_head)
+    root_route = RuntimeRoute(
+        "codex", "gpt-5.6-terra", "low", "executor", "e" * 64
+    )
+    store.create(
+        OperationSpec(
+            "dispatch-1",
+            "review-continuation-root-key",
+            "dispatch",
+            "owner-1",
+            root_route,
+            "packets/task.json",
+            "scoped",
+        ),
+        lane_id="review-continuation-root-lane",
+        run_id="review-continuation-root-run",
+    )
+    for state in ("preflight", "starting", "running", "awaiting-callback"):
+        store.transition("owner-1", "dispatch-1", state)
+    runtime = FakeRuntime(store)
+    controller = ReviewGateController(base / "gate", runtime, store)
+    run = controller.begin_attempt(
+        dispatch_operation_id="dispatch-1",
+        finalization_lineage_id="review-continuation-real-lineage",
+        cycle=1,
+        plan_sha256="1" * 64,
+        outcome_sha256="2" * 64,
+        request=request_for(
+            "review-continuation-real-gate", context=exact_context
+        ),
+        origin_surface="11111111-1111-4111-8111-111111111111",
+        cwd=scratch,
+        product_root=ROOT,
+        prompt_pointer="prompts/review.md",
+        callback_root="callbacks/review-continuation-real-gate",
+    )
+    lane = run.execution.lanes[0]
+    round_ = run.rounds[lane.axis]
+    result = ReviewResult(lane.axis, "approve", (), 0)
+    envelope = review_round_envelope(round_, result)
+    for state in ("preflight", "starting", "running", "awaiting-callback"):
+        store.transition(lane.owner_id, lane.operation_id, state)
+    runtime.accept_callback(envelope)
+    parent = store.read(lane.owner_id, lane.operation_id)
+    parent = replace(
+        parent,
+        resources=replace(
+            parent.resources,
+            process_group=3456,
+            process_identity="f" * 64,
+        ),
+        revision=parent.revision + 1,
+    )
+    store.save(parent, expected_revision=parent.revision - 1)
+    parent_runtime = (
+        store.root
+        / "owners"
+        / lane.owner_id
+        / "runtime"
+        / lane.operation_id
+    )
+    parent_runtime.mkdir(parents=True, exist_ok=True)
+    (parent_runtime / "ready.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "status": "ready",
+                "process_group": 3456,
+                "process_identity": "f" * 64,
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    store.transition(
+        "owner-1",
+        "dispatch-1",
+        "attention-required",
+        reason=AttentionReason.ATTENTION_REQUIRED,
+    )
+    root_runtime = (
+        store.root / "owners" / "owner-1" / "runtime" / "dispatch-1"
+    )
+    root_runtime.mkdir(parents=True, exist_ok=True)
+    ingestions: list[str] = []
+
+    class AliveReviewProcess:
+        def process_status(self, _process_group: int, _identity: str) -> str:
+            return "alive"
+
+    class RegisteredIngestionWorker(
+        RuntimeWorkerCustomMixin, RuntimeWorkerReviewBridgeMixin
+    ):
+        def __init__(self) -> None:
+            self.spec = {
+                "callback_mode": "task-summary",
+                "owner_id": "owner-1",
+                "operation_id": "dispatch-1",
+                "cwd": ROOT,
+            }
+            self.spec_path = root_runtime / "launch.json"
+            self.store = store
+            self.review = SimpleNamespace(gate_root=controller.root)
+            self.pipeline = SimpleNamespace(
+                definition=SimpleNamespace(steps=()),
+                definition_sha256="3" * 64,
+            )
+            self.meta = {"finalization_policy": {"max_cycles": 5}}
+            self.process = AliveReviewProcess()
+            self.trusted_vault = ROOT
+            self.marker_path = root_runtime / "pipeline-review-start.json"
+            self.callback_handled = True
+            self.summary_attention_revision = store.read(
+                "owner-1", "dispatch-1"
+            ).revision
+            self.is_custom_pipeline = False
+
+            def ingest(_vault: Path, _worktree: Path) -> None:
+                recovered = controller.rehydrate_attempt()
+                recovered_lane = recovered.execution.lanes[0]
+                recovered_round = recovered.rounds[recovered_lane.axis]
+                decision = controller.complete_attempt_round(
+                    recovered,
+                    recovered_lane,
+                    recovered_round,
+                    result,
+                )
+                ingestions.append(decision.action)
+
+            self.review_launcher = ingest
+
+    worker = RegisteredIngestionWorker()
+    recovery_decision = worker.review_continuation_decision()
+    worker.recover_review_continuation()
+    root_record = store.read("owner-1", "dispatch-1")
+    receipts = list(
+        (root_runtime / "review-continuation-recovery").glob("*.json")
+    )
+    receipt = (
+        json.loads(receipts[0].read_text(encoding="utf-8"))
+        if receipts
+        else {}
+    )
+    check(
+        "accepted callback recovery reaches the registered gate workflow once",
+        recovery_decision.disposition
+        is RecoveryDisposition.ACCEPTED_CALLBACK_INGEST
+        and ingestions == ["approved"]
+        and controller.read()["status"] == "approved"
+        and root_record.state == "awaiting-callback"
+        and store.read(round_.owner_id, round_.operation_id).accepted_callback_id
+        == envelope.callback_id
+        and len(receipts) == 1
+        and receipt.get("status") == "finalized"
+        and receipt.get("outcome") == "advanced",
+    )
 
 with tempfile.TemporaryDirectory(prefix="release-review-gate.") as raw:
     base = Path(raw)

@@ -315,4 +315,43 @@ with tempfile.TemporaryDirectory(prefix="harness-diagnostics.") as raw:
         == ["review-drive-recovery-refused"],
     )
 
+    unrelated = "unrelated-attention"
+    store.create(
+        OperationSpec(
+            unrelated,
+            "unrelated-attention-key",
+            "dispatch",
+            drive_owner,
+            RuntimeRoute(
+                "codex",
+                "gpt-5.6-sol",
+                "high",
+                "executor",
+                "d" * 64,
+            ),
+            "packets/task.json",
+            "scoped",
+        ),
+        lane_id="unrelated-attention-lane",
+        run_id="unrelated-attention-run",
+    )
+    store.transition(
+        drive_owner,
+        unrelated,
+        "attention-required",
+        reason="attention-required",
+    )
+    packet = observe(store_root, drive_owner)
+    signals = {
+        (signal["operation_id"], signal["code"])
+        for signal in packet["signals"]
+    }
+    check(
+        "a recovery receipt cannot suppress unrelated owner attention",
+        (drive_owner, "review-drive-recovery-refused") in signals
+        and (unrelated, "operation-attention-unclassified") in signals
+        and packet["model_required"] is True
+        and packet["status"] == "needs-model",
+    )
+
 print("harness diagnostics tests passed")
