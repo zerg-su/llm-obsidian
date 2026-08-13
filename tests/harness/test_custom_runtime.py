@@ -144,7 +144,7 @@ with tempfile.TemporaryDirectory(prefix="custom-runtime.") as raw:
     (vault / "scripts").mkdir()
     shutil.copy2(ROOT / "config" / "verification-profiles.toml", vault / "config" / "verification-profiles.toml")
     for dependency in sorted((ROOT / "scripts").glob("*.py")):
-        shutil.copy2(dependency, vault / "scripts" / dependency.name)
+        shutil.copyfile(dependency, vault / "scripts" / dependency.name)
     (vault / "scripts" / "reap-runner.py").write_text(
         "#!/usr/bin/env python3\n", encoding="utf-8"
     )
