@@ -61,6 +61,28 @@ def check(label: str, value: bool) -> None:
     print(f"OK   {label}")
 
 
+def pinned_identity(operation_id: str, name: str) -> dict[str, object]:
+    """Durable provider-event identity pinned independently of production.
+
+    This literal is the on-disk shape an older writer left behind, so it must
+    never be derived from ``ProviderEventIdentity``: deriving it would make the
+    fixture track production drift instead of detecting it.
+    """
+
+    return {
+        "schema_version": 1,
+        "owner_id": "owner-review",
+        "operation_id": operation_id,
+        "run_id": f"run-{name}",
+        "generation": 1,
+        "provider_session_id": f"run-{name}",
+        "process_identity": "a" * 64,
+        "source_id": f"process:{'a' * 64}",
+        "workspace_id": "22222222-2222-4222-8222-222222222222",
+        "surface_id": "11111111-1111-4111-8111-111111111111",
+    }
+
+
 def fixture(root: Path, name: str) -> tuple[OperationStore, str, Path, Path]:
     store = OperationStore(root / name / "store")
     owner = "owner-review"
@@ -228,19 +250,7 @@ def input_unconfirmed_fixture(
     events = runtime / "provider-events/generation-1/events"
     delivery.mkdir(parents=True)
     events.mkdir(parents=True)
-    identity = asdict(
-        ProviderEventIdentity(
-            owner_id="owner-review",
-            operation_id=operation_id,
-            run_id=f"run-{name}",
-            generation=1,
-            provider_session_id=f"run-{name}",
-            process_identity="a" * 64,
-            source_id=f"process:{'a' * 64}",
-            workspace_id="22222222-2222-4222-8222-222222222222",
-            surface_id="11111111-1111-4111-8111-111111111111",
-        )
-    )
+    identity = pinned_identity(operation_id, name)
     (events / "0001.json").write_text(
         json.dumps(
             {
@@ -290,6 +300,24 @@ def input_unconfirmed_fixture(
     )
     return store, operation_id, runtime, callback
 
+
+check(
+    "the pinned durable identity still matches the canonical contract",
+    pinned_identity("review-canonical", "canonical")
+    == asdict(
+        ProviderEventIdentity(
+            owner_id="owner-review",
+            operation_id="review-canonical",
+            run_id="run-canonical",
+            generation=1,
+            provider_session_id="run-canonical",
+            process_identity="a" * 64,
+            source_id=f"process:{'a' * 64}",
+            workspace_id="22222222-2222-4222-8222-222222222222",
+            surface_id="11111111-1111-4111-8111-111111111111",
+        )
+    ),
+)
 
 with tempfile.TemporaryDirectory(prefix="pre-model-retirement.") as raw:
     root = Path(raw)
@@ -392,6 +420,38 @@ with tempfile.TemporaryDirectory(prefix="pre-model-retirement.") as raw:
             == "attention-required"
             and guarded.read("owner-review", guarded_id).resources
             != OwnedResources(),
+        )
+
+    for label, degraded_workspace in (
+        ("missing workspace identity", None),
+        ("empty workspace identity", ""),
+        ("invalid workspace identity", "bad id/../escape"),
+        ("non-string workspace identity", 12345),
+    ):
+        degraded, degraded_id, degraded_runtime, _degraded_callback = (
+            input_unconfirmed_fixture(root, label.replace(" ", "-"))
+        )
+        session_path = degraded_runtime / "session.json"
+        session = json.loads(session_path.read_text(encoding="utf-8"))
+        if degraded_workspace is None:
+            session.pop("workspace_id")
+        else:
+            session["workspace_id"] = degraded_workspace
+        session_path.write_text(
+            json.dumps(session, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        before_degraded = degraded.read("owner-review", degraded_id)
+        degraded_result = retire_failed_reviewer_start(
+            degraded,
+            "owner-review",
+            degraded_id,
+            cmux_adapter=FakeCmux(),
+            process_adapter=FakeProcess(),
+        )
+        check(
+            f"retirement declines {label} without a store effect",
+            degraded_result is None
+            and degraded.read("owner-review", degraded_id) == before_degraded,
         )
 
     for label, mutate, cmux, create_callback in (
