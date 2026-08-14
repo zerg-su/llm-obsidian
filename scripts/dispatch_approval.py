@@ -137,9 +137,9 @@ def authorize_custom_request(
     request_sha256: str,
     approval_token: str,
 ) -> dict[str, Any]:
-    """Consume the host decision while installing its immutable snapshot."""
+    """Atomically consume a revalidated custom snapshot for start."""
 
-    if not re.fullmatch(r"[0-9a-f]{64}", approval_token):
+    if approval_token and not re.fullmatch(r"[0-9a-f]{64}", approval_token):
         raise DispatchError("custom start requires --approval-token")
     path = custom_approval_path(request)
     if path.is_symlink() or not path.is_file():
@@ -163,15 +163,23 @@ def authorize_custom_request(
             "placement": request["placement"],
         }:
             raise DispatchError("custom approval coordinator identity changed")
-        if (
-            persisted.get("status") != "approved"
-            or persisted.get("decision") != "approve"
-            or persisted.get("actor") != "host-user-dialog"
-        ):
+        policy_valid = (
+            persisted.get("status") == "pending"
+            and persisted.get("decision") == ""
+            and persisted.get("actor") == ""
+        )
+        host_approved = (
+            persisted.get("status") == "approved"
+            and persisted.get("decision") == "approve"
+            and persisted.get("actor") == "host-user-dialog"
+        )
+        if not policy_valid and not host_approved:
             raise DispatchError("custom pipeline has no approved decision receipt")
-        if persisted.get("approval_token_sha256") != hashlib.sha256(
-            approval_token.encode()
-        ).hexdigest():
+        if approval_token and (
+            not host_approved
+            or persisted.get("approval_token_sha256")
+            != hashlib.sha256(approval_token.encode()).hexdigest()
+        ):
             raise DispatchError("custom approval token does not match")
         plan_path = custom_approval_plan_path(request)
         plan_info = plan_path.stat() if plan_path.exists() else None
@@ -247,7 +255,7 @@ def authorize_custom_request(
     approved["_custom_approval"] = ExplicitPipelineApproval.for_card(
         definition_sha256=compiled.definition_sha256,
         approval_card=card,
-        actor="host-user-dialog",
+        actor="policy-valid-snapshot" if policy_valid else "host-user-dialog",
         decision="approve",
     )
     approved["_approved_custom_contract"] = (spec, compiled, policy, card)

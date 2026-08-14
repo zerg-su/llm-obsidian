@@ -28,6 +28,7 @@ from .status_segment import CONTROLLER_KINDS, LiveInventory
 from .store import OperationStore, StoreError
 from .dashboard_receipts import (
     absolute_path_is_safe,
+    fix_phase_timing,
     fix_receipt_visits,
     liveness_interval_start,
     read_gate,
@@ -235,6 +236,7 @@ def _step_view(
     review_limit: int,
     root_interval: object = UNKNOWN_TIMING,
     root_owned: bool = False,
+    phase_timing: TimingView | None = None,
 ) -> tuple[StepView, bool]:
     """Bind one compiled step to durable evidence, or derive it from the record.
 
@@ -281,7 +283,7 @@ def _step_view(
         status = "attention" if issue else (
             "complete" if visits else _model_step_status(record)
         )
-    timing = (
+    timing = phase_timing if phase_timing is not None else (
         root_interval
         if root_owned
         and step.primitive_id == "model_step"
@@ -357,6 +359,17 @@ def _steps(
             ),
             root_interval=root_step_interval,
             root_owned=index == 0,
+            phase_timing=(
+                fix_phase_timing(
+                    store, record, runtime, step.step_id, observed_at
+                )
+                if (
+                    compiled.definition.pipeline_id == "engineering"
+                    and compiled.definition.profile == "fix"
+                )
+                and step.primitive_id == "model_step"
+                else None
+            ),
         )
         for index, (step, identity) in enumerate(zip(
             compiled.definition.steps,

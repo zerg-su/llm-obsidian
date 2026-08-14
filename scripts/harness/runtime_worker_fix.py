@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+import time
 from dataclasses import dataclass
 
 from .runtime_worker import *  # noqa: F401,F403
@@ -31,6 +33,79 @@ class FixTransportState:
 
 
 class RuntimeWorkerFixMixin:
+    @staticmethod
+    def _phase_timing_identity(round_: object) -> dict[str, object]:
+        return {
+            "schema_version": 1,
+            "owner_id": round_.spec.owner_id,
+            "parent_operation_id": round_.parent_operation_id,
+            "operation_id": round_.spec.operation_id,
+            "run_id": round_.run_id,
+            "step_id": round_.step_id,
+            "iteration": round_.iteration,
+        }
+
+    def _phase_timing_start(
+        self, state: FixTransportState, round_: object
+    ) -> tuple[Path, float]:
+        root = (
+            state.receipt_root.parent / "timing" / state.receipt_root.name
+            / round_.step_id
+        )
+        path = root / "start.json"
+        identity = self._phase_timing_identity(round_)
+        if path.exists() or path.is_symlink():
+            if path.is_symlink():
+                raise RuntimeWorkerError("engineering/fix phase start is a symlink")
+            try:
+                value = json.loads(path.read_text(encoding="utf-8"))
+                started_at = float(value["started_at"])
+            except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+                raise RuntimeWorkerError("engineering/fix phase start is invalid") from exc
+            if (
+                not isinstance(value, dict)
+                or set(value) != {*identity, "started_at"}
+                or any(value.get(key) != expected for key, expected in identity.items())
+                or not math.isfinite(started_at)
+                or started_at < 0
+            ):
+                raise RuntimeWorkerError("engineering/fix phase start changed")
+            return path, started_at
+        started_at = time.time()
+        self.write_immutable_json(path, {**identity, "started_at": started_at})
+        return path, started_at
+
+    def _write_phase_timing_completion(
+        self, state: FixTransportState, round_: object, receipt: FixStepReceipt
+    ) -> None:
+        start_path, started_at = self._phase_timing_start(state, round_)
+        path = start_path.with_name("completion.json")
+        identity = self._phase_timing_identity(round_)
+        value = {
+            **identity,
+            "completed_at": max(time.time(), started_at),
+            "receipt_sha256": receipt.receipt_sha256,
+        }
+        if path.exists() or path.is_symlink():
+            if path.is_symlink():
+                raise RuntimeWorkerError("engineering/fix phase completion is a symlink")
+            try:
+                current = json.loads(path.read_text(encoding="utf-8"))
+                completed_at = float(current["completed_at"])
+            except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+                raise RuntimeWorkerError("engineering/fix phase completion is invalid") from exc
+            if (
+                not isinstance(current, dict)
+                or set(current) != {*identity, "completed_at", "receipt_sha256"}
+                or any(current.get(key) != expected for key, expected in identity.items())
+                or current.get("receipt_sha256") != receipt.receipt_sha256
+                or not math.isfinite(completed_at)
+                or completed_at < started_at
+            ):
+                raise RuntimeWorkerError("engineering/fix phase completion changed")
+            return
+        self.write_immutable_json(path, value)
+
     def load_fix_policy(self) -> tuple[dict[str, object], str, int, str]:
         meta = json.loads(
             (self.spec["cwd"] / ".task-meta.json").read_text(encoding="utf-8")
@@ -353,6 +428,7 @@ class RuntimeWorkerFixMixin:
         request = fix_phase_request(round_)
         result_pointer = str(request["result_pointer"])
         request, owner = self.publish_pipeline_step_contract(request)
+        self._phase_timing_start(state, round_)
         self.retarget_fix_callback(
             operation_id=round_.spec.operation_id,
             run_id=round_.run_id,
@@ -473,6 +549,7 @@ class RuntimeWorkerFixMixin:
             current_head_sha=self.git_head(),
             receipt_path=receipt_path,
         )
+        self._write_phase_timing_completion(state, round_, accepted)
         callback_path.unlink()
         emit_compiled_pipeline_event(
             self.spec["cwd"],

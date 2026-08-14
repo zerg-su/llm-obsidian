@@ -897,16 +897,24 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     )
     cli_challenge = json.loads(cli_validate.stdout)["challenge_sha256"]
     cli_without_approval = subprocess.run(
-        [sys.executable, str(SCRIPT), "start", "--spec", str(cli_spec)],
+        [
+            sys.executable,
+            str(SCRIPT),
+            "start",
+            "--spec",
+            str(cli_spec),
+            "--approval-token",
+            "f" * 64,
+        ],
         cwd=ROOT,
         text=True,
         capture_output=True,
         check=False,
     )
     check(
-        "custom CLI start fails before effects without exact approval",
+        "custom CLI start rejects an invalid legacy approval token before effects",
         cli_without_approval.returncode == 3
-        and "--approval-token" in cli_without_approval.stderr
+        and "custom approval token does not match" in cli_without_approval.stderr
         and not Path(cli_raw["worktree"]).exists(),
         cli_without_approval.stderr,
     )
@@ -957,6 +965,55 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     check(
         "host custom decision is durable before start",
         not Path(cli_raw["worktree"]).exists(),
+    )
+    policy_valid_raw = json.loads(json.dumps(custom_raw))
+    policy_valid_raw["request_id"] = str(uuid.uuid4())
+    policy_valid_raw["task_name"] = "custom-policy-valid-start"
+    policy_valid_raw["branch"] = "task/custom-policy-valid-start"
+    policy_valid_raw["worktree"] = str(
+        tmp / "worktrees" / "custom-policy-valid-start"
+    )
+    policy_valid_request = runner.validate_request(policy_valid_raw)
+    policy_valid_prompt_request = dict(policy_valid_request)
+    policy_valid_prompt_request["_approved_plan_file"] = (
+        runner.custom_approval_plan_path(policy_valid_request)
+    )
+    policy_valid_prompt = runner.render_task_prompt(
+        policy_valid_prompt_request, config
+    )
+    policy_valid_challenge = runner.custom_approval_challenge(
+        policy_valid_request,
+        request_sha256="c" * 64,
+        effective=effective,
+        review=review,
+        prompt=policy_valid_prompt,
+    )
+    runner.persist_custom_approval_challenge(
+        policy_valid_request,
+        policy_valid_challenge,
+        runner.custom_approval_snapshot(
+            policy_valid_request,
+            policy_valid_challenge,
+            session=session,
+            effective=effective,
+            review=review,
+            prompt=policy_valid_prompt,
+        ),
+    )
+    policy_valid_start = runner.authorize_custom_request(
+        policy_valid_request, "c" * 64, ""
+    )
+    policy_valid_record = runner.read_object(
+        runner.custom_approval_path(policy_valid_request)
+    )
+    check(
+        "policy-valid custom start atomically consumes its immutable snapshot without a host token",
+        policy_valid_start["_approved_custom_contract"][1].definition_sha256
+        == policy_valid_challenge["definition_sha256"]
+        and policy_valid_record["status"] == "consumed"
+        and policy_valid_record.get("actor") == ""
+        and not Path(policy_valid_raw["worktree"]).exists(),
+        policy_valid_record,
     )
     changed_cli_custom = json.loads(json.dumps(custom_payload))
     changed_cli_custom["spec_id"] = "changed-before-cli-start"

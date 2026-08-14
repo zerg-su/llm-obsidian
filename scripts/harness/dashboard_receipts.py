@@ -549,6 +549,143 @@ def fix_receipt_visits(
     return tuple(visits[:MAX_VISITS]), issue
 
 
+def fix_phase_timing(
+    store: OperationStore,
+    record: OperationRecord,
+    runtime: Path,
+    step_id: str,
+    observed_at: float,
+) -> TimingView:
+    """Project one exact engineering/fix sidecar interval, or unavailable."""
+
+    observed = _epoch(observed_at)
+    root = runtime / "pipeline-fix"
+    if observed is None or not root.is_dir() or root.is_symlink():
+        return UNKNOWN_TIMING
+    candidates: list[tuple[int, FixStepReceipt, dict[str, Any], dict[str, Any]]] = []
+    for receipt_path in sorted(root.glob("pass-*/" + step_id + "/receipt.json")):
+        pass_root = receipt_path.parents[1]
+        suffix = pass_root.name.removeprefix("pass-")
+        if not suffix.isdigit():
+            continue
+        try:
+            receipt = load_receipt(receipt_path)
+            child = store.read(record.spec.owner_id, receipt.operation_id)
+        except (FixWorkflowError, StoreError, OSError, ValueError):
+            continue
+        receipt_fields = receipt.to_dict()
+        payload = {key: receipt_fields[key] for key in PAYLOAD_FIELDS}
+        payload_sha256 = hashlib.sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        if (
+            receipt.parent_operation_id != record.spec.operation_id
+            or receipt.definition_sha256 != record.spec.contract_sha256
+            or receipt.step_id != step_id
+            or receipt.iteration != int(suffix)
+            or child.spec.kind != "pipeline-model-step"
+            or child.spec.parent_operation_id != record.spec.operation_id
+            or child.spec.contract_sha256 != record.spec.contract_sha256
+            or child.lane_id != receipt.lane_id
+            or child.run_id != receipt.run_id
+            or child.state != "complete"
+            or child.accepted_callback_id != receipt.callback_id
+            or child.accepted_callback_kind != "result"
+            or child.accepted_callback_sha256 != payload_sha256
+        ):
+            continue
+        timing_root = root / "timing" / pass_root.name / step_id
+        start = _read_object(timing_root / "start.json", boundary=runtime)
+        completion = _read_object(
+            timing_root / "completion.json", boundary=runtime
+        )
+        candidates.append((int(suffix), receipt, start or {}, completion or {}))
+    if not candidates:
+        return _active_fix_phase_timing(
+            store, record, runtime, step_id, observed
+        )
+    iteration, receipt, start, completion = max(
+        candidates, key=lambda item: item[0]
+    )
+    identity = {
+        "schema_version": 1,
+        "owner_id": record.spec.owner_id,
+        "parent_operation_id": record.spec.operation_id,
+        "operation_id": receipt.operation_id,
+        "run_id": receipt.run_id,
+        "step_id": step_id,
+        "iteration": iteration,
+    }
+    if (
+        set(start) != {*identity, "started_at"}
+        or set(completion) != {*identity, "completed_at", "receipt_sha256"}
+        or any(start.get(key) != value for key, value in identity.items())
+        or any(completion.get(key) != value for key, value in identity.items())
+        or completion.get("receipt_sha256") != receipt.receipt_sha256
+    ):
+        return UNKNOWN_TIMING
+    started_at = _epoch(start.get("started_at"))
+    completed_at = _epoch(completion.get("completed_at"))
+    if (
+        started_at is None
+        or completed_at is None
+        or completed_at < started_at
+        or completed_at > observed
+    ):
+        return UNKNOWN_TIMING
+    return _timing("duration", started_at, completed_at)
+
+
+def _active_fix_phase_timing(
+    store: OperationStore,
+    record: OperationRecord,
+    runtime: Path,
+    step_id: str,
+    observed_at: float,
+) -> TimingView:
+    """Project the latest valid nonterminal phase start as elapsed time."""
+
+    root = runtime / "pipeline-fix" / "timing"
+    candidates: list[tuple[int, float]] = []
+    for path in sorted(root.glob("pass-*/" + step_id + "/start.json")):
+        pass_root = path.parents[1]
+        suffix = pass_root.name.removeprefix("pass-")
+        value = _read_object(path, boundary=runtime)
+        if value is None or not suffix.isdigit():
+            continue
+        iteration = int(suffix)
+        try:
+            child = store.read(record.spec.owner_id, str(value["operation_id"]))
+        except (KeyError, StoreError):
+            continue
+        identity = {
+            "schema_version": 1,
+            "owner_id": record.spec.owner_id,
+            "parent_operation_id": record.spec.operation_id,
+            "operation_id": child.spec.operation_id,
+            "run_id": child.run_id,
+            "step_id": step_id,
+            "iteration": iteration,
+        }
+        started_at = _epoch(value.get("started_at"))
+        if (
+            set(value) != {*identity, "started_at"}
+            or any(value.get(key) != expected for key, expected in identity.items())
+            or child.spec.kind != "pipeline-model-step"
+            or child.spec.parent_operation_id != record.spec.operation_id
+            or child.spec.contract_sha256 != record.spec.contract_sha256
+            or child.state in TERMINAL
+            or started_at is None
+            or started_at > observed_at
+        ):
+            continue
+        candidates.append((iteration, started_at))
+    if not candidates:
+        return UNKNOWN_TIMING
+    _iteration, started_at = max(candidates, key=lambda item: item[0])
+    return _timing("elapsed", started_at, observed_at)
+
+
 def verification_identity(
     parent: OperationSpec,
     definition_sha256: str,

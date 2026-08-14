@@ -7,9 +7,14 @@
       "evidence": "approved-base full-gate rebaseline; artifact repair behavior remains covered by tests/harness/test_artifact_repair.py and tests/harness/test_fresh_artifact_repair.py"
     },
     "file-lines:scripts/harness/dashboard_projection.py": {
-      "max_value": 1012,
-      "owner": "v2.6.7 RC6.5 final review closure display projection",
-      "evidence": "unique exact-root active structural-pivot route and ambiguous fail-closed regressions in tests/harness/test_harness_dashboard.py and tests/harness/test_dashboard_observability.py"
+      "max_value": 1025,
+      "owner": "v2.6.7 RC6.7 durable engineering/fix phase timing",
+      "evidence": "identity-bound active and completed phase timing projection in tests/harness/test_harness_dashboard.py"
+    },
+    "file-lines:scripts/harness/dashboard_receipts.py": {
+      "max_value": 1135,
+      "owner": "v2.6.7 RC6.7 durable engineering/fix phase timing",
+      "evidence": "receipt-bound phase timing validation in tests/harness/test_harness_dashboard.py"
     },
     "file-lines:scripts/harness/runtime_worker_review_bridge.py": {
       "max_value": 1124,

@@ -610,6 +610,186 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard.") as raw:
         and program.next_action == "wait"
         and program.classification == WAITING,
     )
+    phase_timed_root = "dashboard-fix-phase-timed-root"
+    _create(
+        store,
+        phase_timed_root,
+        "dispatch",
+        lane_id="phase-timed-root-lane",
+        contract_sha256=compiled.definition_sha256,
+    )
+    _advance(
+        store,
+        phase_timed_root,
+        "preflight",
+        "starting",
+        "running",
+        "awaiting-callback",
+    )
+    phase_timed_runtime = (
+        store_root / "owners" / OWNER / "runtime" / phase_timed_root
+    )
+    phase_durations = {
+        "reproduce": (1_000.0, 1_011.0),
+        "root-cause": (1_020.0, 1_043.0),
+        "regression-test": (1_050.0, 1_081.0),
+        "minimal-fix": (1_090.0, 1_137.0),
+    }
+    for step_id, (started_at, completed_at) in phase_durations.items():
+        _fix_receipt(
+            store,
+            phase_timed_root,
+            phase_timed_runtime,
+            compiled.definition_sha256,
+            step_id,
+            0,
+        )
+        receipt_path = (
+            phase_timed_runtime
+            / "pipeline-fix"
+            / "pass-0"
+            / step_id
+            / "receipt.json"
+        )
+        receipt = FixStepReceipt(**json.loads(receipt_path.read_text(encoding="utf-8")))
+        timing_root = (
+            phase_timed_runtime
+            / "pipeline-fix"
+            / "timing"
+            / "pass-0"
+            / step_id
+        )
+        timing_root.mkdir(parents=True)
+        identity = {
+            "schema_version": 1,
+            "owner_id": OWNER,
+            "parent_operation_id": phase_timed_root,
+            "operation_id": receipt.operation_id,
+            "run_id": receipt.run_id,
+            "step_id": step_id,
+            "iteration": 0,
+        }
+        (timing_root / "start.json").write_text(
+            json.dumps({**identity, "started_at": started_at}, sort_keys=True)
+            + "\n",
+            encoding="utf-8",
+        )
+        (timing_root / "completion.json").write_text(
+            json.dumps(
+                {
+                    **identity,
+                    "completed_at": completed_at,
+                    "receipt_sha256": receipt.receipt_sha256,
+                },
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+    phase_timed_projection = project(
+        store_root, OWNER, observed_at=1_200.0
+    )
+    phase_timed_program = next(
+        program
+        for program in phase_timed_projection.programs
+        if program.operation_id == phase_timed_root
+    )
+    phase_timed_steps = {
+        step.step_id: step
+        for step in phase_timed_program.steps
+    }
+    regression_check(
+        "engineering fix projects each accepted identity-bound phase interval independently",
+        all(
+            phase_timed_steps[step_id].timing
+            == TimingView("duration", int(completed_at - started_at))
+            for step_id, (started_at, completed_at) in phase_durations.items()
+        ),
+    )
+    active_phase_root = "dashboard-fix-phase-active-root"
+    active_phase = "dashboard-fix-phase-active-reproduce"
+    active_owner = "dashboard-fix-phase-active-owner"
+    _create(
+        store,
+        active_phase_root,
+        "dispatch",
+        lane_id="phase-active-root-lane",
+        contract_sha256=compiled.definition_sha256,
+        owner=active_owner,
+    )
+    _advance(
+        store,
+        active_phase_root,
+        "preflight",
+        "starting",
+        "running",
+        "awaiting-callback",
+        owner=active_owner,
+    )
+    _create(
+        store,
+        active_phase,
+        "pipeline-model-step",
+        lane_id="phase-active-child-lane",
+        contract_sha256=compiled.definition_sha256,
+        parent=active_phase_root,
+        owner=active_owner,
+    )
+    _advance(
+        store,
+        active_phase,
+        "preflight",
+        "starting",
+        "running",
+        "awaiting-callback",
+        owner=active_owner,
+    )
+    active_timing_root = (
+        store_root
+        / "owners"
+        / active_owner
+        / "runtime"
+        / active_phase_root
+        / "pipeline-fix"
+        / "timing"
+        / "pass-0"
+        / "reproduce"
+    )
+    active_timing_root.mkdir(parents=True)
+    (active_timing_root / "start.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "owner_id": active_owner,
+                "parent_operation_id": active_phase_root,
+                "operation_id": active_phase,
+                "run_id": f"{active_phase}-run",
+                "step_id": "reproduce",
+                "iteration": 0,
+                "started_at": 1_100.0,
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    active_phase_projection = project(
+        store_root, active_owner, observed_at=1_200.0
+    )
+    active_phase_program = next(
+        program
+        for program in active_phase_projection.programs
+        if program.operation_id == active_phase_root
+    )
+    active_reproduce = next(
+        step
+        for step in active_phase_program.steps
+        if step.step_id == "reproduce"
+    )
+    regression_check(
+        "engineering fix projects a valid active phase sidecar as elapsed time",
+        active_reproduce.timing == TimingView("elapsed", 100),
+    )
     lanes = {lane.lane_id: lane for lane in program.lanes}
     check(
         "parallel operation lanes and review axes are both projected",

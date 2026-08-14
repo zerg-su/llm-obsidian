@@ -2575,6 +2575,42 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
             fix_cmux.sent,
         ),
     )
+    phase_timing = fix_state / "pipeline-fix" / "timing" / "pass-0"
+    timing_evidence: list[tuple[dict[str, object], dict[str, object]]] = []
+    for receipt_path in fix_receipts:
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        step_id = str(receipt["step_id"])
+        start_path = phase_timing / step_id / "start.json"
+        completion_path = phase_timing / step_id / "completion.json"
+        timing_evidence.append(
+            (
+                json.loads(start_path.read_text(encoding="utf-8")),
+                json.loads(completion_path.read_text(encoding="utf-8")),
+            )
+        )
+    check(
+        "engineering fix persists exact immutable phase intervals bound to accepted receipts",
+        len(timing_evidence) == 4
+        and all(
+            start["schema_version"] == 1
+            and completion["schema_version"] == 1
+            and start["owner_id"] == "owner-1"
+            and completion["owner_id"] == "owner-1"
+            and start["parent_operation_id"] == fix_task
+            and completion["parent_operation_id"] == fix_task
+            and start["operation_id"] == completion["operation_id"]
+            and start["run_id"] == completion["run_id"]
+            and start["step_id"] == completion["step_id"]
+            and start["iteration"] == completion["iteration"] == 0
+            and isinstance(start["started_at"], (int, float))
+            and isinstance(completion["completed_at"], (int, float))
+            and completion["completed_at"] >= start["started_at"]
+            and isinstance(completion["receipt_sha256"], str)
+            and len(completion["receipt_sha256"]) == 64
+            for start, completion in timing_evidence
+        ),
+        timing_evidence,
+    )
     phase_messages = [
         item[1]
         for item in fix_cmux.sent
