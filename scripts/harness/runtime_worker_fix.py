@@ -12,6 +12,7 @@ from .runtime_worker import (
     _envelope,
 )
 from .artifact_repair import ContractArtifactOwner
+from .workflows.engineering_fix import fix_phase_request
 
 
 @dataclass
@@ -349,40 +350,28 @@ class RuntimeWorkerFixMixin:
     def publish_fix_request(
         self, state: FixTransportState, round_: object
     ) -> tuple[Path, str]:
-        result_pointer = (
-            f".task-pipeline/results/pass-{state.iteration}/{round_.step_id}.json"
-        )
-        output_pointer = (
-            f".task-pipeline/outputs/pass-{state.iteration}/{round_.step_id}.md"
-        )
-        request = {
-            "schema_version": 1,
-            "operation_id": round_.spec.operation_id,
-            "run_id": round_.run_id,
-            "parent_operation_id": round_.parent_operation_id,
-            "lane_id": round_.lane_id,
-            "definition_sha256": round_.spec.contract_sha256,
-            "step_id": round_.step_id,
-            "iteration": round_.iteration,
-            "input_schema": round_.input_schema,
-            "input_sha256": round_.input_sha256,
-            "input_head_sha": round_.input_head_sha,
-            "prior_receipt_sha256": round_.prior_receipt_sha256,
-            "verification_sha256": round_.verification_sha256,
-            "output_schema": round_.output_schema,
-            "result_pointer": result_pointer,
-            "output_pointer": output_pointer,
-        }
-        request, _owner = self.publish_pipeline_step_contract(request)
+        request = fix_phase_request(round_)
+        result_pointer = str(request["result_pointer"])
+        request, owner = self.publish_pipeline_step_contract(request)
         self.retarget_fix_callback(
             operation_id=round_.spec.operation_id,
             run_id=round_.run_id,
             callback_pointer=".task-pipeline-step-callback.json",
         )
-        self.notify_fix_phase(request)
         _generation, operation_id, run_id, callback_path = _callback_target(self.spec)
         if operation_id != round_.spec.operation_id or run_id != round_.run_id:
             raise RuntimeWorkerError("engineering/fix active callback target changed")
+        result_digest = _bounded_file_sha256(
+            self.spec["cwd"] / result_pointer
+        )
+        if (
+            not callback_path.is_file()
+            and (
+                not result_digest
+                or result_digest == owner.template_artifact_sha256
+            )
+        ):
+            self.notify_fix_phase(request)
         return callback_path, result_pointer
 
     def submit_fix_result(
@@ -462,9 +451,7 @@ class RuntimeWorkerFixMixin:
         try:
             raw = callback_path.read_bytes()
         except FileNotFoundError:
-            result_pointer = (
-                f".task-pipeline/results/pass-{state.iteration}/{round_.step_id}.json"
-            )
+            result_pointer = str(fix_phase_request(round_)["result_pointer"])
             self.submit_fix_result(round_, callback_path, result_pointer)
             return
         if not raw or len(raw) > MAX_OUTBOX_BYTES:

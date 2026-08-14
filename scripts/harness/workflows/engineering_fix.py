@@ -157,6 +157,33 @@ def prepare_retry_phase(
     return _prepare_round(store, round_)
 
 
+def fix_phase_request(round_: FixPhaseRound) -> dict[str, object]:
+    """Build the only request mapping for one engineering/fix phase."""
+
+    return {
+        "schema_version": 1,
+        "operation_id": round_.spec.operation_id,
+        "run_id": round_.run_id,
+        "parent_operation_id": round_.parent_operation_id,
+        "lane_id": round_.lane_id,
+        "definition_sha256": round_.spec.contract_sha256,
+        "step_id": round_.step_id,
+        "iteration": round_.iteration,
+        "input_schema": round_.input_schema,
+        "input_sha256": round_.input_sha256,
+        "input_head_sha": round_.input_head_sha,
+        "prior_receipt_sha256": round_.prior_receipt_sha256,
+        "verification_sha256": round_.verification_sha256,
+        "output_schema": round_.output_schema,
+        "result_pointer": (
+            f".task-pipeline/results/pass-{round_.iteration}/{round_.step_id}.json"
+        ),
+        "output_pointer": (
+            f".task-pipeline/outputs/pass-{round_.iteration}/{round_.step_id}.md"
+        ),
+    }
+
+
 def phase_envelope(
     round_: FixPhaseRound,
     *,

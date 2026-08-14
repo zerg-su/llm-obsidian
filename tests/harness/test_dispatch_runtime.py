@@ -30,6 +30,10 @@ from harness.workflows.dispatch import (
     ReviewPolicy,
     start_dispatch,
 )
+from harness.workflows.engineering_fix import (
+    fix_phase_request,
+    prepare_next_phase,
+)
 
 
 def check(label: str, value: bool) -> None:
@@ -136,6 +140,48 @@ with tempfile.TemporaryDirectory() as raw:
     check(
         "task summary transport stays canonical and code-owned",
         session.task_summary_pointer == ".task-summary.json",
+    )
+
+    fix_runtime = FakeRuntime(cwd / "fix-runtime-store")
+    fix_request = replace(
+        request,
+        task_id="66666666-6666-4666-8666-666666666666",
+        owner_id="66666666-6666-4666-8666-666666666666",
+        pipeline_name="engineering/fix",
+    )
+    start_dispatch(
+        fix_request,
+        fix_runtime,
+        origin_surface="11111111-1111-4111-8111-111111111111",
+        cwd=cwd,
+        initial_head_sha="e" * 40,
+    )
+    fix_session = fix_runtime.requests[0]
+    fix_visible = fix_runtime.visible_step_authority
+    fix_round = prepare_next_phase(
+        fix_runtime.store,
+        fix_runtime.store.read(fix_request.owner_id, fix_request.task_id),
+        definition_sha256=fix_visible[0]["definition_sha256"],
+        approved_plan_sha256=fix_request.plan_sha256,
+        initial_head_sha="e" * 40,
+        receipts=(),
+        iteration=0,
+    )
+    expected_fix_request = fix_phase_request(fix_round)
+    expected_fix_request["contract_template_pointer"] = fix_visible[0][
+        "contract_template_pointer"
+    ]
+    check(
+        "engineering/fix initial reproduce publishes the canonical runtime request",
+        fix_session.callback_pointer == ".task-pipeline-step-callback.json"
+        and fix_visible is not None
+        and fix_visible[0] == expected_fix_request
+        and fix_visible[0]["result_pointer"]
+        == ".task-pipeline/results/pass-0/reproduce.json"
+        and fix_visible[0]["output_pointer"]
+        == ".task-pipeline/outputs/pass-0/reproduce.md"
+        and fix_visible[1]
+        and fix_visible[2],
     )
 
     raw_custom = {

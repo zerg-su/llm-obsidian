@@ -63,7 +63,12 @@ from harness.verification import load_profiles
 from approved_plan_snapshot import bind_approved_plan_snapshot
 from harness.artifact_repair import (  # noqa: E402
     build_verification_escalation,
+    publish_pipeline_step_contract,
     resolve_verification_escalation,
+)
+from harness.workflows.engineering_fix import (  # noqa: E402
+    fix_phase_request,
+    prepare_next_phase,
 )
 from harness.verification_attempt import (  # noqa: E402
     VerificationAttempt,
@@ -1662,6 +1667,7 @@ def run_case(
             "root=pathlib.Path.cwd()\n"
             "summary=pathlib.Path(sys.argv[1])\n"
             "publish_summary(summary,sys.argv[2])\n"
+            "if (root/'.task-pipeline/results/pass-0/reproduce.json').is_file(): time.sleep(0.5)\n"
             "state=pathlib.Path(sys.argv[4])\n"
             "callback_barrier=sys.argv[5] if len(sys.argv)>7 else ''\n"
             "callback_barrier_step=sys.argv[6] if len(sys.argv)>7 else ''\n"
@@ -1766,7 +1772,9 @@ def run_case(
             "state=pathlib.Path(sys.argv[4])\n"
             "request=root/'.task-pipeline-step-request.json'\n"
             "outbox=root/'.task-pipeline-step-callback.json'\n"
+            "log=root/'.provider-step-log.json'\n"
             "seen=set()\n"
+            "processed=[]\n"
             "for expected in ('reproduce','root-cause','regression-test','minimal-fix'):\n"
             "  for _ in range(2000):\n"
             "    if request.is_file():\n"
@@ -1775,6 +1783,8 @@ def run_case(
             "    time.sleep(0.01)\n"
             "  else: raise SystemExit(3)\n"
             "  seen.add(row['operation_id'])\n"
+            "  processed.append({'operation_id':row['operation_id'],'step_id':row['step_id']})\n"
+            "  log.write_text(json.dumps(processed,sort_keys=True)+'\\n',encoding='utf-8')\n"
             "  output=root/row['output_pointer']\n"
             "  output.parent.mkdir(parents=True,exist_ok=True)\n"
             "  output.write_text(expected+' evidence\\n',encoding='utf-8')\n"
@@ -2586,6 +2596,160 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
             )
         ),
         phase_messages,
+    )
+
+    adopted_task = "eafeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+    adopted_prelaunch: dict[str, object] = {}
+
+    def publish_stable_initial_fix_result(
+        vault: Path, worktree: Path, state: Path, _profile_sha: str
+    ) -> None:
+        shutil.copytree(
+            ROOT / "scripts",
+            vault / "scripts",
+            dirs_exist_ok=True,
+            ignore=shutil.ignore_patterns("__pycache__"),
+        )
+        adopted_store = OperationStore(vault / ".vault-meta" / "harness")
+        parent = adopted_store.read("owner-1", adopted_task)
+        meta = json.loads(
+            (worktree / ".task-meta.json").read_text(encoding="utf-8")
+        )
+        initial_head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=worktree,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.strip()
+        round_ = prepare_next_phase(
+            adopted_store,
+            parent,
+            definition_sha256=parent.spec.contract_sha256,
+            approved_plan_sha256=meta["approved_plan_sha256"],
+            initial_head_sha=initial_head,
+            receipts=(),
+            iteration=0,
+        )
+        request, owner = publish_pipeline_step_contract(
+            state_root=state,
+            worktree=worktree,
+            request=fix_phase_request(round_),
+        )
+        output = worktree / str(request["output_pointer"])
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text("pre-launched reproduction evidence\n", encoding="utf-8")
+        write_json(
+            worktree / str(request["result_pointer"]),
+            {
+                "schema_version": 1,
+                "status": "complete",
+                "output_sha256": hashlib.sha256(output.read_bytes()).hexdigest(),
+                "head_sha": initial_head,
+            },
+        )
+        adopted_prelaunch.update(
+            request=request,
+            contract_template_pointer=str(owner.sidecar_path),
+            operation_id=round_.spec.operation_id,
+        )
+
+    (
+        adopted_store,
+        adopted_cmux,
+        adopted_state,
+        adopted_rc,
+    ) = run_case(
+        root,
+        adopted_task,
+        valid_summary,
+        pipeline_name="engineering/fix",
+        verification_runner=pass_verification,
+        before_start=publish_stable_initial_fix_result,
+        fix_restart_after="root-cause",
+        model_restart_limit=1,
+    )
+    adopted_receipts = sorted(
+        (adopted_state / "pipeline-fix" / "pass-0").glob("*/receipt.json")
+    )
+    adopted_log = (
+        root
+        / f"worktree-{adopted_task}"
+        / ".provider-step-log.json"
+    )
+    adopted_steps = (
+        json.loads(adopted_log.read_text(encoding="utf-8"))
+        if adopted_log.is_file()
+        else []
+    )
+    adopted_children = [
+        record
+        for record in adopted_store.list("owner-1")
+        if record.spec.kind == "pipeline-model-step"
+    ]
+    adopted_phase_messages = [
+        item[1]
+        for item in adopted_cmux.sent
+        if ".task-pipeline-step-request.json" in item[1]
+    ]
+    adopted_submit_failure_path = (
+        adopted_state / "pipeline-fix" / "submit-failed.json"
+    )
+    adopted_submit_failure = (
+        json.loads(adopted_submit_failure_path.read_text(encoding="utf-8"))
+        if adopted_submit_failure_path.is_file()
+        else None
+    )
+    check(
+        "engineering fix adopts the pre-launched reproduce result exactly once",
+        adopted_rc == 0
+        and adopted_store.read("owner-1", adopted_task).state
+        == "finalizing"
+        and adopted_store.read("owner-1", adopted_task).model_restarts == 1
+        and len(adopted_receipts) == 4
+        and len(adopted_children) == 4
+        and len(
+            [
+                record
+                for record in adopted_children
+                if record.spec.operation_id == adopted_prelaunch["operation_id"]
+                and record.state == "complete"
+            ]
+        )
+        == 1
+        and len(
+            [
+                record
+                for record in adopted_children
+                if record.spec.operation_id != adopted_prelaunch["operation_id"]
+                and record.spec.kind == "pipeline-model-step"
+                and record.state == "complete"
+            ]
+        )
+        == 3
+        and adopted_prelaunch["request"]["result_pointer"]
+        == ".task-pipeline/results/pass-0/reproduce.json"
+        and adopted_prelaunch["request"]["output_pointer"]
+        == ".task-pipeline/outputs/pass-0/reproduce.md"
+        and adopted_prelaunch["request"]["contract_template_pointer"]
+        == adopted_prelaunch["contract_template_pointer"]
+        and [item["step_id"] for item in adopted_steps]
+        == ["root-cause", "regression-test", "minimal-fix"]
+        and not any("phase reproduce" in message for message in adopted_phase_messages)
+        and len(
+            [message for message in adopted_phase_messages if "phase root-cause" in message]
+        )
+        == 1,
+        (
+            adopted_prelaunch,
+            adopted_rc,
+            adopted_store.read("owner-1", adopted_task),
+            adopted_submit_failure,
+            adopted_children,
+            adopted_receipts,
+            adopted_steps,
+            adopted_phase_messages,
+        ),
     )
 
     restart_task = "eadeeeee-eeee-4eee-8eee-eeeeeeeeeeee"

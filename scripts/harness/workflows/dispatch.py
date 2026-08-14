@@ -29,7 +29,7 @@ from ..runtime_sessions import (
     RuntimeSessionResult,
 )
 from ..dashboard_facade import launch_bound_facade_dashboard
-from .engineering_fix import FixPhaseRound, prepare_next_phase
+from .engineering_fix import fix_phase_request, prepare_next_phase
 from .custom_sequence import (
     CustomStepRound,
     custom_step_request,
@@ -233,28 +233,6 @@ def _assignment(spec: OperationSpec, role: str) -> str:
     return str(uuid.uuid5(namespace, f"{role}:{spec.idempotency_key}"))
 
 
-def _fix_phase_request(round_: FixPhaseRound) -> dict[str, object]:
-    base = f".task-pipeline/pass-{round_.iteration + 1}/{round_.step_id}"
-    return {
-        "schema_version": 1,
-        "operation_id": round_.spec.operation_id,
-        "run_id": round_.run_id,
-        "parent_operation_id": round_.parent_operation_id,
-        "lane_id": round_.lane_id,
-        "definition_sha256": round_.spec.contract_sha256,
-        "step_id": round_.step_id,
-        "iteration": round_.iteration,
-        "input_schema": round_.input_schema,
-        "input_sha256": round_.input_sha256,
-        "input_head_sha": round_.input_head_sha,
-        "prior_receipt_sha256": round_.prior_receipt_sha256,
-        "verification_sha256": round_.verification_sha256,
-        "output_schema": round_.output_schema,
-        "result_pointer": f"{base}-result.json",
-        "output_pointer": f"{base}-output.md",
-    }
-
-
 def start_dispatch(
     request: DispatchRequest,
     runtime: RuntimeSessionManager,
@@ -329,7 +307,7 @@ def start_dispatch(
                 / request.task_id
             ),
             worktree=cwd,
-            request=_fix_phase_request(round_),
+            request=fix_phase_request(round_),
         )
         callback_pointer = ".task-pipeline-step-callback.json"
         initial_callback_operation_id = round_.spec.operation_id
