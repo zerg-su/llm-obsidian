@@ -361,24 +361,24 @@ def _failure_receipts_match(
         if len(event_paths) != 1 or event_paths[0].name != "0001.json":
             return False
         event = _regular_json_object(event_paths[0])
+        resources = record.resources
+        expected_identity = asdict(
+            ProviderEventIdentity(
+                owner_id=record.spec.owner_id,
+                operation_id=record.spec.operation_id,
+                run_id=record.run_id,
+                generation=generation,
+                provider_session_id=record.run_id,
+                process_identity=resources.process_identity,
+                source_id=f"process:{resources.process_identity}",
+                workspace_id=evidence["session.json"].get("workspace_id"),
+                surface_id=resources.surface_id,
+            )
+        )
     except (OSError, ValueError, json.JSONDecodeError, UnicodeDecodeError):
         return False
-    resources = record.resources
     identity = delivery.get("identity")
     cursor = delivery.get("cursor")
-    expected_identity = asdict(
-        ProviderEventIdentity(
-            owner_id=record.spec.owner_id,
-            operation_id=record.spec.operation_id,
-            run_id=record.run_id,
-            generation=generation,
-            provider_session_id=record.run_id,
-            process_identity=resources.process_identity,
-            source_id=f"process:{resources.process_identity}",
-            workspace_id=evidence["session.json"].get("workspace_id"),
-            surface_id=resources.surface_id,
-        )
-    )
     return all(
         (
             transport == {
