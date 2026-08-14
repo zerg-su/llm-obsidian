@@ -199,7 +199,11 @@ def _cancel_or_close(
             reason=AttentionReason.ATTENTION_REQUIRED,
         )
     retired = retire_failed_reviewer_start(
-        store, owner, operation_id, cmux_adapter=cmux_adapter
+        store,
+        owner,
+        operation_id,
+        cmux_adapter=cmux_adapter,
+        process_adapter=process_adapter,
     )
     if retired is not None:
         return retired

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Identity/liveness matrix for zero-provider-effect reviewer retirement."""
+"""Identity/liveness matrix for pre-input reviewer retirement."""
 
 from __future__ import annotations
 
@@ -37,6 +37,21 @@ class FakeCmux:
 
     def workspace_status(self, _workspace_id: str, _window_id: str) -> str:
         return self.workspace
+
+
+class FakeProcess:
+    def __init__(self, process: str = "dead", supervisor: str = "dead"):
+        self.process = process
+        self.supervisor = supervisor
+
+    def exact_statuses(
+        self,
+        _process_group: int,
+        _process_identity: str,
+        _supervisor_pid: int,
+        _supervisor_identity: str,
+    ) -> tuple[str, str]:
+        return self.process, self.supervisor
 
 
 def check(label: str, value: bool) -> None:
@@ -162,6 +177,119 @@ def fixture(root: Path, name: str) -> tuple[OperationStore, str, Path, Path]:
     return store, operation_id, runtime, callback
 
 
+def input_unconfirmed_fixture(
+    root: Path, name: str
+) -> tuple[OperationStore, str, Path, Path]:
+    store, operation_id, runtime, callback = fixture(root, name)
+    current = store.read("owner-review", operation_id)
+    store.save(
+        replace(
+            current,
+            state="attention-required",
+            attention_reason=AttentionReason.ATTENTION_REQUIRED,
+            resume_state="awaiting-callback",
+            effect_outcome=EffectOutcome.SUCCEEDED,
+            resources=OwnedResources(
+                "11111111-1111-4111-8111-111111111111",
+                41001,
+                41002,
+                "a" * 64,
+                "b" * 64,
+            ),
+            revision=current.revision + 1,
+        ),
+        expected_revision=current.revision,
+    )
+    child_id = f"{operation_id}-round"
+    child = store.read("owner-review", child_id)
+    store.save(
+        replace(child, state="cancelled", revision=child.revision + 1),
+        expected_revision=child.revision,
+    )
+    (runtime / "exit.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "status": "input-unconfirmed",
+                "exit_code": 2,
+                "reason": "initial-start-still-composing",
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (runtime / "surface-transport.json").write_text(
+        '{"schema_version":1,"status":"command-submitted"}\n',
+        encoding="utf-8",
+    )
+    delivery = runtime / "provider-events/generation-1/delivery"
+    events = runtime / "provider-events/generation-1/events"
+    delivery.mkdir(parents=True)
+    events.mkdir(parents=True)
+    identity = {
+        "schema_version": 1,
+        "owner_id": "owner-review",
+        "operation_id": operation_id,
+        "run_id": f"run-{name}",
+        "generation": 1,
+        "provider_session_id": f"run-{name}",
+        "process_identity": "a" * 64,
+        "supervisor_identity": "b" * 64,
+        "source_id": f"process:{'a' * 64}",
+        "workspace_id": "22222222-2222-4222-8222-222222222222",
+        "surface_id": "11111111-1111-4111-8111-111111111111",
+    }
+    (events / "0001.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "kind": "provider-started",
+                "sequence": 1,
+                "identity": identity,
+                "effect_id": "",
+                "exit_code": None,
+                "reason": "",
+                "result_sha256": "",
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (delivery / "delivery-state.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "idempotency_key": "c" * 64,
+                "profile": "interactive",
+                "identity": identity,
+                "send_status": "ambiguous",
+                "send_attempts": 1,
+                "callback_submits": 0,
+                "attention_reason": "",
+                "cursor": {
+                    "schema_version": 1,
+                    "identity": identity,
+                    "profile": "interactive",
+                    "last_sequence": 1,
+                    "event_gap": False,
+                    "provider_started": True,
+                    "input_accepted": False,
+                    "turn_stops": 0,
+                    "result_published": False,
+                    "process_exited": False,
+                    "resource_closed": False,
+                },
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return store, operation_id, runtime, callback
+
+
 with tempfile.TemporaryDirectory(prefix="pre-model-retirement.") as raw:
     root = Path(raw)
     store, operation_id, _runtime, callback = fixture(root, "green")
@@ -223,6 +351,47 @@ with tempfile.TemporaryDirectory(prefix="pre-model-retirement.") as raw:
         and observer_store.read("owner-review", observer_id).resources
         == OwnedResources(),
     )
+
+    semantic_store, semantic_id, _semantic_runtime, _semantic_callback = (
+        input_unconfirmed_fixture(root, "input-unconfirmed")
+    )
+    semantic_retired = _cancel_or_close(
+        semantic_store,
+        "owner-review",
+        semantic_id,
+        process_adapter=FakeProcess(),
+        cmux_adapter=FakeCmux(),
+    )
+    check(
+        "proven input-unconfirmed reviewer retires after exact absence proof",
+        semantic_retired is not None
+        and semantic_store.read("owner-review", semantic_id).state == "complete"
+        and semantic_store.read("owner-review", semantic_id).resources
+        == OwnedResources(),
+    )
+
+    for label, process in (
+        ("live semantic process", FakeProcess(process="alive")),
+        ("unknown semantic supervisor", FakeProcess(supervisor="unknown")),
+    ):
+        guarded, guarded_id, _guarded_runtime, _guarded_callback = (
+            input_unconfirmed_fixture(root, label.replace(" ", "-"))
+        )
+        guarded_result = _cancel_or_close(
+            guarded,
+            "owner-review",
+            guarded_id,
+            process_adapter=process,
+            cmux_adapter=FakeCmux(),
+        )
+        check(
+            f"retirement rejects {label}",
+            guarded_result.state == "attention-required"
+            and guarded.read("owner-review", guarded_id).state
+            == "attention-required"
+            and guarded.read("owner-review", guarded_id).resources
+            != OwnedResources(),
+        )
 
     for label, mutate, cmux, create_callback in (
         ("live surface", None, FakeCmux(surface="alive"), False),

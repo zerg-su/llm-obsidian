@@ -1,4 +1,4 @@
-"""Evidence-bound retirement for reviewers that failed before model startup."""
+"""Evidence-bound retirement for reviewers that failed before input acceptance."""
 
 from __future__ import annotations
 
@@ -162,28 +162,49 @@ def _regular_json_object(path: Path) -> dict[str, object]:
     return value
 
 
-def _failed_start_shape(
+def _failed_start_kind(
     record: OperationRecord, owner: str, operation_id: str
-) -> bool:
+) -> str:
     surface_id = record.resources.surface_id
-    return all(
+    shared = all(
         (
             record.spec.owner_id == owner,
             record.spec.operation_id == operation_id,
             record.spec.route.profile == "reviewer-callback",
             record.state == "attention-required",
-            record.attention_reason == AttentionReason.PROCESS_START_FAILED,
-            record.resume_state == "starting",
             not record.pending_effect,
             record.effect_id == "start-provider",
-            record.effect_outcome == EffectOutcome.FAILED,
             bool(surface_id),
-            record.resources == OwnedResources(surface_id=surface_id),
             not record.accepted_callback_id,
             not record.accepted_callback_kind,
             not record.accepted_callback_sha256,
         )
     )
+    if not shared:
+        return ""
+    if all(
+        (
+            record.attention_reason == AttentionReason.PROCESS_START_FAILED,
+            record.resume_state == "starting",
+            record.effect_outcome == EffectOutcome.FAILED,
+            record.resources == OwnedResources(surface_id=surface_id),
+        )
+    ):
+        return "pre-model"
+    resources = record.resources
+    if all(
+        (
+            record.attention_reason == AttentionReason.ATTENTION_REQUIRED,
+            record.resume_state == "awaiting-callback",
+            record.effect_outcome == EffectOutcome.SUCCEEDED,
+            resources.process_group > 1,
+            resources.supervisor_pid > 1,
+            bool(resources.process_identity),
+            bool(resources.supervisor_identity),
+        )
+    ):
+        return "input-unconfirmed"
+    return ""
 
 
 def _load_evidence(state_root: Path) -> dict[str, dict[str, object]] | None:
@@ -305,16 +326,79 @@ def _evidence_bindings_match(
 
 
 def _failure_receipts_match(
+    kind: str,
+    state_root: Path,
+    record: OperationRecord,
     evidence: Mapping[str, Mapping[str, object]],
 ) -> bool:
-    return (
-        evidence["ready.json"] == {"schema_version": 1, "status": "failed"}
-        and evidence["exit.json"]
-        == {
+    if evidence["ready.json"] != {"schema_version": 1, "status": "failed"}:
+        return False
+    if kind == "pre-model":
+        return evidence["exit.json"] == {
             "schema_version": 1,
             "status": "review-input-template-invalid",
             "exit_code": 2,
         }
+    if evidence["exit.json"] != {
+        "schema_version": 1,
+        "status": "input-unconfirmed",
+        "exit_code": 2,
+        "reason": "initial-start-still-composing",
+    }:
+        return False
+    try:
+        transport = _regular_json_object(state_root / "surface-transport.json")
+        generation = evidence["callback-target.json"].get("generation")
+        if type(generation) is not int or generation < 1:
+            return False
+        provider_root = state_root / "provider-events" / f"generation-{generation}"
+        delivery = _regular_json_object(
+            provider_root / "delivery" / "delivery-state.json"
+        )
+        event_paths = sorted((provider_root / "events").glob("*.json"))
+        if len(event_paths) != 1 or event_paths[0].name != "0001.json":
+            return False
+        event = _regular_json_object(event_paths[0])
+    except (OSError, ValueError, json.JSONDecodeError, UnicodeDecodeError):
+        return False
+    resources = record.resources
+    identity = delivery.get("identity")
+    cursor = delivery.get("cursor")
+    expected_identity = {
+        "schema_version": 1,
+        "owner_id": record.spec.owner_id,
+        "operation_id": record.spec.operation_id,
+        "run_id": record.run_id,
+        "generation": generation,
+        "provider_session_id": record.run_id,
+        "process_identity": resources.process_identity,
+        "supervisor_identity": resources.supervisor_identity,
+        "source_id": f"process:{resources.process_identity}",
+        "workspace_id": evidence["session.json"].get("workspace_id"),
+        "surface_id": resources.surface_id,
+    }
+    return all(
+        (
+            transport == {
+                "schema_version": 1,
+                "status": "command-submitted",
+            },
+            identity == expected_identity,
+            isinstance(cursor, Mapping),
+            cursor.get("identity") == expected_identity,
+            cursor.get("provider_started") is True,
+            cursor.get("input_accepted") is False,
+            cursor.get("result_published") is False,
+            cursor.get("resource_closed") is False,
+            cursor.get("last_sequence") == 1,
+            delivery.get("send_status") == "ambiguous",
+            delivery.get("send_attempts") == 1,
+            delivery.get("callback_submits") == 0,
+            event.get("schema_version") == 1,
+            event.get("kind") == "provider-started",
+            event.get("sequence") == 1,
+            event.get("identity") == expected_identity,
+        )
     )
 
 
@@ -322,6 +406,8 @@ def _failed_child_matches(
     store: OperationStore,
     parent: OperationRecord,
     target: Mapping[str, object],
+    *,
+    kind: str,
 ) -> bool:
     child_id = target.get("operation_id")
     if not isinstance(child_id, str) or not child_id:
@@ -340,7 +426,7 @@ def _failed_child_matches(
             child.spec.route == parent.spec.route,
             child.run_id == target.get("run_id"),
             child.lane_id == parent.lane_id,
-            child.state == "failed",
+            child.state == ("failed" if kind == "pre-model" else "cancelled"),
             child.resources == OwnedResources(),
             not child.pending_effect,
             not child.effect_id,
@@ -354,13 +440,32 @@ def _failed_child_matches(
 
 def _resources_are_missing(
     cmux_adapter: object,
+    process_adapter: object | None,
     record: OperationRecord,
+    *,
+    kind: str,
 ) -> bool:
     try:
         surface_status = str(cmux_adapter.status(record.resources.surface_id))
     except Exception:
         return False
-    return surface_status == "missing"
+    if surface_status != "missing":
+        return False
+    if kind == "pre-model":
+        return True
+    exact_statuses = getattr(process_adapter, "exact_statuses", None)
+    if not callable(exact_statuses):
+        return False
+    try:
+        process_status, supervisor_status = exact_statuses(
+            record.resources.process_group,
+            record.resources.process_identity,
+            record.resources.supervisor_pid,
+            record.resources.supervisor_identity,
+        )
+    except Exception:
+        return False
+    return process_status == "dead" and supervisor_status == "dead"
 
 
 def retire_failed_reviewer_start(
@@ -369,11 +474,13 @@ def retire_failed_reviewer_start(
     operation_id: str,
     *,
     cmux_adapter: object,
+    process_adapter: object | None = None,
 ) -> TransitionResult | None:
-    """Retire one exact reviewer with a failed start and no provider effect."""
+    """Retire one exact reviewer whose task input was never accepted."""
 
     record = store.read(owner, operation_id)
-    if not _failed_start_shape(record, owner, operation_id):
+    kind = _failed_start_kind(record, owner, operation_id)
+    if not kind:
         return None
     state_root = store.root / "owners" / owner / "runtime" / operation_id
     evidence = _load_evidence(state_root)
@@ -398,9 +505,11 @@ def retire_failed_reviewer_start(
                 product=product,
                 callback_path=callback_path,
             ),
-            _failure_receipts_match(evidence),
-            _failed_child_matches(store, record, target),
-            _resources_are_missing(cmux_adapter, record),
+            _failure_receipts_match(kind, state_root, record, evidence),
+            _failed_child_matches(store, record, target, kind=kind),
+            _resources_are_missing(
+                cmux_adapter, process_adapter, record, kind=kind
+            ),
         )
     ):
         return None
