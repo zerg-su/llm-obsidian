@@ -78,7 +78,7 @@ class RuntimeWorkerFixMixin:
         started_at = time.time()
         try:
             self.write_immutable_json(path, {**identity, "started_at": started_at})
-        except OSError:
+        except (OSError, RuntimeWorkerError):
             return None
         return path, started_at
 
@@ -129,7 +129,7 @@ class RuntimeWorkerFixMixin:
             return
         try:
             self.write_immutable_json(path, value)
-        except OSError:
+        except (OSError, RuntimeWorkerError):
             return
 
     def load_fix_policy(self) -> tuple[dict[str, object], str, int, str]:

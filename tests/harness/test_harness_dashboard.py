@@ -706,6 +706,69 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard.") as raw:
             for step_id, (started_at, completed_at) in phase_durations.items()
         ),
     )
+    timing_start = (
+        phase_timed_runtime / "pipeline-fix" / "timing" / "pass-0"
+        / "reproduce" / "start.json"
+    )
+    timing_completion = timing_start.with_name("completion.json")
+    original_start = timing_start.read_bytes()
+    original_completion = timing_completion.read_bytes()
+
+    def restore_phase_timing() -> None:
+        if timing_start.exists() or timing_start.is_symlink():
+            timing_start.unlink()
+        if timing_completion.exists() or timing_completion.is_symlink():
+            timing_completion.unlink()
+        timing_start.write_bytes(original_start)
+        timing_completion.write_bytes(original_completion)
+
+    def mutate_start(mutator) -> None:
+        value = json.loads(original_start)
+        mutator(value)
+        timing_start.write_text(json.dumps(value) + "\n", encoding="utf-8")
+
+    def mutate_completion(mutator) -> None:
+        value = json.loads(original_completion)
+        mutator(value)
+        timing_completion.write_text(
+            json.dumps(value) + "\n", encoding="utf-8"
+        )
+
+    timing_symlink_target = phase_timed_runtime / "timing-symlink-target.json"
+    timing_symlink_target.write_bytes(original_start)
+    timing_mutations = (
+        ("missing start", lambda: timing_start.unlink()),
+        ("missing completion", lambda: timing_completion.unlink()),
+        ("unexpected start key", lambda: mutate_start(lambda value: value.update(extra=True))),
+        ("drifted start owner", lambda: mutate_start(lambda value: value.update(owner_id="other"))),
+        ("drifted completion receipt", lambda: mutate_completion(lambda value: value.update(receipt_sha256="0" * 64))),
+        ("reversed interval", lambda: mutate_completion(lambda value: value.update(completed_at=999.0))),
+        ("future start", lambda: mutate_start(lambda value: value.update(started_at=1_201.0))),
+        ("future completion", lambda: mutate_completion(lambda value: value.update(completed_at=1_201.0))),
+        ("non-numeric start", lambda: mutate_start(lambda value: value.update(started_at="nope"))),
+        ("non-finite completion", lambda: mutate_completion(lambda value: value.update(completed_at=float("nan")))),
+        ("negative start", lambda: mutate_start(lambda value: value.update(started_at=-1.0))),
+        ("symlinked start", lambda: (timing_start.unlink(), timing_start.symlink_to(timing_symlink_target))),
+        ("symlinked completion", lambda: (timing_completion.unlink(), timing_completion.symlink_to(timing_symlink_target))),
+    )
+    for mutation_name, mutation in timing_mutations:
+        restore_phase_timing()
+        mutation()
+        mutated_projection = project(store_root, OWNER, observed_at=1_200.0)
+        mutated_program = next(
+            program for program in mutated_projection.programs
+            if program.operation_id == phase_timed_root
+        )
+        mutated_reproduce = next(
+            step for step in mutated_program.steps if step.step_id == "reproduce"
+        )
+        regression_check(
+            f"engineering fix timing rejects {mutation_name} without changing phase status",
+            mutated_reproduce.timing == TimingView("unknown", None)
+            and mutated_reproduce.status == phase_timed_steps["reproduce"].status
+            and mutated_reproduce.visits == phase_timed_steps["reproduce"].visits,
+        )
+    restore_phase_timing()
     retry_phase = "dashboard-fix-phase-timed-reproduce-retry"
     _create(
         store,
