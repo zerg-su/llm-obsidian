@@ -177,16 +177,24 @@ writer. Root elapsed time uses the task's bound `spawned_at`, with exact
 liveness start as a bounded fallback. A terminal duration freezes only when a
 validated reap completion binds the same task metadata. Verification duration
 uses the earliest accepted start and latest accepted finish from the exact
-verification evidence already selected by the receipt policy. Other terminal
-model, review, and fix rows have no authoritative end timestamp and display
-one compact dash. An expanded current row with rejected or missing evidence
-displays `time unavailable`; pending rows omit timing, so unavailable time is
-not repeated mechanically across the tree.
+verification evidence already selected by the receipt policy. A terminal
+reviewer row freezes its own interval from the exact review-input start through
+callback observation only when one accepted terminal review-round child and
+its owner/root/parent/round/run/axis/callback-digest evidence agree. The
+aggregate review phase derives its duration from those same validated reviewer
+children. Other terminal model and fix rows have no authoritative end timestamp
+and display one compact dash. An expanded current row with rejected or missing
+evidence displays `time unavailable`; pending rows omit timing, so unavailable
+time is not repeated mechanically across the tree.
 
-Only durable timestamps bound to the exact owner, operation, run, revision,
-worktree, vault, task metadata digest, and sampled frame are accepted. Invalid
-RFC 3339 values, non-finite or negative epochs, future/reversed intervals,
-leaf or ancestor symlink evidence, and identity drift remain unknown. A raw
+Durable timestamps are accepted only when their applicable exact identity
+bindings agree. Task and verification evidence bind the owner, operation, run,
+revision, worktree, vault, task metadata digest, and sampled frame. Reviewer
+timing additionally binds the owner, root, parent, round, run, axis, accepted
+callback digest, exact review-input start, and callback-observed completion to
+the sampled frame. Invalid RFC 3339 values, non-finite or negative epochs,
+future/reversed intervals, leaf or ancestor symlink evidence, and identity
+drift remain unknown. A raw
 absolute store, evidence, or session-CWD path carrying a `..` component is
 rejected before resolution, because collapsing it would erase a symlink the
 kernel still traverses. Bound task metadata is read once, so its parsed
