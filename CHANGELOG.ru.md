@@ -16,6 +16,29 @@
 внутренними контрольными точками и вошли в следующие публичные релизы; тегов и
 пакетов с этими номерами не выпускалось.
 
+## [2.6.7-rc6.8] — 2026-08-14
+
+Кандидат с actor для policy-valid custom snapshot.
+
+### Исправлено
+
+- Граница freeze custom pipeline принимает существующий code-owned actor
+  `policy-valid-snapshot` только для точного решения `approve`. Существующие
+  привязки definition и approval card остаются обязательными; unknown/model
+  actors и решения reject или revise по-прежнему отклоняются fail-closed.
+- Production-shaped regression теперь проходит validation, consumption
+  immutable snapshot, authorization и freeze preparation без host token и без
+  pre-start эффектов worktree, provider или model. Missing/reused snapshots и
+  drift request, plan, spec, definition, card, route, review, session,
+  permission, effect, budget или actor отклоняются до старта.
+
+### Граница кандидата
+
+- Approval schemas, lifecycle/recovery behavior и сохранённый host-dialog path
+  не изменены. Post-install custom dogfood остаётся coordinator-owned после
+  отдельного merge и plugin refresh; этот кандидат не выполняет merge, push,
+  tag, publish, обновление plugins или такой dogfood.
+
 ## [2.6.7-rc6.7] — 2026-08-14
 
 Кандидат с durable timing фаз engineering/fix и policy-valid custom start.

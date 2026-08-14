@@ -10,6 +10,29 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.6.7-rc6.8] - 2026-08-14
+
+Policy-valid custom snapshot actor candidate.
+
+### Fixed
+
+- The custom-pipeline freeze boundary accepts the existing code-owned
+  `policy-valid-snapshot` actor only for an exact `approve` decision. Existing
+  definition and approval-card bindings remain mandatory; unknown/model
+  actors and reject or revise decisions remain fail-closed.
+- A production-shaped regression now crosses validation, immutable snapshot
+  consumption, authorization, and freeze preparation without a host token or
+  pre-start worktree, provider, or model effect. Missing/reused snapshots and
+  request, plan, spec, definition, card, route, review, session, permission,
+  effect, budget, or actor drift are rejected before start.
+
+### Candidate boundary
+
+- Approval schemas, lifecycle/recovery behavior, and the retained host-dialog
+  path are unchanged. Post-install custom dogfood remains coordinator-owned
+  after a separate merge and plugin refresh; this candidate does not merge,
+  push, tag, publish, update plugins, or run that dogfood.
+
 ## [2.6.7-rc6.7] - 2026-08-14
 
 Durable engineering/fix phase timing and policy-valid custom-start candidate.
