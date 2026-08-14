@@ -240,10 +240,10 @@ with tempfile.TemporaryDirectory(prefix="lifecycle-world.") as raw:
         "worker tick uses the production poll seam without replaying input",
         restarted.snapshot()["effects"][0]["deliveries"] == 1,
     )
+    restarted.apply({"action": "publish-callback", "kind": "result"})
     restarted.apply(
         {"action": "publish-provider-event", "kind": "result-published"}
     )
-    restarted.apply({"action": "publish-callback", "kind": "result"})
     restarted.apply({"action": "close"})
     check(
         "close enters the production cleanup owner and reaches resource-free completion",
@@ -316,8 +316,8 @@ with tempfile.TemporaryDirectory(prefix="lifecycle-effect-once-mutation.") as ra
 with tempfile.TemporaryDirectory(prefix="lifecycle-terminal-mutation.") as raw:
     world = LifecycleWorld.fresh(Path(raw))
     world.apply({"action": "start-worker"})
-    world.apply({"action": "publish-provider-event", "kind": "result-published"})
     world.apply({"action": "publish-callback"})
+    world.apply({"action": "publish-provider-event", "kind": "result-published"})
     world.apply({"action": "close"})
     terminal = world.record()
     resurrected = replace(terminal, state="running", revision=terminal.revision + 1)
