@@ -372,7 +372,6 @@ def _failure_receipts_match(
         "generation": generation,
         "provider_session_id": record.run_id,
         "process_identity": resources.process_identity,
-        "supervisor_identity": resources.supervisor_identity,
         "source_id": f"process:{resources.process_identity}",
         "workspace_id": evidence["session.json"].get("workspace_id"),
         "surface_id": resources.surface_id,
