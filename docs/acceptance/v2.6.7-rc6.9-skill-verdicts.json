@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "records": [
+    {
+      "skill": "implementation-plan",
+      "verdict": "fix",
+      "passes": {
+        "invocation": "pass",
+        "hierarchy": "pass",
+        "steering": "RC69-IMPLEMENTATION-PLAN-TEMPORAL-01",
+        "pruning": "pass",
+        "goal_preservation": "pass"
+      },
+      "overall_input": "An approved Outcome Contract and design that must become owned, independently reviewable TDD slices without changing evidence identity.",
+      "overall_outcome": "A complete implementation plan whose task evidence exists by the configured review verdict and whose later coordinator evidence cannot create a circular review dependency.",
+      "local_subgoal": "Place reviewer-observable evidence in the canonical task contract and later callback, reap, release, and cleanup evidence in one parent-owned post-review section.",
+      "completion_proxies": [
+        "The temporal-boundary instruction contract passes.",
+        "The scoped Improve Skills verdict audit passes.",
+        "The skill body and metadata validators pass."
+      ],
+      "required_outcome_evidence": [
+        "E267.RC69.REVIEW_BOUNDARY"
+      ],
+      "evidence": "At base fdab75b8e2009a3f86fc03c330206e924c3da01e, the skill defined language, slice ownership, YAGNI, finalization, and self-review rules but did not prevent task evidence from depending on its own later review/reap lifecycle. The RC6.9 instruction regression is mutation-sensitive to removal of reviewer-observable or Post-review coordinator acceptance wording.",
+      "change": "Add one mandatory low-freedom temporal evidence rule and compact example after slice ordering; keep all existing plan behavior and the Outcome Contract schema authority unchanged.",
+      "behavior_proof": "Protected inventory remains intact: implicit planning trigger, read-only authority, English normative evidence identity, exact slice fields, dependency ordering, rollback boundaries, YAGNI, FinalizationLedger cycles, approval, and completion criteria. Skill Creator classification: the concise trigger is equivalent, low freedom is adopted because the boundary is fragile, and progressive disclosure is rejected because every implementation plan must apply the rule. Frontmatter is unchanged and no agents/openai.yaml existed at base or final HEAD. Every implementation-plan diff hunk maps to RC69-IMPLEMENTATION-PLAN-TEMPORAL-01."
+    },
+    {
+      "skill": "save-plan",
+      "verdict": "fix",
+      "passes": {
+        "invocation": "pass",
+        "hierarchy": "pass",
+        "steering": "RC69-SAVE-PLAN-TEMPORAL-01",
+        "pruning": "pass",
+        "goal_preservation": "pass"
+      },
+      "overall_input": "A discussed, approved plan and Outcome Contract that the user explicitly asks to file without executing.",
+      "overall_outcome": "One valid provenance-bound wiki plan whose canonical Outcome Contract preserves evidence identity and is not temporally circular.",
+      "local_subgoal": "Reject or amend plans whose task success evidence can exist only after review, while preserving later evidence in one outside-the-contract coordinator section.",
+      "completion_proxies": [
+        "The plan renders exactly one schema-v1 Outcome Contract block.",
+        "The temporal-boundary instruction contract passes.",
+        "The scoped Improve Skills verdict audit passes."
+      ],
+      "required_outcome_evidence": [
+        "E267.RC69.REVIEW_BOUNDARY"
+      ],
+      "evidence": "At base fdab75b8e2009a3f86fc03c330206e924c3da01e, save-plan validated one canonical Outcome Contract before allocation and vault writing but did not classify evidence by review-time observability. The RC6.9 test rejects loss of the reviewer-observable, post-review section, or no-second-contract rules.",
+      "change": "Add one validation paragraph before ambiguity handling; it preserves late evidence outside the canonical block and forbids copying callback, reap, release, or terminal-cleanup gates into task success evidence.",
+      "behavior_proof": "Protected inventory remains intact: explicit multilingual triggers, Read/Bash/Glob tools, non-ExitPlanMode boundary, implementation-plan delegation, exact Outcome Contract extraction before address allocation, provenance, transliteration, vault-write transaction, validation, commit, and completion behavior. Skill Creator classification: existing trigger metadata is equivalent, low freedom is adopted for the validation order, and the core rule stays inline because every save-plan run needs it. Frontmatter is unchanged and no agents/openai.yaml existed at base or final HEAD. Every save-plan diff hunk maps to RC69-SAVE-PLAN-TEMPORAL-01."
+    },
+    {
+      "skill": "review",
+      "verdict": "fix",
+      "passes": {
+        "invocation": "pass",
+        "hierarchy": "RC69-REVIEW-TEMPORAL-01",
+        "steering": "RC69-REVIEW-TEMPORAL-01",
+        "pruning": "RC69-REVIEW-SEMANTIC-RESTORE-02",
+        "goal_preservation": "pass"
+      },
+      "overall_input": "An exact product HEAD, configured purpose/profile, implementer evidence claims, and the unchanged strict outcome-first verdict policy.",
+      "overall_outcome": "A product-read-only review that classifies all task evidence available at verdict time without weakening missing-evidence policy or changing Harness lifecycle authority.",
+      "local_subgoal": "Point review to the authoritative temporal authoring boundary and return a circular task contract for amendment.",
+      "completion_proxies": [
+        "Instruction lint preserves every finalization parity invariant.",
+        "The review skill remains within the hard 5,000-byte package ceiling.",
+        "The scoped Improve Skills verdict audit and documentation suites pass."
+      ],
+      "required_outcome_evidence": [
+        "E267.RC69.REVIEW_BOUNDARY"
+      ],
+      "evidence": "At reviewed HEAD f7f2b6beaaf03c3848d3e642cdbde86d14f2fb1a, budget compression dropped the linted sixth-cycle phrase and non-obvious finalization, dispatch-root, immutable-result, material-failure, external-scratch, and strict-amendment qualifiers. tests/test_instruction_lint.py and make test-docs failed until those exact semantics were restored.",
+      "change": "Keep a concise authoritative pointer to implementation-plan's temporal boundary, state the strict amendment response locally, and restore every protected qualifier while compressing only behavior-equivalent prose under 5,000 bytes.",
+      "behavior_proof": "Protected inventory remains intact: review trigger and read-only authority; Simple/Deep/Full routing; purpose binding; six-section outcome-first judgment; exact finalization-primary/finalization-independent cycles; read-only pivot without availability probe; fresh immutable terminal attempts; material versus mechanism outcomes; sixth-cycle zero effect; typed finding resolution; provider-before-surface cleanup; exact .task-meta.json dispatch roots; and external owner-only scratch. Skill Creator classification: existing trigger metadata is equivalent, low freedom is retained for lifecycle invariants, and the mandatory temporal rule uses one direct authoritative pointer. Frontmatter is unchanged and no agents/openai.yaml existed at base or final HEAD. Every review diff hunk maps to RC69-REVIEW-TEMPORAL-01 or RC69-REVIEW-SEMANTIC-RESTORE-02."
+    }
+  ]
+}

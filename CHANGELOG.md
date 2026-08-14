@@ -10,6 +10,35 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.6.7-rc6.9] - 2026-08-14
+
+Review-evidence boundary and bounded terminal-cancellation candidate.
+
+### Fixed
+
+- Planning, saving, and review authoring now keep task success evidence
+  reviewer-observable at verdict time. Callback, reap, release, and terminal
+  cleanup evidence remains in a parent-owned post-review gate outside the task
+  Outcome Contract; strict missing-evidence review behavior is unchanged.
+- One supported live-provider cancel requests exit once, performs bounded
+  exact-identity cleanup, clears owned resources, and terminates as `cancelled`.
+  Only the matching durable `exiting` plus succeeded `request-exit` branch is
+  treated as expected; sibling identity/effect states remain fail-closed.
+
+### Changed
+
+- `harness cancel` returns exit status `3` with typed `partial` output when the
+  requested root remains nonterminal. Exact surface close is re-probed; failed
+  proof retains ownership as `cleanup-incomplete` instead of guessing success.
+- The live scripts ratchet is pinned to the exact RC6.9 denominator of 288
+  Python files / 107,656 lines.
+
+### Candidate boundary
+
+- Public schemas, provider replay authority, review verdict policy, and
+  ordinary successful reap semantics remain unchanged. Merge, plugin refresh,
+  dogfood, reap, and promotion remain coordinator-owned post-review gates.
+
 ## [2.6.7-rc6.8] - 2026-08-14
 
 Policy-valid custom snapshot actor candidate.

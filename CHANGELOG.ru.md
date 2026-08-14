@@ -16,6 +16,37 @@
 внутренними контрольными точками и вошли в следующие публичные релизы; тегов и
 пакетов с этими номерами не выпускалось.
 
+## [2.6.7-rc6.9] — 2026-08-14
+
+Кандидат с границей review evidence и ограниченным terminal cancellation.
+
+### Исправлено
+
+- Authoring для planning, saving и review теперь оставляет в task success
+  evidence только данные, наблюдаемые к моменту verdict. Evidence callback,
+  reap, release и terminal cleanup остаются во внешнем parent-owned post-review
+  gate; strict missing-evidence policy review не меняется.
+- Один поддерживаемый cancel живого provider ровно один раз запрашивает exit,
+  выполняет bounded exact-identity cleanup, очищает owned resources и честно
+  завершает operation как `cancelled`. Ожидаемым считается только точное
+  durable состояние `exiting` с успешным `request-exit`; соседние состояния
+  identity/effect по-прежнему fail-closed.
+
+### Изменено
+
+- `harness cancel` возвращает exit status `3` и typed output `partial`, если
+  запрошенный root остаётся nonterminal. Exact surface close проверяется
+  повторно; при недоказанном close ownership сохраняется с
+  `cleanup-incomplete`, без guessed success.
+- Live scripts ratchet закреплён на точном знаменателе RC6.9: 288 Python files /
+  107 656 lines.
+
+### Граница кандидата
+
+- Public schemas, provider replay authority, review verdict policy и semantics
+  обычного успешного reap не меняются. Merge, plugin refresh, dogfood, reap и
+  promotion остаются coordinator-owned post-review gates.
+
 ## [2.6.7-rc6.8] — 2026-08-14
 
 Кандидат с actor для policy-valid custom snapshot.
