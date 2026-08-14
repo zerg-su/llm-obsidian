@@ -21,7 +21,7 @@
   },
   "actions": [
     {"action_id": "summary", "action": "publish-summary", "identity_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"},
-    {"action_id": "result", "action": "publish-provider-event", "kind": "result-published", "after": ["summary"]},
+    {"action_id": "result", "action": "publish-provider-event", "kind": "result-published", "result_sha256": "a1e73038b20b14c8814f26b22e8107c1b410db346c6736eea60480137a09109b", "after": ["summary"]},
     {"action_id": "callback", "action": "publish-callback", "after": ["result"]},
     {"action_id": "close", "action": "close", "after": ["callback"]}
   ]

@@ -26,7 +26,7 @@
     {"action_id": "clock", "action": "advance-clock", "delta": 4102444801},
     {"action_id": "callback-ready", "action": "queue-callback", "after": ["clock"]},
     {"action_id": "timeout-tick", "action": "worker-tick", "after": ["callback-ready"]},
-    {"action_id": "result", "action": "publish-provider-event", "kind": "result-published", "after": ["callback-ready"]},
+    {"action_id": "result", "action": "publish-provider-event", "kind": "result-published", "result_sha256": "a1e73038b20b14c8814f26b22e8107c1b410db346c6736eea60480137a09109b", "after": ["callback-ready"]},
     {"action_id": "close", "action": "close", "after": ["timeout-tick", "result"]}
   ]
 }

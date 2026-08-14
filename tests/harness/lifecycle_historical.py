@@ -220,7 +220,11 @@ def run_historical_schedule(
             snapshot["operation"]["accepted_callback_id"] != "sim-callback"
             or snapshot["operation"]["attention_reason"] is not None
             or snapshot["terminal_history"] != ["complete"]
-            or world.provider_result_sha256s() != ("d" * 64,)
+            or world.provider_result_sha256s()
+            != (
+                "a1e73038b20b14c8814f26b22e8107c1"
+                "b410db346c6736eea60480137a09109b",
+            )
             or not {
                 "callback-accepted",
                 "deadline-recheck",
