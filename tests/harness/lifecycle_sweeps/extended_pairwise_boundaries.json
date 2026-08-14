@@ -25,7 +25,7 @@
     {"action_id": "tick", "action": "worker-tick", "after": ["start"]},
     {"action_id": "live", "action": "publish-liveness", "after": ["clock", "tick"]},
     {"action_id": "callback", "action": "publish-callback", "after": ["live"]},
-    {"action_id": "result", "action": "publish-provider-event", "kind": "result-published", "after": ["live"]},
+    {"action_id": "result", "action": "publish-provider-event", "kind": "result-published", "result_sha256": "a1e73038b20b14c8814f26b22e8107c1b410db346c6736eea60480137a09109b", "after": ["live"]},
     {"action_id": "close", "action": "close", "after": ["callback", "result"]}
   ]
 }

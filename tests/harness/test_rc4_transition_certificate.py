@@ -530,8 +530,8 @@ with tempfile.TemporaryDirectory(prefix="rc4-crash-point.") as raw:
         {"crashed": crashed, "state": restarted.record().state},
     )
     restarted.apply({"action": "start-worker"})
-    restarted.apply({"action": "publish-provider-event", "kind": "result-published"})
     restarted.apply({"action": "publish-callback", "kind": "result"})
+    restarted.apply({"action": "publish-provider-event", "kind": "result-published"})
     restarted.apply({"action": "close"})
     snapshot = restarted.snapshot()
     assert_snapshot(snapshot)
