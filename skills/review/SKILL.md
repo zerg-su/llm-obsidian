@@ -60,6 +60,13 @@ Transport, clean diffs, and local green are not outcome proof. Verify findings
 against code; rejection requires technical evidence. Add no hidden lane, model
 call, severity cap, reranking, vote, average, or loop.
 
+Task success evidence must be reviewer-observable at the verdict boundary.
+Evidence from the review callback, reap, release, or terminal cleanup belongs
+under a parent-owned `Post-review coordinator acceptance` gate outside the
+canonical Outcome Contract. The strict missing-evidence policy must not be
+weakened to compensate for a circular task contract; return that contract for
+amendment instead.
+
 ## Flow
 
 1. For a dispatched v3/v4 task, run

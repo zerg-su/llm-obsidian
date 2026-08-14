@@ -32,6 +32,14 @@ checks. Include rollback/recovery only where the change has persistent or
 external effects. Mark parallel slices only when their files, interfaces, and
 produced evidence do not overlap.
 
+Every task success-evidence item must be reviewer-observable before the
+configured review verdict. Evidence created later by the review callback,
+reap, release promotion, or terminal cleanup belongs in a separately named
+`Post-review coordinator acceptance` section owned by the parent coordinator,
+outside the canonical Outcome Contract. For example, put “focused regression
+is green” in task success evidence, but put “review callback accepted and reap
+left empty resources” in that post-review gate.
+
 Apply YAGNI: omit every unrequired feature, compatibility layer, extension
 point, and abstraction that lacks current Outcome Contract evidence. Record a
 non-goal instead of implementing speculative scope.

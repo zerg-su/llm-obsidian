@@ -26,6 +26,7 @@ def require(label: str, condition: bool) -> None:
 
 codebase = normalized("skills/codebase-design/SKILL.md")
 planning = normalized("skills/implementation-plan/SKILL.md")
+save_plan = normalized("skills/save-plan/SKILL.md")
 tdd = normalized("skills/tdd/SKILL.md")
 debug = normalized("skills/debug/SKILL.md")
 review = normalized("skills/review/SKILL.md")
@@ -85,6 +86,32 @@ require(
             "uncovered requirement",
             "contradictory interface",
             "unrelated responsibilities",
+        )
+    ),
+)
+require(
+    "plan authoring and review keep post-review evidence outside the task Outcome Contract",
+    all(
+        all(phrase in skill for phrase in ("reviewer-observable", "post-review coordinator acceptance"))
+        for skill in (planning, save_plan, review)
+    )
+    and all(
+        phrase in planning
+        for phrase in (
+            "before the configured review verdict",
+            "outside the canonical outcome contract",
+            "review callback",
+            "reap",
+            "terminal cleanup",
+        )
+    )
+    and "do not invent a second outcome contract" in save_plan
+    and all(
+        phrase in review
+        for phrase in (
+            "missing-evidence policy",
+            "must not be weakened",
+            "circular task contract",
         )
     ),
 )

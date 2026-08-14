@@ -38,6 +38,12 @@ exactly one canonical Outcome Contract JSON block with
 `schema_version: 1`, `desired_outcome`, `success_evidence`, and `non_goals`,
 plus optional `purpose`, without semantic drift.
 
+Confirm that every success-evidence item is reviewer-observable before the
+configured review verdict. Preserve any later evidence under the separately
+named `Post-review coordinator acceptance` section outside the canonical block;
+do not invent a second Outcome Contract or copy review callback, reap, release,
+or terminal-cleanup gates into task success evidence.
+
 If a required field is missing, duplicated, or materially ambiguous, stop and
 ask before metadata or writing. Do not infer or invent contract values. An
 existing block must match and render once. Do not create a second goal artifact.
