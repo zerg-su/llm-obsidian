@@ -207,9 +207,25 @@ with tempfile.TemporaryDirectory(prefix="pre-model-retirement.") as raw:
         == OwnedResources(),
     )
 
+    observer_store, observer_id, _observer_runtime, _observer_callback = fixture(
+        root, "observer-workspace"
+    )
+    observer_retired = retire_failed_reviewer_start(
+        observer_store,
+        "owner-review",
+        observer_id,
+        cmux_adapter=FakeCmux(surface="missing", workspace="alive"),
+    )
+    check(
+        "failed reviewer retirement preserves a live observer workspace",
+        observer_retired is not None
+        and observer_store.read("owner-review", observer_id).state == "complete"
+        and observer_store.read("owner-review", observer_id).resources
+        == OwnedResources(),
+    )
+
     for label, mutate, cmux, create_callback in (
         ("live surface", None, FakeCmux(surface="alive"), False),
-        ("live workspace", None, FakeCmux(workspace="alive"), False),
         ("callback presence", None, FakeCmux(), True),
         (
             "provider effect success",

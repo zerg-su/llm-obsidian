@@ -71,37 +71,6 @@ def _attention(
     )
 
 
-def _runtime_workspace(
-    store: OperationStore,
-    record: OperationRecord,
-) -> tuple[str, str] | None:
-    path = (
-        store.root
-        / "owners"
-        / record.spec.owner_id
-        / "runtime"
-        / record.spec.operation_id
-        / "session.json"
-    )
-    if not path.is_file():
-        return None
-    value = json.loads(path.read_text(encoding="utf-8"))
-    if (
-        not isinstance(value, dict)
-        or value.get("schema_version") != 1
-        or value.get("operation_id") != record.spec.operation_id
-        or value.get("run_id") != record.run_id
-    ):
-        raise ValueError("runtime session metadata identity is invalid")
-    if value.get("placement") != "workspace":
-        return None
-    workspace_id = str(value.get("workspace_id") or "")
-    window_id = str(value.get("window_id") or "")
-    if not workspace_id or not window_id:
-        raise ValueError("runtime workspace metadata is incomplete")
-    return workspace_id, window_id
-
-
 def _continuation_time_budget(
     store: OperationStore,
     record: OperationRecord,
@@ -146,7 +115,6 @@ def _reconcile_owned_resources(
         resources = record.resources
         has_process_group = resources.process_group > 1
         has_surface = bool(resources.surface_id)
-        workspace = _runtime_workspace(store, record)
         accepted = prove_accepted_callback_ownership(
             record,
             process_adapter,
@@ -167,11 +135,7 @@ def _reconcile_owned_resources(
                 "none", AttentionReason.ATTENTION_REQUIRED
             )
         if has_surface and not has_process_group:
-            surface = (
-                cmux_adapter.workspace_status(*workspace)
-                if workspace is not None
-                else cmux_adapter.status(resources.surface_id)
-            )
+            surface = cmux_adapter.status(resources.surface_id)
             if surface == "alive":
                 return ReconcileDecision("continue")
             if surface == "missing":
@@ -195,14 +159,12 @@ def _reconcile_owned_resources(
             record,
             process_adapter,
             cmux_adapter,
-            workspace=workspace,
         )
         if decision.action in {"close-exact", "terminate-exact"}:
             decision = reconcile(
                 record,
                 process_adapter,
                 cmux_adapter,
-                workspace=workspace,
             )
         return decision
     except Exception:

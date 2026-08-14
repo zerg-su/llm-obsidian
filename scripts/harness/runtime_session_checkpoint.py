@@ -29,7 +29,6 @@ class DurableCleanupOwnership:
     process_status: str
     supervisor_status: str
     surface_status: str
-    workspace_status: str
     workspace_id: str
     window_id: str
 
@@ -354,18 +353,11 @@ class RuntimeSessionCheckpointMixin:
         )
         try:
             surface_status = str(self.cmux.status(resources.surface_id))
-            workspace_status = str(
-                self.cmux.workspace_status(workspace_id, window_id)
-            )
         except Exception as exc:
             raise RuntimeSessionError(
                 "durable cleanup cmux ownership is unavailable"
             ) from exc
-        if (
-            surface_status not in {"alive", "missing"}
-            or workspace_status not in {"alive", "missing"}
-            or surface_status != workspace_status
-        ):
+        if surface_status not in {"alive", "missing"}:
             raise RuntimeSessionError(
                 "durable cleanup cmux ownership changed"
             )
@@ -373,7 +365,6 @@ class RuntimeSessionCheckpointMixin:
             process_status,
             supervisor_status,
             surface_status,
-            workspace_status,
             workspace_id,
             window_id,
         )

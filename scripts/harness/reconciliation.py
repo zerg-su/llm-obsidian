@@ -124,8 +124,6 @@ def reconcile(
     record: OperationRecord,
     process_adapter: object,
     cmux_adapter: object,
-    *,
-    workspace: tuple[str, str] | None = None,
 ) -> ReconcileDecision:
     resources = record.resources
     if resources.process_group <= 1 or not resources.surface_id:
@@ -135,17 +133,10 @@ def reconcile(
         resources.process_identity,
     )
     try:
-        surface = (
-            cmux_adapter.workspace_status(*workspace)
-            if workspace is not None
-            else cmux_adapter.status(resources.surface_id)
-        )
+        surface = cmux_adapter.status(resources.surface_id)
     except Exception:
         surface = "unknown"
     decision = decide(process, surface)
     if decision.action == "close-exact":
-        if workspace is not None:
-            cmux_adapter.close_workspace_exact(*workspace)
-        else:
-            cmux_adapter.close_exact(resources.surface_id)
+        cmux_adapter.close_exact(resources.surface_id)
     return decision

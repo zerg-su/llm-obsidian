@@ -355,18 +355,12 @@ def _failed_child_matches(
 def _resources_are_missing(
     cmux_adapter: object,
     record: OperationRecord,
-    session: Mapping[str, object],
 ) -> bool:
     try:
         surface_status = str(cmux_adapter.status(record.resources.surface_id))
-        workspace_status = str(
-            cmux_adapter.workspace_status(
-                session["workspace_id"], session["window_id"]
-            )
-        )
     except Exception:
         return False
-    return surface_status == "missing" and workspace_status == "missing"
+    return surface_status == "missing"
 
 
 def retire_failed_reviewer_start(
@@ -406,7 +400,7 @@ def retire_failed_reviewer_start(
             ),
             _failure_receipts_match(evidence),
             _failed_child_matches(store, record, target),
-            _resources_are_missing(cmux_adapter, record, evidence["session.json"]),
+            _resources_are_missing(cmux_adapter, record),
         )
     ):
         return None

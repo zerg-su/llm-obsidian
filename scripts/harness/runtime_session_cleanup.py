@@ -262,7 +262,11 @@ class RuntimeSessionCleanupMixin:
         exit_result = self.request_exit(old_owner, old_operation)
         if exit_result.action not in {"exit-requested", "terminal"}:
             return exit_result
-        cleanup_result = self.cleanup(old_owner, old_operation)
+        cleanup_result = self.cleanup(
+            old_owner,
+            old_operation,
+            terminal_state="cancelled",
+        )
         if (
             cleanup_result.record.state in TERMINAL
             and cleanup_result.record.resources == OwnedResources()
@@ -302,6 +306,7 @@ class RuntimeSessionCleanupMixin:
         process_status: str,
         supervisor_status: str,
         surface_status: str,
+        require_result: bool,
     ) -> str:
         """Publish the exact close receipt before clearing durable ownership."""
 
@@ -354,18 +359,21 @@ class RuntimeSessionCleanupMixin:
             )
         except RuntimeProviderEventError:
             return "attention"
-        cursor = stream.controller.current_state().cursor
-        if (
-            not record.accepted_callback_id
-            or not record.accepted_callback_sha256
-            or not cursor.result_published
-        ):
-            return "attention"
-        try:
-            # The event is already published, so this is an idempotent exact
-            # accepted-payload digest assertion and cannot synthesize a result.
-            stream.result(record.accepted_callback_sha256)
-        except RuntimeProviderEventError:
+        state = stream.controller.current_state()
+        if require_result:
+            if (
+                not record.accepted_callback_id
+                or not record.accepted_callback_sha256
+                or not state.cursor.result_published
+            ):
+                return "attention"
+            try:
+                # The event is already published, so this is an idempotent exact
+                # accepted-payload digest assertion and cannot synthesize a result.
+                stream.result(record.accepted_callback_sha256)
+            except RuntimeProviderEventError:
+                return "attention"
+        elif state.attention_reason not in {"", "result-missing"}:
             return "attention"
         observation = ResourceObservation(
             process_status=process_status,
@@ -386,6 +394,15 @@ class RuntimeSessionCleanupMixin:
             decision = stream.resource_closed_receipt(result.receipt)
         except RuntimeProviderEventError:
             return "attention"
+        if not require_result:
+            cancelled_state = stream.controller.current_state()
+            if (
+                not cancelled_state.cursor.resource_closed
+                or cancelled_state.attention_reason
+                not in {"", "result-missing"}
+            ):
+                return "attention"
+            return "close"
         return decision.action
 
     def status(self, owner_id: str, operation_id: str) -> RuntimeSessionResult:
@@ -633,6 +650,7 @@ class RuntimeSessionCleanupMixin:
             process_status="dead",
             supervisor_status="dead",
             surface_status=surface_status,
+            require_result=terminal_state == "complete",
         )
         if close_action == "attention":
             current = self._mark_attention(

@@ -604,10 +604,9 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
         )
         return payload_sha
 
-    def publish_provider_result(
+    def create_provider_stream(
         operation_id: str,
-        payload_sha256: str,
-    ) -> None:
+    ) -> RuntimeProviderEventStream:
         record = store.read("owner-cli", operation_id)
         stream = RuntimeProviderEventStream.create(
             store.root
@@ -628,6 +627,13 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
         assert stream.start().action == "wait"
         assert stream.reserve_input().action == "send"
         assert stream.accept_input().action == "wait"
+        return stream
+
+    def publish_provider_result(
+        operation_id: str,
+        payload_sha256: str,
+    ) -> None:
+        stream = create_provider_stream(operation_id)
         assert stream.result(payload_sha256).action == "close"
 
     def write_workspace_session(operation_id: str) -> tuple[str, str]:
@@ -689,6 +695,7 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
     def create_review_cleanup_operation(
         operation_id: str,
         *,
+        awaiting_callback: bool = False,
         missing_checkpoint: bool = False,
         runtime: str = "claude",
         model: str = "fable",
@@ -717,12 +724,15 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
         for state in ("preflight", "starting", "running"):
             store.transition("owner-cli", operation_id, state)
         bind_owned_resources(operation_id)
-        store.transition(
-            "owner-cli",
-            operation_id,
-            "attention-required",
-            reason=AttentionReason.CLEANUP_INCOMPLETE,
-        )
+        if awaiting_callback:
+            store.transition("owner-cli", operation_id, "awaiting-callback")
+        else:
+            store.transition(
+                "owner-cli",
+                operation_id,
+                "attention-required",
+                reason=AttentionReason.CLEANUP_INCOMPLETE,
+            )
         state_root = (
             store.root
             / "owners"
@@ -1122,7 +1132,7 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
 
     create_cli_operation("op-orphan-workspace-cli", state="running")
     bind_owned_resources("op-orphan-workspace-cli")
-    workspace_identity = write_workspace_session(
+    write_workspace_session(
         "op-orphan-workspace-cli"
     )
     orphan_workspace_process = FakeProcess("dead")
@@ -1137,11 +1147,12 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
         "owner-cli", "op-orphan-workspace-cli"
     )
     check(
-        "CLI cancel closes and verifies a metadata-owned workspace",
+        "CLI cancel closes only the exact surface in a live observer workspace",
         orphan_workspace_rc == 0
-        and orphan_workspace_cmux.closed_workspaces
-        == [workspace_identity]
-        and orphan_workspace_cmux.closed == []
+        and orphan_workspace_cmux.closed_workspaces == []
+        and orphan_workspace_cmux.closed
+        == ["11111111-1111-1111-1111-111111111111"]
+        and orphan_workspace_cmux.workspace_current == "alive"
         and orphan_workspace_after.state == "cancelled"
         and orphan_workspace_after.resources == OwnedResources(),
     )
@@ -1180,7 +1191,7 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
     write_workspace_session("op-drift-workspace-cli")
     drift_workspace_cmux = FakeCmux("missing")
     drift_workspace_cmux.workspace_current = "drift"
-    drift_workspace_rc, drift_workspace_output = run_cli_in_process(
+    drift_workspace_rc, _drift_workspace_output = run_cli_in_process(
         "cancel",
         "op-drift-workspace-cli",
         process=FakeProcess("dead"),
@@ -1190,11 +1201,10 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
         "owner-cli", "op-drift-workspace-cli"
     )
     check(
-        "CLI cancel retains ownership on workspace identity drift",
-        drift_workspace_rc == harness_cli.CASCADE_PARTIAL_EXIT
-        and drift_workspace_output["status"] == "partial"
-        and drift_workspace_after.state == "attention-required"
-        and bool(drift_workspace_after.resources.surface_id)
+        "CLI cancel ignores workspace drift after exact surface disappearance",
+        drift_workspace_rc == 0
+        and drift_workspace_after.state == "cancelled"
+        and drift_workspace_after.resources == OwnedResources()
         and drift_workspace_cmux.closed_workspaces == [],
     )
 
@@ -1256,6 +1266,30 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
         and store.read("owner-cli", "op-owned-cli") == owned_after_cancel
         and len(owned_process.guardian_requests) == 1
         and owned_cmux.closed
+        == ["11111111-1111-1111-1111-111111111111"],
+    )
+
+    create_cli_operation("op-modern-cancel-cli", state="running")
+    bind_owned_resources("op-modern-cancel-cli")
+    write_workspace_session("op-modern-cancel-cli")
+    write_callback_target("op-modern-cancel-cli")
+    create_provider_stream("op-modern-cancel-cli")
+    modern_cancel_process = ExitAfterProbeProcess("alive")
+    modern_cancel_cmux = FakeCmux("alive")
+    modern_cancel_rc, _modern_cancel_output = run_cli_in_process(
+        "cancel",
+        "op-modern-cancel-cli",
+        process=modern_cancel_process,
+        cmux=modern_cancel_cmux,
+    )
+    modern_cancelled = store.read("owner-cli", "op-modern-cancel-cli")
+    check(
+        "modern cancellation publishes close authority without a result",
+        modern_cancel_rc == 0
+        and modern_cancelled.state == "cancelled"
+        and modern_cancelled.resources == OwnedResources()
+        and modern_cancel_cmux.closed_workspaces == []
+        and modern_cancel_cmux.closed
         == ["11111111-1111-1111-1111-111111111111"],
     )
 
@@ -1358,6 +1392,46 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
         and proof_cmux.closed_workspaces == [],
     )
 
+    create_review_cleanup_operation(
+        "op-review-observer-cli", awaiting_callback=True
+    )
+    observer_payload_sha256 = accept_result_callback(
+        "op-review-observer-cli"
+    )
+    publish_provider_result(
+        "op-review-observer-cli", observer_payload_sha256
+    )
+    observer_process = FakeProcess(
+        "unknown", supervisor_status="unknown", capture_matches=True
+    )
+    observer_cmux = FakeCmux("alive")
+    observer_exit_rc, _observer_exit_output = run_cli_in_process(
+        "close",
+        "op-review-observer-cli",
+        process=observer_process,
+        cmux=observer_cmux,
+    )
+    observer_process.status = "dead"
+    observer_process.supervisor_status = "dead"
+    observer_cmux.current = "missing"
+    observer_cmux.workspace_current = "alive"
+    observer_cleanup_rc, _observer_cleanup_output = run_cli_in_process(
+        "close",
+        "op-review-observer-cli",
+        process=observer_process,
+        cmux=observer_cmux,
+    )
+    observer_terminal = store.read("owner-cli", "op-review-observer-cli")
+    check(
+        "CLI reviewer cleanup preserves a live observer workspace",
+        observer_exit_rc == 0
+        and observer_cleanup_rc == 0
+        and observer_terminal.state == "complete"
+        and observer_terminal.resources == OwnedResources()
+        and observer_cmux.closed_workspaces == []
+        and observer_cmux.workspace_current == "alive",
+    )
+
     create_review_cleanup_operation("op-review-reused-cli")
     reused_process = FakeProcess(
         "unknown", supervisor_status="unknown", capture_matches=False
@@ -1390,10 +1464,10 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
     )
     foreign_after = store.read("owner-cli", "op-review-foreign-cli")
     check(
-        "CLI reviewer cleanup rejects foreign workspace or surface identity",
+        "CLI reviewer cleanup ignores workspace drift with exact surface identity",
         foreign_rc == 0
-        and foreign_after.state == "attention-required"
-        and foreign_process.guardian_requests == []
+        and foreign_after.state == "exiting"
+        and len(foreign_process.guardian_requests) == 1
         and foreign_cmux.closed_workspaces == [],
     )
 

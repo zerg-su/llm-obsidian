@@ -495,7 +495,9 @@ with tempfile.TemporaryDirectory(prefix="superseded-review-cleanup.") as raw:
                 "schema_version": 1,
                 "operation_id": "review-old-1",
                 "run_id": "review-old-run-1",
-                "placement": "split",
+                "placement": "workspace",
+                "workspace_id": "22222222-2222-4222-8222-222222222222",
+                "window_id": "33333333-3333-4333-8333-333333333333",
             }
         ),
         encoding="utf-8",
@@ -512,6 +514,20 @@ with tempfile.TemporaryDirectory(prefix="superseded-review-cleanup.") as raw:
         ),
         encoding="utf-8",
     )
+    old_stream = RuntimeProviderEventStream.create(
+        session.parent / "provider-events",
+        owner_id="review-old-owner-1",
+        operation_id="review-old-1",
+        run_id="review-old-run-1",
+        generation=1,
+        process_identity="4" * 64,
+        workspace_id="22222222-2222-4222-8222-222222222222",
+        surface_id=SURFACE,
+        input_sha256="6" * 64,
+    )
+    assert old_stream.start().action == "wait"
+    assert old_stream.reserve_input().action == "send"
+    assert old_stream.accept_input().action == "wait"
     authorization = {
         "schema_version": 1,
         "operation_id": "review-boundary-old-1",
@@ -631,7 +647,7 @@ with tempfile.TemporaryDirectory(prefix="superseded-review-cleanup.") as raw:
     replay = manager.cleanup_superseded_review(receipt_path)
     check(
         "authorized superseded review cleanup reaches resource-free terminal once",
-        cleaned.record.state == "complete"
+        cleaned.record.state == "cancelled"
         and cleaned.record.resources == OwnedResources()
         and replay.record == cleaned.record
         and cleanup_cmux.closed == [SURFACE]

@@ -1323,7 +1323,7 @@ with tempfile.TemporaryDirectory(prefix="review-cleanup-product-binding.") as ra
     )
     cleanup_cmux = FakeCmux(cleanup_events)
     cleanup_cmux.surface_status = "missing"
-    cleanup_cmux.workspace_status_value = "missing"
+    cleanup_cmux.workspace_status_value = "alive"
     cleanup_process = FakeProcess(cleanup_events)
     cleanup_process.status_value = "dead"
     cleanup_process.supervisor_status_value = "dead"
@@ -1413,7 +1413,8 @@ with tempfile.TemporaryDirectory(prefix="review-cleanup-product-binding.") as ra
         cleanup_ownership.process_status == "dead"
         and cleanup_ownership.supervisor_status == "dead"
         and cleanup_ownership.surface_status == "missing"
-        and cleanup_ownership.workspace_status == "missing",
+        and cleanup_cmux.workspace_status_value == "alive"
+        and cleanup_cmux.closed_workspaces == [],
         cleanup_ownership,
     )
 
