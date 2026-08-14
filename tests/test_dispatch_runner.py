@@ -1000,20 +1000,189 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
             prompt=policy_valid_prompt,
         ),
     )
-    policy_valid_start = runner.authorize_custom_request(
-        policy_valid_request, "c" * 64, ""
-    )
+    with mock.patch.object(runner.subprocess, "run") as pre_start_process:
+        policy_valid_start = runner.authorize_custom_request(
+            policy_valid_request, "c" * 64, ""
+        )
+        policy_valid_frozen = runner.custom_pipeline_for_request(
+            policy_valid_start
+        )
+    pre_start_process.assert_not_called()
     policy_valid_record = runner.read_object(
         runner.custom_approval_path(policy_valid_request)
     )
     check(
-        "policy-valid custom start atomically consumes its immutable snapshot without a host token",
+        "policy-valid custom start consumes and freezes its immutable snapshot without pre-start effects",
         policy_valid_start["_approved_custom_contract"][1].definition_sha256
         == policy_valid_challenge["definition_sha256"]
+        and policy_valid_frozen is not None
+        and policy_valid_frozen.definition_sha256
+        == policy_valid_challenge["definition_sha256"]
+        and policy_valid_frozen.approval.actor == "policy-valid-snapshot"
+        and policy_valid_frozen.approval.decision == "approve"
+        and policy_valid_frozen.approval_card
+        == policy_valid_start["_approved_custom_contract"][3]
         and policy_valid_record["status"] == "consumed"
         and policy_valid_record.get("actor") == ""
         and not Path(policy_valid_raw["worktree"]).exists(),
         policy_valid_record,
+    )
+
+    def pending_policy_valid_case():
+        suffix = uuid.uuid4().hex[:8]
+        case_raw = json.loads(json.dumps(custom_raw))
+        case_raw["request_id"] = str(uuid.uuid4())
+        case_raw["task_name"] = f"custom-policy-drift-{suffix}"
+        case_raw["branch"] = f"task/custom-policy-drift-{suffix}"
+        case_raw["worktree"] = str(
+            tmp / "worktrees" / f"custom-policy-drift-{suffix}"
+        )
+        case_request = runner.validate_request(case_raw)
+        case_prompt_request = dict(case_request)
+        case_prompt_request["_approved_plan_file"] = (
+            runner.custom_approval_plan_path(case_request)
+        )
+        case_prompt = runner.render_task_prompt(case_prompt_request, config)
+        case_request_sha256 = hashlib.sha256(suffix.encode()).hexdigest()
+        case_challenge = runner.custom_approval_challenge(
+            case_request,
+            request_sha256=case_request_sha256,
+            effective=effective,
+            review=review,
+            prompt=case_prompt,
+        )
+        runner.persist_custom_approval_challenge(
+            case_request,
+            case_challenge,
+            runner.custom_approval_snapshot(
+                case_request,
+                case_challenge,
+                session=session,
+                effective=effective,
+                review=review,
+                prompt=case_prompt,
+            ),
+        )
+        return case_raw, case_request, case_request_sha256
+
+    drift_cases = (
+        (
+            "missing immutable snapshot",
+            ("snapshot",),
+            None,
+            "snapshot is unavailable",
+        ),
+        (
+            "request identity drift",
+            ("challenge", "request_sha256"),
+            "d" * 64,
+            "request bytes changed",
+        ),
+        (
+            "definition identity drift",
+            ("challenge", "definition_sha256"),
+            "d" * 64,
+            "no longer matches",
+        ),
+        (
+            "approval-card authority drift",
+            ("snapshot", "approval_card"),
+            "changed approval card",
+            "no longer matches",
+        ),
+        (
+            "route authority drift",
+            ("snapshot", "effective"),
+            {**effective, "model": "changed-model"},
+            "no longer matches",
+        ),
+        (
+            "review authority drift",
+            ("snapshot", "review", "mode"),
+            "deep",
+            "no longer matches",
+        ),
+        (
+            "session identity drift",
+            ("snapshot", "session", "session_id"),
+            "changed-session",
+            "session snapshot changed",
+        ),
+        (
+            "spec identity drift",
+            ("snapshot", "pipeline_spec", "spec_id"),
+            "changed-spec",
+            "no longer matches",
+        ),
+        (
+            "permission authority drift",
+            ("snapshot", "pipeline_spec", "requested_permissions"),
+            ["git-write"],
+            "no longer matches",
+        ),
+        (
+            "effect authority drift",
+            ("snapshot", "pipeline_spec", "requested_side_effects"),
+            ["git-write"],
+            "no longer matches",
+        ),
+        (
+            "budget authority drift",
+            ("snapshot", "pipeline_spec", "budget", "token_limit"),
+            50_001,
+            "no longer matches",
+        ),
+        (
+            "actor authority drift",
+            ("actor",),
+            "model",
+            "no approved decision receipt",
+        ),
+    )
+    for label, field_path, changed_value, error in drift_cases:
+        case_raw, case_request, case_request_sha256 = (
+            pending_policy_valid_case()
+        )
+        case_record = runner.read_object(
+            runner.custom_approval_path(case_request)
+        )
+        target = case_record
+        for field in field_path[:-1]:
+            target = target[field]
+        target[field_path[-1]] = changed_value
+        runner.atomic_json(
+            runner.custom_approval_path(case_request), case_record
+        )
+        with mock.patch.object(runner.subprocess, "run") as drift_process:
+            expect_error(
+                f"policy-valid custom start rejects {label}",
+                lambda request=case_request, digest=case_request_sha256: (
+                    runner.authorize_custom_request(request, digest, "")
+                ),
+                error,
+            )
+        drift_process.assert_not_called()
+        check(
+            f"policy-valid {label} reaches no worktree effect",
+            not Path(case_raw["worktree"]).exists(),
+        )
+
+    plan_raw, plan_request, plan_request_sha256 = pending_policy_valid_case()
+    runner.custom_approval_plan_path(plan_request).write_text(
+        "changed plan snapshot\n", encoding="utf-8"
+    )
+    with mock.patch.object(runner.subprocess, "run") as plan_drift_process:
+        expect_error(
+            "policy-valid custom start rejects plan identity drift",
+            lambda: runner.authorize_custom_request(
+                plan_request, plan_request_sha256, ""
+            ),
+            "plan snapshot is unavailable",
+        )
+    plan_drift_process.assert_not_called()
+    check(
+        "policy-valid plan identity drift reaches no worktree effect",
+        not Path(plan_raw["worktree"]).exists(),
     )
     expect_error(
         "policy-valid custom start rejects an empty-token replay after consumption",
