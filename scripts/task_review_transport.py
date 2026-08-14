@@ -11,6 +11,7 @@ from typing import Any, Mapping, Sequence
 
 from harness.contracts import to_dict
 from harness.review_submit import publish_review_input_template
+from harness.review_timing import publish_reviewer_timing
 from harness.store import OperationStore
 from harness.workflows.review import ReviewContext, ReviewResult, ReviewRound
 from harness.workflows.review_gate import ReviewGateController, ReviewGateRun
@@ -286,7 +287,7 @@ def _collect_ready_results(
         if not callback.is_file() or callback.is_symlink():
             continue
         try:
-            _unused, result = _envelope(callback, round_)
+            envelope, result = _envelope(callback, round_)
         except (StaleRoundCallbackError, TaskReviewError, OSError, ValueError):
             _emit_round_telemetry(
                 worktree,
@@ -297,6 +298,12 @@ def _collect_ready_results(
                 terminal_status="rejected",
             )
             raise
+        publish_reviewer_timing(
+            vault / ".vault-meta" / "harness",
+            runtime_root,
+            round_,
+            envelope.payload_sha256,
+        )
         ready.append((lane, round_, result))
     return ready
 

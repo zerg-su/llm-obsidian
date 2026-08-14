@@ -28,6 +28,7 @@ every coordinator poll and is never consumed.
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import os
@@ -36,12 +37,15 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
+from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from harness.contracts import CallbackEnvelope  # noqa: E402
+from harness.contracts import CallbackEnvelope, to_dict  # noqa: E402
 from harness.review_submit import (  # noqa: E402
     FINDING_FIELDS as SUBMIT_FINDING_FIELDS,
     ROUND_FIELDS as SUBMIT_ROUND_FIELDS,
@@ -49,8 +53,14 @@ from harness.review_submit import (  # noqa: E402
     round_schema_lines,
     submit_review,
 )
-from harness.workflows.review import ReviewContext  # noqa: E402
+from harness.workflows.review import (  # noqa: E402
+    ReviewContext,
+    ReviewResult,
+    review_round_envelope,
+)
 from review_contract import SEVERITIES, VERDICTS  # noqa: E402
+from task_review_shared import StaleRoundCallbackError  # noqa: E402
+from task_review_transport import _collect_ready_results  # noqa: E402
 
 # Imported from the code that enforces them, so the assertion cannot rot.
 ROUND_FIELDS = frozenset(SUBMIT_ROUND_FIELDS)
@@ -496,7 +506,15 @@ def _stub_round():
 
     route = RuntimeRoute("claude", "fable", "xhigh", "reviewer-readonly", "a" * 64)
     spec = OperationSpec(
-        "op-round", "key-round", "review-round", "owner-1", route, "packet.json", "full"
+        "op-round",
+        "key-round",
+        "review-round",
+        "owner-1",
+        route,
+        "packet.json",
+        "full",
+        parent_operation_id="op-parent",
+        root_operation_id="op-root",
     )
     return ReviewRound(
         parent_operation_id="op-parent",
@@ -510,6 +528,153 @@ def _stub_round():
     )
 
 
+def check_validated_callback_publishes_reviewer_timing() -> None:
+    """The validated callback boundary owns one immutable display interval."""
+
+    with tempfile.TemporaryDirectory(prefix="review-timing.") as raw:
+        tmp = Path(raw).resolve()
+        vault = tmp / "vault"
+        worktree = tmp / "worktree"
+        runtime_root = tmp / "review-runtime"
+        for path in (vault, worktree, runtime_root):
+            path.mkdir(parents=True)
+        round_ = _stub_round()
+        lane = SimpleNamespace(axis=round_.axis)
+        run = SimpleNamespace(
+            execution=SimpleNamespace(lanes=(lane,)),
+            rounds={round_.axis: round_},
+        )
+        callback = runtime_root / "callbacks" / round_.axis / ".review-callback.json"
+        callback.parent.mkdir(parents=True)
+        started_epoch = time.time() - 30.0
+        started_at = datetime.fromtimestamp(
+            started_epoch, timezone.utc
+        ).isoformat()
+        expected_started_epoch = datetime.fromisoformat(started_at).timestamp()
+        (callback.parent / ".review-meta.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "transport": "review-round",
+                    "operation_id": round_.operation_id,
+                    "run_id": round_.run_id,
+                    "parent_session_operation_id": round_.parent_operation_id,
+                    "axis": round_.axis,
+                    "started_at": started_at,
+                },
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        result = ReviewResult(
+            round_.axis,
+            "approve",
+            verification_iteration=round_.verification_iteration,
+        )
+        envelope = review_round_envelope(round_, result)
+        callback.write_text(
+            json.dumps(to_dict(envelope), sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        timing_path = (
+            vault
+            / ".vault-meta"
+            / "harness"
+            / "review-data"
+            / round_.owner_id
+            / round_.owner_id
+            / "review-timing"
+            / round_.parent_operation_id
+            / f"{round_.operation_id}.json"
+        )
+
+        ready = _collect_ready_results(
+            run, runtime_root, worktree, vault
+        )
+        check(
+            "validated callback remains ready for normal acceptance",
+            len(ready) == 1 and ready[0][2] == result,
+        )
+        check(
+            "validated callback publishes one reviewer timing record",
+            timing_path.is_file() and not timing_path.is_symlink(),
+            str(timing_path),
+        )
+        raw_timing = timing_path.read_bytes()
+        timing = json.loads(raw_timing)
+        check(
+            "review timing binds the exact owner root parent round run axis and callback",
+            timing
+            == {
+                "schema_version": 1,
+                "owner_id": round_.owner_id,
+                "root_operation_id": round_.spec.root_operation_id,
+                "parent_operation_id": round_.parent_operation_id,
+                "round_operation_id": round_.operation_id,
+                "run_id": round_.run_id,
+                "axis": round_.axis,
+                "started_at": expected_started_epoch,
+                "completed_at": timing.get("completed_at"),
+                "callback_sha256": envelope.payload_sha256,
+            }
+            and isinstance(timing.get("completed_at"), float)
+            and timing["completed_at"] >= timing["started_at"],
+            json.dumps(timing, sort_keys=True),
+        )
+        check(
+            "review timing is owner-only",
+            timing_path.stat().st_mode & 0o777 == 0o600
+            and timing_path.parent.stat().st_mode & 0o777 == 0o700,
+        )
+
+        _collect_ready_results(run, runtime_root, worktree, vault)
+        check(
+            "callback replay preserves byte-stable reviewer timing",
+            timing_path.read_bytes() == raw_timing,
+        )
+
+        timing_path.write_bytes(b"{malformed")
+        malformed = timing_path.read_bytes()
+        ready = _collect_ready_results(run, runtime_root, worktree, vault)
+        check(
+            "malformed timing conflicts do not overwrite or alter callback processing",
+            len(ready) == 1 and timing_path.read_bytes() == malformed,
+        )
+
+        timing_path.unlink()
+        target = tmp / "foreign-timing.json"
+        target.write_bytes(raw_timing)
+        timing_path.symlink_to(target)
+        ready = _collect_ready_results(run, runtime_root, worktree, vault)
+        check(
+            "symlinked timing conflicts do not follow or alter callback processing",
+            len(ready) == 1
+            and timing_path.is_symlink()
+            and target.read_bytes() == raw_timing,
+        )
+
+        timing_path.unlink()
+        mismatched = to_dict(envelope)
+        payload = dict(mismatched["payload"])
+        payload["axis"] = "openai-holistic"
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        mismatched["payload"] = payload
+        mismatched["payload_sha256"] = hashlib.sha256(encoded).hexdigest()
+        callback.write_text(
+            json.dumps(mismatched, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        rejected = False
+        try:
+            _collect_ready_results(run, runtime_root, worktree, vault)
+        except StaleRoundCallbackError:
+            rejected = True
+        check(
+            "mismatched callback publishes no reviewer timing",
+            rejected and not timing_path.exists(),
+        )
+
+
 def run() -> None:
     check_producer_exists()
     check_report_counts_invalid_callbacks()
@@ -519,6 +684,7 @@ def run() -> None:
     check_every_named_value_is_accepted(ROOT)
     check_advertised_string_fields_reject_non_strings(ROOT)
     check_emit_targets_an_explicit_vault()
+    check_validated_callback_publishes_reviewer_timing()
 
 
 if __name__ == "__main__":
