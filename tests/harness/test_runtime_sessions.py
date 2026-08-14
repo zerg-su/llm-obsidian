@@ -279,6 +279,150 @@ class EventFirstLoopProbe(RuntimeWorkerLoopMixin):
         self.source_states.append(observation.source)
 
 
+class LostProviderChildProbe(RuntimeWorkerLoopMixin):
+    def __init__(
+        self,
+        store: OperationStore,
+        *,
+        owner_id: str,
+        operation_id: str,
+        run_id: str,
+    ) -> None:
+        self.store = store
+        self.spec = {
+            "owner_id": owner_id,
+            "operation_id": operation_id,
+            "run_id": run_id,
+        }
+        self.handle = type("Handle", (), {"pid": 9001})()
+        self.provider_exited = False
+        self.exit_code = 99
+        self.recorded_exits: list[int] = []
+
+    def record_provider_exit(self, exit_code: int) -> None:
+        self.recorded_exits.append(exit_code)
+
+
+def lost_provider_child_state(
+    root: Path,
+    name: str,
+    *,
+    state: str,
+    effect_id: str,
+    effect_outcome: EffectOutcome,
+    worker_run_id: str | None = None,
+) -> tuple[str, LostProviderChildProbe]:
+    owner_id = f"owner-{name}"
+    operation_id = f"operation-{name}"
+    run_id = f"run-{name}"
+    store = OperationStore(root / name)
+    spec = OperationSpec(
+        operation_id,
+        f"key-{name}",
+        "runtime-lifecycle",
+        owner_id,
+        RuntimeRoute(
+            "claude", "claude-opus-5", "high", "reviewer-callback", "c" * 64
+        ),
+        "packets/runtime.json",
+        "scoped",
+    )
+    store.create(spec, lane_id=f"lane-{name}", run_id=run_id)
+    for next_state in ("preflight", "starting", "running", "cancelling"):
+        store.transition(owner_id, operation_id, next_state)
+    store.begin_effect(owner_id, operation_id, effect_id)
+    if effect_outcome != EffectOutcome.PENDING:
+        store.resolve_effect(owner_id, operation_id, effect_outcome)
+    if state == "exiting":
+        store.transition(owner_id, operation_id, state)
+    worker = LostProviderChildProbe(
+        store,
+        owner_id=owner_id,
+        operation_id=operation_id,
+        run_id=worker_run_id or run_id,
+    )
+    with patch.object(os, "waitid", side_effect=ChildProcessError):
+        worker.observe_provider_exit()
+    return store.read(owner_id, operation_id).state, worker
+
+
+with tempfile.TemporaryDirectory(prefix="expected-provider-exit.") as raw:
+    exit_root = Path(raw)
+    expected_exit_cases = (
+        (
+            "expected",
+            "exiting",
+            "request-exit",
+            EffectOutcome.SUCCEEDED,
+            None,
+            "exiting",
+        ),
+        (
+            "pending",
+            "cancelling",
+            "request-exit",
+            EffectOutcome.PENDING,
+            None,
+            "attention-required",
+        ),
+        (
+            "failed",
+            "exiting",
+            "request-exit",
+            EffectOutcome.FAILED,
+            None,
+            "attention-required",
+        ),
+        (
+            "different",
+            "exiting",
+            "close-surface",
+            EffectOutcome.SUCCEEDED,
+            None,
+            "attention-required",
+        ),
+        (
+            "nonexiting",
+            "cancelling",
+            "request-exit",
+            EffectOutcome.SUCCEEDED,
+            None,
+            "attention-required",
+        ),
+        (
+            "run-drift",
+            "exiting",
+            "request-exit",
+            EffectOutcome.SUCCEEDED,
+            "run-other",
+            "attention-required",
+        ),
+    )
+    exit_results = {
+        name: lost_provider_child_state(
+            exit_root,
+            name,
+            state=state,
+            effect_id=effect_id,
+            effect_outcome=effect_outcome,
+            worker_run_id=worker_run_id,
+        )
+        for name, state, effect_id, effect_outcome, worker_run_id, _expected
+        in expected_exit_cases
+    }
+    check(
+        "lost provider child accepts only the exact durable requested-exit branch",
+        all(
+            exit_results[name][0] == expected
+            and exit_results[name][1].provider_exited
+            and exit_results[name][1].recorded_exits == [0]
+            for name, _state, _effect, _outcome, _run, expected
+            in expected_exit_cases
+        ),
+        {name: result[0] for name, result in exit_results.items()},
+    )
+
+
 _event_first = EventFirstLoopProbe()
 check(
     "event wake performs the full durable inspection before the fallback",

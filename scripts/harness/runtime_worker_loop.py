@@ -264,6 +264,21 @@ class RuntimeWorkerLoopMixin:
                 },
             )
 
+    def _expected_provider_exit(self) -> bool:
+        try:
+            current = self.store.read(
+                self.spec["owner_id"], self.spec["operation_id"]
+            )
+        except Exception:
+            return False
+        return bool(
+            current.run_id == self.spec["run_id"]
+            and current.state == "exiting"
+            and not current.pending_effect
+            and current.effect_id == "request-exit"
+            and current.effect_outcome == EffectOutcome.SUCCEEDED
+        )
+
     def observe_provider_exit(self) -> bool:
         """Observe and contain provider exit; return false when polling must defer."""
         if self.provider_exited:
@@ -278,7 +293,8 @@ class RuntimeWorkerLoopMixin:
             self.provider_exited = True
             self.exit_code = 0
             self.record_provider_exit(self.exit_code)
-            self.mark_attention(AttentionReason.ATTENTION_REQUIRED)
+            if not self._expected_provider_exit():
+                self.mark_attention(AttentionReason.ATTENTION_REQUIRED)
             return True
         except OSError:
             return True
