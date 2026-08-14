@@ -16,6 +16,32 @@
 внутренними контрольными точками и вошли в следующие публичные релизы; тегов и
 пакетов с этими номерами не выпускалось.
 
+## [2.6.7-rc6.11] — 2026-08-14
+
+Кандидат с observer-safe terminal cleanup custom pipeline.
+
+### Исправлено
+
+- Terminal Wiki Summary custom pipeline теперь публикует принятый result в
+  immutable initial generation корневого provider, даже если retargeting
+  дочернего callback продвинул active target generation.
+- Terminal cleanup теперь получает close authority только из точных task
+  process, supervisor и surface. Alive task surface закрывается адресно,
+  внешний live observer workspace сохраняется, а завершение происходит после
+  доказанного исчезновения exact surface.
+- Cleanup публикует один resource-closed receipt и очищает ownership только
+  после accepted matching result, успешного exit request, dead
+  identity-matched process и supervisor и missing exact surface. Missing или
+  mismatched result, changed generation, unresolved identity или surface,
+  conflicting либо foreign receipt остаются fail-closed.
+
+### Граница кандидата
+
+- Public schemas, replay authority provider/callback, стабильный внешний
+  Harness RC6.10, dashboard markers и несвязанное lifecycle behavior не
+  меняются. Этот кандидат не выполняет merge, push, tag, publish, обновление
+  plugins или live dogfood.
+
 ## [2.6.7-rc6.10] — 2026-08-14
 
 Кандидат с durable terminal duration reviewer-сессий.

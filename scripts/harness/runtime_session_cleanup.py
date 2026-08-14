@@ -335,19 +335,6 @@ class RuntimeSessionCleanupMixin:
             workspace_id=workspace_id,
             surface_id=resources.surface_id,
         )
-        observation = ResourceObservation(
-            process_status=process_status,
-            supervisor_status=supervisor_status,
-            surface_status=surface_status,
-            workspace_status=workspace_status,
-        )
-        if self._fault_observer is not None:
-            self._fault_observer("cleanup-receipt-published:before")
-        result = ResourceClosureLedger(
-            self._state_root(record) / "provider-events"
-        ).close(identity, observation)
-        if self._fault_observer is not None:
-            self._fault_observer("cleanup-receipt-published")
         delivery_state = (
             self._state_root(record)
             / "provider-events"
@@ -356,6 +343,14 @@ class RuntimeSessionCleanupMixin:
             / "delivery-state.json"
         )
         if not delivery_state.is_file() or delivery_state.is_symlink():
+            existing_stream = any(
+                path.is_file() and not path.is_symlink()
+                for path in (
+                    self._state_root(record) / "provider-events"
+                ).glob("generation-*/delivery/delivery-state.json")
+            )
+            if existing_stream:
+                return "attention"
             return "legacy"
         try:
             stream = RuntimeProviderEventStream.rehydrate(
@@ -364,13 +359,29 @@ class RuntimeSessionCleanupMixin:
             )
             cursor = stream.controller.current_state().cursor
             if (
-                not cursor.process_exited
-                and not cursor.event_gap
-                and not cursor.result_published
+                not record.accepted_callback_id
+                or not record.accepted_callback_sha256
+                or not cursor.result_published
             ):
-                stream.event_gap("worker-exit-unobserved")
+                return "attention"
+            # With the cursor already published this is an idempotent exact
+            # digest assertion; it cannot synthesize a missing result.
+            stream.result(record.accepted_callback_sha256)
+            observation = ResourceObservation(
+                process_status=process_status,
+                supervisor_status=supervisor_status,
+                surface_status=surface_status,
+                workspace_status=workspace_status,
+            )
+            if self._fault_observer is not None:
+                self._fault_observer("cleanup-receipt-published:before")
+            result = ResourceClosureLedger(
+                self._state_root(record) / "provider-events"
+            ).close(identity, observation)
+            if self._fault_observer is not None:
+                self._fault_observer("cleanup-receipt-published")
             decision = stream.resource_closed_receipt(result.receipt)
-        except RuntimeProviderEventError as exc:
+        except (RuntimeProviderEventError, ValueError) as exc:
             raise RuntimeSessionError(
                 "typed resource close delivery is invalid"
             ) from exc
@@ -492,8 +503,6 @@ class RuntimeSessionCleanupMixin:
         resources = record.resources
         metadata = self._metadata(record)
         workspace_placement = metadata.get("placement") == "workspace"
-        workspace_id = str(metadata.get("workspace_id") or "")
-        window_id = str(metadata.get("window_id") or "")
         process_status, supervisor_status = (
             self._cleanup_ownership_statuses(record)
         )
@@ -505,14 +514,7 @@ class RuntimeSessionCleanupMixin:
             )
         except Exception:
             surface_status = "unknown"
-        workspace_status = "missing"
-        if workspace_placement:
-            try:
-                workspace_status = self.cmux.workspace_status(
-                    workspace_id, window_id
-                )
-            except Exception:
-                workspace_status = "unknown"
+        workspace_status = "unknown" if workspace_placement else "missing"
         if (
             surface_status == "unknown"
             and process_status == "dead"
@@ -527,7 +529,6 @@ class RuntimeSessionCleanupMixin:
             process_status,
             supervisor_status,
             surface_status,
-            workspace_status,
         }:
             return self._result(
                 record,
@@ -598,12 +599,7 @@ class RuntimeSessionCleanupMixin:
                 process_status=process_status,
                 surface_status=surface_status,
             )
-        keep_open_alive = (
-            workspace_status == "alive"
-            if workspace_placement
-            else surface_status == "alive"
-        )
-        if record.spec.keep_open and keep_open_alive:
+        if record.spec.keep_open and surface_status == "alive":
             return self._result(
                 record,
                 "keep-open",
@@ -611,33 +607,7 @@ class RuntimeSessionCleanupMixin:
                 surface_status=surface_status,
             )
         supervisor = OperationSupervisor(self.store, owner_id, operation_id)
-        if workspace_placement:
-            if workspace_status == "alive":
-                supervisor.effect(
-                    "close-workspace",
-                    lambda _record: self.cmux.close_workspace_exact(
-                        workspace_id,
-                        window_id,
-                    ),
-                )
-                try:
-                    workspace_status = self.cmux.workspace_status(
-                        workspace_id, window_id
-                    )
-                except Exception:
-                    workspace_status = "unknown"
-                if workspace_status != "missing":
-                    current = self._mark_attention(
-                        supervisor.read(), AttentionReason.CLEANUP_INCOMPLETE
-                    )
-                    return self._result(
-                        current,
-                        "attention-required",
-                        process_status="dead",
-                        surface_status=surface_status,
-                    )
-                surface_status = "missing"
-        elif surface_status == "alive":
+        if surface_status == "alive":
             supervisor.effect(
                 "close-surface",
                 lambda _record: self.cmux.close_exact(
@@ -666,7 +636,6 @@ class RuntimeSessionCleanupMixin:
             surface_status=surface_status,
             workspace_status=workspace_status,
         )
-        supervisor.bind_resources(OwnedResources())
         if close_action == "attention":
             current = self._mark_attention(
                 supervisor.read(), AttentionReason.ATTENTION_REQUIRED
@@ -678,6 +647,7 @@ class RuntimeSessionCleanupMixin:
                 process_status="dead",
                 surface_status="missing",
             )
+        supervisor.bind_resources(OwnedResources())
         current = supervisor.transition(terminal_state)
         self._notify(current.spec.owner_id, current.spec.operation_id)
         return self._result(

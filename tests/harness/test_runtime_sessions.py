@@ -1080,6 +1080,11 @@ class FakeProcess:
                 ("owner-1", "runtime-workspace", "run-workspace"),
                 (
                     "owner-1",
+                    "runtime-workspace-surface",
+                    "run-workspace-surface",
+                ),
+                (
+                    "owner-1",
                     "runtime-workspace-drift",
                     "run-workspace-drift",
                 ),
@@ -3539,19 +3544,137 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         and attention_cleanup.record.state == "attention-required"
         and workspace_cmux.closed_workspaces == [],
     )
+    workspace_store.transition(
+        "owner-1", "runtime-workspace", "awaiting-callback"
+    )
+    workspace_payload = {"status": "complete"}
+    workspace_payload_sha = hashlib.sha256(
+        json.dumps(
+            workspace_payload,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    workspace_manager.accept_callback(
+        CallbackEnvelope(
+            "runtime-workspace-callback",
+            "runtime-workspace",
+            "run-workspace",
+            "result",
+            workspace_payload,
+            workspace_payload_sha,
+        )
+    )
+    workspace_record = workspace_store.read("owner-1", "runtime-workspace")
+    workspace_stream = RuntimeProviderEventStream.create(
+        workspace_manager._state_root(workspace_record) / "provider-events",
+        owner_id="owner-1",
+        operation_id="runtime-workspace",
+        run_id="run-workspace",
+        generation=1,
+        process_identity=workspace_record.resources.process_identity,
+        workspace_id=WORKSPACE,
+        surface_id=SURFACE,
+        input_sha256="3" * 64,
+    )
+    assert workspace_stream.start().action == "wait"
+    assert workspace_stream.reserve_input().action == "send"
+    assert workspace_stream.accept_input().action == "wait"
+    assert workspace_stream.result(workspace_payload_sha).action == "close"
     workspace_manager.request_exit("owner-1", "runtime-workspace")
     workspace_process.status_value = "dead"
     workspace_process.supervisor_status_value = "dead"
     workspace_cmux.surface_status = "missing"
+    assert workspace_stream.process_exited(0).action == "close"
     workspace_cleaned = workspace_manager.cleanup(
         "owner-1", "runtime-workspace"
     )
+    workspace_receipt = (
+        workspace_manager._state_root(workspace_cleaned.record)
+        / "provider-events"
+        / "resource-closed.json"
+    )
     check(
-        "terminal cleanup closes and verifies metadata-owned workspace",
+        "missing task surface completes without closing live observer workspace",
         workspace_cleaned.record.state == "complete"
-        and workspace_cmux.closed_workspaces == [(WORKSPACE, WINDOW)]
+        and workspace_cleaned.record.resources == OwnedResources()
+        and workspace_cmux.closed_workspaces == []
         and workspace_cmux.closed == []
-        and workspace_cmux.workspace_status_value == "missing",
+        and workspace_cmux.workspace_status_value == "alive"
+        and workspace_receipt.is_file(),
+        workspace_events,
+    )
+
+    workspace_surface_spec = replace(
+        spec,
+        operation_id="runtime-workspace-surface",
+        idempotency_key="runtime-workspace-surface-key",
+    )
+    workspace_surface_request = replace(
+        request,
+        spec=workspace_surface_spec,
+        run_id="run-workspace-surface",
+        placement="workspace",
+        callback_pointer="callbacks/workspace-surface.json",
+    )
+    workspace_cmux.surface_status = "alive"
+    workspace_process.status_value = "alive"
+    workspace_process.supervisor_status_value = "alive"
+    workspace_surface_started = workspace_manager.start(
+        workspace_surface_request
+    )
+    workspace_surface_payload = {"status": "complete", "surface": "exact"}
+    workspace_surface_sha = hashlib.sha256(
+        json.dumps(
+            workspace_surface_payload,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    workspace_manager.accept_callback(
+        CallbackEnvelope(
+            "runtime-workspace-surface-callback",
+            "runtime-workspace-surface",
+            "run-workspace-surface",
+            "result",
+            workspace_surface_payload,
+            workspace_surface_sha,
+        )
+    )
+    workspace_surface_stream = RuntimeProviderEventStream.create(
+        workspace_manager._state_root(workspace_surface_started.record)
+        / "provider-events",
+        owner_id="owner-1",
+        operation_id="runtime-workspace-surface",
+        run_id="run-workspace-surface",
+        generation=1,
+        process_identity=(
+            workspace_surface_started.record.resources.process_identity
+        ),
+        workspace_id=WORKSPACE,
+        surface_id=SURFACE,
+        input_sha256="4" * 64,
+    )
+    assert workspace_surface_stream.start().action == "wait"
+    assert workspace_surface_stream.reserve_input().action == "send"
+    assert workspace_surface_stream.accept_input().action == "wait"
+    assert workspace_surface_stream.result(workspace_surface_sha).action == "close"
+    workspace_process.status_value = "dead"
+    workspace_process.supervisor_status_value = "dead"
+    workspace_manager.request_exit("owner-1", "runtime-workspace-surface")
+    assert workspace_surface_stream.process_exited(0).action == "close"
+    workspace_cmux.surface_status = "alive"
+    workspace_cmux.surface_statuses = ["alive", "missing"]
+    workspace_surface_cleaned = workspace_manager.cleanup(
+        "owner-1", "runtime-workspace-surface"
+    )
+    check(
+        "live task surface closes exactly without closing observer workspace",
+        workspace_surface_cleaned.record.state == "complete"
+        and workspace_surface_cleaned.record.resources == OwnedResources()
+        and workspace_cmux.closed == [SURFACE]
+        and workspace_cmux.closed_workspaces == []
+        and workspace_cmux.workspace_status_value == "alive",
         workspace_events,
     )
 
@@ -3590,10 +3713,9 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         "owner-1", "runtime-workspace-drift"
     )
     check(
-        "workspace identity drift retains cleanup ownership",
-        drift_result.action == "wait-for-ownership"
-        and drift_result.record.state == "exiting"
-        and drift_result.record.resources.surface_id == SURFACE
+        "workspace identity drift cannot retain missing task-surface ownership",
+        drift_result.record.state == "complete"
+        and drift_result.record.resources == OwnedResources()
         and drift_cmux.closed_workspaces == [],
         drift_events,
     )

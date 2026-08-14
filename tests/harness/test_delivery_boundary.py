@@ -343,6 +343,38 @@ with tempfile.TemporaryDirectory(prefix="delivery-boundary.") as raw:
         surface_status="missing",
         workspace_status="missing",
     )
+    check(
+        "live observer workspace is outside exact task resource closure",
+        observe_resource_liveness(
+            dataclasses.replace(gone, workspace_status="alive")
+        ).action
+        == "close",
+    )
+    check(
+        "unknown workspace is provenance rather than cleanup authority",
+        observe_resource_liveness(
+            dataclasses.replace(gone, workspace_status="unknown")
+        ).action
+        == "close",
+    )
+    check(
+        "alive exact task surface cannot be inferred closed from workspace state",
+        observe_resource_liveness(
+            dataclasses.replace(
+                gone,
+                surface_status="alive",
+                workspace_status="missing",
+            )
+        ).action
+        == "recheck",
+    )
+    check(
+        "unknown exact task surface remains fail-closed",
+        observe_resource_liveness(
+            dataclasses.replace(gone, surface_status="unknown")
+        ).action
+        == "attention",
+    )
     ledger_root = root / "resource-close"
     ledger = ResourceClosureLedger(ledger_root)
     first_close = ledger.close(resource_identity, gone)
@@ -487,7 +519,7 @@ with tempfile.TemporaryDirectory(prefix="delivery-boundary.") as raw:
             "1" * 64,
         )
     )
-    for state in ("running", "finalizing", "exiting"):
+    for state in ("running", "finalizing"):
         supervisor.transition(state)
     manager = RuntimeSessionManager(store, GoneCmux(), GoneProcess())
     cleanup_record = supervisor.read()
@@ -512,6 +544,22 @@ with tempfile.TemporaryDirectory(prefix="delivery-boundary.") as raw:
             "callback_pointer": "callbacks/result.json",
         },
     )
+    missing_result_stream = RuntimeProviderEventStream.create(
+        manager._state_root(cleanup_record) / "provider-events",
+        owner_id=cleanup_spec.owner_id,
+        operation_id=cleanup_spec.operation_id,
+        run_id=cleanup_record.run_id,
+        generation=1,
+        process_identity="f" * 64,
+        workspace_id="cleanup-workspace",
+        surface_id="cleanup-surface",
+        input_sha256="3" * 64,
+    )
+    assert missing_result_stream.start().action == "wait"
+    assert missing_result_stream.reserve_input().action == "send"
+    assert missing_result_stream.accept_input().action == "wait"
+    manager.request_exit(cleanup_spec.owner_id, cleanup_spec.operation_id)
+    assert missing_result_stream.process_exited(0).action == "attention"
     cleaned = manager.cleanup(cleanup_spec.owner_id, cleanup_spec.operation_id)
     replayed_cleanup = manager.cleanup(
         cleanup_spec.owner_id, cleanup_spec.operation_id
@@ -522,13 +570,11 @@ with tempfile.TemporaryDirectory(prefix="delivery-boundary.") as raw:
         / "resource-closed.json"
     )
     check(
-        "runtime cleanup publishes close before clearing ownership and replays once",
-        cleaned.record.resources == OwnedResources()
-        and cleaned.record.state == "complete"
-        and replayed_cleanup.action == "terminal"
-        and integrated_receipt.is_file()
-        and json.loads(integrated_receipt.read_text(encoding="utf-8"))["status"]
-        == "resource-closed",
+        "missing provider result cannot publish close or clear exact ownership",
+        cleaned.record.resources.surface_id == "cleanup-surface"
+        and cleaned.record.state == "attention-required"
+        and replayed_cleanup.action == "attention-required"
+        and not integrated_receipt.exists(),
     )
 
 print("delivery and durable close matrix: ok")

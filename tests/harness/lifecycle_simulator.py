@@ -762,7 +762,7 @@ class LifecycleWorld:
             if decision.action == "send":
                 stream.accept_input()
             if record.accepted_callback_id:
-                stream.result(RESULT_SHA256)
+                stream.result(record.accepted_callback_sha256)
         if record.state in {"exiting", "complete", "failed", "cancelled"}:
             world.process.disappear()
         if record.state in {"complete", "failed", "cancelled"}:
@@ -939,7 +939,13 @@ class LifecycleWorld:
         kind = action.get("kind")
         stream = self.stream()
         if kind == "result-published":
-            stream.result(str(action.get("result_sha256") or RESULT_SHA256))
+            stream.result(
+                str(
+                    action.get("result_sha256")
+                    or self.record().accepted_callback_sha256
+                    or RESULT_SHA256
+                )
+            )
         elif kind == "turn-stopped":
             stream.turn_stopped()
         elif kind == "process-exited":

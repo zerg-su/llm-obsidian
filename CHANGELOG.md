@@ -10,6 +10,32 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.6.7-rc6.11] - 2026-08-14
+
+Observer-safe custom terminal cleanup candidate.
+
+### Fixed
+
+- A terminal custom-pipeline Wiki Summary now publishes its accepted result
+  against the immutable initial root provider generation, even after child
+  callback retargeting advances the active target generation.
+- Terminal cleanup now derives close authority only from the exact task
+  process, supervisor, and surface. It closes an alive task surface exactly,
+  preserves a live external observer workspace, and completes after the exact
+  surface is proven missing.
+- Cleanup publishes one resource-closed receipt and clears ownership only
+  after an accepted matching result, succeeded exit request, dead
+  identity-matched process and supervisor, and missing exact surface. Missing
+  or mismatched results, changed generations, unresolved identities or
+  surfaces, and conflicting or foreign receipts remain fail-closed.
+
+### Candidate boundary
+
+- Public schemas, provider/callback replay authority, the stable RC6.10 outer
+  Harness, dashboard markers, and unrelated lifecycle behavior are unchanged.
+  This candidate does not merge, push, tag, publish, update plugins, or run
+  live dogfood.
+
 ## [2.6.7-rc6.10] - 2026-08-14
 
 Durable reviewer terminal-duration candidate.

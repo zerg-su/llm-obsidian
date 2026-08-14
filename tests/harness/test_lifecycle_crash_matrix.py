@@ -58,8 +58,8 @@ def prepare_before_boundary(world: LifecycleWorld, boundary: str) -> None:
         world.apply({"action": "reserve-effect", "effect_id": "before-effect"})
     elif boundary == "cleanup-receipt-published":
         world.apply({"action": "start-worker"})
-        world.apply({"action": "publish-provider-event", "kind": "result-published"})
         world.apply({"action": "publish-callback"})
+        world.apply({"action": "publish-provider-event", "kind": "result-published"})
         result = world.manager.request_exit("sim-owner", "sim-operation")
         if result.action != "exit-requested":
             raise AssertionError("cleanup precondition did not enter exiting")
@@ -226,8 +226,8 @@ with tempfile.TemporaryDirectory(prefix="lifecycle-cleanup-crash.") as raw:
     root = Path(raw)
     world = LifecycleWorld.fresh(root)
     world.apply({"action": "start-worker"})
-    world.apply({"action": "publish-provider-event", "kind": "result-published"})
     world.apply({"action": "publish-callback"})
+    world.apply({"action": "publish-provider-event", "kind": "result-published"})
     provider_effects = world.provider.effects()
     world.apply(
         {

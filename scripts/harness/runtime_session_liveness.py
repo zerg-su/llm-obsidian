@@ -127,19 +127,18 @@ class ResourceCloseDecision:
 def observe_resource_liveness(
     observation: ResourceObservation,
 ) -> ResourceCloseDecision:
-    """Use disappearance as authority; time and screen never prove progress."""
+    """Prove closure from exact task resources; workspace is provenance only."""
 
     if not isinstance(observation, ResourceObservation):
         raise ResourceCloseError("resource observation is invalid")
-    statuses = (
+    owned_statuses = (
         observation.process_status,
         observation.supervisor_status,
         observation.surface_status,
-        observation.workspace_status,
     )
-    if "unknown" in statuses:
+    if "unknown" in owned_statuses:
         return ResourceCloseDecision("attention", "ownership-unknown")
-    if statuses == ("dead", "dead", "missing", "missing"):
+    if owned_statuses == ("dead", "dead", "missing"):
         return ResourceCloseDecision("close", "owned-resources-gone")
     if observation.deadline_reached:
         return ResourceCloseDecision("attention", "deadline-reached")
