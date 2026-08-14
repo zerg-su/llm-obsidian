@@ -249,8 +249,16 @@ headroom.
 The RC6.10 reviewer-duration slice adds exactly one production module,
 ``harness/review_timing.py``. It owns immutable callback-observed interval
 publication while the existing dashboard receipt and history owners validate
-and project that evidence. The candidate is 289 files / 108,051 lines, pinned
+and project that evidence. The candidate is 289 files / 108,021 lines, pinned
 exactly with no speculative headroom.
+
+The RC6.11 observer-safe cleanup release adds no production module: the file
+count stays 289. Its net 30 lines over the RC6.10 candidate come from the exact
+pre-input reviewer retirement owner plus root-bound terminal result publication
+and exact-surface cleanup in the existing owners. The candidate is 289 files /
+108,051 lines, pinned exactly with no speculative headroom. That growth landed
+before this ceiling was raised, so the justification is late rather than
+backdated, and the RC6.10 record above remains the RC6.10 measurement.
 """
 
 from __future__ import annotations
@@ -281,13 +289,13 @@ def assert_within_ceilings(scripts_dir: Path) -> tuple[int, int]:
     files, lines = measure(scripts_dir)
     if files > SCRIPT_FILE_CEILING:
         raise AssertionError(
-            f"scripts/ holds {files} Python files, above the RC6.10 ceiling "
+            f"scripts/ holds {files} Python files, above the RC6.11 ceiling "
             f"{SCRIPT_FILE_CEILING}; justify and raise the ceiling in the same "
             "commit as the growth"
         )
     if lines > SCRIPT_LINE_CEILING:
         raise AssertionError(
-            f"scripts/ holds {lines} lines, above the RC6.10 ceiling "
+            f"scripts/ holds {lines} lines, above the RC6.11 ceiling "
             f"{SCRIPT_LINE_CEILING}; justify and raise the ceiling in the same "
             "commit as the growth"
         )
