@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import json
 import sys
 import tempfile
@@ -19,7 +20,12 @@ from harness.provider_events import (  # noqa: E402
     ProviderEventCursor,
     ProviderEventIdentity,
 )
-from harness.contracts import OperationSpec, OwnedResources, RuntimeRoute  # noqa: E402
+from harness.contracts import (  # noqa: E402
+    CallbackEnvelope,
+    OperationSpec,
+    OwnedResources,
+    RuntimeRoute,
+)
 from harness.runtime_session_delivery import (  # noqa: E402
     DeliveryController,
     DeliveryError,
@@ -323,7 +329,6 @@ with tempfile.TemporaryDirectory(prefix="delivery-boundary.") as raw:
         process_status="alive",
         supervisor_status="alive",
         surface_status="alive",
-        workspace_status="alive",
         screen_changed=True,
     )
     check(
@@ -341,21 +346,6 @@ with tempfile.TemporaryDirectory(prefix="delivery-boundary.") as raw:
         process_status="dead",
         supervisor_status="dead",
         surface_status="missing",
-        workspace_status="missing",
-    )
-    check(
-        "live observer workspace is outside exact task resource closure",
-        observe_resource_liveness(
-            dataclasses.replace(gone, workspace_status="alive")
-        ).action
-        == "close",
-    )
-    check(
-        "unknown workspace is provenance rather than cleanup authority",
-        observe_resource_liveness(
-            dataclasses.replace(gone, workspace_status="unknown")
-        ).action
-        == "close",
     )
     check(
         "alive exact task surface cannot be inferred closed from workspace state",
@@ -363,7 +353,6 @@ with tempfile.TemporaryDirectory(prefix="delivery-boundary.") as raw:
             dataclasses.replace(
                 gone,
                 surface_status="alive",
-                workspace_status="missing",
             )
         ).action
         == "recheck",
@@ -575,6 +564,296 @@ with tempfile.TemporaryDirectory(prefix="delivery-boundary.") as raw:
         and cleaned.record.state == "attention-required"
         and replayed_cleanup.action == "attention-required"
         and not integrated_receipt.exists(),
+    )
+
+    def prepare_modern_cleanup_case(
+        case: str,
+        *,
+        target_generation: int,
+    ) -> tuple[
+        RuntimeSessionManager,
+        OperationSupervisor,
+        OperationSpec,
+    ]:
+        case_store = OperationStore(root / f"{case}-store")
+        case_spec = dataclasses.replace(
+            cleanup_spec,
+            operation_id=f"{case}-operation",
+            idempotency_key=f"{case}-key",
+        )
+        case_store.create(
+            case_spec,
+            lane_id="cleanup-lane",
+            run_id=f"{case}-run",
+        )
+        case_supervisor = OperationSupervisor(
+            case_store,
+            case_spec.owner_id,
+            case_spec.operation_id,
+        )
+        for state in ("preflight", "starting"):
+            case_supervisor.transition(state)
+        case_supervisor.bind_resources(
+            OwnedResources(
+                f"{case}-surface",
+                223,
+                224,
+                "a" * 64,
+                "b" * 64,
+            )
+        )
+        for state in ("running", "awaiting-callback"):
+            case_supervisor.transition(state)
+        case_manager = RuntimeSessionManager(
+            case_store,
+            GoneCmux(),
+            GoneProcess(),
+        )
+        case_record = case_supervisor.read()
+        case_manager._write_json(
+            case_manager._metadata_path(case_record),
+            {
+                "schema_version": 1,
+                "operation_id": case_spec.operation_id,
+                "run_id": case_record.run_id,
+                "placement": "workspace",
+                "workspace_id": f"{case}-workspace",
+                "window_id": f"{case}-window",
+            },
+        )
+        case_manager._write_json(
+            case_manager._callback_target_path(case_record),
+            {
+                "schema_version": 1,
+                "generation": target_generation,
+                "operation_id": case_spec.operation_id,
+                "run_id": case_record.run_id,
+                "callback_pointer": f"callbacks/{case}.json",
+            },
+        )
+        return case_manager, case_supervisor, case_spec
+
+    def accepted_case_callback(
+        case_manager: RuntimeSessionManager,
+        case_spec: OperationSpec,
+        case: str,
+    ) -> str:
+        payload = {"status": "complete", "case": case}
+        payload_sha256 = hashlib.sha256(
+            json.dumps(
+                payload,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        case_manager.accept_callback(
+            CallbackEnvelope(
+                f"{case}-callback",
+                case_spec.operation_id,
+                f"{case}-run",
+                "result",
+                payload,
+                payload_sha256,
+            )
+        )
+        return payload_sha256
+
+    def case_stream(
+        case_manager: RuntimeSessionManager,
+        case_spec: OperationSpec,
+        case: str,
+        *,
+        generation: int,
+    ) -> RuntimeProviderEventStream:
+        case_record = case_manager.store.read(
+            case_spec.owner_id,
+            case_spec.operation_id,
+        )
+        stream = RuntimeProviderEventStream.create(
+            case_manager._state_root(case_record) / "provider-events",
+            owner_id=case_spec.owner_id,
+            operation_id=case_spec.operation_id,
+            run_id=case_record.run_id,
+            generation=generation,
+            process_identity="a" * 64,
+            workspace_id=f"{case}-workspace",
+            surface_id=f"{case}-surface",
+            input_sha256="c" * 64,
+        )
+        assert stream.start().action == "wait"
+        assert stream.reserve_input().action == "send"
+        assert stream.accept_input().action == "wait"
+        return stream
+
+    drift_manager, drift_supervisor, drift_spec = prepare_modern_cleanup_case(
+        "root-generation-drift",
+        target_generation=2,
+    )
+    drift_sha256 = accepted_case_callback(
+        drift_manager,
+        drift_spec,
+        "root-generation-drift",
+    )
+    drift_stream = case_stream(
+        drift_manager,
+        drift_spec,
+        "root-generation-drift",
+        generation=2,
+    )
+    assert drift_stream.result(drift_sha256).action == "close"
+    drift_manager.request_exit(drift_spec.owner_id, drift_spec.operation_id)
+    assert drift_stream.process_exited(0).action == "close"
+    drift_cleanup = drift_manager.cleanup(
+        drift_spec.owner_id,
+        drift_spec.operation_id,
+    )
+    drift_receipt = (
+        drift_manager._state_root(drift_cleanup.record)
+        / "provider-events"
+        / "resource-closed.json"
+    )
+    check(
+        "missing immutable root generation fails closed despite a live sibling stream",
+        drift_cleanup.record.state == "attention-required"
+        and drift_cleanup.record.resources.surface_id
+        == "root-generation-drift-surface"
+        and not drift_receipt.exists(),
+    )
+
+    conflict_manager, conflict_supervisor, conflict_spec = (
+        prepare_modern_cleanup_case(
+            "result-digest-conflict",
+            target_generation=1,
+        )
+    )
+    conflict_stream = case_stream(
+        conflict_manager,
+        conflict_spec,
+        "result-digest-conflict",
+        generation=1,
+    )
+    assert conflict_stream.result("d" * 64).action == "close"
+    accepted_case_callback(
+        conflict_manager,
+        conflict_spec,
+        "result-digest-conflict",
+    )
+    conflict_manager.request_exit(
+        conflict_spec.owner_id,
+        conflict_spec.operation_id,
+    )
+    assert conflict_stream.process_exited(0).action == "close"
+    try:
+        conflict_cleanup = conflict_manager.cleanup(
+            conflict_spec.owner_id,
+            conflict_spec.operation_id,
+        )
+    except Exception:
+        conflict_cleanup = None
+    conflict_receipt = (
+        conflict_manager._state_root(conflict_supervisor.read())
+        / "provider-events"
+        / "resource-closed.json"
+    )
+    check(
+        "result published before callback with a conflicting digest latches attention",
+        conflict_cleanup is not None
+        and conflict_cleanup.record.state == "attention-required"
+        and conflict_cleanup.record.resources.surface_id
+        == "result-digest-conflict-surface"
+        and not conflict_receipt.exists(),
+    )
+
+    orphan_manager, orphan_supervisor, orphan_spec = (
+        prepare_modern_cleanup_case(
+            "result-without-callback",
+            target_generation=1,
+        )
+    )
+    orphan_stream = case_stream(
+        orphan_manager,
+        orphan_spec,
+        "result-without-callback",
+        generation=1,
+    )
+    assert orphan_stream.result("e" * 64).action == "close"
+    orphan_supervisor.transition("finalizing")
+    orphan_manager.request_exit(
+        orphan_spec.owner_id,
+        orphan_spec.operation_id,
+    )
+    assert orphan_stream.process_exited(0).action == "close"
+    orphan_cleanup = orphan_manager.cleanup(
+        orphan_spec.owner_id,
+        orphan_spec.operation_id,
+    )
+    check(
+        "published result without an accepted callback retains ownership",
+        orphan_cleanup.record.state == "attention-required"
+        and orphan_cleanup.record.resources.surface_id
+        == "result-without-callback-surface",
+    )
+
+    receipt_manager, receipt_supervisor, receipt_spec = (
+        prepare_modern_cleanup_case(
+            "foreign-close-receipt",
+            target_generation=1,
+        )
+    )
+    receipt_sha256 = accepted_case_callback(
+        receipt_manager,
+        receipt_spec,
+        "foreign-close-receipt",
+    )
+    receipt_stream = case_stream(
+        receipt_manager,
+        receipt_spec,
+        "foreign-close-receipt",
+        generation=1,
+    )
+    assert receipt_stream.result(receipt_sha256).action == "close"
+    receipt_record = receipt_supervisor.read()
+    foreign_identity = ResourceIdentity(
+        owner_id=receipt_spec.owner_id,
+        operation_id=receipt_spec.operation_id,
+        run_id=receipt_record.run_id,
+        generation=1,
+        provider_session_id=receipt_record.run_id,
+        process_identity="a" * 64,
+        supervisor_identity="b" * 64,
+        source_id=f"process:{'a' * 64}",
+        workspace_id="foreign-close-receipt-workspace",
+        surface_id="foreign-surface",
+    )
+    ResourceClosureLedger(
+        receipt_manager._state_root(receipt_record) / "provider-events"
+    ).close(foreign_identity, gone)
+    receipt_manager.request_exit(
+        receipt_spec.owner_id,
+        receipt_spec.operation_id,
+    )
+    assert receipt_stream.process_exited(0).action == "close"
+    receipt_cleanup = receipt_manager.cleanup(
+        receipt_spec.owner_id,
+        receipt_spec.operation_id,
+    )
+    receipt_event_kinds = [
+        json.loads(path.read_text(encoding="utf-8"))["kind"]
+        for path in sorted(
+            (
+                receipt_manager._state_root(receipt_record)
+                / "provider-events"
+                / "generation-1"
+                / "events"
+            ).glob("*.json")
+        )
+    ]
+    check(
+        "foreign durable close receipt latches attention without provider close",
+        receipt_cleanup.record.state == "attention-required"
+        and receipt_cleanup.record.resources.surface_id
+        == "foreign-close-receipt-surface"
+        and "resource-closed" not in receipt_event_kinds,
     )
 
 print("delivery and durable close matrix: ok")

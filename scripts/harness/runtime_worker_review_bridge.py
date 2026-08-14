@@ -297,9 +297,7 @@ class RuntimeWorkerReviewBridgeMixin:
                     generation=generation,
                     envelope=envelope,
                 )
-            self.record_provider_result(
-                generation, hashlib.sha256(raw).hexdigest()
-            )
+            self.record_provider_result(generation, envelope.payload_sha256)
             self.callback_handled = True
             self.finalize_callback_timeout_rearm(
                 generation=generation,

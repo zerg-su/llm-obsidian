@@ -21,6 +21,7 @@ from .runtime_session_contracts import (
     RuntimeSessionResult,
 )
 from .runtime_session_liveness import (
+    ResourceCloseError,
     ResourceClosureLedger,
     ResourceIdentity,
     ResourceObservation,
@@ -35,6 +36,8 @@ from .supervisor import OperationSupervisor
 
 class RuntimeSessionCleanupMixin:
     """Own observation, exit requests, and exact cleanup effects."""
+
+    _ROOT_PROVIDER_GENERATION = 1
 
     _SUPERSEDED_REVIEW_RECEIPT_KEYS = frozenset(
         {
@@ -299,7 +302,6 @@ class RuntimeSessionCleanupMixin:
         process_status: str,
         supervisor_status: str,
         surface_status: str,
-        workspace_status: str,
     ) -> str:
         """Publish the exact close receipt before clearing durable ownership."""
 
@@ -308,7 +310,7 @@ class RuntimeSessionCleanupMixin:
             # Historical records created before provider-event generations remain
             # cleanup-compatible but cannot manufacture a typed event identity.
             return "legacy"
-        target = self._callback_target(record)
+        self._callback_target(record)
         resources = record.resources
         workspace_id = str(metadata.get("workspace_id") or "")
         if not all(
@@ -323,11 +325,12 @@ class RuntimeSessionCleanupMixin:
             # the complete new provider/resource identity. Cleanup remains
             # possible, but no typed close receipt is fabricated for them.
             return "legacy"
+        root_generation = self._ROOT_PROVIDER_GENERATION
         identity = ResourceIdentity(
             owner_id=record.spec.owner_id,
             operation_id=record.spec.operation_id,
             run_id=record.run_id,
-            generation=int(target["generation"]),
+            generation=root_generation,
             provider_session_id=record.run_id,
             process_identity=resources.process_identity,
             supervisor_identity=resources.supervisor_identity,
@@ -338,53 +341,51 @@ class RuntimeSessionCleanupMixin:
         delivery_state = (
             self._state_root(record)
             / "provider-events"
-            / f"generation-{int(target['generation'])}"
+            / f"generation-{root_generation}"
             / "delivery"
             / "delivery-state.json"
         )
         if not delivery_state.is_file() or delivery_state.is_symlink():
-            existing_stream = any(
-                path.is_file() and not path.is_symlink()
-                for path in (
-                    self._state_root(record) / "provider-events"
-                ).glob("generation-*/delivery/delivery-state.json")
-            )
-            if existing_stream:
-                return "attention"
-            return "legacy"
+            return "attention"
         try:
             stream = RuntimeProviderEventStream.rehydrate(
                 self._state_root(record) / "provider-events",
-                int(target["generation"]),
+                root_generation,
             )
-            cursor = stream.controller.current_state().cursor
-            if (
-                not record.accepted_callback_id
-                or not record.accepted_callback_sha256
-                or not cursor.result_published
-            ):
-                return "attention"
-            # With the cursor already published this is an idempotent exact
-            # digest assertion; it cannot synthesize a missing result.
+        except RuntimeProviderEventError:
+            return "attention"
+        cursor = stream.controller.current_state().cursor
+        if (
+            not record.accepted_callback_id
+            or not record.accepted_callback_sha256
+            or not cursor.result_published
+        ):
+            return "attention"
+        try:
+            # The event is already published, so this is an idempotent exact
+            # accepted-payload digest assertion and cannot synthesize a result.
             stream.result(record.accepted_callback_sha256)
-            observation = ResourceObservation(
-                process_status=process_status,
-                supervisor_status=supervisor_status,
-                surface_status=surface_status,
-                workspace_status=workspace_status,
-            )
-            if self._fault_observer is not None:
-                self._fault_observer("cleanup-receipt-published:before")
+        except RuntimeProviderEventError:
+            return "attention"
+        observation = ResourceObservation(
+            process_status=process_status,
+            supervisor_status=supervisor_status,
+            surface_status=surface_status,
+        )
+        if self._fault_observer is not None:
+            self._fault_observer("cleanup-receipt-published:before")
+        try:
             result = ResourceClosureLedger(
                 self._state_root(record) / "provider-events"
             ).close(identity, observation)
-            if self._fault_observer is not None:
-                self._fault_observer("cleanup-receipt-published")
+        except ResourceCloseError:
+            return "attention"
+        if self._fault_observer is not None:
+            self._fault_observer("cleanup-receipt-published")
+        try:
             decision = stream.resource_closed_receipt(result.receipt)
-        except (RuntimeProviderEventError, ValueError) as exc:
-            raise RuntimeSessionError(
-                "typed resource close delivery is invalid"
-            ) from exc
+        except RuntimeProviderEventError:
+            return "attention"
         return decision.action
 
     def status(self, owner_id: str, operation_id: str) -> RuntimeSessionResult:
@@ -502,7 +503,6 @@ class RuntimeSessionCleanupMixin:
             raise RuntimeSessionError("cleanup requires an exiting operation")
         resources = record.resources
         metadata = self._metadata(record)
-        workspace_placement = metadata.get("placement") == "workspace"
         process_status, supervisor_status = (
             self._cleanup_ownership_statuses(record)
         )
@@ -514,7 +514,6 @@ class RuntimeSessionCleanupMixin:
             )
         except Exception:
             surface_status = "unknown"
-        workspace_status = "unknown" if workspace_placement else "missing"
         if (
             surface_status == "unknown"
             and process_status == "dead"
@@ -634,7 +633,6 @@ class RuntimeSessionCleanupMixin:
             process_status="dead",
             supervisor_status="dead",
             surface_status=surface_status,
-            workspace_status=workspace_status,
         )
         if close_action == "attention":
             current = self._mark_attention(

@@ -3420,6 +3420,28 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
     process.status_value = "alive"
     process.supervisor_status_value = "alive"
 
+    terminal_record = store.read("owner-1", "runtime-1")
+    terminal_stream = RuntimeProviderEventStream.create(
+        manager._state_root(terminal_record) / "provider-events",
+        owner_id="owner-1",
+        operation_id="runtime-1",
+        run_id="run-1",
+        generation=1,
+        process_identity=terminal_record.resources.process_identity,
+        workspace_id=WORKSPACE,
+        surface_id=SURFACE,
+        input_sha256="2" * 64,
+    )
+    assert terminal_stream.start().action == "wait"
+    assert terminal_stream.reserve_input().action == "send"
+    assert terminal_stream.accept_input().action == "wait"
+    assert (
+        terminal_stream.result(
+            terminal_record.accepted_callback_sha256
+        ).action
+        == "close"
+    )
+
     exiting = manager.request_exit("owner-1", "runtime-1")
     check(
         "exit requests the exact PGID before surface close",
@@ -3581,6 +3603,16 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
     assert workspace_stream.reserve_input().action == "send"
     assert workspace_stream.accept_input().action == "wait"
     assert workspace_stream.result(workspace_payload_sha).action == "close"
+    ProcessAdapter._write_json(
+        workspace_manager._callback_target_path(workspace_record),
+        {
+            "schema_version": 1,
+            "generation": 2,
+            "operation_id": "runtime-workspace",
+            "run_id": "run-workspace",
+            "callback_pointer": "callbacks/workspace.json",
+        },
+    )
     workspace_manager.request_exit("owner-1", "runtime-workspace")
     workspace_process.status_value = "dead"
     workspace_process.supervisor_status_value = "dead"
@@ -3595,7 +3627,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         / "resource-closed.json"
     )
     check(
-        "missing task surface completes without closing live observer workspace",
+        "retargeted root cleanup uses immutable generation and preserves observer",
         workspace_cleaned.record.state == "complete"
         and workspace_cleaned.record.resources == OwnedResources()
         and workspace_cmux.closed_workspaces == []
@@ -3713,9 +3745,9 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         "owner-1", "runtime-workspace-drift"
     )
     check(
-        "workspace identity drift cannot retain missing task-surface ownership",
-        drift_result.record.state == "complete"
-        and drift_result.record.resources == OwnedResources()
+        "modern root without accepted result retains exact surface ownership",
+        drift_result.record.state == "attention-required"
+        and drift_result.record.resources.surface_id == SURFACE
         and drift_cmux.closed_workspaces == [],
         drift_events,
     )
@@ -3987,8 +4019,8 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         and worker_wake_progress["outcome"] == "progressed",
         (worker_wake_source.generations, worker_wake_progress),
     )
-    provider_events = [
-        json.loads(path.read_text(encoding="utf-8"))["kind"]
+    provider_event_payloads = [
+        json.loads(path.read_text(encoding="utf-8"))
         for path in sorted(
             (
                 worker_launch.spec_path.parent
@@ -3997,6 +4029,12 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
                 / "events"
             ).glob("*.json")
         )
+    ]
+    provider_events = [event["kind"] for event in provider_event_payloads]
+    provider_result_sha256s = [
+        event["result_sha256"]
+        for event in provider_event_payloads
+        if event["kind"] == "result-published"
     ]
     check(
         "public launch and live worker durably order input before result and exit",
@@ -4007,6 +4045,8 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
             "result-published",
             "process-exited",
         ]
+        and provider_result_sha256s
+        == [worker_record.accepted_callback_sha256]
         and worker_cmux.sent[-1]
         == (
             SURFACE,
@@ -4016,7 +4056,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
                 "perform the bounded task",
             ),
         ),
-        (provider_events, worker_cmux.sent),
+        (provider_event_payloads, worker_cmux.sent),
     )
 
     compact_prompt_path = cwd / "codex-prompt.md"

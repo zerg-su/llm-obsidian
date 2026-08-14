@@ -90,7 +90,6 @@ class ResourceObservation:
     process_status: str
     supervisor_status: str
     surface_status: str
-    workspace_status: str
     deadline_reached: bool = False
     screen_changed: bool = False
     schema_version: int = 1
@@ -101,7 +100,6 @@ class ResourceObservation:
             or self.process_status not in {"alive", "dead", "unknown"}
             or self.supervisor_status not in {"alive", "dead", "unknown"}
             or self.surface_status not in {"alive", "missing", "unknown"}
-            or self.workspace_status not in {"alive", "missing", "unknown"}
             or not isinstance(self.deadline_reached, bool)
             or not isinstance(self.screen_changed, bool)
         ):

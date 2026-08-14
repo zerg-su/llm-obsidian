@@ -436,7 +436,7 @@ class RuntimeWorkerControlMixin:
             acceptance = CallbackBroker(self.store, self.spec["owner_id"]).accept(
                 envelope, deadline_operation_id=self.spec["operation_id"]
             )
-            self.record_provider_result(generation, digest)
+            self.record_provider_result(generation, envelope.payload_sha256)
             self.callback_handled = True
             _atomic_json(
                 self.spec_path.parent / "callback-receipt.json",
