@@ -21,6 +21,7 @@ from .dashboard_policy import (
 )
 from .dashboard_receipts import (
     liveness_timing,
+    reviewer_timing,
     review_attempt_history,
     review_summary,
     verification_receipt_timing,
@@ -101,16 +102,31 @@ def _reviewers(
     store: OperationStore,
     observed_at: float,
 ) -> tuple[ChildView, ...]:
-    return tuple(
-        _child_view(
-            by_id[lane.operation_id],
+    reviewers: list[ChildView] = []
+    for lane in identity.lanes:
+        record = by_id.get(lane.operation_id)
+        if record is None:
+            continue
+        children = tuple(tree.get(record.spec.operation_id, ()))
+        view = _child_view(
+            record,
             tree,
             store=store,
             observed_at=observed_at,
         )
-        for lane in identity.lanes
-        if lane.operation_id in by_id
-    )
+        reviewers.append(
+            replace(
+                view,
+                timing=reviewer_timing(
+                    store,
+                    record,
+                    children,
+                    observed_at,
+                    axis=lane.axis,
+                ),
+            )
+        )
+    return tuple(reviewers)
 
 
 def _verification_phase(

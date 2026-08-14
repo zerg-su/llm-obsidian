@@ -47,6 +47,18 @@ from .workflows.engineering_fix_model import PAYLOAD_FIELDS
 
 
 MAX_VISITS = 16
+REVIEW_TIMING_FIELDS = {
+    "schema_version",
+    "owner_id",
+    "root_operation_id",
+    "parent_operation_id",
+    "round_operation_id",
+    "run_id",
+    "axis",
+    "started_at",
+    "completed_at",
+    "callback_sha256",
+}
 RFC3339 = re.compile(
     r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}"
     r"(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})\Z"
@@ -205,6 +217,71 @@ def liveness_timing(
     if start is None:
         return UNKNOWN_TIMING
     return _timing("elapsed", start, observed)
+
+
+def reviewer_timing(
+    store: OperationStore,
+    record: OperationRecord,
+    children: tuple[OperationRecord, ...],
+    observed_at: float,
+    *,
+    axis: str,
+) -> TimingView:
+    """Freeze one reviewer interval only from its accepted terminal child."""
+
+    if record.state not in TERMINAL:
+        return liveness_timing(store, record, observed_at)
+    observed = _epoch(observed_at)
+    root_id = record.spec.root_operation_id
+    rounds = tuple(
+        child
+        for child in children
+        if child.spec.kind == "review-round"
+        and child.spec.parent_operation_id == record.spec.operation_id
+        and child.spec.owner_id == record.spec.owner_id
+        and child.spec.root_operation_id == root_id
+        and child.lane_id == record.lane_id
+        and child.state == "complete"
+        and child.accepted_callback_kind == "review"
+    )
+    if observed is None or not root_id or len(rounds) != 1:
+        return UNKNOWN_TIMING
+    child = rounds[0]
+    timing = _read_object(
+        store.root
+        / "review-data"
+        / record.spec.owner_id
+        / record.spec.owner_id
+        / "review-timing"
+        / record.spec.operation_id
+        / f"{child.spec.operation_id}.json",
+        boundary=store.root,
+    )
+    if timing is None:
+        return UNKNOWN_TIMING
+    started_at = _epoch(timing.get("started_at"))
+    completed_at = _epoch(timing.get("completed_at"))
+    callback_sha256 = timing.get("callback_sha256")
+    if (
+        set(timing) != REVIEW_TIMING_FIELDS
+        or timing.get("schema_version") != 1
+        or timing.get("owner_id") != record.spec.owner_id
+        or timing.get("root_operation_id") != root_id
+        or timing.get("parent_operation_id") != record.spec.operation_id
+        or timing.get("round_operation_id") != child.spec.operation_id
+        or timing.get("run_id") != child.run_id
+        or timing.get("axis") != axis
+        or started_at is None
+        or completed_at is None
+        or completed_at < started_at
+        or completed_at > observed
+        or not isinstance(callback_sha256, str)
+        or re.fullmatch(r"[0-9a-f]{64}", callback_sha256) is None
+        or child.accepted_callback_sha256 != callback_sha256
+        or child.accepted_callback_id != f"review-{callback_sha256[:24]}"
+    ):
+        return UNKNOWN_TIMING
+    return _timing("duration", started_at, completed_at)
 
 
 def liveness_interval_start(

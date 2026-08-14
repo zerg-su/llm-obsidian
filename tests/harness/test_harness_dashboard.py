@@ -149,6 +149,7 @@ def _create(
     lane_id: str,
     contract_sha256: str = "",
     parent: str = "",
+    root: str = "",
     owner: str = OWNER,
     route: RuntimeRoute | None = None,
     verification_profile: str = "scoped",
@@ -164,6 +165,7 @@ def _create(
             verification_profile,
             contract_sha256=contract_sha256,
             parent_operation_id=parent,
+            root_operation_id=root,
         ),
         lane_id=lane_id,
         run_id=f"{operation_id}-run",
@@ -420,12 +422,14 @@ def _accepted_review_round(
     """Create one exact accepted review child for scalar dashboard evidence."""
 
     operation_id = f"{parent}-round-0"
+    parent_record = store.read(owner, parent)
     _create(
         store,
         operation_id,
         "review-round",
-        lane_id=f"{axis}-lane",
+        lane_id=parent_record.lane_id,
         parent=parent,
+        root=owner,
         owner=owner,
         route=_reviewer_route(),
     )
@@ -455,6 +459,52 @@ def _accepted_review_round(
     )
     _advance(store, operation_id, "finalizing", "exiting", "complete", owner=owner)
     return operation_id, f"{operation_id}-run", callback_id, payload_sha256
+
+
+def _reviewer_timing(
+    store: OperationStore,
+    *,
+    owner: str,
+    parent: str,
+    round_operation_id: str,
+    axis: str,
+    started_at: float,
+    completed_at: float,
+) -> Path:
+    """Write one producer-shaped immutable reviewer timing fixture."""
+
+    child = store.read(owner, round_operation_id)
+    path = (
+        store.root
+        / "review-data"
+        / owner
+        / owner
+        / "review-timing"
+        / parent
+        / f"{round_operation_id}.json"
+    )
+    path.parent.mkdir(parents=True, mode=0o700)
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "owner_id": owner,
+                "root_operation_id": owner,
+                "parent_operation_id": parent,
+                "round_operation_id": round_operation_id,
+                "run_id": child.run_id,
+                "axis": axis,
+                "started_at": started_at,
+                "completed_at": completed_at,
+                "callback_sha256": child.accepted_callback_sha256,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return path
 
 
 def _tree_bytes(root: Path) -> dict[str, str]:
@@ -4513,6 +4563,7 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-time.") as raw:
         and review_step.review.material_findings is None,
     )
 
+    current_rounds: dict[str, tuple[str, str, str, str]] = {}
     for lane in lanes:
         store.create(
             OperationSpec(
@@ -4530,9 +4581,28 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-time.") as raw:
                 "packets/review.json",
                 "scoped",
                 parent_operation_id=review_root,
+                root_operation_id=review_root,
             ),
             lane_id=lane.lane_id,
             run_id=lane.run_id,
+        )
+        _advance(
+            store,
+            lane.operation_id,
+            "preflight",
+            "starting",
+            "running",
+            "awaiting-callback",
+            "finalizing",
+            "exiting",
+            "complete",
+            owner=review_root,
+        )
+        current_rounds[lane.axis] = _accepted_review_round(
+            store,
+            owner=review_root,
+            parent=lane.operation_id,
+            axis=lane.axis,
         )
     gate.update(
         active_review_operation_id=identity.attempt_id,
@@ -4555,6 +4625,16 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-time.") as raw:
         ],
     )
     gate_path.write_text(json.dumps(gate, sort_keys=True) + "\n", encoding="utf-8")
+    for index, lane in enumerate(lanes):
+        _reviewer_timing(
+            store,
+            owner=review_root,
+            parent=lane.operation_id,
+            round_operation_id=current_rounds[lane.axis][0],
+            axis=lane.axis,
+            started_at=1_000.0 + index * 10,
+            completed_at=1_120.0 + index * 10,
+        )
     reviewed = project_root(store_root, review_root, observed_at=observed_at)
     review_step = next(
         step for step in reviewed.programs[0].steps if step.step_id == "review"
@@ -4658,6 +4738,7 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-time.") as raw:
                 "packets/review.json",
                 "scoped",
                 parent_operation_id=review_root,
+                root_operation_id=review_root,
             ),
             lane_id=lane.lane_id,
             run_id=lane.run_id,
@@ -4679,6 +4760,15 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-time.") as raw:
             owner=review_root,
             parent=lane.operation_id,
             axis=lane.axis,
+        )
+        _reviewer_timing(
+            store,
+            owner=review_root,
+            parent=lane.operation_id,
+            round_operation_id=round_id,
+            axis=lane.axis,
+            started_at=800.0 + len(first_rows) * 10,
+            completed_at=900.0 + len(first_rows) * 10,
         )
         first_rows.append(
             {
@@ -4792,6 +4882,339 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-time.") as raw:
         }
         == {lane.operation_id for lane in (*first_lanes, *lanes)}
         and foreign_root not in history_render,
+    )
+    review_phases = {
+        phase.cycle: phase for phase in history if phase.kind == "review"
+    }
+    regression_check(
+        "terminal reviewer rows and review phases freeze their validated child intervals",
+        review_phases[1].timing == TimingView("duration", 100)
+        and all(
+            child.timing == TimingView("duration", 100)
+            for child in review_phases[1].children
+        )
+        and review_phases[2].timing == TimingView("duration", 120)
+        and all(
+            child.timing == TimingView("duration", 120)
+            for child in review_phases[2].children
+        )
+        and "complete  duration 1m 40s" in history_render
+        and "complete  duration 2m 00s" in history_render,
+    )
+    timing_path = (
+        store_root
+        / "review-data"
+        / review_root
+        / review_root
+        / "review-timing"
+        / first_lanes[0].operation_id
+        / f"{first_lanes[0].operation_id}-round-0.json"
+    )
+    original_timing_bytes = timing_path.read_bytes()
+    original_timing = json.loads(original_timing_bytes)
+
+    def first_reviewer_timing_is_unknown() -> bool:
+        projected = project_root(
+            store_root, review_root, observed_at=1_800_000_000.0
+        )
+        phase = next(
+            item
+            for item in projected.programs[0].history
+            if item.kind == "review" and item.cycle == 1
+        )
+        child = next(
+            item
+            for item in phase.children
+            if item.operation_id == first_lanes[0].operation_id
+        )
+        return phase.status == "complete" and child.timing == TimingView()
+
+    timing_path.unlink()
+    timing_failures = [] if first_reviewer_timing_is_unknown() else ["missing"]
+    timing_path.write_bytes(original_timing_bytes)
+    malformed = b"{malformed"
+    timing_path.write_bytes(malformed)
+    if not first_reviewer_timing_is_unknown():
+        timing_failures.append("malformed JSON")
+    timing_path.write_bytes(original_timing_bytes)
+    for label, field, value in (
+        ("partial", "completed_at", None),
+        ("owner drift", "owner_id", "foreign-owner"),
+        ("root drift", "root_operation_id", "foreign-root"),
+        ("parent drift", "parent_operation_id", "foreign-parent"),
+        ("round drift", "round_operation_id", "foreign-round"),
+        ("run drift", "run_id", "foreign-run"),
+        ("axis drift", "axis", "foreign-axis"),
+        ("digest drift", "callback_sha256", "0" * 64),
+        ("negative start", "started_at", -1.0),
+        ("non-finite completion", "completed_at", float("nan")),
+        ("future completion", "completed_at", 1_800_000_001.0),
+    ):
+        candidate = dict(original_timing)
+        if label == "partial":
+            candidate.pop(field)
+        else:
+            candidate[field] = value
+        timing_path.write_text(
+            json.dumps(candidate, sort_keys=True, separators=(",", ":")) + "\n",
+            encoding="utf-8",
+        )
+        if not first_reviewer_timing_is_unknown():
+            timing_failures.append(label)
+    for label, started_at, completed_at in (
+        ("reversed interval", 901.0, 900.0),
+        ("future start", 1_800_000_001.0, 1_800_000_002.0),
+    ):
+        candidate = {
+            **original_timing,
+            "started_at": started_at,
+            "completed_at": completed_at,
+        }
+        timing_path.write_text(
+            json.dumps(candidate, sort_keys=True, separators=(",", ":")) + "\n",
+            encoding="utf-8",
+        )
+        if not first_reviewer_timing_is_unknown():
+            timing_failures.append(label)
+    timing_path.write_bytes(original_timing_bytes)
+    symlink_target = timing_path.with_name("foreign-review-timing.json")
+    symlink_target.write_bytes(original_timing_bytes)
+    timing_path.unlink()
+    timing_path.symlink_to(symlink_target)
+    if not first_reviewer_timing_is_unknown():
+        timing_failures.append("symlink")
+    timing_path.unlink()
+    timing_path.write_bytes(original_timing_bytes)
+    symlink_target.unlink()
+    regression_check(
+        "review timing rejects missing partial identity digest timestamp and symlink evidence",
+        not timing_failures,
+    )
+
+    # E267.RC610.DASHBOARD: reproduce the RC6.9 shape with two terminal
+    # reviewers and one active reviewer under the same exact root.
+    triple_root = "dashboard-three-review-root"
+    _create(
+        store,
+        triple_root,
+        "dispatch",
+        lane_id="three-review-root-lane",
+        contract_sha256=compiled.definition_sha256,
+        owner=triple_root,
+    )
+    _advance(
+        store,
+        triple_root,
+        "preflight",
+        "starting",
+        "running",
+        owner=triple_root,
+    )
+    triple_policy = ReviewAttemptPolicy(
+        "simple",
+        False,
+        "claude",
+        "claude-opus-5",
+        "xhigh",
+        1,
+        "implementation",
+        "anthropic",
+    )
+    triple_gate_root = store_root / "review-data" / triple_root / triple_root
+    triple_gate_root.mkdir(parents=True)
+
+    def triple_cycle(
+        cycle: int, *, terminal: bool, started_at: float, completed_at: float
+    ) -> dict[str, object]:
+        operation_id = f"{triple_root}-cycle-{cycle}-reviewer"
+        lane_id = f"three-review-lane-{cycle}"
+        run_id = f"three-review-run-{cycle}"
+        route_sha = f"{cycle}" * 64
+        lane = ReviewAttemptLaneIdentity(
+            "anthropic-holistic",
+            triple_root,
+            operation_id,
+            lane_id,
+            run_id,
+            "claude",
+            "claude-opus-5",
+            "xhigh",
+            "reviewer-callback",
+            route_sha,
+        )
+        identity = ReviewAttemptIdentity(
+            f"three-review-attempt-{cycle}",
+            "three-review-lineage",
+            cycle,
+            "a" * 64,
+            "b" * 64,
+            f"{cycle}" * 40,
+            triple_policy,
+            (lane,),
+        )
+        store.create(
+            OperationSpec(
+                operation_id,
+                f"{operation_id}-key",
+                "implementation-review",
+                triple_root,
+                RuntimeRoute(
+                    lane.runtime,
+                    lane.model,
+                    lane.effort,
+                    lane.profile,
+                    lane.routing_sha256,
+                ),
+                "packets/review.json",
+                "scoped",
+                parent_operation_id=triple_root,
+                root_operation_id=triple_root,
+            ),
+            lane_id=lane_id,
+            run_id=run_id,
+        )
+        states = (
+            ("preflight", "starting", "running", "awaiting-callback", "finalizing", "exiting", "complete")
+            if terminal
+            else ("preflight", "starting", "running", "awaiting-callback")
+        )
+        _advance(store, operation_id, *states, owner=triple_root)
+        if terminal:
+            round_id, _round_run, _callback_id, callback_sha = (
+                _accepted_review_round(
+                    store,
+                    owner=triple_root,
+                    parent=operation_id,
+                    axis=lane.axis,
+                )
+            )
+            _reviewer_timing(
+                store,
+                owner=triple_root,
+                parent=operation_id,
+                round_operation_id=round_id,
+                axis=lane.axis,
+                started_at=started_at,
+                completed_at=completed_at,
+            )
+            attempt = ReviewAttempt(
+                identity,
+                "terminal",
+                ReviewAttemptTerminal(
+                    ReviewAttemptTerminalResult.CHANGES_REQUESTED,
+                    identity.exact_head_sha,
+                    (
+                        ReviewAttemptLaneResult(
+                            lane.axis,
+                            "changes-requested",
+                            callback_sha,
+                            (f"three-review-finding-{cycle}",),
+                        ),
+                    ),
+                ),
+            )
+            status = "changes-requested"
+            lane_state = "complete"
+        else:
+            _liveness(
+                store,
+                triple_root,
+                operation_id,
+                started_at=started_at,
+                last_progress_at=started_at,
+            )
+            active_round, _round_run, _callback_id, _callback_sha = (
+                _accepted_review_round(
+                    store,
+                    owner=triple_root,
+                    parent=operation_id,
+                    axis=lane.axis,
+                )
+            )
+            _reviewer_timing(
+                store,
+                owner=triple_root,
+                parent=operation_id,
+                round_operation_id=active_round,
+                axis=lane.axis,
+                started_at=started_at,
+                completed_at=started_at + 50.0,
+            )
+            attempt = ReviewAttempt(identity, "awaiting-callback")
+            status = "reviewing"
+            lane_state = "awaiting-callback"
+        return {
+            "schema_version": 1,
+            "owner_id": triple_root,
+            "dispatch_operation_id": triple_root,
+            "status": status,
+            "active_review_operation_id": identity.attempt_id,
+            "context": {
+                "head_sha": identity.exact_head_sha,
+                "verification_profile": "scoped",
+                "verification_profile_sha256": "7" * 64,
+            },
+            "lanes": [
+                {
+                    "axis": lane.axis,
+                    "operation_id": lane.operation_id,
+                    "lane_id": lane.lane_id,
+                    "run_id": lane.run_id,
+                    "surface_id": "" if terminal else "three-review-surface",
+                    "checkpoint": "" if terminal else "three-review-checkpoint",
+                    "verification_iteration": 0,
+                    "state": lane_state,
+                }
+            ],
+            "attempt": attempt.payload(),
+        }
+
+    cycle_one = triple_cycle(
+        1, terminal=True, started_at=1_000.0, completed_at=1_100.0
+    )
+    cycle_two = triple_cycle(
+        2, terminal=True, started_at=1_200.0, completed_at=1_400.0
+    )
+    cycle_three = triple_cycle(
+        3, terminal=False, started_at=1_500.0, completed_at=0.0
+    )
+    triple_attempts = triple_gate_root / "attempts"
+    triple_attempts.mkdir()
+    for cycle, value in ((1, cycle_one), (2, cycle_two)):
+        (triple_attempts / f"cycle-{cycle}.json").write_text(
+            json.dumps(value, sort_keys=True) + "\n", encoding="utf-8"
+        )
+    (triple_gate_root / "review-gate.json").write_text(
+        json.dumps(cycle_three, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    triple_projection = project_root(
+        store_root, triple_root, observed_at=1_600.0
+    )
+    triple_history = triple_projection.programs[0].history
+    triple_reviews = tuple(
+        phase for phase in triple_history if phase.kind == "review"
+    )
+    triple_plain = render(
+        triple_projection, scope="root", columns=120, color=False
+    )
+    triple_colored = render(
+        triple_projection, scope="root", columns=120, color=True
+    )
+    regression_check(
+        "three-cycle reviewer history keeps active elapsed and freezes each terminal duration",
+        tuple(phase.cycle for phase in triple_reviews) == (1, 2, 3)
+        and triple_reviews[0].children[0].timing
+        == TimingView("duration", 100)
+        and triple_reviews[0].timing == TimingView("duration", 100)
+        and triple_reviews[1].children[0].timing
+        == TimingView("duration", 200)
+        and triple_reviews[1].timing == TimingView("duration", 200)
+        and triple_reviews[2].children[0].timing == TimingView("elapsed", 100)
+        and triple_reviews[2].timing == TimingView("elapsed", 100)
+        and "complete  duration 1m 40s" in triple_plain
+        and "complete  duration 3m 20s" in triple_plain
+        and "awaiting-callback  elapsed 1m 40s" in triple_plain
+        and ansi.sub("", triple_colored) == triple_plain,
     )
     regression_check(
         "root rendering tells the complete compact correction story",
