@@ -706,6 +706,56 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard.") as raw:
             for step_id, (started_at, completed_at) in phase_durations.items()
         ),
     )
+    retry_phase = "dashboard-fix-phase-timed-reproduce-retry"
+    _create(
+        store,
+        retry_phase,
+        "pipeline-model-step",
+        lane_id="phase-timed-retry-lane",
+        contract_sha256=compiled.definition_sha256,
+        parent=phase_timed_root,
+    )
+    _advance(
+        store,
+        retry_phase,
+        "preflight",
+        "starting",
+        "running",
+        "awaiting-callback",
+    )
+    retry_timing_root = (
+        phase_timed_runtime / "pipeline-fix" / "timing" / "pass-1" / "reproduce"
+    )
+    retry_timing_root.mkdir(parents=True)
+    (retry_timing_root / "start.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "owner_id": OWNER,
+                "parent_operation_id": phase_timed_root,
+                "operation_id": retry_phase,
+                "run_id": f"{retry_phase}-run",
+                "step_id": "reproduce",
+                "iteration": 1,
+                "started_at": 1_150.0,
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    retry_projection = project(store_root, OWNER, observed_at=1_200.0)
+    retry_program = next(
+        program for program in retry_projection.programs
+        if program.operation_id == phase_timed_root
+    )
+    retry_reproduce = next(
+        step for step in retry_program.steps if step.step_id == "reproduce"
+    )
+    regression_check(
+        "engineering fix projects the newest active retry instead of stale duration",
+        retry_reproduce.timing == TimingView("elapsed", 50),
+    )
     active_phase_root = "dashboard-fix-phase-active-root"
     active_phase = "dashboard-fix-phase-active-reproduce"
     active_owner = "dashboard-fix-phase-active-owner"

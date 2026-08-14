@@ -140,7 +140,9 @@ def authorize_custom_request(
     """Atomically consume a revalidated custom snapshot for start."""
 
     if approval_token and not re.fullmatch(r"[0-9a-f]{64}", approval_token):
-        raise DispatchError("custom start requires --approval-token")
+        raise DispatchError(
+            "custom approval token must be 64 lowercase hex characters"
+        )
     path = custom_approval_path(request)
     if path.is_symlink() or not path.is_file():
         raise DispatchError("custom pipeline must be validated before start")

@@ -247,8 +247,8 @@ from pathlib import Path
 #: Maximum tracked Python files under ``scripts/`` for the 2.6.7 RC6.5 candidate.
 SCRIPT_FILE_CEILING = 287
 
-#: Maximum total lines across those files for the 2.6.7 RC6.5 candidate.
-SCRIPT_LINE_CEILING = 107_293
+#: Maximum total lines across those files for the RC6.7 timing candidate.
+SCRIPT_LINE_CEILING = 107_600
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

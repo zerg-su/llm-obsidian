@@ -81,14 +81,19 @@ Bounded review/schema work may use the compiled ephemeral profile below.
    inherited authority, limits, stops and outcomes. Custom validation persists
    an owner-only `challenge_sha256` bound to every material input and origin;
    it is not authorization.
-7. Run `python3 <vault-root>/scripts/dispatch-runner.py approve --spec
-   <request.json> --challenge-sha256 <exact-validate-challenge>`. Only the
-   host dialog can choose approve/reject/revise; argv/stdin cannot. Reject/revise
-   are terminal. Approve returns `approval_token`.
-8. Start once with `python3 <vault-root>/scripts/dispatch-runner.py start --spec
-   <request.json> --approval-token <exact-one-shot-token>` for custom, omitting
-   the token for built-ins. Never synthesize decisions/tokens or reuse a token;
-   start consumes it atomically and rejects drift before effects.
+7. For a policy-valid custom request, start directly with
+   `python3 <vault-root>/scripts/dispatch-runner.py start --spec <request.json>`;
+   no dialog or token is required. Start atomically revalidates the request
+   bytes, coordinator identity, plan digest, compiled definition, approval card,
+   prompt, route, review, and session before any effect, then consumes the
+   immutable snapshot. The host dialog path remains available for an existing
+   explicit decision: `approve --spec <request.json> --challenge-sha256
+   <exact-validate-challenge>` returns its one-shot `approval_token`; reject and
+   revise are terminal.
+8. Never synthesize, reuse, or supply a malformed token. A legacy host-token
+   start consumes that approved decision atomically; a policy-valid token-free
+   start consumes its pending snapshot atomically and rejects all drift before
+   effects. Built-ins continue to omit the token.
 9. Show the bounded typed launch result. When it returns
    `coordinator_action: return-to-idle-without-polling`, end this turn. Do not
    poll, wait, or run monitors; typed callbacks resume the idle coordinator.

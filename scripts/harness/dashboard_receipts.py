@@ -600,13 +600,14 @@ def fix_phase_timing(
             timing_root / "completion.json", boundary=runtime
         )
         candidates.append((int(suffix), receipt, start or {}, completion or {}))
+    active = _active_fix_phase_timing(store, record, runtime, step_id, observed)
     if not candidates:
-        return _active_fix_phase_timing(
-            store, record, runtime, step_id, observed
-        )
+        return active[1] if active is not None else UNKNOWN_TIMING
     iteration, receipt, start, completion = max(
         candidates, key=lambda item: item[0]
     )
+    if active is not None and active[0] > iteration:
+        return active[1]
     identity = {
         "schema_version": 1,
         "owner_id": record.spec.owner_id,
@@ -642,7 +643,7 @@ def _active_fix_phase_timing(
     runtime: Path,
     step_id: str,
     observed_at: float,
-) -> TimingView:
+) -> tuple[int, TimingView] | None:
     """Project the latest valid nonterminal phase start as elapsed time."""
 
     root = runtime / "pipeline-fix" / "timing"
@@ -681,9 +682,9 @@ def _active_fix_phase_timing(
             continue
         candidates.append((iteration, started_at))
     if not candidates:
-        return UNKNOWN_TIMING
-    _iteration, started_at = max(candidates, key=lambda item: item[0])
-    return _timing("elapsed", started_at, observed_at)
+        return None
+    iteration, started_at = max(candidates, key=lambda item: item[0])
+    return iteration, _timing("elapsed", started_at, observed_at)
 
 
 def verification_identity(

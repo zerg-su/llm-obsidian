@@ -16,6 +16,26 @@
 внутренними контрольными точками и вошли в следующие публичные релизы; тегов и
 пакетов с этими номерами не выпускалось.
 
+## [2.6.7-rc6.7] — 2026-08-14
+
+Кандидат с durable timing фаз engineering/fix и policy-valid custom start.
+
+### Исправлено
+
+- Engineering/fix записывает identity-bound sidecar timing в
+  `pipeline-fix/timing/pass-N/<step>/`. Это только display evidence:
+  отсутствующие, некорректные, подменённые, reversed или future данные делают
+  время unavailable и не блокируют публикацию request, callback acceptance,
+  cleanup или существующий lifecycle transition.
+- Dashboard выбирает active interval новейшего retry pass вместо frozen
+  duration предыдущего pass и иначе показывает exact receipt-bound duration.
+- Owner-only policy-valid custom validation snapshot стартует без host dialog и
+  approval token после atomic revalidation request, coordinator, plan,
+  definition, card, prompt, route, review и session. Legacy host token остаётся
+  одноразовым.
+- Ratchet live scripts поднят до 107 600 строк для ограниченной RC6.7 timing
+  implementation и её strict validation paths.
+
 ## [2.6.7-rc6.6] — 2026-08-14
 
 Кандидат с каноническим phase request для engineering/fix. Initial dispatch и

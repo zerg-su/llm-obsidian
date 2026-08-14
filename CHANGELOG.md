@@ -10,6 +10,26 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.6.7-rc6.7] - 2026-08-14
+
+Durable engineering/fix phase timing and policy-valid custom-start candidate.
+
+### Fixed
+
+- Engineering/fix writes identity-bound timing sidecars under
+  `pipeline-fix/timing/pass-N/<step>/`. They are display-only: missing,
+  malformed, tampered, reversed, or future evidence renders timing unavailable
+  and never blocks request publication, callback acceptance, cleanup, or the
+  existing lifecycle transition.
+- The dashboard selects the newest active retry interval over a completed prior
+  pass and otherwise freezes the exact accepted receipt-bound duration.
+- A policy-valid owner-only custom validation snapshot may start without a host
+  dialog or approval token after atomic revalidation of request, coordinator,
+  plan, definition, card, prompt, route, review, and session. Legacy explicit
+  host approval tokens remain one-shot.
+- The live scripts ratchet is raised to 107,600 lines for the bounded RC6.7
+  timing implementation and its strict validation paths.
+
 ## [2.6.7-rc6.6] - 2026-08-14
 
 Canonical engineering/fix phase-request candidate. Initial dispatch and

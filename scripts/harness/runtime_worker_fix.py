@@ -47,7 +47,7 @@ class RuntimeWorkerFixMixin:
 
     def _phase_timing_start(
         self, state: FixTransportState, round_: object
-    ) -> tuple[Path, float]:
+    ) -> tuple[Path, float] | None:
         root = (
             state.receipt_root.parent / "timing" / state.receipt_root.name
             / round_.step_id
@@ -56,55 +56,81 @@ class RuntimeWorkerFixMixin:
         identity = self._phase_timing_identity(round_)
         if path.exists() or path.is_symlink():
             if path.is_symlink():
-                raise RuntimeWorkerError("engineering/fix phase start is a symlink")
+                return None
             try:
                 value = json.loads(path.read_text(encoding="utf-8"))
-                started_at = float(value["started_at"])
-            except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
-                raise RuntimeWorkerError("engineering/fix phase start is invalid") from exc
+                if not isinstance(value, dict):
+                    return None
+                raw_started_at = value.get("started_at")
+                if isinstance(raw_started_at, bool):
+                    return None
+                started_at = float(raw_started_at)
+            except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError):
+                return None
             if (
-                not isinstance(value, dict)
-                or set(value) != {*identity, "started_at"}
+                set(value) != {*identity, "started_at"}
                 or any(value.get(key) != expected for key, expected in identity.items())
                 or not math.isfinite(started_at)
                 or started_at < 0
             ):
-                raise RuntimeWorkerError("engineering/fix phase start changed")
+                return None
             return path, started_at
         started_at = time.time()
-        self.write_immutable_json(path, {**identity, "started_at": started_at})
+        try:
+            self.write_immutable_json(path, {**identity, "started_at": started_at})
+        except OSError:
+            return None
         return path, started_at
 
     def _write_phase_timing_completion(
         self, state: FixTransportState, round_: object, receipt: FixStepReceipt
     ) -> None:
-        start_path, started_at = self._phase_timing_start(state, round_)
+        root = (
+            state.receipt_root.parent / "timing" / state.receipt_root.name
+            / round_.step_id
+        )
+        start_path = root / "start.json"
+        # Completion is display-only evidence: never synthesize its missing
+        # start marker during callback acceptance.
+        if not start_path.is_file() or start_path.is_symlink():
+            return
+        start = self._phase_timing_start(state, round_)
+        if start is None:
+            return
+        _start_path, _started_at = start
         path = start_path.with_name("completion.json")
         identity = self._phase_timing_identity(round_)
         value = {
             **identity,
-            "completed_at": max(time.time(), started_at),
+            "completed_at": time.time(),
             "receipt_sha256": receipt.receipt_sha256,
         }
         if path.exists() or path.is_symlink():
             if path.is_symlink():
-                raise RuntimeWorkerError("engineering/fix phase completion is a symlink")
+                return
             try:
                 current = json.loads(path.read_text(encoding="utf-8"))
-                completed_at = float(current["completed_at"])
-            except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
-                raise RuntimeWorkerError("engineering/fix phase completion is invalid") from exc
+                if not isinstance(current, dict):
+                    return
+                raw_completed_at = current.get("completed_at")
+                if isinstance(raw_completed_at, bool):
+                    return
+                completed_at = float(raw_completed_at)
+            except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError):
+                return
             if (
-                not isinstance(current, dict)
-                or set(current) != {*identity, "completed_at", "receipt_sha256"}
+                set(current) != {*identity, "completed_at", "receipt_sha256"}
                 or any(current.get(key) != expected for key, expected in identity.items())
                 or current.get("receipt_sha256") != receipt.receipt_sha256
                 or not math.isfinite(completed_at)
-                or completed_at < started_at
+                or completed_at < 0
             ):
-                raise RuntimeWorkerError("engineering/fix phase completion changed")
+                return
             return
-        self.write_immutable_json(path, value)
+        try:
+            self.write_immutable_json(path, value)
+        except OSError:
+            return
 
     def load_fix_policy(self) -> tuple[dict[str, object], str, int, str]:
         meta = json.loads(

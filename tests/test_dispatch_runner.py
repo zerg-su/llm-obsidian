@@ -1015,6 +1015,20 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         and not Path(policy_valid_raw["worktree"]).exists(),
         policy_valid_record,
     )
+    expect_error(
+        "policy-valid custom start rejects an empty-token replay after consumption",
+        lambda: runner.authorize_custom_request(policy_valid_request, "c" * 64, ""),
+        "custom pipeline has no approved decision receipt",
+    )
+    policy_valid_record.update({"status": "reject", "decision": "reject"})
+    runner.atomic_json(
+        runner.custom_approval_path(policy_valid_request), policy_valid_record
+    )
+    expect_error(
+        "policy-valid custom start rejects an empty-token rejected record",
+        lambda: runner.authorize_custom_request(policy_valid_request, "c" * 64, ""),
+        "custom pipeline has no approved decision receipt",
+    )
     changed_cli_custom = json.loads(json.dumps(custom_payload))
     changed_cli_custom["spec_id"] = "changed-before-cli-start"
     custom_spec.write_text(json.dumps(changed_cli_custom), encoding="utf-8")

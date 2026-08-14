@@ -12,7 +12,7 @@
       "evidence": "identity-bound active and completed phase timing projection in tests/harness/test_harness_dashboard.py"
     },
     "file-lines:scripts/harness/dashboard_receipts.py": {
-      "max_value": 1135,
+      "max_value": 1140,
       "owner": "v2.6.7 RC6.7 durable engineering/fix phase timing",
       "evidence": "receipt-bound phase timing validation in tests/harness/test_harness_dashboard.py"
     },
