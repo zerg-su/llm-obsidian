@@ -1697,6 +1697,9 @@ def run_case(
             "      if not outbox.exists(): break\n"
             "      time.sleep(0.01)\n"
             "    else: raise SystemExit(4)\n"
+            "    if row['step_id']==restart_after:\n"
+            "      timing=state/'pipeline-fix'/'timing'/'pass-0'/row['step_id']\n"
+            "      (state/'pipeline-fix'/'timing-before-restart.json').write_text(json.dumps({'step_id':row['step_id'],'start':(timing/'start.json').read_text(encoding='utf-8'),'completion':(timing/'completion.json').read_text(encoding='utf-8')},sort_keys=True)+'\\n',encoding='utf-8')\n"
             "    seen.append({'operation_id':row['operation_id'],'step_id':row['step_id']})\n"
             "    log.write_text(json.dumps(seen,sort_keys=True)+'\\n',encoding='utf-8')\n"
             "    if row['step_id']==restart_after and not crashed.is_file():\n"
@@ -2819,6 +2822,14 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
             / ".provider-step-log.json"
         ).read_text(encoding="utf-8")
     )
+    restart_timing = json.loads(
+        (
+            restart_state / "pipeline-fix" / "timing-before-restart.json"
+        ).read_text(encoding="utf-8")
+    )
+    restart_timing_root = (
+        restart_state / "pipeline-fix" / "timing" / "pass-0" / "root-cause"
+    )
     check(
         "engineering fix restarts one provider without replaying an accepted phase",
         restart_rc == 0
@@ -2844,11 +2855,17 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
                 if "phase root-cause" in item[1]
             ]
         )
-        == 1,
+        == 1
+        and restart_timing["step_id"] == "root-cause"
+        and restart_timing["start"]
+        == (restart_timing_root / "start.json").read_text(encoding="utf-8")
+        and restart_timing["completion"]
+        == (restart_timing_root / "completion.json").read_text(encoding="utf-8"),
         (
             restart_parent,
             restart_receipt,
             restart_steps,
+            restart_timing,
             restart_cmux.sent,
         ),
     )
