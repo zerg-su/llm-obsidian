@@ -16,6 +16,30 @@
 внутренними контрольными точками и вошли в следующие публичные релизы; тегов и
 пакетов с этими номерами не выпускалось.
 
+## [2.6.7-rc6.10] — 2026-08-14
+
+Кандидат с durable terminal duration reviewer-сессий.
+
+### Исправлено
+
+- Каждый новый identity-bound reviewer callback публикует один owner-only,
+  attempt-scoped display interval от точного старта review input до наблюдения
+  callback. Идентичный replay сохраняет те же байты; malformed, symlinked или
+  конфликтующие evidence не перезаписываются и не влияют на callback processing.
+- Active reviewer rows сохраняют live elapsed time. Terminal rows замораживают
+  собственную accepted callback-bound duration, а aggregate review phase
+  использует те же validated child intervals. Legacy, missing, malformed,
+  mismatched, reversed, negative, non-finite и future evidence остаётся `—`.
+- Ratchet live scripts теперь охватывает 289 Python files / 108 021 lines;
+  ceiling receipt validator привязан к negative matrix RC6.10.
+
+### Граница кандидата
+
+- Timing остаётся только read-only display evidence. OperationStore, Harness
+  FSM, callback acceptance, review verdicts, provider behavior, cleanup,
+  palette, layout, ordering и root scope не меняются. Этот кандидат не
+  выполняет merge, push, tag, publish, обновление plugins или live dogfood.
+
 ## [2.6.7-rc6.9] — 2026-08-14
 
 Кандидат с границей review evidence и ограниченным terminal cancellation.

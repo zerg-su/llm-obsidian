@@ -10,6 +10,31 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.6.7-rc6.10] - 2026-08-14
+
+Durable reviewer terminal-duration candidate.
+
+### Fixed
+
+- Each new identity-bound reviewer callback now publishes one owner-only,
+  attempt-scoped display interval from its exact review-input start through
+  callback observation. Identical replay preserves the same bytes; malformed,
+  symlinked, or conflicting evidence is never overwritten and cannot change
+  callback processing.
+- Active reviewer rows retain live elapsed time. Terminal reviewer rows freeze
+  their own accepted callback-bound duration, and the aggregate review phase
+  uses those same validated child intervals. Legacy, missing, malformed,
+  mismatched, reversed, negative, non-finite, or future evidence remains `—`.
+- The live scripts ratchet now covers 289 Python files / 108,021 lines, with
+  the receipt validator ceiling bound to the RC6.10 negative matrix.
+
+### Candidate boundary
+
+- Timing remains read-only display evidence. OperationStore, Harness FSM,
+  callback acceptance, review verdicts, provider behavior, cleanup, palette,
+  layout, ordering, and root scope are unchanged. This candidate does not
+  merge, push, tag, publish, update plugins, or run live dogfood.
+
 ## [2.6.7-rc6.9] - 2026-08-14
 
 Review-evidence boundary and bounded terminal-cancellation candidate.
