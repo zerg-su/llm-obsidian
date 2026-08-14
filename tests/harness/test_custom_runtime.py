@@ -35,6 +35,7 @@ from harness.runtime_worker import (
     run as run_worker,
 )
 from harness.cmux_wake_source import WakeObservation
+from harness.runtime_provider_events import RuntimeProviderEventStream
 from harness.store import OperationStore
 from harness.verification import load_profiles
 from harness.workflows.custom_sequence import custom_step_request, prepare_custom_step
@@ -275,7 +276,12 @@ with tempfile.TemporaryDirectory(prefix="custom-runtime.") as raw:
         "  if (state/'pipeline-custom'/'finalization-notify.json').is_file(): break\n"
         "  time.sleep(0.01)\n"
         "else: raise SystemExit(5)\n"
-        "(root/'.task-summary.json').write_text(json.dumps(summary,sort_keys=True)+'\\n',encoding='utf-8'); time.sleep(0.4)\n",
+        "(root/'.task-summary.json').write_text(json.dumps(summary,sort_keys=True)+'\\n',encoding='utf-8')\n"
+        "for _ in range(800):\n"
+        "  if (state/'callback-receipt.json').is_file(): break\n"
+        "  time.sleep(0.01)\n"
+        "else: raise SystemExit(8)\n"
+        "time.sleep(0.4)\n",
         encoding="utf-8",
     )
     summary_path = worktree / ".task-summary.json"
@@ -299,6 +305,21 @@ with tempfile.TemporaryDirectory(prefix="custom-runtime.") as raw:
         launch.spec_path.parent / "callback-target.json",
         {"schema_version": 1, "generation": 1, "operation_id": first.spec.operation_id, "run_id": first.run_id, "callback_pointer": ".task-pipeline-step-callback.json"},
     )
+    root_provider = RuntimeProviderEventStream.create(
+        launch.spec_path.parent / "provider-events",
+        owner_id=TASK,
+        operation_id=TASK,
+        run_id="custom-run",
+        generation=1,
+        process_identity="a" * 64,
+        workspace_id="custom-workspace",
+        surface_id=SURFACE,
+        input_sha256=sha("initial provider input"),
+    )
+    root_provider.start()
+    if root_provider.reserve_input().action != "send":
+        raise AssertionError("root provider input was not reserved")
+    root_provider.accept_input()
 
     verification_calls: list[tuple[str, ...]] = []
 
@@ -330,6 +351,40 @@ with tempfile.TemporaryDirectory(prefix="custom-runtime.") as raw:
     final = store.read(TASK, TASK)
     receipts = sorted((state_root / "pipeline-custom" / "receipts").glob("*.json"))
     submit_failure = state_root / "pipeline-custom" / "submit-failed.json"
+    callback_target = json.loads(
+        (launch.spec_path.parent / "callback-target.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    root_events = [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in sorted(
+            (
+                launch.spec_path.parent
+                / "provider-events"
+                / "generation-1"
+                / "events"
+            ).glob("*.json")
+        )
+    ]
+    root_result_sha256s = [
+        str(event["result_sha256"])
+        for event in root_events
+        if event.get("kind") == "result-published"
+    ]
+    if callback_target.get("generation") != 2:
+        raise AssertionError(
+            ("custom child callback did not retarget generation", callback_target)
+        )
+    if root_result_sha256s != [final.accepted_callback_sha256]:
+        raise AssertionError(
+            (
+                "accepted terminal summary was not published exactly once on "
+                "the immutable root provider generation",
+                final.accepted_callback_sha256,
+                root_result_sha256s,
+            )
+        )
     if (
         thread.is_alive()
         or not result
