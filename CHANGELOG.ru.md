@@ -34,6 +34,10 @@
   identity-matched process и supervisor и missing exact surface. Missing или
   mismatched result, changed generation, unresolved identity или surface,
   conflicting либо foreign receipt остаются fail-closed.
+- Cleanup старта review теперь завершает exact dead reviewer только когда
+  durable provider events доказывают `provider-started` без `input-accepted`;
+  event identity строится через канонический контракт `ProviderEventIdentity`.
+- Ratchet live scripts теперь охватывает 289 Python files / 108 051 lines.
 
 ### Граница кандидата
 

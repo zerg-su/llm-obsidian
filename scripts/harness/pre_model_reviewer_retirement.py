@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import asdict
 from pathlib import Path
 from typing import Mapping
 
@@ -14,6 +15,7 @@ from .contracts import (
     TransitionResult,
 )
 from .review_attempt import ReviewAttempt
+from .provider_events import ProviderEventIdentity
 from .state_machine import TERMINAL
 from .store import OperationStore, StoreError
 from .supervisor import OperationSupervisor, SupervisorError
@@ -364,18 +366,19 @@ def _failure_receipts_match(
     resources = record.resources
     identity = delivery.get("identity")
     cursor = delivery.get("cursor")
-    expected_identity = {
-        "schema_version": 1,
-        "owner_id": record.spec.owner_id,
-        "operation_id": record.spec.operation_id,
-        "run_id": record.run_id,
-        "generation": generation,
-        "provider_session_id": record.run_id,
-        "process_identity": resources.process_identity,
-        "source_id": f"process:{resources.process_identity}",
-        "workspace_id": evidence["session.json"].get("workspace_id"),
-        "surface_id": resources.surface_id,
-    }
+    expected_identity = asdict(
+        ProviderEventIdentity(
+            owner_id=record.spec.owner_id,
+            operation_id=record.spec.operation_id,
+            run_id=record.run_id,
+            generation=generation,
+            provider_session_id=record.run_id,
+            process_identity=resources.process_identity,
+            source_id=f"process:{resources.process_identity}",
+            workspace_id=evidence["session.json"].get("workspace_id"),
+            surface_id=resources.surface_id,
+        )
+    )
     return all(
         (
             transport == {

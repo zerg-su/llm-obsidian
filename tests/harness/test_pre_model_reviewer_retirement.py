@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 import sys
 import tempfile
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 
 
@@ -24,6 +24,7 @@ from harness.cli import _cancel_or_close  # noqa: E402
 from harness.pre_model_reviewer_retirement import (  # noqa: E402
     retire_failed_reviewer_start,
 )
+from harness.provider_events import ProviderEventIdentity  # noqa: E402
 from harness.store import OperationStore  # noqa: E402
 
 
@@ -227,18 +228,19 @@ def input_unconfirmed_fixture(
     events = runtime / "provider-events/generation-1/events"
     delivery.mkdir(parents=True)
     events.mkdir(parents=True)
-    identity = {
-        "schema_version": 1,
-        "owner_id": "owner-review",
-        "operation_id": operation_id,
-        "run_id": f"run-{name}",
-        "generation": 1,
-        "provider_session_id": f"run-{name}",
-        "process_identity": "a" * 64,
-        "source_id": f"process:{'a' * 64}",
-        "workspace_id": "22222222-2222-4222-8222-222222222222",
-        "surface_id": "11111111-1111-4111-8111-111111111111",
-    }
+    identity = asdict(
+        ProviderEventIdentity(
+            owner_id="owner-review",
+            operation_id=operation_id,
+            run_id=f"run-{name}",
+            generation=1,
+            provider_session_id=f"run-{name}",
+            process_identity="a" * 64,
+            source_id=f"process:{'a' * 64}",
+            workspace_id="22222222-2222-4222-8222-222222222222",
+            surface_id="11111111-1111-4111-8111-111111111111",
+        )
+    )
     (events / "0001.json").write_text(
         json.dumps(
             {

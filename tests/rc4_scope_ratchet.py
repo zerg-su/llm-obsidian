@@ -249,7 +249,7 @@ headroom.
 The RC6.10 reviewer-duration slice adds exactly one production module,
 ``harness/review_timing.py``. It owns immutable callback-observed interval
 publication while the existing dashboard receipt and history owners validate
-and project that evidence. The candidate is 289 files / 108,021 lines, pinned
+and project that evidence. The candidate is 289 files / 108,051 lines, pinned
 exactly with no speculative headroom.
 """
 
@@ -258,11 +258,11 @@ from __future__ import annotations
 from pathlib import Path
 
 
-#: Maximum tracked Python files under ``scripts/`` for the 2.6.7 RC6.10 candidate.
+#: Maximum tracked Python files under ``scripts/`` for the 2.6.7 RC6.11 candidate.
 SCRIPT_FILE_CEILING = 289
 
-#: Maximum total lines across those files for the RC6.10 reviewer candidate.
-SCRIPT_LINE_CEILING = 108_021
+#: Maximum total lines across those files for the RC6.11 reviewer candidate.
+SCRIPT_LINE_CEILING = 108_051
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

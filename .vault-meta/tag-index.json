@@ -120,9 +120,7 @@
     "wiki/plans/2026-08-02-010436-llm-obsidian-2-6-dogfood-rt1-callback-watchdog.md",
     "wiki/plans/2026-08-02-010436-llm-obsidian-2-6-dogfood-rt2-fresh-review-packet.md",
     "wiki/plans/2026-08-02-010436-llm-obsidian-2-6-dogfood-rt3-mixed-review-rulings.md",
-    "wiki/plans/2026-08-02-010436-llm-obsidian-2-6-dogfood-rt4-callback-fallback-prototype.md",
-    "wiki/plans/rc64-autonomous-continuation-dogfood-r2.local.md",
-    "wiki/plans/rc64-autonomous-continuation-dogfood.local.md"
+    "wiki/plans/2026-08-02-010436-llm-obsidian-2-6-dogfood-rt4-callback-fallback-prototype.md"
   ],
   "dragonscale": [
     "wiki/concepts/DragonScale on macOS.md"
@@ -376,9 +374,7 @@
     "wiki/plans/2026-08-05-145351-llm-obsidian-2-6-5-subplan-c-bounded-finalization-and-dsl.md",
     "wiki/plans/2026-08-05-145351-llm-obsidian-2-6-5-subplan-d-split-components.md",
     "wiki/plans/2026-08-06-154927-llm-obsidian-2-6-6-zakrytie-lifecycle-debt-posle-2-6-5.md",
-    "wiki/plans/2026-08-09-151537-llm-obsidian-2-6-7-bounded-harness-stabilization-and-root-sc.md",
-    "wiki/plans/rc64-autonomous-continuation-dogfood-r2.local.md",
-    "wiki/plans/rc64-autonomous-continuation-dogfood.local.md"
+    "wiki/plans/2026-08-09-151537-llm-obsidian-2-6-7-bounded-harness-stabilization-and-root-sc.md"
   ],
   "product-roadmap": [
     "wiki/concepts/cherry-picks.md"

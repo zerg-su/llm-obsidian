@@ -28,6 +28,10 @@ Observer-safe custom terminal cleanup candidate.
   identity-matched process and supervisor, and missing exact surface. Missing
   or mismatched results, changed generations, unresolved identities or
   surfaces, and conflicting or foreign receipts remain fail-closed.
+- Review startup cleanup now retires an exact dead reviewer only when durable
+  provider events prove `provider-started` without `input-accepted`; its event
+  identity is derived from the canonical `ProviderEventIdentity` contract.
+- The live scripts ratchet now covers 289 Python files / 108,051 lines.
 
 ### Candidate boundary
 

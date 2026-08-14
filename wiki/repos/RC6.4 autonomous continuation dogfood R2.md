@@ -1,6 +1,9 @@
 ---
 type: repo
 title: "RC6.4 autonomous continuation dogfood R2"
+aliases:
+  - rc64-autonomous-continuation-dogfood.local
+  - rc64-autonomous-continuation-dogfood-r2.local
 address: c-000130
 created: 2026-08-13
 updated: 2026-08-13

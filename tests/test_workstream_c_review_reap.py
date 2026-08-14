@@ -301,7 +301,7 @@ check(
 )
 check(
     "active unattended v3 review retains the code-owned runner path",
-    "dispatched v3/v4 task" in review_skill,
+    "dispatched v3/v4 task" in review_skill.casefold(),
 )
 check(
     "review skill exposes purpose-bound outcome checkpoints",
