@@ -5,34 +5,31 @@ description: Review outcomes, code, architecture, security, or specs through har
 
 # Review
 
-Use after self-review, before finalization. The harness owns routing, sessions,
-identity, callbacks, and budgets. Reviewers are product read-only; only the
-executor resolves findings.
+Use after self-review, before finalization. Harness owns routing, sessions,
+identity, callbacks, and budgets. Reviewers are product read-only; the executor
+resolves findings.
 
 Summary/reap stay locked until approval matches exact HEAD/profile and v4
 summary bytes. Only `--no-review` persists a typed bypass.
 
 ## Presets
 
-- `review`: one holistic session on the selected model;
+- `review`: one holistic session;
 - `review --deep`: independent Anthropic and OpenAI holistic sessions at
   `xhigh` by default; with an alias-backed `--runtime` or `--model`, independent
   intent and engineering sessions on that selected model only;
-- `review --full`: only when explicitly requested, the four-lane
+- `review --full`: the explicit four-lane
   `{Anthropic, OpenAI} × {intent, engineering}` grid at `xhigh`;
-- `--cross-model`: for the one-route Simple preset, select the opposite
-  runtime. Default Deep and explicit Full already use both providers, so
-  the flag does not change their topology; explicit overrides stay
-  authoritative.
+- `--cross-model`: Simple selects the opposite runtime. Deep/Full already use
+  both providers; explicit overrides remain authoritative.
 
 Deep/Full use `review_profiles.deep`; overrides accept routing aliases only.
-`--deep --full` is invalid. Full is never inferred and rejects model/runtime
-overrides. Lane IDs use `anthropic-*`/`openai-*`; concrete routes stay metadata.
+Full is explicit, rejects overrides, and cannot combine with `--deep`. Lane IDs
+use `anthropic-*`/`openai-*`; concrete routes stay metadata.
 
-Standalone Deep remains unchanged. Finalization is separate: cycles 1–3 use
-only `finalization-primary`; the third material failure freezes a read-only
-pivot packet; cycles 4–5 add `finalization-independent` only after its
-accepted receipt, without an availability probe. Explicit single-model always wins.
+Standalone Deep is unchanged. Finalization cycles 1–3 use
+`finalization-primary`; cycles 4–5 add `finalization-independent` only after an
+accepted third-failure pivot receipt. Explicit single-model always wins.
 
 ## Purpose boundaries
 
@@ -60,30 +57,27 @@ Transport, clean diffs, and local green are not outcome proof. Verify findings
 against code; rejection requires technical evidence. Add no hidden lane, model
 call, severity cap, reranking, vote, average, or loop.
 
-Task success evidence must be reviewer-observable at the verdict boundary.
-Evidence from the review callback, reap, release, or terminal cleanup belongs
-under a parent-owned `Post-review coordinator acceptance` gate outside the
-canonical Outcome Contract. The strict missing-evidence policy must not be
-weakened to compensate for a circular task contract; return that contract for
-amendment instead.
+Task evidence must be reviewer-observable at verdict. Put review callback,
+reap, release, and terminal cleanup under parent-owned
+`Post-review coordinator acceptance`, outside the canonical Outcome Contract.
+The missing-evidence policy must not be weakened for a circular task contract;
+amend it instead.
 
 ## Flow
 
-1. For a dispatched v3/v4 task, run
-   `task-review-runner.py run --worktree <worktree>`;
-   `plan --worktree <checkout> --plan <plan>` for plans (add exact `--base`
-   unless a single-parent HEAD changes that plan); otherwise `current --worktree
-   <checkout>` with requested preset/aliases and compatible purpose/boundary.
-   The facade starts, resumes, or returns a receipt; `review-runner.py` is low-level.
+1. For a dispatched v3/v4 task, run `task-review-runner.py run --worktree
+   <worktree>`. Plans use `plan --worktree <checkout> --plan <plan>` (add exact
+   `--base` unless one parent changes it); otherwise use `current --worktree
+   <checkout>` with compatible preset, purpose, and boundary. The facade
+   starts/resumes/returns a receipt; `review-runner.py` is low-level.
 2. Keep ContextPacket/outbox in owner-only scratch and product read-only. Submit
    axis JSON only through its generated `harness/review_submit.py` command.
 3. Keep lanes independent. Before effect, finalization reserves
-   `FinalizationLedger`; each cycle owns one fresh exact-HEAD attempt and an
-   immutable terminal result. Material `changes-requested`/`approved`
-   consumes a product cycle; mechanism outcomes release the slot into a
-   bounded attempt receipt. A changed HEAD uses the next cycle; cycle 4
-   needs the accepted pivot receipt. A fifth material failure exhausts the lineage; a
-   sixth cycle has zero effect. Standalone keeps preset budgets.
+   `FinalizationLedger`; each cycle owns one fresh exact-HEAD attempt/result.
+   Material `changes-requested`/`approved` consumes a product cycle; mechanism
+   outcomes release into a bounded attempt receipt. Changed HEAD advances the
+   cycle; cycle 4 needs the pivot, the fifth failure exhausts, and cycle 6 has
+   zero effect. Standalone keeps preset budgets.
 4. The executor records typed rulings/checks and escalates protected boundaries.
    A plan finding may rebind retained lanes only when the exact Git delta changes
    the design artifact alone; Outcome, dispositions, or evidence-map changes
@@ -94,5 +88,5 @@ amendment instead.
    re-evaluation; a second restart or exhausted budget is `attention-required`.
 
 Never edit product, open a second verification surface, rerank, push, publish,
-or broaden scope. Dispatch paths come from `.task-meta.json`, never a generic
-root; current review uses derived harness state and external owner-only scratch.
+or broaden scope. Use dispatch paths from `.task-meta.json`; current review uses
+derived harness state and owner-only scratch.
