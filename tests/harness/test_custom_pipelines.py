@@ -247,6 +247,31 @@ check(
     and frozen.approval_sha256 == approval_receipt.approval_card_sha256
     and frozen.approval_card == approval,
 )
+policy_valid_receipt = ExplicitPipelineApproval.for_card(
+    definition_sha256=compiled.definition_sha256,
+    approval_card=approval,
+    actor="policy-valid-snapshot",
+    decision="approve",
+)
+try:
+    policy_valid_frozen = freeze_custom_pipeline(
+        spec,
+        compiled,
+        policy_valid_receipt,
+        approval,
+    )
+except Exception as exc:
+    raise AssertionError(
+        "exact policy-valid snapshot approval freezes the compiled hash"
+    ) from exc
+else:
+    check(
+        "exact policy-valid snapshot approval freezes the compiled hash",
+        policy_valid_frozen.definition_sha256 == compiled.definition_sha256
+        and policy_valid_frozen.approval_sha256
+        == policy_valid_receipt.approval_card_sha256
+        and policy_valid_frozen.approval_card == approval,
+    )
 route = RuntimeRoute("codex", "sol", "high", "default", "c" * 64)
 custom_dispatch = DispatchRequest(
     task_id="custom-dispatch-1",
@@ -549,11 +574,51 @@ for label, receipt, token in (
         "user",
     ),
     (
+        "unknown actors cannot approve a proposal",
+        ExplicitPipelineApproval.for_card(
+            definition_sha256=compiled.definition_sha256,
+            approval_card=approval,
+            actor="unknown",
+            decision="approve",
+        ),
+        "user",
+    ),
+    (
+        "policy-valid snapshot cannot freeze a rejected proposal",
+        ExplicitPipelineApproval.for_card(
+            definition_sha256=compiled.definition_sha256,
+            approval_card=approval,
+            actor="policy-valid-snapshot",
+            decision="reject",
+        ),
+        "user",
+    ),
+    (
+        "policy-valid snapshot cannot freeze a revised proposal",
+        ExplicitPipelineApproval.for_card(
+            definition_sha256=compiled.definition_sha256,
+            approval_card=approval,
+            actor="policy-valid-snapshot",
+            decision="revise",
+        ),
+        "user",
+    ),
+    (
         "approval cannot be replayed for a different definition",
         ExplicitPipelineApproval.for_card(
             definition_sha256="b" * 64,
             approval_card=approval,
             actor="user",
+            decision="approve",
+        ),
+        "definition",
+    ),
+    (
+        "policy-valid snapshot cannot be replayed for a different definition",
+        ExplicitPipelineApproval.for_card(
+            definition_sha256="b" * 64,
+            approval_card=approval,
+            actor="policy-valid-snapshot",
             decision="approve",
         ),
         "definition",
@@ -565,6 +630,23 @@ for label, receipt, token in (
         check(label, token in str(exc))
     else:
         check(label, False)
+try:
+    freeze_custom_pipeline(
+        spec,
+        compiled,
+        policy_valid_receipt,
+        approval + "changed",
+    )
+except Exception as exc:
+    check(
+        "policy-valid snapshot cannot be replayed for a different approval card",
+        "card" in str(exc),
+    )
+else:
+    check(
+        "policy-valid snapshot cannot be replayed for a different approval card",
+        False,
+    )
 expect_rejection(
     "arbitrary commands fail closed",
     lambda value: value["verification_checks"].append("python -c evil"),
