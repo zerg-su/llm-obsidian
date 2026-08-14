@@ -470,8 +470,17 @@ class RuntimeSessionCleanupMixin:
             surface_status="alive",
         )
 
-    def cleanup(self, owner_id: str, operation_id: str) -> RuntimeSessionResult:
+    def cleanup(
+        self,
+        owner_id: str,
+        operation_id: str,
+        *,
+        terminal_state: str = "complete",
+    ) -> RuntimeSessionResult:
         """Finalize only after provider exit, then close the exact owned surface."""
+
+        if terminal_state not in {"complete", "cancelled"}:
+            raise RuntimeSessionError("cleanup terminal state is invalid")
 
         record = self.store.read(owner_id, operation_id)
         if record.state in TERMINAL:
@@ -635,7 +644,20 @@ class RuntimeSessionCleanupMixin:
                     resources.surface_id
                 ),
             )
-            surface_status = "missing"
+            try:
+                surface_status = self.cmux.status(resources.surface_id)
+            except Exception:
+                surface_status = "unknown"
+            if surface_status != "missing":
+                current = self._mark_attention(
+                    supervisor.read(), AttentionReason.CLEANUP_INCOMPLETE
+                )
+                return self._result(
+                    current,
+                    "attention-required",
+                    process_status="dead",
+                    surface_status=surface_status,
+                )
         close_action = self._record_resource_closed(
             supervisor.read(),
             metadata,
@@ -656,7 +678,7 @@ class RuntimeSessionCleanupMixin:
                 process_status="dead",
                 surface_status="missing",
             )
-        current = supervisor.transition("complete")
+        current = supervisor.transition(terminal_state)
         self._notify(current.spec.owner_id, current.spec.operation_id)
         return self._result(
             current,

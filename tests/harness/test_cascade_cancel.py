@@ -189,6 +189,7 @@ def cancel_root(
         operation_id,
         process_adapter=process_adapter or UnusedProcessAdapter(),
         cmux_adapter=cmux_adapter or UnusedCmuxAdapter(),
+        bounded_cancel=True,
     )
 
 
@@ -232,6 +233,30 @@ class RecordingProcessAdapter:
         return self.status_value
 
 
+class ExitThenDeadProcessAdapter(RecordingProcessAdapter):
+    def __init__(self) -> None:
+        super().__init__("alive")
+        self.guardian_requests: list[dict[str, object]] = []
+
+    def pid_status(self, supervisor_pid: int, identity: str) -> str:
+        self.calls.append(("pid_status", supervisor_pid))
+        return self.status_value
+
+    def request_guardian_signal(
+        self,
+        _control_path: Path,
+        **request: object,
+    ) -> None:
+        self.guardian_requests.append(dict(request))
+        self.status_value = "dead"
+
+
+class ClosingCmuxAdapter(RecordingCmuxAdapter):
+    def close_exact(self, surface_id: str) -> None:
+        self.calls.append(("close_exact", surface_id))
+        self.statuses[:] = ["missing"]
+
+
 def prepare_pending_effect(store) -> dict[str, object]:
     """An unreconciled effect from a crash blocks the descendant on attention."""
 
@@ -267,6 +292,50 @@ def bind_surface(store, operation_id, surface_id):
     return OperationSupervisor(store, OWNER, operation_id).bind_resources(
         OwnedResources(surface_id=surface_id)
     )
+
+
+def bind_provider(store, operation_id, surface_id):
+    record = OperationSupervisor(store, OWNER, operation_id).bind_resources(
+        OwnedResources(
+            surface_id=surface_id,
+            process_group=4201,
+            supervisor_pid=4202,
+            process_identity="a" * 64,
+            supervisor_identity="b" * 64,
+        )
+    )
+    runtime_root = (
+        store.root / "owners" / OWNER / "runtime" / operation_id
+    )
+    runtime_root.mkdir(parents=True)
+    (runtime_root / "session.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "operation_id": operation_id,
+                "run_id": record.run_id,
+                "placement": "split",
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (runtime_root / "callback-target.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "generation": 1,
+                "operation_id": operation_id,
+                "run_id": record.run_id,
+                "callback_pointer": "callbacks/result.json",
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return record
 
 
 def main() -> int:
@@ -461,6 +530,27 @@ def main() -> int:
             "public cancel does not touch the sibling subtree",
             all(cli_after[item] == "running" for item in OUTSIDE),
             {item: cli_after[item] for item in OUTSIDE},
+        )
+
+        live_store = ObservingStore(root / "cascade-live-provider")
+        build_incident_fixture(live_store)
+        bind_provider(live_store, "op-verify", "surface-live-verify")
+        live_process = ExitThenDeadProcessAdapter()
+        live_cmux = ClosingCmuxAdapter(["alive"])
+        live_outcome = cancel_root(
+            live_store,
+            process_adapter=live_process,
+            cmux_adapter=live_cmux,
+        )
+        live_after = live_store.read(OWNER, "op-verify")
+        check(
+            "one cascade cancel converges an exact live descendant",
+            live_outcome.complete
+            and live_after.state == "cancelled"
+            and live_after.resources == OwnedResources()
+            and len(live_process.guardian_requests) == 1
+            and live_process.guardian_requests[0]["action"] == "request-exit",
+            live_outcome,
         )
 
         # --- FIX1-CANCEL-E2: the cascade really releases owned resources.

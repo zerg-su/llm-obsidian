@@ -237,6 +237,14 @@ The RC6.5 final-review closure adds 54 net production lines for strict optional
 event-envelope validation and the display-only active structural-pivot route.
 The closure candidate is therefore 287 files / 107,293 lines, again pinned
 exactly with no speculative headroom.
+
+The RC6.9 terminal-cancellation slice adds exactly one production module,
+``harness/runtime_session_cancel.py``. It owns the fixed probe budget, retryable
+cleanup actions, and honest cancellation result classification that would push
+the public CLI over its file-quality ceiling if kept inline. Exact surface-close
+proof and terminal-state selection stay in the existing cleanup owner. The
+candidate is 288 files / 107,656 lines, pinned exactly with no speculative
+headroom.
 """
 
 from __future__ import annotations
@@ -244,11 +252,11 @@ from __future__ import annotations
 from pathlib import Path
 
 
-#: Maximum tracked Python files under ``scripts/`` for the 2.6.7 RC6.5 candidate.
-SCRIPT_FILE_CEILING = 287
+#: Maximum tracked Python files under ``scripts/`` for the 2.6.7 RC6.9 candidate.
+SCRIPT_FILE_CEILING = 288
 
-#: Maximum total lines across those files for the RC6.7 timing candidate.
-SCRIPT_LINE_CEILING = 107_600
+#: Maximum total lines across those files for the RC6.9 cancellation candidate.
+SCRIPT_LINE_CEILING = 107_656
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:
@@ -267,13 +275,13 @@ def assert_within_ceilings(scripts_dir: Path) -> tuple[int, int]:
     files, lines = measure(scripts_dir)
     if files > SCRIPT_FILE_CEILING:
         raise AssertionError(
-            f"scripts/ holds {files} Python files, above the RC6.5 ceiling "
+            f"scripts/ holds {files} Python files, above the RC6.9 ceiling "
             f"{SCRIPT_FILE_CEILING}; justify and raise the ceiling in the same "
             "commit as the growth"
         )
     if lines > SCRIPT_LINE_CEILING:
         raise AssertionError(
-            f"scripts/ holds {lines} lines, above the RC6.5 ceiling "
+            f"scripts/ holds {lines} lines, above the RC6.9 ceiling "
             f"{SCRIPT_LINE_CEILING}; justify and raise the ceiling in the same "
             "commit as the growth"
         )

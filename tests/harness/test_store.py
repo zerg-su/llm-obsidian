@@ -15,6 +15,7 @@ from contextlib import redirect_stdout
 from dataclasses import replace
 from io import StringIO
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -506,6 +507,34 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
             self.closed_workspaces.append((workspace_id, window_id))
             self.workspace_current = "missing"
 
+    class ExitAfterProbeProcess(FakeProcess):
+        exit_requested = False
+        exit_probes = 0
+
+        def process_status(
+            self, process_group: int, identity: str
+        ) -> str:
+            del process_group, identity
+            if self.exit_requested:
+                self.exit_probes += 1
+                if self.exit_probes >= 2:
+                    self.status = "dead"
+                    self.supervisor_status = "dead"
+            return self.status
+
+        def request_guardian_signal(
+            self,
+            control_path: Path,
+            **request: object,
+        ) -> None:
+            super().request_guardian_signal(control_path, **request)
+            if request.get("action") == "request-exit":
+                self.exit_requested = True
+
+    class UnclosedCmux(FakeCmux):
+        def close_exact(self, surface_id: str) -> None:
+            self.closed.append(surface_id)
+
     def run_cli_in_process(
         command: str,
         operation_id: str,
@@ -602,6 +631,32 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
             encoding="utf-8",
         )
         return workspace_id, window_id
+
+    def write_split_session(operation_id: str) -> None:
+        record = store.read("owner-cli", operation_id)
+        path = (
+            store.root
+            / "owners"
+            / "owner-cli"
+            / "runtime"
+            / operation_id
+            / "session.json"
+        )
+        path.parent.mkdir(parents=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "operation_id": operation_id,
+                    "run_id": record.run_id,
+                    "placement": "split",
+                },
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        write_callback_target(operation_id)
 
     def create_review_cleanup_operation(
         operation_id: str,
@@ -1097,7 +1152,7 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
     write_workspace_session("op-drift-workspace-cli")
     drift_workspace_cmux = FakeCmux("missing")
     drift_workspace_cmux.workspace_current = "drift"
-    drift_workspace_rc, _drift_workspace_output = run_cli_in_process(
+    drift_workspace_rc, drift_workspace_output = run_cli_in_process(
         "cancel",
         "op-drift-workspace-cli",
         process=FakeProcess("dead"),
@@ -1108,7 +1163,8 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
     )
     check(
         "CLI cancel retains ownership on workspace identity drift",
-        drift_workspace_rc == 0
+        drift_workspace_rc == harness_cli.CASCADE_PARTIAL_EXIT
+        and drift_workspace_output["status"] == "partial"
         and drift_workspace_after.state == "attention-required"
         and bool(drift_workspace_after.resources.surface_id)
         and drift_workspace_cmux.closed_workspaces == [],
@@ -1118,7 +1174,7 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
     bind_owned_resources("op-orphan-process-cli")
     orphan_process = FakeProcess("alive")
     orphan_process_cmux = FakeCmux("missing")
-    orphan_process_rc, _orphan_process_output = run_cli_in_process(
+    orphan_process_rc, orphan_process_output = run_cli_in_process(
         "cancel",
         "op-orphan-process-cli",
         process=orphan_process,
@@ -1127,7 +1183,8 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
     orphan_process_after = store.read("owner-cli", "op-orphan-process-cli")
     check(
         "CLI cancel leaves an unguarded orphan process attention-required",
-        orphan_process_rc == 0
+        orphan_process_rc == harness_cli.CASCADE_PARTIAL_EXIT
+        and orphan_process_output["status"] == "partial"
         and orphan_process.terminated == []
         and orphan_process_after.state == "attention-required"
         and orphan_process_after.attention_reason
@@ -1137,23 +1194,91 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
 
     create_cli_operation("op-owned-cli", state="running")
     bind_owned_resources("op-owned-cli")
-    owned_process = FakeProcess("alive")
+    write_split_session("op-owned-cli")
+    owned_process = ExitAfterProbeProcess("alive")
+    owned_cmux = FakeCmux("alive")
     contained_rc, _contained_output = run_cli_in_process(
         "cancel",
         "op-owned-cli",
         process=owned_process,
-        cmux=FakeCmux("alive"),
+        cmux=owned_cmux,
     )
     owned_after_cancel = store.read("owner-cli", "op-owned-cli")
     check(
-        "CLI cancel asks the exact live guardian to exit",
+        "one CLI cancel exits and cleans one exact live provider",
         contained_rc == 0
-        and owned_after_cancel.state == "exiting"
-        and bool(owned_after_cancel.resources.surface_id)
+        and owned_after_cancel.state == "cancelled"
+        and owned_after_cancel.resources == OwnedResources()
         and len(owned_process.guardian_requests) == 1
         and owned_process.guardian_requests[0]["action"] == "request-exit"
         and owned_process.guardian_requests[0]["operation_id"]
-        == "op-owned-cli",
+        == "op-owned-cli"
+        and owned_cmux.closed
+        == ["11111111-1111-1111-1111-111111111111"],
+    )
+    replay_rc, _replay_output = run_cli_in_process(
+        "cancel",
+        "op-owned-cli",
+        process=owned_process,
+        cmux=owned_cmux,
+    )
+    check(
+        "repeated CLI cancel replays no provider exit or cleanup effect",
+        replay_rc == 0
+        and store.read("owner-cli", "op-owned-cli") == owned_after_cancel
+        and len(owned_process.guardian_requests) == 1
+        and owned_cmux.closed
+        == ["11111111-1111-1111-1111-111111111111"],
+    )
+
+    create_cli_operation("op-unclosed-cli", state="running")
+    bind_owned_resources("op-unclosed-cli")
+    write_split_session("op-unclosed-cli")
+    unclosed_process = ExitAfterProbeProcess("alive")
+    unclosed_cmux = UnclosedCmux("alive")
+    unclosed_rc, unclosed_output = run_cli_in_process(
+        "cancel",
+        "op-unclosed-cli",
+        process=unclosed_process,
+        cmux=unclosed_cmux,
+    )
+    unclosed_after = store.read("owner-cli", "op-unclosed-cli")
+    check(
+        "CLI cancel fails closed when exact surface close is unproved",
+        unclosed_rc == harness_cli.CASCADE_PARTIAL_EXIT
+        and unclosed_output["status"] == "partial"
+        and unclosed_after.state == "attention-required"
+        and unclosed_after.attention_reason
+        == AttentionReason.CLEANUP_INCOMPLETE
+        and bool(unclosed_after.resources.surface_id)
+        and len(unclosed_process.guardian_requests) == 1,
+    )
+
+    create_cli_operation("op-still-alive-cli", state="running")
+    bind_owned_resources("op-still-alive-cli")
+    write_split_session("op-still-alive-cli")
+    still_alive_process = FakeProcess("alive")
+    cancel_waits: list[float] = []
+    with patch(
+        "harness.runtime_session_cancel.sleep",
+        side_effect=cancel_waits.append,
+    ):
+        still_alive_rc, still_alive_output = run_cli_in_process(
+            "cancel",
+            "op-still-alive-cli",
+            process=still_alive_process,
+            cmux=FakeCmux("alive"),
+        )
+    still_alive_after = store.read("owner-cli", "op-still-alive-cli")
+    check(
+        "CLI cancel exhausts one fixed probe budget without replaying exit",
+        still_alive_rc == harness_cli.CASCADE_PARTIAL_EXIT
+        and still_alive_output["status"] == "partial"
+        and still_alive_after.state == "exiting"
+        and bool(still_alive_after.resources.surface_id)
+        and len(still_alive_process.guardian_requests) == 1
+        and len(cancel_waits) == 39
+        and set(cancel_waits) == {0.05},
     )
 
     create_review_cleanup_operation("op-review-proof-cli")

@@ -224,6 +224,7 @@ def _cancel_or_close(
     *,
     process_adapter: object,
     cmux_adapter: object,
+    bounded_cancel: bool = False,
 ) -> TransitionResult:
     record = store.read(owner, operation_id)
     if record.state in TERMINAL:
@@ -259,11 +260,12 @@ def _cancel_or_close(
                 reason=AttentionReason.CLEANUP_INCOMPLETE,
             )
         initial = record
-        result = (
-            runtime.cleanup(owner, operation_id)
-            if record.state == "exiting"
-            else runtime.request_exit(owner, operation_id)
-        )
+        if bounded_cancel:
+            result = runtime.cancel(owner, operation_id)
+        elif record.state == "exiting":
+            result = runtime.cleanup(owner, operation_id)
+        else:
+            result = runtime.request_exit(owner, operation_id)
         current = result.record
         return TransitionResult(
             operation_id,
@@ -278,11 +280,16 @@ def _cancel_or_close(
             store, record, process_adapter, cmux_adapter
         )
         if decision.action == "continue":
-            requested = RuntimeSessionManager(
+            runtime = RuntimeSessionManager(
                 store,
                 cmux_adapter,
                 process_adapter,
-            ).request_exit(owner, operation_id)
+            )
+            requested = (
+                runtime.cancel(owner, operation_id)
+                if bounded_cancel
+                else runtime.request_exit(owner, operation_id)
+            )
             current = requested.record
             return TransitionResult(
                 operation_id,
@@ -377,6 +384,7 @@ def _cancel_or_close_subtree(
     *,
     process_adapter: object,
     cmux_adapter: object,
+    bounded_cancel: bool = False,
 ) -> CascadeOutcome:
     """Apply the supported per-operation cancellation child-first, then the root.
 
@@ -397,8 +405,11 @@ def _cancel_or_close_subtree(
             operation_id,
             process_adapter=process_adapter,
             cmux_adapter=cmux_adapter,
+            bounded_cancel=bounded_cancel,
         )
-        if result.state not in TERMINAL and operation_id != root_operation_id:
+        if result.state not in TERMINAL and (
+            operation_id != root_operation_id or bounded_cancel
+        ):
             return CascadeOutcome(
                 root_operation_id,
                 store.read(owner, root_operation_id).state,
@@ -962,6 +973,7 @@ def main(
                     operation_id,
                     process_adapter=process_adapter,
                     cmux_adapter=cmux_adapter,
+                    bounded_cancel=args.command == "cancel",
                 )
                 cascade_truncated = not outcome.complete
                 value = _cascade_payload(outcome)

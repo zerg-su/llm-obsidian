@@ -64,11 +64,13 @@ from .runtime_session_contracts import (
     _relative,
 )
 from .runtime_session_launch import RuntimeSessionLaunchMixin
+from .runtime_session_cancel import RuntimeSessionCancellationMixin
 from .runtime_session_cleanup import RuntimeSessionCleanupMixin
 from .runtime_session_checkpoint import RuntimeSessionCheckpointMixin
 
 class RuntimeSessionManager(
     RuntimeSessionLaunchMixin,
+    RuntimeSessionCancellationMixin,
     RuntimeSessionCleanupMixin,
     RuntimeSessionCheckpointMixin,
 ):
