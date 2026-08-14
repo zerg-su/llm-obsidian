@@ -32,6 +32,7 @@ from harness.contracts import (
 from harness.callbacks import CallbackBroker
 import harness.cli as harness_cli
 from harness.cli import main as harness_cli_main
+from harness.runtime_provider_events import RuntimeProviderEventStream
 from harness.store import OperationStore, StoreError
 
 
@@ -581,7 +582,7 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
             expected_revision=record.revision,
         )
 
-    def accept_result_callback(operation_id: str) -> None:
+    def accept_result_callback(operation_id: str) -> str:
         record = store.read("owner-cli", operation_id)
         payload = {"status": "complete"}
         payload_sha = hashlib.sha256(
@@ -601,6 +602,33 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
                 payload_sha,
             )
         )
+        return payload_sha
+
+    def publish_provider_result(
+        operation_id: str,
+        payload_sha256: str,
+    ) -> None:
+        record = store.read("owner-cli", operation_id)
+        stream = RuntimeProviderEventStream.create(
+            store.root
+            / "owners"
+            / "owner-cli"
+            / "runtime"
+            / operation_id
+            / "provider-events",
+            owner_id="owner-cli",
+            operation_id=operation_id,
+            run_id=record.run_id,
+            generation=1,
+            process_identity=record.resources.process_identity,
+            workspace_id="22222222-2222-4222-8222-222222222222",
+            surface_id=record.resources.surface_id,
+            input_sha256="c" * 64,
+        )
+        assert stream.start().action == "wait"
+        assert stream.reserve_input().action == "send"
+        assert stream.accept_input().action == "wait"
+        assert stream.result(payload_sha256).action == "close"
 
     def write_workspace_session(operation_id: str) -> tuple[str, str]:
         record = store.read("owner-cli", operation_id)
@@ -1320,11 +1348,12 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
     )
     proof_terminal = store.read("owner-cli", "op-review-proof-cli")
     check(
-        "CLI reviewer cleanup contains partial cleanup and replays idempotently",
+        "CLI reviewer cleanup without result retains ownership idempotently",
         partial_rc == 0
         and replay_rc == 0
-        and proof_terminal.state in {"complete", "cancelled"}
-        and proof_terminal.resources == OwnedResources()
+        and proof_terminal.state == "exiting"
+        and proof_terminal.resources.surface_id
+        == "11111111-1111-1111-1111-111111111111"
         and len(proof_process.guardian_requests) == 1
         and proof_cmux.closed_workspaces == [],
     )
@@ -1498,7 +1527,13 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
     bind_owned_resources("op-accepted-unknown-cli")
     write_workspace_session("op-accepted-unknown-cli")
     write_callback_target("op-accepted-unknown-cli")
-    accept_result_callback("op-accepted-unknown-cli")
+    accepted_payload_sha256 = accept_result_callback(
+        "op-accepted-unknown-cli"
+    )
+    publish_provider_result(
+        "op-accepted-unknown-cli",
+        accepted_payload_sha256,
+    )
     accepted_process = FakeProcess(
         "unknown",
         supervisor_status="unknown",
