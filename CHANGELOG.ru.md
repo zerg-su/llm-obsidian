@@ -16,6 +16,37 @@
 внутренними контрольными точками и вошли в следующие публичные релизы; тегов и
 пакетов с этими номерами не выпускалось.
 
+## [2.6.7-rc6.6] — 2026-08-14
+
+Кандидат с каноническим phase request для engineering/fix. Initial dispatch и
+runtime continuation теперь используют одну immutable grammar запроса и одну
+нумерацию pass.
+
+### Исправлено
+
+- Дублирующиеся mapping в dispatch и worker заменены одним workflow-owned
+  constructor. Initial reproduce теперь публикует
+  `.task-pipeline/results/pass-0/reproduce.json` и
+  `.task-pipeline/outputs/pass-0/reproduce.md`, совпадающие с runtime
+  continuation и существующим immutable contract-template authority.
+- Валидный non-template result, существующий до наблюдения worker, проходит
+  existing two-read code-owned submit и acceptance без повторного phase
+  notification. При отсутствующем или нетронутом template сохраняется обычный
+  provider prompt; некорректные pointer, identity, digest, template и symlink
+  состояния по-прежнему отклоняются fail-closed.
+- Production-shaped traversal доказывает один receipt initial reproduce, один
+  переход к root-cause и provider restart без повтора reproduce prompt,
+  provider processing, callback, child или receipt.
+
+### Граница кандидата
+
+- Phase schemas и order, retry и verification budgets, review, dashboard,
+  event wake и lifecycle authority не изменены. Не добавлены compatibility
+  reader, provider retry, callback replay или migration старых runs.
+- Post-install engineering/fix smoke остаётся coordinator-owned после merge и
+  обновления plugin. Этот кандидат не выполняет merge, push, tag, publish,
+  обновление plugins, post-install smoke или promotion финального релиза.
+
 ## [2.6.7-rc6.5] — 2026-08-13
 
 Кандидат event-first wake для runtime и исправления таймера шага dashboard.

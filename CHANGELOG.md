@@ -10,6 +10,37 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.6.7-rc6.6] - 2026-08-14
+
+Canonical engineering/fix phase-request candidate. Initial dispatch and
+runtime continuation now share the same immutable request grammar and pass
+numbering.
+
+### Fixed
+
+- Replaced the duplicated dispatch/worker phase mappings with one
+  workflow-owned constructor. Initial reproduce now publishes
+  `.task-pipeline/results/pass-0/reproduce.json` and
+  `.task-pipeline/outputs/pass-0/reproduce.md`, matching runtime continuation
+  and the existing immutable contract-template authority.
+- A valid non-template result present before worker observation is submitted
+  and accepted through the existing two-read code-owned path without a
+  duplicate phase notification. Missing and untouched templates keep the
+  ordinary provider prompt; invalid pointer, identity, digest, template, and
+  symlink states remain fail-closed.
+- Production-shaped traversal proves one initial reproduce receipt, one
+  root-cause advance, and provider restart without reproduce prompt, provider
+  processing, callback, child, or receipt replay.
+
+### Candidate boundary
+
+- Phase schemas and order, retry and verification budgets, review, dashboard,
+  event wake, and lifecycle authority are unchanged. No compatibility reader,
+  provider retry, callback replay, or old-run migration was added.
+- The post-install engineering/fix smoke remains coordinator-owned after merge
+  and plugin refresh. This candidate does not merge, push, tag, publish, update
+  plugins, run post-install smoke, or promote the final release.
+
 ## [2.6.7-rc6.5] - 2026-08-13
 
 Event-first runtime wake and dashboard step-timing candidate. Existing durable
