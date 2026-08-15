@@ -20,10 +20,12 @@ from .runtime_worker import (
     _review_resolution_handoff_ready,
     _submit_failure_requires_attention,
 )
+from .store import StoreError
 from .verification import (
     VerificationAuthority,
     VerificationAuthorityError,
 )
+from .verification_attempt import MAX_SAME_HEAD_ATTEMPT_INDEX
 
 
 class RuntimeWorkerVerificationMixin:
@@ -837,6 +839,76 @@ class RuntimeWorkerVerificationMixin:
             )
         elif failed_record.state not in {"attention-required", "failed"}:
             raise RuntimeWorkerError("failed verification operation state is invalid")
+
+    def invalidated_verification_attempt(self) -> object | None:
+        """Return the bound attempt's record when its authority is invalid.
+
+        A settled succeeded own-identity effect without a persisted receipt
+        proves the probes ran to completion once but can never prove
+        verification authority for the current candidate: the receipt is the
+        only durable outcome, and settlement closes the resumable window.
+        Pending, foreign, unsettled, or receipt-bearing attempts are never
+        classified here — they stay with their existing owners.
+        """
+
+        try:
+            record = self.store.read(
+                self.spec["owner_id"], self.verification_spec.operation_id
+            )
+        except StoreError:
+            return None
+        if (
+            self.verification_receipt_path.exists()
+            or record.pending_effect
+            or record.effect_id != self.verification_effect_id
+            or record.effect_outcome != EffectOutcome.SUCCEEDED
+            or record.state not in {"verifying", "attention-required", "failed"}
+        ):
+            return None
+        return record
+
+    def adopt_invalidated_verification_successor(self) -> bool:
+        """Hand one invalidated attempt to its exact-current-HEAD successor.
+
+        The stale attempt is durably terminalized and linked to exactly one
+        predecessor-bound fresh attempt through the existing identity
+        constructors; repeated wakes and crash re-entry converge on the same
+        successor. An exhausted successor identity space stays typed
+        attention with no replacement and no probe replay.
+        """
+
+        stale = self.invalidated_verification_attempt()
+        if stale is None:
+            return True
+        if self.verification_attempt.attempt_index >= MAX_SAME_HEAD_ATTEMPT_INDEX:
+            self.summary_attention(
+                "pipeline-verification-retry-exhausted",
+                AttentionReason.RETRY_EXHAUSTED,
+            )
+            return False
+        stale_operation_id = stale.spec.operation_id
+        if stale.state not in TERMINAL:
+            self.store.transition(
+                self.spec["owner_id"], stale_operation_id, "failed"
+            )
+        self._bind_verification_attempt(
+            self.verification_attempt.attempt_index + 1
+        )
+        self.write_immutable_json(
+            self.spec_path.parent
+            / "pipeline-verification"
+            / stale_operation_id
+            / "invalidation.json",
+            {
+                "schema_version": 1,
+                "operation_id": stale_operation_id,
+                "parent_operation_id": self.spec["operation_id"],
+                "successor_operation_id": self.verification_spec.operation_id,
+                "current_head_sha": self.verification_head,
+                "status": "invalidated",
+            },
+        )
+        return self.adopt_invalidated_verification_successor()
 
     def run_verification(self) -> None:
         from .dashboard_facade import launch_bound_facade_dashboard

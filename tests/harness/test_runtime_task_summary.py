@@ -813,6 +813,10 @@ def assert_resolved_changed_head_gates_review_on_exact_head_receipt(
         def _bind_verification_attempt(self, index: int) -> None:
             calls.append(("bind", index))
 
+        def adopt_invalidated_verification_successor(self) -> bool:
+            calls.append(("adopt",))
+            return True
+
         def verification_receipt(self) -> object:
             return receipt_box[0]
 

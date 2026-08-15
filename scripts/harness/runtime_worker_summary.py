@@ -454,6 +454,10 @@ class RuntimeWorkerSummaryMixin:
             (step for step in steps if step.primitive_id == "verify"), None
         )
         self.bind_verification_contract(verify_step)
+        if verify_step is not None and (
+            not self.adopt_invalidated_verification_successor()
+        ):
+            return None
         previous = (
             self.controller_verification_receipt() if verify_step is not None else None
         )

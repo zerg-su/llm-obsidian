@@ -422,6 +422,8 @@ class RuntimeWorkerReviewBridgeMixin:
         if self.verification_head != current_head:
             self.verification_head = current_head
             self._bind_verification_attempt(0)
+        if not self.adopt_invalidated_verification_successor():
+            return False
         receipt = self.verification_receipt()
         if receipt is None:
             self.run_verification()
