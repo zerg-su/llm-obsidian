@@ -10,6 +10,29 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.7.1] - 2026-08-15
+
+Bounded verification stabilization candidate; not tagged, published, or
+live-accepted. 2.6.7 remains an unpublished historical base.
+
+### Fixed
+
+- `retry-mechanism-flake` is now the single public decision for a same-HEAD
+  verification retry, from the typed raise through the durable resolution
+  record and the coordinator wake. The private `authorize-one-same-head-retry`
+  alias is retired; only the typed constructor derives the private action, and
+  near-match decisions fail closed.
+- After the exact originating coordinator resolves `retry-mechanism-flake`,
+  the identity-bound same-HEAD response is published automatically by the
+  registered code path before the task wakes; the manual
+  `--same-head-mechanism-flake` resubmit command no longer exists. Attempt-0
+  evidence, the one-retry ceiling, and changed-HEAD fix-and-resubmit are
+  unchanged.
+- The active review authority baseline is bound to the exact measured final
+  contour (27 files, 15,051 LOC, zero writable authorities, zero incident
+  literals) and the RC1 integration trace now asserts exact LOC equality, so
+  authority growth and stale headroom both fail immediately.
+
 ## [2.6.7-rc6.11] - 2026-08-14
 
 Observer-safe custom terminal cleanup candidate.

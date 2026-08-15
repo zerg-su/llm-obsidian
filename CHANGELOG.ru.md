@@ -16,6 +16,29 @@
 внутренними контрольными точками и вошли в следующие публичные релизы; тегов и
 пакетов с этими номерами не выпускалось.
 
+## [2.7.1] — 2026-08-15
+
+Ограниченный стабилизационный кандидат verification-контура; без тега,
+публикации и live-приёмки. 2.6.7 остаётся неопубликованной исторической базой.
+
+### Исправлено
+
+- `retry-mechanism-flake` теперь единственное публичное решение для same-HEAD
+  retry верификации: от typed raise через durable resolution record до wake
+  координатора. Приватный алиас `authorize-one-same-head-retry` изъят; только
+  typed constructor выводит приватное действие, а near-match решения
+  отклоняются fail-closed.
+- После того как исходный координатор резолвит точное решение
+  `retry-mechanism-flake`, identity-bound same-HEAD response публикуется
+  автоматически зарегистрированным кодовым путём до пробуждения задачи;
+  ручной команды `--same-head-mechanism-flake` больше нет. Evidence
+  attempt-0, потолок в один retry и changed-HEAD fix-and-resubmit не
+  изменились.
+- Baseline активной review authority привязан к точному измеренному финальному
+  контуру (27 файлов, 15 051 LOC, ноль writable authorities, ноль incident
+  literals), а интеграционный trace RC1 проверяет точное равенство LOC:
+  рост authority и устаревший запас теперь падают сразу.
+
 ## [2.6.7-rc6.11] — 2026-08-14
 
 Кандидат с observer-safe terminal cleanup custom pipeline.
