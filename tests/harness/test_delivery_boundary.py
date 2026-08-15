@@ -685,6 +685,255 @@ with tempfile.TemporaryDirectory(prefix="delivery-boundary.") as raw:
         assert stream.accept_input().action == "wait"
         return stream
 
+    duplicate_manager, duplicate_supervisor, duplicate_spec = (
+        prepare_modern_cleanup_case(
+            "duplicate-eligible-root",
+            target_generation=2,
+        )
+    )
+    duplicate_sha256 = accepted_case_callback(
+        duplicate_manager,
+        duplicate_spec,
+        "duplicate-eligible-root",
+    )
+    duplicate_root = case_stream(
+        duplicate_manager,
+        duplicate_spec,
+        "duplicate-eligible-root",
+        generation=1,
+    )
+    duplicate_sibling = case_stream(
+        duplicate_manager,
+        duplicate_spec,
+        "duplicate-eligible-root",
+        generation=2,
+    )
+    assert duplicate_root.result(duplicate_sha256).action == "close"
+    assert duplicate_sibling.result(duplicate_sha256).action == "close"
+    duplicate_manager.request_exit(
+        duplicate_spec.owner_id,
+        duplicate_spec.operation_id,
+    )
+    assert duplicate_sibling.process_exited(0).action == "close"
+    duplicate_cleanup = duplicate_manager.cleanup(
+        duplicate_spec.owner_id,
+        duplicate_spec.operation_id,
+    )
+    duplicate_receipt = (
+        duplicate_manager._state_root(duplicate_cleanup.record)
+        / "provider-events"
+        / "resource-closed.json"
+    )
+    check(
+        "duplicate eligible root contour latches attention without close authority",
+        duplicate_cleanup.record.state == "attention-required"
+        and duplicate_cleanup.record.resources.surface_id
+        == "duplicate-eligible-root-surface"
+        and not duplicate_receipt.exists(),
+    )
+
+    malformed_manager, malformed_supervisor, malformed_spec = (
+        prepare_modern_cleanup_case(
+            "malformed-root-directory",
+            target_generation=2,
+        )
+    )
+    malformed_sha256 = accepted_case_callback(
+        malformed_manager,
+        malformed_spec,
+        "malformed-root-directory",
+    )
+    malformed_stream = case_stream(
+        malformed_manager,
+        malformed_spec,
+        "malformed-root-directory",
+        generation=2,
+    )
+    assert malformed_stream.result(malformed_sha256).action == "close"
+    malformed_root = (
+        malformed_manager._state_root(malformed_supervisor.read())
+        / "provider-events"
+        / "generation-1"
+    )
+    malformed_root.write_text("{}\n", encoding="utf-8")
+    malformed_manager.request_exit(
+        malformed_spec.owner_id,
+        malformed_spec.operation_id,
+    )
+    assert malformed_stream.process_exited(0).action == "close"
+    malformed_cleanup = malformed_manager.cleanup(
+        malformed_spec.owner_id,
+        malformed_spec.operation_id,
+    )
+    malformed_receipt = (
+        malformed_manager._state_root(malformed_cleanup.record)
+        / "provider-events"
+        / "resource-closed.json"
+    )
+    check(
+        "malformed root generation directory fails closed without close authority",
+        malformed_cleanup.record.state == "attention-required"
+        and malformed_cleanup.record.resources.surface_id
+        == "malformed-root-directory-surface"
+        and not malformed_receipt.exists(),
+    )
+
+    symlink_manager, symlink_supervisor, symlink_spec = (
+        prepare_modern_cleanup_case(
+            "symlinked-root-generation",
+            target_generation=2,
+        )
+    )
+    symlink_sha256 = accepted_case_callback(
+        symlink_manager,
+        symlink_spec,
+        "symlinked-root-generation",
+    )
+    symlink_stream = case_stream(
+        symlink_manager,
+        symlink_spec,
+        "symlinked-root-generation",
+        generation=2,
+    )
+    assert symlink_stream.result(symlink_sha256).action == "close"
+    symlink_provider_root = (
+        symlink_manager._state_root(symlink_supervisor.read())
+        / "provider-events"
+    )
+    (symlink_provider_root / "generation-1").symlink_to(
+        symlink_provider_root / "generation-2"
+    )
+    symlink_manager.request_exit(
+        symlink_spec.owner_id,
+        symlink_spec.operation_id,
+    )
+    assert symlink_stream.process_exited(0).action == "close"
+    symlink_cleanup = symlink_manager.cleanup(
+        symlink_spec.owner_id,
+        symlink_spec.operation_id,
+    )
+    symlink_receipt = symlink_provider_root / "resource-closed.json"
+    check(
+        "symlinked root generation fails closed without close authority",
+        symlink_cleanup.record.state == "attention-required"
+        and symlink_cleanup.record.resources.surface_id
+        == "symlinked-root-generation-surface"
+        and not symlink_receipt.exists(),
+    )
+
+    drifted_manager, drifted_supervisor, drifted_spec = (
+        prepare_modern_cleanup_case(
+            "root-identity-drift",
+            target_generation=2,
+        )
+    )
+    drifted_sha256 = accepted_case_callback(
+        drifted_manager,
+        drifted_spec,
+        "root-identity-drift",
+    )
+    drifted_record = drifted_manager.store.read(
+        drifted_spec.owner_id,
+        drifted_spec.operation_id,
+    )
+    drifted_root = RuntimeProviderEventStream.create(
+        drifted_manager._state_root(drifted_record) / "provider-events",
+        owner_id=drifted_spec.owner_id,
+        operation_id=drifted_spec.operation_id,
+        run_id=drifted_record.run_id,
+        generation=1,
+        process_identity="a" * 64,
+        workspace_id="root-identity-drift-workspace",
+        surface_id="root-identity-drift-foreign-surface",
+        input_sha256="c" * 64,
+    )
+    assert drifted_root.start().action == "wait"
+    assert drifted_root.reserve_input().action == "send"
+    assert drifted_root.accept_input().action == "wait"
+    drifted_stream = case_stream(
+        drifted_manager,
+        drifted_spec,
+        "root-identity-drift",
+        generation=2,
+    )
+    assert drifted_stream.result(drifted_sha256).action == "close"
+    drifted_manager.request_exit(
+        drifted_spec.owner_id,
+        drifted_spec.operation_id,
+    )
+    assert drifted_stream.process_exited(0).action == "close"
+    drifted_cleanup = drifted_manager.cleanup(
+        drifted_spec.owner_id,
+        drifted_spec.operation_id,
+    )
+    drifted_receipt = (
+        drifted_manager._state_root(drifted_cleanup.record)
+        / "provider-events"
+        / "resource-closed.json"
+    )
+    check(
+        "identity-drifted root generation fails closed despite an exact callback stream",
+        drifted_cleanup.record.state == "attention-required"
+        and drifted_cleanup.record.resources.surface_id
+        == "root-identity-drift-surface"
+        and not drifted_receipt.exists(),
+    )
+
+    authority_manager, authority_supervisor, authority_spec = (
+        prepare_modern_cleanup_case(
+            "root-generation-authority",
+            target_generation=2,
+        )
+    )
+    authority_sha256 = accepted_case_callback(
+        authority_manager,
+        authority_spec,
+        "root-generation-authority",
+    )
+    authority_root = case_stream(
+        authority_manager,
+        authority_spec,
+        "root-generation-authority",
+        generation=1,
+    )
+    authority_stream = case_stream(
+        authority_manager,
+        authority_spec,
+        "root-generation-authority",
+        generation=2,
+    )
+    assert authority_stream.result(authority_sha256).action == "close"
+    authority_manager.request_exit(
+        authority_spec.owner_id,
+        authority_spec.operation_id,
+    )
+    assert authority_stream.process_exited(0).action == "close"
+    authority_cleanup = authority_manager.cleanup(
+        authority_spec.owner_id,
+        authority_spec.operation_id,
+    )
+    authority_receipt = (
+        authority_manager._state_root(authority_cleanup.record)
+        / "provider-events"
+        / "resource-closed.json"
+    )
+    authority_payload = (
+        json.loads(authority_receipt.read_text(encoding="utf-8"))
+        if authority_receipt.is_file()
+        else {}
+    )
+    authority_replay = authority_manager.cleanup(
+        authority_spec.owner_id,
+        authority_spec.operation_id,
+    )
+    check(
+        "valid later callback generation completes while closure binds the immutable root",
+        authority_cleanup.record.state == "complete"
+        and not authority_cleanup.record.resources.surface_id
+        and authority_payload.get("identity", {}).get("generation") == 1
+        and authority_replay.action == "terminal",
+    )
+
     drift_manager, drift_supervisor, drift_spec = prepare_modern_cleanup_case(
         "root-generation-drift",
         target_generation=2,
