@@ -43,8 +43,10 @@ candidate scope.
   the verified HEAD now publishes one typed `pipeline-decision` continuation
   (`stop` or `retry-with-scope`) and parks in attention on every path instead
   of returning silently. It creates no commit and never completes the fix
-  transport on the failed HEAD. Including this repair, the live scripts
-  ratchet stands at 289 Python files / 108,143 lines.
+  transport on the failed HEAD. Each retry iteration carries its own decision
+  identity, so a later null-change retry at the same HEAD still publishes an
+  actionable continuation while replay stays idempotent. Including this repair,
+  the live scripts ratchet stands at 289 Python files / 108,157 lines.
 
 ### Candidate boundary
 

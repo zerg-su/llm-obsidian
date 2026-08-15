@@ -49,8 +49,10 @@ RC6.11.
   verified HEAD, теперь публикует один типизированный `pipeline-decision`
   continuation (`stop` или `retry-with-scope`) и на каждом пути уходит в
   attention вместо молчаливого возврата. Он не создаёт commit и не завершает
-  fix transport на failed HEAD. С учётом этого ремонта ratchet live scripts
-  составляет 289 Python files / 108 143 lines.
+  fix transport на failed HEAD. Каждая retry iteration несёт собственную
+  decision identity, поэтому поздний null-change retry на том же HEAD всё ещё
+  публикует actionable continuation, а replay остаётся идемпотентным. С учётом
+  этого ремонта ratchet live scripts составляет 289 Python files / 108 157 lines.
 
 ### Граница кандидата
 

@@ -400,6 +400,20 @@ class RuntimeWorkerFixMixin:
         """
 
         head_sha = self.git_head()
+        # One decision per (operation, retry iteration, HEAD): a later retry at
+        # the same HEAD is a distinct decision, while replay stays identical.
+        decision_identity = hashlib.sha256(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "operation_id": self.spec["operation_id"],
+                    "iteration": state.iteration,
+                    "head_sha": head_sha,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
         emit_compiled_pipeline_event(
             self.spec["cwd"],
             event="fix-retry-null-change",
@@ -416,7 +430,7 @@ class RuntimeWorkerFixMixin:
             self.publish_pipeline_decision(
                 marker={
                     "version": 1,
-                    "id": f"pipeline-decision-{head_sha[:24]}",
+                    "id": f"pipeline-decision-{decision_identity[:32]}",
                     "status": "pending",
                     "task_name": "engineering/fix retry changed nothing",
                     "category": "pipeline-decision",

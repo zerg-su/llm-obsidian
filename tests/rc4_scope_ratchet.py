@@ -260,16 +260,18 @@ and exact-surface cleanup in the existing owners. The candidate is 289 files /
 before this ceiling was raised, so the justification is late rather than
 backdated, and the RC6.10 record above remains the RC6.10 measurement.
 
-The RC6.11 candidate itself stays 289 files / 108,021 plus its own follow-up
-growth to 108,051 lines. The remaining 92 lines are deliberately *not* candidate
-scope: they are one coordinator-authorized mechanism repair (escalation
-``529fbbd8``, raised as ``mechanism-failure`` and resolved) of the null-change
-retry-completion seam in ``harness/runtime_worker_fix.py`` and its shared
-pipeline-decision publisher in ``harness/runtime_worker_control.py``. That
-repair adds no production module and no Outcome Contract evidence. The live
-ceiling therefore stands at 289 files / 108,143 lines, raised in the same commit
-as the growth, pinned exactly with no speculative headroom, and attributed to
-mechanism repair rather than to the approved RC6.11 Outcome Contract.
+The RC6.11 candidate denominator stays 289 files / 108,021 plus its own
+follow-up growth to 108,051 lines. Everything above that is a separate live-tree
+denominator for one mechanism repair of the null-change retry-completion seam in
+``harness/runtime_worker_fix.py`` and its shared pipeline-decision publisher in
+``harness/runtime_worker_control.py``. It adds no production module and no
+Outcome Contract evidence, and its chronology is stated as the commit history
+shows it rather than as the rule prefers: ``70297051`` added 86 lines and raised
+the ceiling to 108,137 in the same commit; ``b0202992`` then changed those two
+owners by a net six lines without touching the ceiling, and ``527e2667`` raised
+it to 108,143 one commit late; this commit adds the distinct per-iteration
+decision identity and raises the ceiling to 289 files / 108,157 lines with its
+own growth. Each figure is pinned exactly with no speculative headroom.
 """
 
 from __future__ import annotations
@@ -281,7 +283,7 @@ from pathlib import Path
 SCRIPT_FILE_CEILING = 289
 
 #: Maximum total lines across those files for the RC6.11 reviewer candidate.
-SCRIPT_LINE_CEILING = 108_143
+SCRIPT_LINE_CEILING = 108_157
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:
