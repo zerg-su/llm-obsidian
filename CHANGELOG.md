@@ -25,10 +25,16 @@ live-accepted. Builds on the preserved 2.7.1 candidate.
   closed to typed attention before any close receipt or resource clearing,
   while a valid same-session later-generation review callback cleanup still
   completes exactly once (`docs/acceptance/v2.7.2-root-generation-cleanup-authority.md`).
+- A delegated review callback now binds result authority to its exact
+  callback-target generation: when the target generation stream is missing or
+  mismatched, an earlier-generation result cannot substitute, and cleanup fails
+  closed to typed attention. A callback already accepted by the parent record
+  itself keeps its own durable earlier-generation contract.
 - The live scripts scope ratchet (`rc4_scope_ratchet`) is rebased to the exact
-  measured 2.7.2 candidate — 290 files, 108,525 lines, no speculative
+  measured 2.7.2 reviewed candidate — 290 files, 108,536 lines, no speculative
   headroom — absorbing the 2.7.1-base `review_cleanup_recovery.py` module that
-  landed without a ceiling raise plus the 30-line cleanup-authority repair.
+  landed without a ceiling raise plus the measured cleanup-authority repair and
+  its review correction.
 
 ## [2.7.1] - 2026-08-15
 

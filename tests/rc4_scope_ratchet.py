@@ -283,6 +283,13 @@ production module: its measured 30 lines restore the immutable root-generation
 binding and the separate root/callback authority selector inside the existing
 ``harness/runtime_session_cleanup.py`` owner. Both ceilings are pinned at the
 exact 290-file / 108,525-line candidate with no speculative headroom.
+
+The accepted 2.7.2 Sol review finding then required binding a delegated review
+callback's result authority to its exact callback-target generation, while a
+callback already accepted by the parent record keeps its own durable
+earlier-generation contract. The correction adds 11 measured lines in the same
+cleanup owner and no production module; the ceilings move to the exact
+290-file / 108,536-line reviewed candidate with no speculative headroom.
 """
 
 from __future__ import annotations
@@ -294,7 +301,7 @@ from pathlib import Path
 SCRIPT_FILE_CEILING = 290
 
 #: Maximum total lines across those files for the 2.7.2 cleanup candidate.
-SCRIPT_LINE_CEILING = 108_525
+SCRIPT_LINE_CEILING = 108_536
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

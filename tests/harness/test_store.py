@@ -1724,6 +1724,85 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
         and generation_complete.resources == OwnedResources(),
     )
 
+    create_review_cleanup_operation(
+        "op-review-target-missing-cli", awaiting_callback=True
+    )
+    target_missing_parent = store.read(
+        "owner-cli", "op-review-target-missing-cli"
+    )
+    target_missing_child_id = "op-review-target-missing-cli-round"
+    target_missing_child = store.create(
+        OperationSpec(
+            target_missing_child_id,
+            "key-op-review-target-missing-cli-round",
+            "review-round",
+            "owner-cli",
+            target_missing_parent.spec.route,
+            "packets/review-round.json",
+            "scoped",
+            parent_operation_id=target_missing_parent.spec.operation_id,
+            root_operation_id=target_missing_parent.spec.operation_id,
+        ),
+        lane_id=target_missing_parent.lane_id,
+        run_id="run-op-review-target-missing-cli-round",
+    )
+    for child_state in ("preflight", "starting", "running", "awaiting-callback"):
+        store.transition("owner-cli", target_missing_child_id, child_state)
+    target_missing_sha256 = accept_result_callback(target_missing_child_id)
+    publish_provider_result(
+        "op-review-target-missing-cli",
+        target_missing_sha256,
+    )
+    write_callback_target(
+        "op-review-target-missing-cli",
+        generation=2,
+        callback_operation_id=target_missing_child_id,
+        callback_run_id=target_missing_child.run_id,
+    )
+    target_missing_process = FakeProcess(
+        "unknown", supervisor_status="unknown", capture_matches=True
+    )
+    target_missing_cmux = FakeCmux("alive")
+    target_missing_exit_rc, _target_missing_exit_output = run_cli_in_process(
+        "close",
+        "op-review-target-missing-cli",
+        process=target_missing_process,
+        cmux=target_missing_cmux,
+    )
+    target_missing_process.status = "dead"
+    target_missing_process.supervisor_status = "dead"
+    target_missing_cmux.current = "missing"
+    target_missing_cmux.workspace_current = "missing"
+    target_missing_cleanup_rc, _target_missing_cleanup_output = (
+        run_cli_in_process(
+            "close",
+            "op-review-target-missing-cli",
+            process=target_missing_process,
+            cmux=target_missing_cmux,
+        )
+    )
+    target_missing_after = store.read(
+        "owner-cli", "op-review-target-missing-cli"
+    )
+    target_missing_receipt = (
+        store.root
+        / "owners"
+        / "owner-cli"
+        / "runtime"
+        / "op-review-target-missing-cli"
+        / "provider-events"
+        / "resource-closed.json"
+    )
+    check(
+        "CLI delegated review cleanup fails closed without its exact target generation",
+        target_missing_exit_rc == 0
+        and target_missing_cleanup_rc == 0
+        and target_missing_after.state == "attention-required"
+        and target_missing_after.resources.surface_id
+        == "11111111-1111-1111-1111-111111111111"
+        and not target_missing_receipt.exists(),
+    )
+
     create_cli_operation(
         "op-accepted-mismatch-cli", state="awaiting-callback"
     )

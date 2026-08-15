@@ -369,6 +369,17 @@ class RuntimeSessionCleanupMixin:
         )
         if require_result and selected is None:
             return "attention"
+        # A delegated review callback binds result authority to its exact
+        # callback-target generation; an earlier-generation result cannot
+        # substitute for a missing or mismatched target stream. A callback
+        # already accepted by the parent record itself keeps its own durable
+        # earlier-generation contract.
+        if (
+            require_result
+            and callback_record is not record
+            and selected[1] != int(target["generation"])
+        ):
+            return "attention"
         identity = ResourceIdentity(
             owner_id=record.spec.owner_id,
             operation_id=record.spec.operation_id,

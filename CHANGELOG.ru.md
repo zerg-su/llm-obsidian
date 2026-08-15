@@ -32,10 +32,17 @@
   очистки ресурсов, а валидный same-session cleanup с поздней generation
   review callback по-прежнему завершается ровно один раз
   (`docs/acceptance/v2.7.2-root-generation-cleanup-authority.md`).
+- Delegated review callback теперь привязывает result authority к своей точной
+  callback-target generation: при отсутствующем или несовпадающем target
+  generation stream результат более ранней генерации не подменяет его, и
+  cleanup уходит fail-closed в typed attention. Callback, уже принятый самим
+  parent record, сохраняет собственный durable контракт более ранней
+  генерации.
 - Live scope ratchet скриптов (`rc4_scope_ratchet`) перепривязан к точному
-  измерению кандидата 2.7.2 — 290 файлов, 108,525 строк, без запасного
-  headroom — с учётом модуля `review_cleanup_recovery.py` из базы 2.7.1,
-  добавленного без поднятия потолка, и 30 строк ремонта cleanup authority.
+  измерению reviewed-кандидата 2.7.2 — 290 файлов, 108,536 строк, без
+  запасного headroom — с учётом модуля `review_cleanup_recovery.py` из базы
+  2.7.1, добавленного без поднятия потолка, измеренного ремонта cleanup
+  authority и его review-коррекции.
 
 ## [2.7.1] — 2026-08-15
 
