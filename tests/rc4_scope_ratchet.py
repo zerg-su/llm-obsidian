@@ -260,13 +260,16 @@ and exact-surface cleanup in the existing owners. The candidate is 289 files /
 before this ceiling was raised, so the justification is late rather than
 backdated, and the RC6.10 record above remains the RC6.10 measurement.
 
-The RC6.11 follow-up repairs the null-change retry-completion seam in
-``harness/runtime_worker_fix.py``. A bounded retry that finishes with an empty
-change set at the verified HEAD now publishes one typed decision continuation
-instead of returning silently, which costs 86 lines in that existing owner and
-adds no production module. The candidate is 289 files / 108,137 lines, raised
-in the same commit as the growth and pinned exactly with no speculative
-headroom.
+The RC6.11 candidate itself stays 289 files / 108,021 plus its own follow-up
+growth to 108,051 lines. The remaining 92 lines are deliberately *not* candidate
+scope: they are one coordinator-authorized mechanism repair (escalation
+``529fbbd8``, raised as ``mechanism-failure`` and resolved) of the null-change
+retry-completion seam in ``harness/runtime_worker_fix.py`` and its shared
+pipeline-decision publisher in ``harness/runtime_worker_control.py``. That
+repair adds no production module and no Outcome Contract evidence. The live
+ceiling therefore stands at 289 files / 108,143 lines, raised in the same commit
+as the growth, pinned exactly with no speculative headroom, and attributed to
+mechanism repair rather than to the approved RC6.11 Outcome Contract.
 """
 
 from __future__ import annotations
@@ -278,7 +281,7 @@ from pathlib import Path
 SCRIPT_FILE_CEILING = 289
 
 #: Maximum total lines across those files for the RC6.11 reviewer candidate.
-SCRIPT_LINE_CEILING = 108_137
+SCRIPT_LINE_CEILING = 108_143
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

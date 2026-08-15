@@ -31,12 +31,20 @@ Observer-safe custom terminal cleanup candidate.
 - Review startup cleanup now retires an exact dead reviewer only when durable
   provider events prove `provider-started` without `input-accepted`; its event
   identity is derived from the canonical `ProviderEventIdentity` contract.
+- The live scripts ratchet now covers 289 Python files / 108,051 lines.
+
+### Authorized mechanism repair
+
+Outside the approved RC6.11 Outcome Contract and recorded as such: one
+coordinator-authorized repair of the engineering/fix transport, not RC6.11
+candidate scope.
+
 - A bounded engineering/fix retry that completes with an empty change set at
   the verified HEAD now publishes one typed `pipeline-decision` continuation
-  (`stop` or `retry-with-scope`) and parks in attention instead of returning
-  silently. It creates no commit and never completes the fix transport on the
-  failed HEAD.
-- The live scripts ratchet now covers 289 Python files / 108,137 lines.
+  (`stop` or `retry-with-scope`) and parks in attention on every path instead
+  of returning silently. It creates no commit and never completes the fix
+  transport on the failed HEAD. Including this repair, the live scripts
+  ratchet stands at 289 Python files / 108,143 lines.
 
 ### Candidate boundary
 
