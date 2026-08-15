@@ -139,6 +139,39 @@ def recover_accepted_callback_cleanup(controller: Any) -> bool:
     return True
 
 
+def accepted_callback_cleanup_is_complete(controller: Any) -> bool:
+    """Prove the callback-bound reviewer is already resource-free."""
+
+    state = controller.read()
+    raw_attempt = state.get("attempt")
+    stored_lanes = state.get("lanes")
+    if not isinstance(raw_attempt, Mapping):
+        return False
+    attempt = ReviewAttempt.from_mapping(raw_attempt)
+    if (
+        attempt.status != "awaiting-callback"
+        or state.get("status") != "reviewing"
+        or len(attempt.identity.lanes) != 1
+        or not isinstance(stored_lanes, list)
+        or len(stored_lanes) != 1
+    ):
+        return False
+    records = _accepted_records(controller, attempt)
+    if records is None:
+        return False
+    parent, _child = records
+    lane = stored_lanes[0]
+    return bool(
+        isinstance(lane, dict)
+        and lane.get("state") == "complete"
+        and not lane.get("surface_id")
+        and parent.state == "complete"
+        and not parent.resources.surface_id
+        and parent.resources.process_group == 0
+        and parent.resources.supervisor_pid == 0
+    )
+
+
 def recover_interrupted_review_attempt(controller: Any) -> bool:
     """Select one exact no-replay recovery for the frozen attempt."""
 

@@ -25,7 +25,7 @@ from harness.pre_model_reviewer_retirement import (
     review_attempt_records_are_quiescent,
 )
 from harness.review_finalization import StructuralPivotPending
-from harness.review_cleanup_recovery import recover_interrupted_review_attempt
+from harness.review_cleanup_recovery import accepted_callback_cleanup_is_complete, recover_interrupted_review_attempt
 from harness.runtime_sessions import RuntimeSessionManager
 from harness.store import OperationStore, StoreError
 from harness.workflows.review import (
@@ -863,7 +863,6 @@ def _run_exact_head_review(
         )
     if request is None:
         raise TaskReviewError("enabled review has no request")
-
     cycle = 1
     zero_lane_preflight = False
     predecessor_attempt_id = ""
@@ -871,6 +870,7 @@ def _run_exact_head_review(
     supersedes_approved_attempt_id = ""
     approved_summary_predecessor_attempt_id = ""
     amended_boundary = False
+    recovered_attention_attempt = gate_exists and accepted_callback_cleanup_is_complete(gate)
     if gate_exists:
         prior_state = gate.read()
         prior_attempt = ReviewAttempt.from_mapping(prior_state["attempt"])
@@ -878,6 +878,7 @@ def _run_exact_head_review(
             prior_attempt.status == "terminal"
             and recover_interrupted_review_attempt(gate)
         ):
+            recovered_attention_attempt = True
             prior_state = gate.read()
             prior_attempt = ReviewAttempt.from_mapping(
                 prior_state["attempt"]
@@ -1031,7 +1032,6 @@ def _run_exact_head_review(
                     )
         else:
             reserved_attempt_id = prior_attempt.identity.attempt_id
-
     reservation = _reserve_or_reviewing(
         lambda: reserve_exact_head_attempt(
             meta,
@@ -1048,6 +1048,7 @@ def _run_exact_head_review(
             approved_summary_predecessor_attempt_id=(
                 approved_summary_predecessor_attempt_id
             ),
+            recover_attention_attempt=recovered_attention_attempt,
         ),
         lambda: _reviewing_receipt(
             meta, vault, worktree, runtime_root, context_manifest
@@ -1080,7 +1081,6 @@ def _run_exact_head_review(
                 approved_summary_predecessor_attempt_id
             ),
         )
-
     state = gate.read()
     attempt = ReviewAttempt.from_mapping(state["attempt"])
     lineage, cycle, plan_sha256, outcome_sha256 = _attempt_binding(

@@ -168,6 +168,7 @@ def reserve_task_finalization_cycle(
     now_epoch: int,
     predecessor_attempt_id: str = "",
     supersedes_approved_attempt_id: str = "",
+    recover_attention_attempt: bool = False,
     pivot_workflow: object | None = None,
     pivot_runtime: object | None = None,
 ) -> TaskFinalizationReservation | None:
@@ -279,6 +280,7 @@ def reserve_task_finalization_cycle(
         supersedes_approved_attempt_id=(
             supersedes_approved_attempt_id
         ),
+        recover_attention_attempt=recover_attention_attempt,
     )
     selected = (
         decisions[reserved.cycle_number]

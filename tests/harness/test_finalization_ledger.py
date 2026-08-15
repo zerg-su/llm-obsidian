@@ -396,6 +396,51 @@ with tempfile.TemporaryDirectory(prefix="finalization-ledger-mechanism.") as raw
     )
 
 with tempfile.TemporaryDirectory(
+    prefix="finalization-ledger-accepted-cleanup-recovery."
+) as raw:
+    ledger = FinalizationLedger(
+        Path(raw),
+        lineage_id=attempt(430),
+        origin_task_id=attempt(431),
+        plan_sha256="1" * 64,
+        outcome_contract_sha256="2" * 64,
+    )
+    reserve(ledger, 432)
+    ledger.record_terminal(
+        attempt_id=attempt(432), terminal_result="attention-required"
+    )
+    recovered = ledger.reserve(
+        attempt_id=attempt(432),
+        exact_head=f"{432:040x}",
+        task_id=attempt(432),
+        worktree="/tmp/finalization-task-432",
+        provider_policy={
+            "routes": ["finalization-primary"],
+            "reason": "primary-only",
+        },
+        recover_attention_attempt=True,
+    )
+    recovered_snapshot = ledger.snapshot()
+    check(
+        "exact accepted-callback cleanup restores its released reservation",
+        not recovered.allowed
+        and recovered.created
+        and recovered.reason == "attention-recovered"
+        and recovered.cycle_number == 1
+        and recovered_snapshot["attempts"] == []
+        and recovered_snapshot["cycles"][0]["attempt_id"] == attempt(432)
+        and recovered_snapshot["cycles"][0]["terminal_result"] == "",
+    )
+    approved_after_cleanup = ledger.record_terminal(
+        attempt_id=attempt(432), terminal_result="approved"
+    )
+    check(
+        "recovered callback records its actual terminal review verdict",
+        approved_after_cleanup.terminal_result == "approved"
+        and ledger.snapshot()["terminal_disposition"] == "approved",
+    )
+
+with tempfile.TemporaryDirectory(
     prefix="finalization-ledger-predecessor-retry."
 ) as raw:
     lineage_id = attempt(450)

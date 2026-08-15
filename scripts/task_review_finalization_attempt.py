@@ -192,6 +192,7 @@ def reserve_exact_head_attempt(
     reserved_attempt_id: str = "",
     supersedes_approved_attempt_id: str = "",
     approved_summary_predecessor_attempt_id: str = "",
+    recover_attention_attempt: bool = False,
 ) -> tuple[ReviewOperationRequest, FinalizationLedger, int]:
     config = load_config(vault)
     ledger = finalization_ledger(meta, vault, task_id, worktree)
@@ -240,6 +241,7 @@ def reserve_exact_head_attempt(
             approved_summary_predecessor_attempt_id
             or supersedes_approved_attempt_id
         ),
+        recover_attention_attempt=recover_attention_attempt,
     )
     if reservation is None or reservation.routes is None:
         raise FinalizationAttemptError(
@@ -248,6 +250,7 @@ def reserve_exact_head_attempt(
     if not reservation.cycle.allowed and reservation.cycle.reason not in {
         "already-reserved",
         "attempt-terminal",
+        "attention-recovered",
     }:
         raise FinalizationAttemptError(
             f"exact-HEAD finalization stopped: {reservation.cycle.reason}"

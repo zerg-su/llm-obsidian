@@ -401,6 +401,7 @@ class FinalizationLedger:
         provider_policies: Mapping[int, dict[str, Any]],
         predecessor_attempt_id: str = "",
         supersedes_approved_attempt_id: str = "",
+        recover_attention_attempt: bool = False,
     ) -> CycleDecision:
         requested_identity = {
             "attempt_id": _canonical_uuid(attempt_id, "attempt_id"),
@@ -502,12 +503,46 @@ class FinalizationLedger:
                     ),
                     disposition="",
                 )
-            if any(
-                receipt["attempt_id"] == requested_identity["attempt_id"]
+            matching_attempts = [
+                receipt
                 for receipt in value["attempts"]
-            ):
-                raise FinalizationLedgerError(
-                    "finalization attempt_id was reused"
+                if receipt["attempt_id"] == requested_identity["attempt_id"]
+            ]
+            if matching_attempts:
+                receipt = matching_attempts[0]
+                cycle_number = int(receipt["cycle_number"])
+                if not recover_attention_attempt:
+                    raise FinalizationLedgerError(
+                        "finalization attempt_id was reused"
+                    )
+                if (
+                    len(matching_attempts) != 1
+                    or value["attempts"][-1] is not receipt
+                    or receipt["classification"] != "attention-required"
+                    or cycle_number != len(value["cycles"]) + 1
+                    or any(
+                        not cycle["terminal_result"]
+                        for cycle in value["cycles"]
+                    )
+                ):
+                    raise FinalizationLedgerError(
+                        "attention recovery reservation is unavailable"
+                    )
+                cycle = {
+                    "number": cycle_number,
+                    **requested_identity,
+                    "provider_policy": provider_policies[cycle_number],
+                    "terminal_result": "",
+                }
+                value["attempts"].remove(receipt)
+                value["cycles"].append(cycle)
+                self._write(value)
+                return _decision(
+                    cycle,
+                    allowed=False,
+                    created=True,
+                    reason="attention-recovered",
+                    disposition="",
                 )
             if value["cycles"] and not value["cycles"][-1]["terminal_result"]:
                 raise FinalizationLedgerError(
@@ -556,6 +591,7 @@ class FinalizationLedger:
         worktree: str,
         provider_policy: Mapping[str, Any],
         supersedes_approved_attempt_id: str = "",
+        recover_attention_attempt: bool = False,
     ) -> CycleDecision:
         """Reserve the sole active cycle and authorize at most one effect."""
 
@@ -571,6 +607,7 @@ class FinalizationLedger:
             supersedes_approved_attempt_id=(
                 supersedes_approved_attempt_id
             ),
+            recover_attention_attempt=recover_attention_attempt,
         )
 
     def reserve_from_policy_matrix(
@@ -583,6 +620,7 @@ class FinalizationLedger:
         provider_policies: Mapping[int, Mapping[str, Any]],
         predecessor_attempt_id: str = "",
         supersedes_approved_attempt_id: str = "",
+        recover_attention_attempt: bool = False,
     ) -> CycleDecision:
         """Atomically select the policy for the cycle actually reserved."""
 
@@ -606,6 +644,7 @@ class FinalizationLedger:
             supersedes_approved_attempt_id=(
                 supersedes_approved_attempt_id
             ),
+            recover_attention_attempt=recover_attention_attempt,
         )
 
     def record_terminal(
