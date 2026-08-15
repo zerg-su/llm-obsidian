@@ -75,6 +75,16 @@ from harness.verification_attempt import (  # noqa: E402
     verification_input_sha256,
 )
 
+import importlib.util  # noqa: E402
+
+_resubmit_spec = importlib.util.spec_from_file_location(
+    "pipeline_verification_resubmit",
+    ROOT / "scripts" / "pipeline-verification-resubmit.py",
+)
+assert _resubmit_spec and _resubmit_spec.loader
+verification_resubmit = importlib.util.module_from_spec(_resubmit_spec)
+_resubmit_spec.loader.exec_module(verification_resubmit)
+
 
 class FallbackWakeSource:
     """Hermetic pacing that never fabricates a cmux event receipt."""
@@ -3916,42 +3926,23 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
                         "verification_escalation": typed_escalation,
                     },
                 )
-                resolution = append_resolution(
+                append_resolution(
                     worktree,
-                    "authorize-one-same-head-retry",
+                    "retry-mechanism-flake",
                     verification_resolution=resolve_verification_escalation(
                         typed_escalation,
-                        action="authorize-one-same-head-retry",
+                        decision="retry-mechanism-flake",
                         evidence_note=(
                             "Exact isolated verification proved a mechanism flake."
                         ),
                     ),
                     resolved_at="2026-08-05T12:01:00Z",
                 )
-                packet_sha256 = hashlib.sha256(
-                    json.dumps(
-                        packet, sort_keys=True, separators=(",", ":")
-                    ).encode()
-                ).hexdigest()
-                next_attempt = attempt.same_head_retry()
-                write_json(
-                    worktree / ".task-verification-response.json",
-                    {
-                        "schema_version": 2,
-                        "operation_id": task_id,
-                        "verification_operation_id": packet[
-                            "verification_operation_id"
-                        ],
-                        "failed_head_sha": packet["head_sha"],
-                        "packet_sha256": packet_sha256,
-                        "response": "retry-mechanism-flake",
-                        "resubmitted_head_sha": packet["head_sha"],
-                        "failed_attempt_sha256": attempt.sha256,
-                        "next_attempt": next_attempt.as_dict(),
-                        "next_attempt_sha256": next_attempt.sha256,
-                        "mechanism_flake_decision_id": escalation_id,
-                        "mechanism_flake_decision_sha256": resolution.sha256,
-                    },
+                # Only the registered code-owned entry may publish the
+                # identity-bound same-HEAD response; a hand-written response
+                # must never satisfy this scenario.
+                verification_resubmit.publish_same_head_response(
+                    worktree, escalation_id
                 )
                 completed.set()
 

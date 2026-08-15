@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import shlex
@@ -27,6 +28,7 @@ from task_escalation_records import (
 from task_plan_authority import PlanAuthorityError, record_plan_amendment
 from harness.adapters.cmux import run_cmux
 from harness.artifact_repair import (
+    VERIFICATION_PUBLIC_DECISIONS,
     build_verification_escalation,
     resolve_verification_escalation,
 )
@@ -165,11 +167,9 @@ def raise_escalation(
                 if contract != expected_escalation:
                     die("verification escalation contract identity changed", 3)
                 marker["verification_escalation"] = contract
-                marker["allowed_decisions"] = [
-                    "retry-mechanism-flake",
-                    "stop",
-                    "repair-repository-mechanism",
-                ]
+                marker["allowed_decisions"] = list(
+                    VERIFICATION_PUBLIC_DECISIONS
+                )
             except VerificationAttemptError as exc:
                 die(f"verification escalation authority is invalid: {exc}", 3)
     marker_path = worktree / ".task-needs-attention.json"
@@ -245,6 +245,19 @@ def raise_escalation(
     return 0
 
 
+def _verification_resubmit():
+    """Load the one registered same-HEAD response builder/writer."""
+    path = Path(__file__).resolve().with_name("pipeline-verification-resubmit.py")
+    spec = importlib.util.spec_from_file_location(
+        "pipeline_verification_resubmit", path
+    )
+    if spec is None or spec.loader is None:
+        die("verification resubmit owner is unavailable", 3)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def resolve_escalation(worktree: Path, decision: str) -> int:
     meta, _ = load_unattended(worktree)
     try:
@@ -255,14 +268,8 @@ def resolve_escalation(worktree: Path, decision: str) -> int:
         die("there is no unresolved task escalation", 3)
     marker = latest.payload
     unresolved_status = str(marker.get("status") or "")
-    public_answer = compact(decision, "decision")
+    answer = compact(decision, "decision")
     typed_escalation = marker.get("verification_escalation")
-    answer = (
-        "authorize-one-same-head-retry"
-        if typed_escalation is not None
-        and public_answer == "retry-mechanism-flake"
-        else public_answer
-    )
     replay = unresolved_status == "resolved" and marker.get("decision") == answer
     if unresolved_status not in {"pending", "delivery-failed"} and not replay:
         die("there is no unresolved task escalation", 3)
@@ -275,7 +282,7 @@ def resolve_escalation(worktree: Path, decision: str) -> int:
         try:
             typed_resolution = resolve_verification_escalation(
                 typed_escalation,
-                action=answer,
+                decision=answer,
                 evidence_note="Coordinator classified the exact verification attempt.",
             )
         except VerificationAttemptError as exc:
@@ -288,9 +295,24 @@ def resolve_escalation(worktree: Path, decision: str) -> int:
         )
     except EscalationRecordError as exc:
         die(str(exc), 3)
+    retry_note = ""
+    if typed_resolution is not None and answer == "retry-mechanism-flake":
+        resubmit = _verification_resubmit()
+        try:
+            resubmit.publish_same_head_response(
+                worktree, str(marker.get("id") or "")
+            )
+        except (resubmit.ResubmitError, OSError, ValueError) as exc:
+            die(f"same-HEAD retry response publication failed: {exc}", 3)
+        retry_note = (
+            "The identity-bound same-HEAD retry response is already "
+            "published; the harness consumes attempt 1 without another "
+            "command. "
+        )
     send(
         task_surface,
         f"[Coordinator decision for escalation {marker.get('id')}] {answer} "
+        f"{retry_note}"
         "Continue only within this decision and the approved plan; escalate again on further drift.",
         clear_codex=str(meta.get("executor_runtime") or meta.get("runtime") or "") == "codex",
     )

@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Build the exact identity-bound response for a repaired verification HEAD."""
+"""Build the exact identity-bound response for a repaired verification HEAD.
+
+Changed-HEAD fix-and-resubmit remains this script's CLI. The same-HEAD
+mechanism-flake response has no manual command: after the originating
+coordinator resolves the exact public decision ``retry-mechanism-flake``,
+``publish_same_head_response`` is invoked once by the registered coordinator
+path (``task_escalation.py resolve``) and writes the one identity-bound
+response idempotently."""
 
 from __future__ import annotations
 
@@ -145,6 +152,7 @@ def _same_head_response(
         or decision_record.record_type != "resolution"
         or payload.get("status") != "resolved"
         or payload.get("category") != "mechanism-failure"
+        or payload.get("decision") != "retry-mechanism-flake"
         or payload.get("id") != escalation_id
         or Path(str(payload.get("worktree") or "")).expanduser().resolve()
         != worktree
@@ -182,8 +190,9 @@ def build_response(
     if current_head == failed_head:
         if not same_head_mechanism_flake:
             raise ResubmitError(
-                "verification repair must commit a new HEAD or provide exact "
-                "same-HEAD mechanism-flake authorization"
+                "verification repair must commit a new HEAD; one same-HEAD "
+                "retry is published only by the coordinator's exact "
+                "retry-mechanism-flake resolution"
             )
         return _same_head_response(
             worktree, packet, canonical, same_head_mechanism_flake
@@ -202,6 +211,23 @@ def build_response(
         "packet_sha256": hashlib.sha256(canonical).hexdigest(),
         "response": "fix-and-resubmit",
         "resubmitted_head_sha": current_head,
+    }
+
+
+def publish_same_head_response(
+    worktree: Path, escalation_id: str
+) -> dict[str, object]:
+    """Registered coordinator entry: publish one authorized same-HEAD response."""
+
+    if not isinstance(escalation_id, str) or not escalation_id:
+        raise ResubmitError("same-HEAD mechanism-flake authorization is invalid")
+    root = worktree.expanduser().resolve()
+    response = build_response(root, same_head_mechanism_flake=escalation_id)
+    return {
+        "schema_version": 1,
+        "status": write_response(root, response),
+        "operation_id": response["operation_id"],
+        "response": RESPONSE_NAME,
     }
 
 
@@ -231,23 +257,12 @@ def write_response(worktree: Path, response: dict[str, object]) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--worktree", type=Path, required=True)
-    parser.add_argument(
-        "--same-head-mechanism-flake",
-        default="",
-        metavar="ESCALATION_ID",
-        help=(
-            "consume one exact resolved mechanism-flake decision for attempt 1"
-        ),
-    )
     args = parser.parse_args()
     worktree = args.worktree.expanduser().resolve()
     if not worktree.is_dir():
         die("worktree must be an existing directory")
     try:
-        response = build_response(
-            worktree,
-            same_head_mechanism_flake=args.same_head_mechanism_flake,
-        )
+        response = build_response(worktree)
         status = write_response(worktree, response)
     except (ResubmitError, OSError, ValueError, json.JSONDecodeError) as exc:
         die(str(exc))

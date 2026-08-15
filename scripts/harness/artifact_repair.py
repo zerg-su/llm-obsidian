@@ -41,7 +41,7 @@ RESERVATION_FIELDS = frozenset({
     "schema_version", "family", "attempt_id", "template_sha256",
     "invalid_sha256", "attempt", "correction_id",
 })
-VERIFICATION_ACTIONS = frozenset({"authorize-one-same-head-retry", "stop", "repair-repository-mechanism"})
+VERIFICATION_PUBLIC_DECISIONS = ("retry-mechanism-flake", "stop", "repair-repository-mechanism")
 
 
 class ArtifactRepairError(RuntimeError):
@@ -271,9 +271,9 @@ def build_verification_escalation(
 
 
 def resolve_verification_escalation(
-    escalation: object, *, action: str, evidence_note: str
+    escalation: object, *, decision: str, evidence_note: str
 ) -> dict[str, object]:
-    """Resolve only a typed escalation; prose never carries authority tokens."""
+    """Translate the exact public decision into the one private typed action."""
 
     expected = {
         "schema_version", "kind", "category", "operation_id",
@@ -294,15 +294,15 @@ def resolve_verification_escalation(
         or not IDENTIFIER.fullmatch(str(escalation.get("verification_operation_id") or ""))
         or not GIT_OID.fullmatch(str(escalation.get("exact_head_sha") or ""))
         or not SHA256.fullmatch(str(escalation.get("failed_attempt_sha256") or ""))
-        or action not in VERIFICATION_ACTIONS
+        or decision not in VERIFICATION_PUBLIC_DECISIONS
         or not note
         or len(note) > 1000
     ):
         raise VerificationAttemptError("verification escalation resolution is invalid")
     return {
         **escalation,
-        "decision": "authorize-attempt-1" if action == "authorize-one-same-head-retry" else "do-not-authorize",
-        "action": action,
+        "decision": "authorize-attempt-1" if decision == "retry-mechanism-flake" else "do-not-authorize",
+        "action": decision,
         "evidence_note": note,
     }
 
@@ -319,7 +319,7 @@ def verification_resolution_authorizes(
     try:
         expected = resolve_verification_escalation(
             build_verification_escalation(failed_attempt, verification_operation_id),
-            action="authorize-one-same-head-retry",
+            decision="retry-mechanism-flake",
             evidence_note=str(resolution.get("evidence_note") or ""),
         )
     except VerificationAttemptError:
@@ -992,9 +992,8 @@ class ContractArtifactOwner:
 
 
 __all__ = (
-    "ArtifactObservation",
-    "ArtifactRepairError",
-    "ArtifactRepairResult",
+    "ArtifactObservation", "ArtifactRepairError", "ArtifactRepairResult",
+    "VERIFICATION_PUBLIC_DECISIONS",
     "ContractArtifactOwner",
     "CorrectionBudgetExhausted",
     "CorrectionNotificationUncertain",

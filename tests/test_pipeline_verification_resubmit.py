@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
-"""Regression checks for code-owned verification resubmission."""
+"""Regression checks for code-owned verification resubmission.
+
+The canonical public decision is exactly ``retry-mechanism-flake`` from raise
+through the durable resolution record and the coordinator wake. Resolving that
+decision automatically publishes the one identity-bound same-HEAD response; no
+separate manual resubmit command exists for the same-HEAD path.
+"""
 
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import os
 import subprocess
@@ -20,6 +27,19 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from harness.verification_attempt import VerificationAttempt  # noqa: E402
 import task_escalation  # noqa: E402
 from task_escalation_records import load_latest  # noqa: E402
+
+
+def load_resubmit_module():
+    spec = importlib.util.spec_from_file_location(
+        "pipeline_verification_resubmit", SCRIPT
+    )
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+resubmit = load_resubmit_module()
 
 
 with tempfile.TemporaryDirectory(prefix="verification-resubmit.") as raw:
@@ -94,16 +114,36 @@ with tempfile.TemporaryDirectory(prefix="verification-resubmit.") as raw:
     packet_path.write_text(
         json.dumps(packet, sort_keys=True) + "\n", encoding="utf-8"
     )
+    response_path = worktree / ".task-verification-response.json"
     blocked = subprocess.run(
         ["python3", str(SCRIPT), "--worktree", str(worktree)],
         text=True, capture_output=True, check=False,
     )
     if (
         blocked.returncode == 0
-        or "commit a new HEAD or provide exact same-HEAD mechanism-flake authorization"
-        not in blocked.stderr
+        or "verification repair must commit a new HEAD" not in blocked.stderr
     ):
         raise AssertionError(blocked)
+    manual_flag = subprocess.run(
+        [
+            "python3",
+            str(SCRIPT),
+            "--worktree",
+            str(worktree),
+            "--same-head-mechanism-flake",
+            "manual-escalation",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if (
+        manual_flag.returncode == 0
+        or "unrecognized arguments" not in manual_flag.stderr
+    ):
+        raise AssertionError(
+            ("the manual same-HEAD resubmit command must not exist", manual_flag)
+        )
     typed_escalation = {
         "schema_version": 1,
         "kind": "same-head-verification-retry",
@@ -167,25 +207,48 @@ with tempfile.TemporaryDirectory(prefix="verification-resubmit.") as raw:
     ):
         raise AssertionError((raised, relayed))
     escalation_id = str(raised.payload["id"])
+    wakes_before = len(relayed)
+
+    # The private alias and near-match decisions fail closed before any record.
+    for near_match in ("authorize-one-same-head-retry", "retry-mechanism-flakes"):
+        with mock.patch.dict(
+            os.environ,
+            {"CODEX_THREAD_ID": str(task_meta["origin_session"])},
+            clear=True,
+        ):
+            try:
+                task_escalation.resolve_escalation(worktree, near_match)
+            except SystemExit:
+                pass
+            else:
+                raise AssertionError(
+                    f"near-match decision {near_match!r} was accepted"
+                )
+        still_pending = load_latest(worktree)
+        if (
+            still_pending is None
+            or still_pending.record_type != "raise"
+            or response_path.exists()
+            or len(relayed) != wakes_before
+        ):
+            raise AssertionError((near_match, still_pending, relayed))
+
+    # A foreign session must not resolve the escalation.
     with mock.patch.dict(
-        os.environ,
-        {"CODEX_THREAD_ID": str(task_meta["origin_session"])},
+        os.environ, {"CODEX_THREAD_ID": "99999999-9999-4999-8999-999999999999"},
         clear=True,
     ):
-        task_escalation.resolve_escalation(
-            worktree, "retry-mechanism-flake"
-        )
-    resolved = load_latest(worktree)
-    if resolved is None:
-        raise AssertionError("typed resolution was not published")
-    typed_resolution = resolved.payload.get("verification_resolution")
-    latest = load_latest(worktree)
-    if (
-        latest is None
-        or latest.payload.get("decision") != "authorize-one-same-head-retry"
-        or latest.payload.get("verification_resolution") != typed_resolution
-    ):
-        raise AssertionError((latest, typed_resolution))
+        try:
+            task_escalation.resolve_escalation(worktree, "retry-mechanism-flake")
+        except SystemExit:
+            pass
+        else:
+            raise AssertionError("foreign session resolved the escalation")
+    if load_latest(worktree).record_type != "raise" or response_path.exists():
+        raise AssertionError("foreign session left durable effects")
+
+    # A failed response publication keeps the durable public decision but
+    # must not wake the task with a false continuation.
     packet_path.write_text(
         json.dumps(
             {
@@ -197,44 +260,54 @@ with tempfile.TemporaryDirectory(prefix="verification-resubmit.") as raw:
         + "\n",
         encoding="utf-8",
     )
-    unauthorized_same_head = subprocess.run(
-        [
-            "python3",
-            str(SCRIPT),
-            "--worktree",
-            str(worktree),
-            "--same-head-mechanism-flake",
-            escalation_id,
-        ],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    if (
-        unauthorized_same_head.returncode == 0
-        or "same-HEAD mechanism-flake retry is not authorized"
-        not in unauthorized_same_head.stderr
+    with mock.patch.dict(
+        os.environ,
+        {"CODEX_THREAD_ID": str(task_meta["origin_session"])},
+        clear=True,
     ):
-        raise AssertionError(unauthorized_same_head)
+        try:
+            task_escalation.resolve_escalation(worktree, "retry-mechanism-flake")
+        except SystemExit:
+            pass
+        else:
+            raise AssertionError(
+                "an unauthorized packet still published a same-HEAD response"
+            )
+    resolved = load_latest(worktree)
+    if (
+        resolved is None
+        or resolved.record_type != "resolution"
+        or resolved.payload.get("decision") != "retry-mechanism-flake"
+        or response_path.exists()
+        or len(relayed) != wakes_before
+    ):
+        raise AssertionError((resolved, relayed))
+
+    # Replaying the exact public decision after repairing the packet
+    # publishes the identity-bound response and then wakes the task once.
     packet_path.write_text(
         json.dumps(packet, sort_keys=True) + "\n", encoding="utf-8"
     )
-    same_head_ready = subprocess.run(
-        [
-            "python3",
-            str(SCRIPT),
-            "--worktree",
-            str(worktree),
-            "--same-head-mechanism-flake",
-            escalation_id,
-        ],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    if same_head_ready.returncode != 0:
-        raise AssertionError(same_head_ready)
-    response_path = worktree / ".task-verification-response.json"
+    with mock.patch.dict(
+        os.environ,
+        {"CODEX_THREAD_ID": str(task_meta["origin_session"])},
+        clear=True,
+    ):
+        task_escalation.resolve_escalation(worktree, "retry-mechanism-flake")
+    resolved = load_latest(worktree)
+    if resolved is None:
+        raise AssertionError("typed resolution was not published")
+    typed_resolution = resolved.payload.get("verification_resolution")
+    if (
+        resolved.payload.get("decision") != "retry-mechanism-flake"
+        or not isinstance(typed_resolution, dict)
+        or typed_resolution.get("action") != "retry-mechanism-flake"
+        or typed_resolution.get("decision") != "authorize-attempt-1"
+        or len(relayed) != wakes_before + 1
+        or f"escalation {escalation_id}" not in relayed[-1]
+        or "retry-mechanism-flake" not in relayed[-1]
+    ):
+        raise AssertionError((resolved.payload, relayed))
     same_head_response = json.loads(response_path.read_text(encoding="utf-8"))
     canonical = json.dumps(
         packet, sort_keys=True, separators=(",", ":")
@@ -255,24 +328,32 @@ with tempfile.TemporaryDirectory(prefix="verification-resubmit.") as raw:
     }
     if same_head_response != expected_same_head:
         raise AssertionError((same_head_response, expected_same_head))
-    repeated_same_head = subprocess.run(
-        [
-            "python3",
-            str(SCRIPT),
-            "--worktree",
-            str(worktree),
-            "--same-head-mechanism-flake",
-            escalation_id,
-        ],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    if (
-        repeated_same_head.returncode != 0
-        or "already-ready" not in repeated_same_head.stdout
+
+    # Resolution replay returns the same already-ready response and never
+    # creates a second attempt or a second durable resolution.
+    response_bytes = response_path.read_bytes()
+    with mock.patch.dict(
+        os.environ,
+        {"CODEX_THREAD_ID": str(task_meta["origin_session"])},
+        clear=True,
     ):
-        raise AssertionError(repeated_same_head)
+        task_escalation.resolve_escalation(worktree, "retry-mechanism-flake")
+    replay_status = resubmit.publish_same_head_response(worktree, escalation_id)
+    replayed = load_latest(worktree)
+    if (
+        response_path.read_bytes() != response_bytes
+        or replay_status["status"] != "already-ready"
+        or replayed.sha256 != resolved.sha256
+    ):
+        raise AssertionError((replay_status, replayed))
+    try:
+        resubmit.publish_same_head_response(worktree, "some-other-escalation")
+    except resubmit.ResubmitError as exc:
+        if "authorization is invalid" not in str(exc):
+            raise AssertionError(exc)
+    else:
+        raise AssertionError("a foreign escalation id published a response")
+
     product.write_text("after\n", encoding="utf-8")
     subprocess.run(["git", "add", "product.txt"], cwd=worktree, check=True)
     subprocess.run(
@@ -331,27 +412,34 @@ with tempfile.TemporaryDirectory(prefix="verification-resubmit.") as raw:
         json.dumps(exhausted_packet, sort_keys=True) + "\n", encoding="utf-8"
     )
     stale.unlink()
-    exhausted = subprocess.run(
-        [
-            "python3",
-            str(SCRIPT),
-            "--worktree",
-            str(worktree),
-            "--same-head-mechanism-flake",
-            escalation_id,
-        ],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    if (
-        exhausted.returncode == 0
-        or "same-HEAD verification retry is exhausted" not in exhausted.stderr
-        or stale.exists()
+    try:
+        resubmit.publish_same_head_response(worktree, escalation_id)
+    except resubmit.ResubmitError as exc:
+        if "same-HEAD verification retry is exhausted" not in str(exc):
+            raise AssertionError(exc)
+    else:
+        raise AssertionError("a second same-HEAD retry published a response")
+    if stale.exists():
+        raise AssertionError("an exhausted retry left a response artifact")
+    with mock.patch.dict(
+        os.environ,
+        {"CODEX_THREAD_ID": str(task_meta["origin_session"])},
+        clear=True,
     ):
-        raise AssertionError(exhausted)
+        try:
+            task_escalation.raise_escalation(
+                worktree,
+                "mechanism-failure",
+                "Second flake claim on attempt 1.",
+                "Authorize another same-HEAD retry?",
+                verification_mechanism_flake=True,
+            )
+        except SystemExit:
+            pass
+        else:
+            raise AssertionError("an attempt-1 packet produced a typed raise")
 
 print(
-    "OK   verification resubmission separates changed-HEAD repair from one "
-    "authorized same-HEAD mechanism-flake attempt"
+    "OK   verification resubmission keeps retry-mechanism-flake canonical and "
+    "publishes the one authorized same-HEAD response automatically"
 )

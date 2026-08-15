@@ -52,18 +52,28 @@ check(
 escalation = build_verification_escalation(attempt_0, "verify-operation")
 resolution = resolve_verification_escalation(
     escalation,
-    action="authorize-one-same-head-retry",
+    decision="retry-mechanism-flake",
     evidence_note="Transient local command execution failed before product effect.",
 )
 check(
-    "typed mechanism-flake resolution binds exact identities without copied prose",
+    "typed resolution derives the private action from the one public decision",
     verification_resolution_authorizes(
         resolution, attempt_0, "verify-operation"
     )
     and resolution["decision"] == "authorize-attempt-1"
-    and resolution["action"] == "authorize-one-same-head-retry",
+    and resolution["action"] == "retry-mechanism-flake",
     resolution,
 )
+try:
+    resolve_verification_escalation(
+        escalation,
+        decision="authorize-one-same-head-retry",
+        evidence_note="The private alias must never be an input token.",
+    )
+except VerificationAttemptError:
+    print("OK   the private retry alias is not an accepted decision token")
+else:
+    raise AssertionError("the private retry alias was accepted as a decision")
 copied_wrong = dict(resolution)
 copied_wrong["exact_head_sha"] = "c" * 40
 check(

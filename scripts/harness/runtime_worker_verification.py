@@ -598,7 +598,7 @@ class RuntimeWorkerVerificationMixin:
             "Authorize one exact same-HEAD verification retry?"))
         self.cmux_adapter.send(
             self.spec["surface_id"],
-            f"Typed pipeline verification attention is ready in .task-verification.json. For changed-HEAD fix-and-resubmit, commit the fix and run `python3 {self.trusted_vault}/scripts/pipeline-verification-resubmit.py --worktree {self.spec['cwd']}`. If isolated evidence establishes a mechanism flake, run this exact typed raise command: `{verification_raise}`. A same-HEAD retry requires the coordinator's exact public decision `retry-mechanism-flake`, then the resubmit command with `--same-head-mechanism-flake <escalation-id>`. Do not create an empty commit, launch review, or invoke reap.",
+            f"Typed pipeline verification attention is ready in .task-verification.json. For changed-HEAD fix-and-resubmit, commit the fix and run `python3 {self.trusted_vault}/scripts/pipeline-verification-resubmit.py --worktree {self.spec['cwd']}`. If isolated evidence establishes a mechanism flake, run this exact typed raise command: `{verification_raise}`. A same-HEAD retry happens only through the coordinator's exact public decision `retry-mechanism-flake`; that resolution publishes the identity-bound response automatically, so run no resubmit command for it. Do not create an empty commit, launch review, or invoke reap.",
         )
         self.cmux_adapter.send_key(self.spec["surface_id"], "Enter")
         _atomic_json(

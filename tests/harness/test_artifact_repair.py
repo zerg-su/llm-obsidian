@@ -19,8 +19,16 @@ from harness.artifact_repair import (  # noqa: E402
     CorrectionNotificationUncertain,
     ContractArtifactOwner,
     MAX_ARTIFACT_BYTES,
+    VERIFICATION_PUBLIC_DECISIONS,
+    build_verification_escalation,
     observe_stable_artifact,
     publish_pipeline_step_contract,
+    resolve_verification_escalation,
+    verification_resolution_authorizes,
+)
+from harness.verification_attempt import (  # noqa: E402
+    VerificationAttempt,
+    VerificationAttemptError,
 )
 from harness.contracts import CanonicalContractTemplate, ContractFamily  # noqa: E402
 from harness.runtime_worker_summary import (  # noqa: E402
@@ -441,5 +449,71 @@ with tempfile.TemporaryDirectory(prefix="artifact-repair.") as raw:
         and len(worker.cmux_adapter.events) == 2,
         (worker.cmux_adapter.events, worker.attention),
     )
+
+flake_attempt = VerificationAttempt(
+    parent_operation_id="parent-operation",
+    profile="scoped",
+    profile_sha256="a" * 64,
+    exact_head_sha="b" * 40,
+    attempt_index=0,
+)
+flake_escalation = build_verification_escalation(flake_attempt, "verify-operation")
+check(
+    "the typed constructor owns the exact public verification decisions",
+    VERIFICATION_PUBLIC_DECISIONS
+    == ("retry-mechanism-flake", "stop", "repair-repository-mechanism"),
+    VERIFICATION_PUBLIC_DECISIONS,
+)
+for public_decision, private_decision in (
+    ("retry-mechanism-flake", "authorize-attempt-1"),
+    ("stop", "do-not-authorize"),
+    ("repair-repository-mechanism", "do-not-authorize"),
+):
+    typed = resolve_verification_escalation(
+        flake_escalation,
+        decision=public_decision,
+        evidence_note="Coordinator classified the exact verification attempt.",
+    )
+    check(
+        f"public decision {public_decision} derives exactly one private action",
+        typed["action"] == public_decision
+        and typed["decision"] == private_decision
+        and verification_resolution_authorizes(
+            typed, flake_attempt, "verify-operation"
+        )
+        is (public_decision == "retry-mechanism-flake"),
+        typed,
+    )
+for rejected in (
+    "authorize-one-same-head-retry",
+    "retry-mechanism-flakes",
+    "retry-mechanism-flake ",
+    "Retry-Mechanism-Flake",
+    "retry",
+):
+    try:
+        resolve_verification_escalation(
+            flake_escalation,
+            decision=rejected,
+            evidence_note="Near-match tokens must fail closed.",
+        )
+    except VerificationAttemptError:
+        pass
+    else:
+        raise AssertionError(f"near-match decision {rejected!r} was accepted")
+print("OK   near-match and private-alias decisions fail closed")
+forged = resolve_verification_escalation(
+    flake_escalation,
+    decision="retry-mechanism-flake",
+    evidence_note="Coordinator classified the exact verification attempt.",
+)
+forged["action"] = "authorize-one-same-head-retry"
+check(
+    "a resolution carrying the retired private alias never authorizes a retry",
+    not verification_resolution_authorizes(
+        forged, flake_attempt, "verify-operation"
+    ),
+    forged,
+)
 
 print("artifact repair matrix: ok")
