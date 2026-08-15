@@ -1681,6 +1681,7 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
     for child_state in ("preflight", "starting", "running", "awaiting-callback"):
         store.transition("owner-cli", generation_child_id, child_state)
     generation_payload_sha256 = accept_result_callback(generation_child_id)
+    create_provider_stream("op-review-generation-cli")
     publish_provider_result(
         "op-review-generation-cli",
         generation_payload_sha256,

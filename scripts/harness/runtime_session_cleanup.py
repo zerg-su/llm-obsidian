@@ -39,6 +39,8 @@ from .supervisor import OperationSupervisor
 class RuntimeSessionCleanupMixin:
     """Own observation, exit requests, and exact cleanup effects."""
 
+    _ROOT_PROVIDER_GENERATION = 1
+
     _SUPERSEDED_REVIEW_RECEIPT_KEYS = frozenset(
         {
             "schema_version",
@@ -356,17 +358,22 @@ class RuntimeSessionCleanupMixin:
             # the complete new provider/resource identity. Cleanup remains
             # possible, but no typed close receipt is fabricated for them.
             return "legacy"
+        # Resource closure authority is the immutable provider root generation
+        # minted at session start; a later callback-target generation may carry
+        # the result but never substitutes as resource ownership.
+        root_stream = self._root_provider_stream(record, workspace_id)
+        if root_stream is None:
+            return "attention"
         selected = self._exact_result_stream(
             record, metadata, callback_record.accepted_callback_sha256
         )
         if require_result and selected is None:
             return "attention"
-        generation = selected[1] if selected is not None else int(target["generation"])
         identity = ResourceIdentity(
             owner_id=record.spec.owner_id,
             operation_id=record.spec.operation_id,
             run_id=record.run_id,
-            generation=generation,
+            generation=self._ROOT_PROVIDER_GENERATION,
             provider_session_id=record.run_id,
             process_identity=resources.process_identity,
             supervisor_identity=resources.supervisor_identity,
@@ -374,23 +381,14 @@ class RuntimeSessionCleanupMixin:
             workspace_id=workspace_id,
             surface_id=resources.surface_id,
         )
-        stream = selected[0] if selected is not None else None
-        if stream is None:
-            try:
-                stream = RuntimeProviderEventStream.rehydrate(
-                    self._state_root(record) / "provider-events", generation
-                )
-            except RuntimeProviderEventError:
-                return "attention"
-        state = stream.controller.current_state()
+        root_state = root_stream.controller.current_state()
         if require_result:
             if (
                 not callback_record.accepted_callback_id
                 or not callback_record.accepted_callback_sha256
-                or not state.cursor.result_published
             ):
                 return "attention"
-        elif state.attention_reason not in {"", "result-missing"}:
+        elif root_state.attention_reason not in {"", "result-missing"}:
             return "attention"
         observation = ResourceObservation(
             process_status=process_status,
@@ -408,19 +406,19 @@ class RuntimeSessionCleanupMixin:
         if self._fault_observer is not None:
             self._fault_observer("cleanup-receipt-published")
         try:
-            decision = stream.resource_closed_receipt(result.receipt)
+            root_stream.resource_closed_receipt(result.receipt)
         except RuntimeProviderEventError:
             return "attention"
-        if not require_result:
-            cancelled_state = stream.controller.current_state()
-            if (
-                not cancelled_state.cursor.resource_closed
-                or cancelled_state.attention_reason
-                not in {"", "result-missing"}
-            ):
-                return "attention"
-            return "close"
-        return decision.action
+        # The root stream may lack a published result when the exact callback
+        # generation carried it; the accepted result contour was already
+        # validated against that exact stream above.
+        closed_state = root_stream.controller.current_state()
+        if (
+            not closed_state.cursor.resource_closed
+            or closed_state.attention_reason not in {"", "result-missing"}
+        ):
+            return "attention"
+        return "close"
 
     def status(self, owner_id: str, operation_id: str) -> RuntimeSessionResult:
         """Read exact resource liveness without mutating durable state."""
@@ -689,6 +687,38 @@ class RuntimeSessionCleanupMixin:
             process_status="dead",
             surface_status="missing",
         )
+    def _root_provider_stream(
+        self,
+        record: OperationRecord,
+        workspace_id: str,
+    ) -> RuntimeProviderEventStream | None:
+        """Bind resource closure to the immutable provider root generation."""
+
+        provider_root = self._state_root(record) / "provider-events"
+        root_directory = (
+            provider_root / f"generation-{self._ROOT_PROVIDER_GENERATION}"
+        )
+        if root_directory.is_symlink() or not root_directory.is_dir():
+            return None
+        try:
+            stream = RuntimeProviderEventStream.rehydrate(
+                provider_root, self._ROOT_PROVIDER_GENERATION
+            )
+        except RuntimeProviderEventError:
+            return None
+        identity = stream.controller.current_state().identity
+        if (
+            identity.owner_id != record.spec.owner_id
+            or identity.operation_id != record.spec.operation_id
+            or identity.run_id != record.run_id
+            or identity.generation != self._ROOT_PROVIDER_GENERATION
+            or identity.process_identity != record.resources.process_identity
+            or identity.workspace_id != workspace_id
+            or identity.surface_id != record.resources.surface_id
+        ):
+            return None
+        return stream
+
     def _exact_result_stream(
         self,
         record: OperationRecord,
