@@ -25,6 +25,7 @@ from harness.pre_model_reviewer_retirement import (
     review_attempt_records_are_quiescent,
 )
 from harness.review_finalization import StructuralPivotPending
+from harness.review_cleanup_recovery import recover_interrupted_review_attempt
 from harness.runtime_sessions import RuntimeSessionManager
 from harness.store import OperationStore, StoreError
 from harness.workflows.review import (
@@ -204,7 +205,6 @@ def _start_review(
         context_manifest=context_manifest,
         run=run,
     )
-
 
 def _exact_head_attempt_enabled(meta: Mapping[str, Any]) -> bool:
     """Select the protocol only from the normalized additive v4 policy.
@@ -876,7 +876,7 @@ def _run_exact_head_review(
         prior_attempt = ReviewAttempt.from_mapping(prior_state["attempt"])
         if (
             prior_attempt.status == "terminal"
-            and gate.recover_late_started_attempt()
+            and recover_interrupted_review_attempt(gate)
         ):
             prior_state = gate.read()
             prior_attempt = ReviewAttempt.from_mapping(

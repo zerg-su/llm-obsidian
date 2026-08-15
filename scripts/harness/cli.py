@@ -434,6 +434,21 @@ def _review_recovery_kind(
         and terminal.get("result") == gate.get("status")
     ):
         return "accepted-exact-callbacks"
+    if (
+        gate.get("status") == "attention-required"
+        and gate.get("execution_protocol") == "exact-head-attempt-v1"
+        and isinstance(attempt, dict)
+        and attempt.get("status") == "terminal"
+        and isinstance(terminal, dict)
+        and terminal.get("result") == "attention-required"
+        and terminal.get("lane_results") == []
+        and gate.get("round_results") in ({}, None)
+        and gate.get("final_results") in ({}, None)
+    ):
+        # A callback may already be accepted while bounded reviewer cleanup
+        # times out.  The exact gate owns enough identity to retry only that
+        # cleanup and ingest the same callback; no reviewer is relaunched.
+        return "accepted-exact-callbacks"
     if not response_path.is_file():
         return ""
     if gate.get("status") in {

@@ -49,6 +49,7 @@ from harness.runtime_worker_control import RuntimeWorkerControlMixin
 from harness.runtime_worker_custom import RuntimeWorkerCustomMixin
 from harness.runtime_worker_review_bridge import RuntimeWorkerReviewBridgeMixin
 from harness.review_continuation_recovery import RecoveryDisposition
+from harness.review_cleanup_recovery import recover_interrupted_review_attempt
 from harness.runtime_session_contracts import (
     RuntimeCheckpointEvidenceMissing,
     RuntimeSessionError,
@@ -2111,17 +2112,25 @@ with tempfile.TemporaryDirectory(prefix="review-cleanup-attention.") as raw:
     runtime = FakeRuntime(store)
     runtime.cleanup_attention = True
     controller = ReviewGateController(base / "gate", runtime, store)
-    run = begin(
-        controller,
-        request_for("review-cleanup-attention", context=context),
-        scratch,
+    run = controller.begin_attempt(
+        dispatch_operation_id="review-cleanup-attention-dispatch",
+        finalization_lineage_id="review-cleanup-attention-lineage",
+        cycle=1,
+        plan_sha256="5" * 64,
+        outcome_sha256="6" * 64,
+        request=request_for("review-cleanup-attention", context=context),
+        origin_surface="11111111-1111-4111-8111-111111111111",
+        cwd=scratch,
+        product_root=ROOT,
+        prompt_pointer="prompts/review.md",
+        callback_root="callbacks/review-cleanup-attention",
     )
     lane = run.execution.lanes[0]
-    decision = controller.complete_round(
+    decision = controller.complete_attempt_round(
         run,
         lane,
         run.rounds[lane.axis],
-        ReviewResult("anthropic-holistic", "approve"),
+        ReviewResult("anthropic-holistic", "approve", (), 0),
     )
     state = controller.read()
     check(
@@ -2131,6 +2140,32 @@ with tempfile.TemporaryDirectory(prefix="review-cleanup-attention.") as raw:
         and state["final_results"] == {}
         and state["evidence"] == {}
         and len(runtime.cleanups) == 3,
+    )
+    runtime.cleanup_attention = False
+    recovered = recover_interrupted_review_attempt(controller)
+    recovered_state = controller.read()
+    if not isinstance(recovered_state.get("attempt"), dict):
+        raise AssertionError(
+            "accepted callback cleanup restores an exact attempt payload: "
+            f"{recovered_state}"
+        )
+    check("accepted callback cleanup restores an exact attempt payload", True)
+    recovered_run = controller.rehydrate_attempt()
+    recovered_decision = controller.complete_attempt_round(
+        recovered_run,
+        recovered_run.execution.lanes[0],
+        recovered_run.rounds[lane.axis],
+        ReviewResult("anthropic-holistic", "approve", (), 0),
+    )
+    recovered_parent = store.read(lane.owner_id, lane.operation_id)
+    check(
+        "accepted callback cleanup resumes the same attempt without replay",
+        recovered
+        and recovered_parent.state == "complete"
+        and recovered_parent.resources == OwnedResources()
+        and recovered_decision.action == "approved"
+        and controller.read()["status"] == "approved"
+        and len(runtime.started) == 1,
     )
 
 with tempfile.TemporaryDirectory(prefix="review-callback-timeout.") as raw:
