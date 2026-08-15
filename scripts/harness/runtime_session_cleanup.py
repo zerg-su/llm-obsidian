@@ -31,13 +31,12 @@ from .runtime_provider_events import (
     RuntimeProviderEventStream,
 )
 from .state_machine import TERMINAL
+from .store import StoreError
 from .supervisor import OperationSupervisor
 
 
 class RuntimeSessionCleanupMixin:
     """Own observation, exit requests, and exact cleanup effects."""
-
-    _ROOT_PROVIDER_GENERATION = 1
 
     _SUPERSEDED_REVIEW_RECEIPT_KEYS = frozenset(
         {
@@ -315,7 +314,31 @@ class RuntimeSessionCleanupMixin:
             # Historical records created before provider-event generations remain
             # cleanup-compatible but cannot manufacture a typed event identity.
             return "legacy"
-        self._callback_target(record)
+        target = self._callback_target(record)
+        generation = int(target["generation"])
+        target_operation_id = str(target["operation_id"])
+        callback_record = record
+        if require_result:
+            try:
+                callback_record = self.store.read(
+                    record.spec.owner_id, target_operation_id
+                )
+            except StoreError:
+                return "attention"
+            if (
+                callback_record.run_id != target.get("run_id")
+                or (
+                    target_operation_id != record.spec.operation_id
+                    and (
+                        record.spec.kind not in REVIEW_PARENT_KINDS
+                        or callback_record.spec.kind != "review-round"
+                        or callback_record.spec.parent_operation_id
+                        != record.spec.operation_id
+                        or callback_record.lane_id != record.lane_id
+                    )
+                )
+            ):
+                return "attention"
         resources = record.resources
         workspace_id = str(metadata.get("workspace_id") or "")
         if not all(
@@ -330,12 +353,11 @@ class RuntimeSessionCleanupMixin:
             # the complete new provider/resource identity. Cleanup remains
             # possible, but no typed close receipt is fabricated for them.
             return "legacy"
-        root_generation = self._ROOT_PROVIDER_GENERATION
         identity = ResourceIdentity(
             owner_id=record.spec.owner_id,
             operation_id=record.spec.operation_id,
             run_id=record.run_id,
-            generation=root_generation,
+            generation=generation,
             provider_session_id=record.run_id,
             process_identity=resources.process_identity,
             supervisor_identity=resources.supervisor_identity,
@@ -346,7 +368,7 @@ class RuntimeSessionCleanupMixin:
         delivery_state = (
             self._state_root(record)
             / "provider-events"
-            / f"generation-{root_generation}"
+            / f"generation-{generation}"
             / "delivery"
             / "delivery-state.json"
         )
@@ -355,22 +377,22 @@ class RuntimeSessionCleanupMixin:
         try:
             stream = RuntimeProviderEventStream.rehydrate(
                 self._state_root(record) / "provider-events",
-                root_generation,
+                generation,
             )
         except RuntimeProviderEventError:
             return "attention"
         state = stream.controller.current_state()
         if require_result:
             if (
-                not record.accepted_callback_id
-                or not record.accepted_callback_sha256
+                not callback_record.accepted_callback_id
+                or not callback_record.accepted_callback_sha256
                 or not state.cursor.result_published
             ):
                 return "attention"
             try:
                 # The event is already published, so this is an idempotent exact
                 # accepted-payload digest assertion and cannot synthesize a result.
-                stream.result(record.accepted_callback_sha256)
+                stream.result(callback_record.accepted_callback_sha256)
             except RuntimeProviderEventError:
                 return "attention"
         elif state.attention_reason not in {"", "result-missing"}:

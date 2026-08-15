@@ -606,6 +606,8 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
 
     def create_provider_stream(
         operation_id: str,
+        *,
+        generation: int = 1,
     ) -> RuntimeProviderEventStream:
         record = store.read("owner-cli", operation_id)
         stream = RuntimeProviderEventStream.create(
@@ -618,7 +620,7 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
             owner_id="owner-cli",
             operation_id=operation_id,
             run_id=record.run_id,
-            generation=1,
+            generation=generation,
             process_identity=record.resources.process_identity,
             workspace_id="22222222-2222-4222-8222-222222222222",
             surface_id=record.resources.surface_id,
@@ -632,8 +634,10 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
     def publish_provider_result(
         operation_id: str,
         payload_sha256: str,
+        *,
+        generation: int = 1,
     ) -> None:
-        stream = create_provider_stream(operation_id)
+        stream = create_provider_stream(operation_id, generation=generation)
         assert stream.result(payload_sha256).action == "close"
 
     def write_workspace_session(operation_id: str) -> tuple[str, str]:
@@ -807,7 +811,13 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
         write_callback_target(operation_id)
         return workspace_id, window_id
 
-    def write_callback_target(operation_id: str) -> None:
+    def write_callback_target(
+        operation_id: str,
+        *,
+        generation: int = 1,
+        callback_operation_id: str = "",
+        callback_run_id: str = "",
+    ) -> None:
         record = store.read("owner-cli", operation_id)
         path = (
             store.root
@@ -821,9 +831,9 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
             json.dumps(
                 {
                     "schema_version": 1,
-                    "generation": 1,
-                    "operation_id": operation_id,
-                    "run_id": record.run_id,
+                    "generation": generation,
+                    "operation_id": callback_operation_id or operation_id,
+                    "run_id": callback_run_id or record.run_id,
                     "callback_pointer": "callbacks/result.json",
                 },
                 sort_keys=True,
@@ -1645,6 +1655,71 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
         cleanup_rc == 0
         and accepted_complete.state == "complete"
         and accepted_complete.resources == OwnedResources(),
+    )
+
+    create_review_cleanup_operation(
+        "op-review-generation-cli", awaiting_callback=True
+    )
+    generation_parent = store.read("owner-cli", "op-review-generation-cli")
+    generation_child_id = "op-review-generation-cli-round"
+    generation_child = store.create(
+        OperationSpec(
+            generation_child_id,
+            "key-op-review-generation-cli-round",
+            "review-round",
+            "owner-cli",
+            generation_parent.spec.route,
+            "packets/review-round.json",
+            "scoped",
+            parent_operation_id=generation_parent.spec.operation_id,
+            root_operation_id=generation_parent.spec.operation_id,
+        ),
+        lane_id=generation_parent.lane_id,
+        run_id="run-op-review-generation-cli-round",
+    )
+    for child_state in ("preflight", "starting", "running", "awaiting-callback"):
+        store.transition("owner-cli", generation_child_id, child_state)
+    generation_payload_sha256 = accept_result_callback(generation_child_id)
+    publish_provider_result(
+        "op-review-generation-cli",
+        generation_payload_sha256,
+        generation=2,
+    )
+    write_callback_target(
+        "op-review-generation-cli",
+        generation=2,
+        callback_operation_id=generation_child_id,
+        callback_run_id=generation_child.run_id,
+    )
+    generation_process = FakeProcess(
+        "unknown", supervisor_status="unknown", capture_matches=True
+    )
+    generation_cmux = FakeCmux("alive")
+    generation_exit_rc, _generation_exit_output = run_cli_in_process(
+        "close",
+        "op-review-generation-cli",
+        process=generation_process,
+        cmux=generation_cmux,
+    )
+    generation_process.status = "dead"
+    generation_process.supervisor_status = "dead"
+    generation_cmux.current = "missing"
+    generation_cmux.workspace_current = "missing"
+    generation_cleanup_rc, _generation_cleanup_output = run_cli_in_process(
+        "close",
+        "op-review-generation-cli",
+        process=generation_process,
+        cmux=generation_cmux,
+    )
+    generation_complete = store.read(
+        "owner-cli", "op-review-generation-cli"
+    )
+    check(
+        "CLI review cleanup follows exact callback generation and child receipt",
+        generation_exit_rc == 0
+        and generation_cleanup_rc == 0
+        and generation_complete.state == "complete"
+        and generation_complete.resources == OwnedResources(),
     )
 
     create_cli_operation(
