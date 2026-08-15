@@ -21,6 +21,11 @@
       "owner": "v2.6.7 rc3 review corridor repairs",
       "evidence": "changed-HEAD ordering, false-attention latch, and batched iteration/self-healing/pre-ready, and verifying-window regressions in tests/harness/test_runtime_task_summary.py and tests/harness/test_review_submit_corrections.py"
     },
+    "file-lines:scripts/harness/runtime_worker_verification.py": {
+      "max_value": 1051,
+      "owner": "v2.7.3 invalidated-verification handoff",
+      "evidence": "code-owned invalidated-attempt classification and exact-current-HEAD successor handoff in the existing verification owner; exact live ordering, repeated-wake, crash re-entry, and exhaustion matrix in tests/harness/test_runtime_task_summary.py with identity/authority pins in tests/harness/test_verification_authority.py"
+    },
     "file-lines:scripts/harness/runtime_session_launch.py": {
       "max_value": 1144,
       "owner": "v2.6.7 review startup recovery",
@@ -73,10 +78,10 @@
       "operation-uuid": 27,
       "operator-local-path": 2
     },
-    "final_max_production_loc": 15051,
+    "final_max_production_loc": 15123,
     "final_production_file_count": 27,
     "final_max_writable_authorities": 0,
     "final_max_incident_literals": 0,
-    "evidence": "docs/acceptance/v2.6.6-rc1-active-authority-baseline.md and docs/acceptance/v2.7.1-verification-stabilization.md plus the separately owned exact 27-file RC5.5 review/recovery authority manifest, including atomic immutable-plan publication, amendment-safe finalization lineage, callback drain, crash replay, acceptance-bound one-time fresh artifact reconciliation, explicit current-review dashboard binding, typed reap-close owners, the crash-resumable structural-pivot workflow owner, the directly tested pending-pivot reviewing-receipt seam, the RC6.4 exact-HEAD plus implementer-summary approval binding with one predecessor-bound follow-up and accepted predecessor-callback rollover after a zero-effect launch failure, the RC6.9 bounded cancellation owner, and the RC6.11 exact pre-input reviewer retirement proof derived from canonical provider identity; the 2.7.1 verification stabilization rebaselines the same contour at exactly the measured 15051 LOC with zero headroom, zero writable authorities, and zero incident literals"
+    "evidence": "docs/acceptance/v2.6.6-rc1-active-authority-baseline.md and docs/acceptance/v2.7.1-verification-stabilization.md plus the separately owned exact 27-file RC5.5 review/recovery authority manifest, including atomic immutable-plan publication, amendment-safe finalization lineage, callback drain, crash replay, acceptance-bound one-time fresh artifact reconciliation, explicit current-review dashboard binding, typed reap-close owners, the crash-resumable structural-pivot workflow owner, the directly tested pending-pivot reviewing-receipt seam, the RC6.4 exact-HEAD plus implementer-summary approval binding with one predecessor-bound follow-up and accepted predecessor-callback rollover after a zero-effect launch failure, the RC6.9 bounded cancellation owner, and the RC6.11 exact pre-input reviewer retirement proof derived from canonical provider identity; the 2.7.1 verification stabilization rebaselines the same contour at exactly the measured 15051 LOC with zero headroom, zero writable authorities, and zero incident literals; the 2.7.3 invalidated-verification handoff (docs/acceptance/v2.7.3-invalidated-verification-handoff.md) grows only scripts/harness/runtime_worker_verification.py by the 72-LOC code-owned invalidated-attempt successor and rebaselines the unchanged 27-file contour at exactly the measured 15123 LOC with zero headroom"
   }
 }

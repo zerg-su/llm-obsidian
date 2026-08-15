@@ -16,6 +16,42 @@
 внутренними контрольными точками и вошли в следующие публичные релизы; тегов и
 пакетов с этими номерами не выпускалось.
 
+## [2.7.3] — 2026-08-16
+
+Ограниченный кандидат восстановления invalidated-verification handoff; без
+тега, публикации и live-приёмки. Строится на сохранённом объединённом
+кандидате 2.7.1 + 2.7.2.
+
+### Исправлено
+
+- Verification owner теперь передаёт инвалидированную verification-попытку
+  ровно одной predecessor-bound свежей попытке на текущем чистом HEAD.
+  Установленный успешный own-identity verification effect без сохранённого
+  receipt — пробы, завершившиеся на HEAD, который продукт покинул до принятия
+  callback, или receipt, потерянный при crash — классифицируется как успешный
+  effect с недействительной verification authority и никогда как verification
+  receipt. Устаревшая попытка durably терминализируется и связывается через
+  один неизменяемый invalidation record со своим attempt-1 преемником,
+  построенным существующими identity-конструкторами; повторные wake и
+  crash re-entry сходятся к одному преемнику, исчерпание ограниченного
+  пространства identity преемников остаётся типизированным retry-exhausted
+  attention без замены и без повтора проб, а root callback-invalid attention
+  снимается только через обычный summary-путь после успешного receipt на
+  точном текущем HEAD
+  (`docs/acceptance/v2.7.3-invalidated-verification-handoff.md`).
+- Changed-HEAD review-resolution gate применяет тот же invalidated-attempt
+  handoff перед запуском verification, поэтому его перепривязанная identity
+  попытки больше не может вернуться в recovery-тупик.
+
+### Управление
+
+- RC1 active-authority contour перебазирован на точно измеренные 15123 LOC
+  (неизменный манифест из 27 файлов, ноль writable authorities, ноль incident
+  literals), verification owner стал owned file-lines hotspot ровно на
+  измеренных 1051 строках, а scope ratchet живых scripts сдвинут на измеренную
+  стоимость ремонта в 78 строк к точному кандидату 290 файлов /
+  108 636 строк без запасного headroom.
+
 ## [2.7.2] — 2026-08-15
 
 Ограниченный кандидат восстановления root-generation cleanup authority; без

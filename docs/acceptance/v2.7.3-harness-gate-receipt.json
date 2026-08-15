@@ -1,0 +1,12 @@
+{
+  "environment": "Executor environment with an owner-writable scratch directory; rerunnable verbatim from the candidate tree root.",
+  "exit_code": 0,
+  "gate": "make test-harness",
+  "measured_tree_note": "git write-tree of the exact working tree the gate ran on. The resolved HEAD tree differs from it by exactly three gate-inert receipt artifacts written afterward: docs/acceptance/v2.7.3-harness-gate-output.log, this receipt file, and the acceptance note's complete-gate receipt section. Verify with: git diff --stat d8954dd91cdc9df4db18febb7a0728400ec06604 <resolved-head> — no other path may appear. No registered gate reads these artifacts.",
+  "measured_tree_sha": "d8954dd91cdc9df4db18febb7a0728400ec06604",
+  "output_lines": 3191,
+  "output_pointer": "docs/acceptance/v2.7.3-harness-gate-output.log",
+  "output_sha256": "885e5fa3c32c319f6e1a743a3ac4eb49f34c75269a63970ddb686e7676c34d55",
+  "registered_suite_files": 96,
+  "schema_version": 1
+}

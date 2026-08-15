@@ -10,6 +10,40 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.7.3] - 2026-08-16
+
+Bounded invalidated-verification handoff candidate; not tagged, published, or
+live-accepted. Builds on the preserved combined 2.7.1 + 2.7.2 candidate.
+
+### Fixed
+
+- The verification owner now hands an invalidated verification attempt to
+  exactly one predecessor-bound fresh attempt at the current clean HEAD. A
+  settled succeeded own-identity verification effect without a persisted
+  receipt — probes that finished at a HEAD the product left before callback
+  acceptance, or whose receipt was lost to a crash — is classified as a
+  successful effect with invalid verification authority, never as a
+  verification receipt. The stale attempt is durably terminalized and linked
+  through one immutable invalidation record to its attempt-1 successor, built
+  from the existing identity constructors; repeated wakes and crash re-entry
+  converge on the same successor, exhaustion of the bounded successor identity
+  space stays typed retry-exhausted attention with no replacement and no probe
+  replay, and root callback-invalid attention clears only through the ordinary
+  summary path after an exact-current-HEAD successful receipt
+  (`docs/acceptance/v2.7.3-invalidated-verification-handoff.md`).
+- The changed-HEAD review-resolution gate adopts the same invalidated-attempt
+  handoff before launching verification, so its rebound attempt identity can
+  never re-enter the recovery dead end.
+
+### Governance
+
+- The RC1 active-authority contour is rebaselined at the exact measured
+  15123 LOC (unchanged 27-file manifest, zero writable authorities, zero
+  incident literals), the verification owner is an owned file-lines hotspot at
+  exactly its measured 1051 lines, and the live scripts scope ratchet moves by
+  the measured 78-line repair cost to the exact 290-file / 108,636-line
+  candidate with no speculative headroom.
+
 ## [2.7.2] - 2026-08-15
 
 Bounded root-generation cleanup authority candidate; not tagged, published, or

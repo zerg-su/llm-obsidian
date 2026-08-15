@@ -1,0 +1,3191 @@
+=== harness contracts and replay regressions ===
+=== deterministic lifecycle simulator (fast) ===
+OK   frozen stale-rearm snapshot fails by its declared first invariant
+OK   applied rearm aligns operation, liveness, and latch
+OK   oracle catches duplicate irreversible delivery
+OK   oracle catches duplicate callback identity acceptance
+OK   oracle catches accepted wrong-identity artifacts
+OK   oracle catches terminal resurrection
+OK   oracle catches terminal resource leaks
+OK   scenario is content-free and bounded
+
+All lifecycle simulator oracle tests passed.
+OK   production poll_once owns inspect, observer, and exit observation order
+OK   production settle_exit_once owns classification and restart/final decision
+OK   observer pacing consumes the injected monotonic clock
+OK   callback draining uses injected pacing with no real sleep
+OK   fresh world uses the production OperationStore
+OK   fake provider crosses one real delivery reducer and store effect
+OK   effect observations survive restart and count the fake attempt
+OK   restart rebuilds volatile adapters from unchanged durable bytes
+OK   virtual time alone has zero transition authority
+OK   worker tick uses the production poll seam without replaying input
+OK   close enters the production cleanup owner and reaches resource-free completion
+OK   restart preserves independently disappeared process and cmux resources
+OK   a non-fake provider mutation is measured instead of hidden by a constant
+OK   a measured real effect makes the simulator gate red
+OK   persisted expected identity catches a production-accepted wrong callback
+OK   persisted provider attempts catch a second external delivery invocation
+OK   persisted terminal history catches production-record resurrection
+
+All lifecycle simulator world tests passed.
+OK   same scenario and seed compile byte-identical schedules
+OK   bounded enumeration covers both orders of an independent pair
+OK   every schedule preserves declared dependencies
+OK   the schedule ceiling cannot starve an independent pair orientation
+OK   scheduler enforces the declared max_depth ceiling
+OK   scheduler enforces the declared max_waves ceiling
+OK   different seed changes selection before truncation without losing coverage
+OK   exact trace identity replays the same ordered actions
+OK   deterministic logical summary is stable and excludes wall telemetry
+OK   first violated invariant binds scenario, trace, and bad action
+
+All lifecycle scheduler tests passed.
+OK   crash before operation-transition-published is reached through its production owner
+OK   crash before operation-transition-published preserves the prerequisite durable prefix
+OK   restart before operation-transition-published converges through the same owner
+OK   crash before liveness-published is reached through its production owner
+OK   crash before liveness-published preserves the prerequisite durable prefix
+OK   restart before liveness-published converges through the same owner
+OK   crash before error-latch-published is reached through its production owner
+OK   crash before error-latch-published preserves the prerequisite durable prefix
+OK   restart before error-latch-published converges through the same owner
+OK   crash before effect-reserved is reached through its production owner
+OK   crash before effect-reserved preserves the prerequisite durable prefix
+OK   restart before effect-reserved converges through the same owner
+OK   crash before effect-resolved is reached through its production owner
+OK   crash before effect-resolved preserves the prerequisite durable prefix
+OK   restart before effect-resolved converges through the same owner
+OK   crash before cleanup-receipt-published is reached through its production owner
+OK   crash before cleanup-receipt-published preserves the prerequisite durable prefix
+OK   restart before cleanup-receipt-published converges through the same owner
+OK   operation transition crashes only after its durable record
+OK   restart worker converges the published operation through its production poll
+OK   effect reservation crashes after the pending identity is durable
+OK   restart rehydrates the pending effect
+OK   effect resolution crashes after the terminal disposition is durable
+OK   effect replay preserves the single provider-facing identity
+OK   liveness publication crashes after atomic state replacement
+OK   error latch crashes after the immutable failure fact is durable
+OK   restart preserves the original error marker bytes
+OK   cleanup crashes after the exact close receipt is durable
+OK   cleanup restart converges once without replaying provider input
+OK   an armed but unconsumed failpoint makes the gate red
+OK   fault injection is test-only and absent from production CLI entrypoints
+OK   the simulator performed no real external effects
+OK   crash at summary-consumed-before-verification kills the worker generation at its seam
+OK   restart after summary-consumed-before-verification converges to the accepted wiki summary
+OK   restart after summary-consumed-before-verification duplicates no callback or ledger effect
+OK   crash at verification-receipt-published kills the worker generation at its seam
+OK   restart after verification-receipt-published converges to the accepted wiki summary
+OK   restart after verification-receipt-published duplicates no callback or ledger effect
+OK   crash at review-callback-accepted-before kills the worker generation at its seam
+OK   restart after review-callback-accepted-before converges to the accepted wiki summary
+OK   restart after review-callback-accepted-before duplicates no callback or ledger effect
+OK   crash at review-callback-accepted-after kills the worker generation at its seam
+OK   restart after review-callback-accepted-after converges to the accepted wiki summary
+OK   restart after review-callback-accepted-after duplicates no callback or ledger effect
+OK   crash at findings-notification-sent kills the worker generation at its seam
+OK   restart after findings-notification-sent converges to the accepted wiki summary
+OK   restart after findings-notification-sent duplicates no callback or ledger effect
+OK   crash at resolution-reverification kills the worker generation at its seam
+OK   restart after resolution-reverification converges to the accepted wiki summary
+OK   restart after resolution-reverification duplicates no callback or ledger effect
+OK   crash at refresh-notification-sent kills the worker generation at its seam
+OK   restart after refresh-notification-sent converges to the accepted wiki summary
+OK   restart after refresh-notification-sent duplicates no callback or ledger effect
+OK   crash at approval-callback-accepted kills the worker generation at its seam
+OK   restart after approval-callback-accepted converges to the accepted wiki summary
+OK   restart after approval-callback-accepted duplicates no callback or ledger effect
+OK   crash at reap-notification-sent kills the worker generation at its seam
+OK   restart after reap-notification-sent converges to the accepted wiki summary
+OK   restart after reap-notification-sent duplicates no callback or ledger effect
+OK   reap crash precondition reaches the accepted wiki summary
+OK   reap-finalize crash leaves one durable pending effect
+OK   reap restart resumes the exact pending effect once
+
+All lifecycle crash-matrix tests passed.
+OK   review-drive crash after workflow preserves one prepared receipt
+OK   review-drive restart observes durable progress without replay
+OK   review-drive finalized receipt never re-attempts
+OK   review-drive prepared receipt revision drift becomes typed refusal
+OK   accepted-callback crash after workflow preserves one prepared receipt
+OK   accepted-callback restart observes durable progress without replay
+OK   accepted-callback finalized receipt never re-attempts
+OK   accepted-callback prepared receipt revision drift becomes typed refusal
+OK   restart overwrites partial wake diagnostics without replay authority
+OK   gate telemetry contains measured wall time outside the stable logical summary
+OK   an injected fast-gate budget overrun makes the gate red
+OK   an injected extended-gate budget overrun makes the gate red
+
+All lifecycle gate-budget tests passed.
+OK   historical corpus contains exactly seven declared scenarios
+OK   two-pass corpus replay is byte-identical
+OK   every historical class is RED by its named invariant and GREEN afterward
+OK   causal ledger binds every machine-readable scenario identity
+OK   one-byte fixture mutation is detected by digest plus oracle identity
+OK   admitted historical fixture bytes are digest-verified before hydration
+OK   historical source digest participates in exact trace identity
+OK   every declared forbidden semantic effect is mutation-sensitive
+{"actions":25,"invariants":7,"scenarios":7,"schedules":8}
+
+All lifecycle regression-corpus tests passed.
+OK   both supported logical providers share the closed ephemeral event contract
+OK   deterministic interactive source cannot invent an event kind
+OK   fake provider records one idempotency identity and one logical delivery
+OK   simulator adapters expose facts but no production adapter inheritance
+OK   fake external adapters contain no process, network, or real cmux launch primitive
+OK   conformance path reports measured zero real provider, model, cmux, and network effects
+
+All lifecycle provider-conformance tests passed.
+{"actions":25,"invariants":7,"scenarios":7,"schedules":8,"wall_seconds":0.20468}
+OK   stable JSON serialization
+OK   contracts are frozen
+OK   unknown runtime rejected
+OK   path escape rejected
+OK   invalid compiled contract binding rejected
+OK   unknown schema rejected
+OK   callback payload is immutable
+OK   runtime perimeter has no direct production callers
+OK   strict runtime perimeter is clean
+OK   runtime lint requires executable production harness calls
+OK   registry contains exactly the five approved model-owned families
+OK   registered correction ceilings preserve current behavior
+OK   registry values are immutable policy with no runtime or provider port
+OK   an unclassified production seam fails the registry gate
+OK   audit covers all supported families
+OK   audit exactly classifies the independent model boundary inventory
+OK   audit records deferred and test-only model boundaries
+OK   audit forbids every code-owned authority named by RC5
+OK   canonical template binds family attempt target ownership and exact bytes
+OK   template digest is mutation-sensitive
+OK   fault table rejects unknown family
+OK   fault table rejects path traversal
+OK   fault table rejects registered target mismatch
+OK   fault table rejects non-JSON template value
+OK   fault table rejects overlapping ownership
+OK   fault table rejects unregistered ownership
+OK   registry boundary rejects overlapping registry ownership
+OK   registry boundary rejects registry target traversal
+OK   registry boundary rejects invalid audit identity
+OK   registry boundary rejects invalid inventory owner
+OK   inventory rejects syntax-invalid declaration
+OK   inventory rejects non-literal declaration
+OK   inventory rejects empty declaration
+OK   inventory rejects duplicate declarations
+contract registry fault table: ok
+OK   template publication is immutable and idempotent
+OK   pipeline-step publication rejects drift and symlink visibility
+OK   pipeline-step publication types non-UTF-8 request failure
+OK   pipeline-step publication types oversized request failure
+OK   pipeline-step publication types non-object request failure
+OK   syntax shape aliases and uniquely bound identity repair deterministically
+OK   artifact requires two identical bounded reads
+OK   symlink artifact fails closed
+OK   duplicate observation reuses one durable reservation and one notification
+OK   registered one-shot task-summary budget exhausts exactly
+OK   restart after notification reservation fails closed without a duplicate prompt
+OK   runtime task-summary template is derived only from durable dispatch authority
+OK   shared summary omission requires semantic correction
+OK   final summary omission requires semantic correction
+OK   task-summary semantic correction restores once and waits for an edit
+OK   a second distinct semantic defect exhausts task-summary correction
+OK   the typed constructor owns the exact public verification decisions
+OK   public decision retry-mechanism-flake derives exactly one private action
+OK   public decision stop derives exactly one private action
+OK   public decision repair-repository-mechanism derives exactly one private action
+OK   near-match and private-alias decisions fail closed
+OK   a resolution carrying the retired private alias never authorizes a retry
+artifact repair matrix: ok
+OK   fresh repair prefers the opposite provider at XHigh
+OK   same-provider fallback requires durable opposite-provider unavailability
+OK   fresh session is artifact-only with zero replay budget
+OK   launch cannot mutate repository files or durable lifecycle authority
+OK   one family attempt cannot reserve a second fresh repair
+OK   accepted repair emits only content-free identity and digest evidence
+OK   invalid fresh output converges terminally without another provider effect
+OK   task-summary production consumer adopts once then submits normally
+OK   task-summary production consumer terminalizes child failure once
+OK   task-summary rejects callback substitution across restart
+OK   pipeline-step-result production consumer adopts once then submits normally
+OK   pipeline-step-result production consumer terminalizes child failure once
+OK   pipeline-step-result rejects callback substitution across restart
+OK   restart never replays an uncertain provider effect
+OK   code-owned and unregistered fresh targets fail closed
+All fresh artifact repair tests passed.
+OK   invalid model semantics consume the registered correction budget
+OK   code-owned authority failures bypass model correction
+OK   untyped mechanism failures fail closed without correction
+pipeline submit failure boundary: ok
+OK   the round prompt states the exact authoritative iteration
+OK   review identity and value aliases repair before authoritative submit
+OK   a semantic defect writes one typed keyed rejection receipt
+OK   the receipt carries the authoritative rejected digest
+OK   resubmitting identical bytes reuses the receipt idempotently
+OK   a different invalid input receives the next attempt number
+OK   a corrected input publishes the callback and continues automatically
+OK   a live rejection drives one same-session correction
+OK   the correction never resends the review prompt or starts a cycle
+OK   a duplicate rejection receipt is idempotent
+OK   repeated polling preserves and submits the reviewer's corrected bytes
+OK   corrections consume no verification iteration
+OK   authoritative attempt order delivers correction two exactly once
+OK   restart after correction-reserved reconciles correction delivery exactly once
+OK   restart after correction-attempt-consumed reconciles correction delivery exactly once
+OK   restart after correction-template-restored reconciles correction delivery exactly once
+OK   restart after notification-reserved fails closed without notification replay
+OK   the third rejection exhausts the attempt budget fail-closed
+OK   a dead reviewer session stays fail-closed
+OK   a mismatched reviewer identity stays fail-closed
+OK   a changed HEAD stays fail-closed
+OK   a bound reviewer launch-in-progress is waiting without ready.json
+OK   a failed early handshake inside the launch window stays fail-closed
+review submit correction tests passed
+OK   captured review-drive failure is eligible only after changed-HEAD verification
+OK   captured accepted callback is eligible for gate ingestion without replay
+OK   accepted callback ingestion refuses non-recoverable latch absent
+OK   accepted callback ingestion refuses non-recoverable latch callback-invalid
+OK   accepted callback ingestion refuses non-recoverable latch wiki-summary-invalid
+OK   accepted callback ingestion refuses non-recoverable latch callback-wake-effect-uncertain
+OK   accepted callback ingestion refuses non-recoverable latch pipeline-verification-effect-uncertain
+OK   a healthy accepted-callback window has no recovery authority
+OK   accepted callback ingestion uses only the registered reviewing seam
+OK   a pending effect cannot be replayed
+OK   a missing resolution has no continuation authority
+OK   an unchanged HEAD is not a post-resolution continuation
+OK   stale verification evidence fails closed
+OK   an exhausted finalization ceiling performs no recovery
+OK   a wrong callback run cannot be ingested
+OK   conflicting accepted callbacks are ambiguous
+OK   a callback already consumed by the gate never retries
+OK   provider or callback replay requirements fail closed
+OK   the same authority recognizes an exact durable review in progress
+OK   a bound pre-ready launch is wait-only without recovery identity
+OK   an exact live start-provider launch remains wait-only
+OK   a different pending launch effect remains fail-closed
+OK   a failed pre-ready identity cannot suppress review drive
+OK   wiki-summary-invalid retains restart-only semantics
+OK   callback-wake-effect-uncertain retains restart-only semantics
+OK   pipeline-verification-effect-uncertain retains restart-only semantics
+OK   malformed callback authority cannot create a receipt
+review continuation recovery policy tests passed
+OK   durable drive records reconstruct the captured rearm authority
+OK   durable exact start-provider launch remains a live review window
+OK   durable callback records reconstruct exact ingestion authority
+OK   the same durable callback is refused outside a stuck root
+OK   every gate lane is observed and an unresolved lane effect fails closed
+OK   a gate lane without a durable round cannot prove live review progress
+review continuation observation tests passed
+OK   bounded identifiers reject empty values
+OK   owner-relative paths reject empty values
+OK   callback payload rejects non-JSON values
+OK   packet metadata rejects negative byte counts
+OK   packet manifests reject duplicate normalized files
+OK   owned resources reject negative process identifiers
+OK   process identity requires a live process group
+OK   supervisor identity requires a live supervisor pid
+OK   operation records reject negative revisions
+OK   operation records reject invalid persisted budgets
+OK   operation records reject boolean deadlines
+OK   operation records reject non-finite deadlines
+OK   operations cannot parent themselves
+OK   root lineage requires a parent operation
+OK   resume state is limited to attention-required
+OK   effect identity cannot exist without an outcome
+OK   pending effect identity must agree
+OK   resolved effect cannot remain pending
+OK   accepted callback identity must be complete
+OK   compatible capability reports cannot carry a failure reason
+OK   incompatible capability reports require a reason
+OK   callback envelopes reject unknown schema versions
+OK   callback envelopes enforce the payload size cap
+OK   callback envelopes bind the canonical payload digest
+OK   verification evidence requires an exact Git object id
+OK   verification evidence requires an integer exit code
+OK   verification evidence requires both timestamps
+OK   verification evidence rejects unknown schema versions
+OK   verification evidence rejects negative output sizes
+OK   legacy verification evidence cannot claim an output digest
+OK   transition results reject negative revisions
+OK   stable serialization rejects non-contract values
+OK   legacy pending effects receive the bounded derived outcome
+
+All contract boundary tests passed.
+contract/state edge matrix passed
+OK   paste visibility precedes first Enter and activity acknowledges
+OK   pre-Enter reservation replay fails closed without an unbudgeted key
+OK   post-Enter crash replay observes activity without a second key
+OK   crash after prompt transport replays without a second paste
+OK   Codex collapsed pasted content is recognized as input-ready
+OK   one identity-bound Enter retry never repeats the prompt
+OK   exhausted shared nudge budget fails closed without duplicate input
+OK   callback artifact wins the delivery race
+OK   transport replay submits only after a baseline-bound editor change
+OK   transport replay cannot submit a stale same-heading editor
+OK   stale pre-Enter activity cannot acknowledge the new continuation
+OK   stale activity without current input visibility fails closed
+OK   stale same-heading editor cannot identify the current paste
+OK   durable prior submit may acknowledge activity without another Enter
+OK   accepted submit with visible editor fails closed without replay
+OK   submit replay rejects activity identical to its durable baseline
+OK   visible transcript anchor does not hide exact provider activity
+OK   idle repaint cannot acknowledge a continuation
+OK   missing screen after Enter fails closed without retry
+OK   later missing screen also blocks the Enter retry
+OK   unknown interactive screen fails closed
+OK   ownership is rechecked before Enter
+OK   Claude activity is classified without dropping the prompt anchor
+Continuation delivery matrix passed.
+OK   pipeline contracts are frozen
+OK   compiled contract pins compiler compatibility
+OK   canonical definition hash is stable
+OK   compiler resolves exact primitive versions
+OK   compiler resolves controls without adding fake linear steps
+OK   compiler exposes only declared capability requirements
+OK   compiler exposes a conservative immutable worst-case budget
+OK   compiled policy ceiling and effects use code-owned bindings
+OK   contract is bounded and labels its real enforcement boundary
+OK   compiled order derives one wait action without controller state
+OK   completed records derive the next executable step
+OK   the compiled terminal prefix derives reap-ready
+OK   typed attention stops before later steps
+OK   out-of-order durable evidence fails closed
+OK   compiler rejects a mismatched pipeline input schema
+OK   compiler rejects a mismatched pipeline output schema
+OK   compiler rejects an unsupported session mode
+OK   compiler rejects a missing route capability
+OK   compiler rejects unregistered skill semantics
+OK   compiler rejects unresolved control primitives
+OK   compiler rejects an execution primitive used as a control
+OK   completion policy attention/3 fails closed
+OK   completion policy autonomous/2 fails closed
+OK   completion policy unknown/2 fails closed
+OK   unknown permission_ceiling fails closed
+OK   unknown side_effects fails closed
+OK   typed allowed completion policies participate in the canonical contract hash
+OK   budget participates in the canonical contract hash
+OK   permission ceiling participates in the canonical contract hash
+OK   side effects participates in the canonical contract hash
+OK   render rejects request-time policies outside the immutable contract
+OK   custom pipeline facade preserves contract identities after extraction
+OK   code-owned selector chooses the baseline
+OK   published documentation pipeline compiles through the strict contract
+OK   model-authored custom spec cannot override reserved outcome pointer
+OK   custom compiler preserves deterministic fix semantics
+OK   strict parser produces a stable compiled hash
+OK   set-like spec ordering does not change the canonical hash
+OK   custom compiler uses the existing compiler
+OK   custom budget is bounded by the code-owned ceiling
+OK   approval renders baseline delta and absolute ceiling
+OK   authoring contract names the schema and forbids executable content
+OK   exact explicit approval freezes the compiled hash
+OK   exact policy-valid snapshot approval freezes the compiled hash
+OK   approved custom contract binds the existing dispatch operation
+OK   approved custom composition may add registered sequential model steps
+OK   custom dispatch cannot exist before approval
+OK   owner-only frozen store revalidates the exact approved contract
+OK   runtime resolves custom execution through the existing baseline
+OK   frozen store detects contract tampering
+OK   frozen store detects approval-card tampering
+OK   frozen store detects spec tampering
+OK   frozen store detects approval tampering
+OK   frozen store rejects the legacy schema
+OK   unknown top-level fields fail closed
+OK   model cannot choose a permissive delta baseline
+OK   built-in-equivalent proposals are rejected
+OK   omitted authority cannot hide the effective harness envelope
+OK   custom provider restart authority is globally capped at one
+OK   model cannot approve its own proposal
+OK   unknown actors cannot approve a proposal
+OK   policy-valid snapshot cannot freeze a rejected proposal
+OK   policy-valid snapshot cannot freeze a revised proposal
+OK   approval cannot be replayed for a different definition
+OK   policy-valid snapshot cannot be replayed for a different definition
+OK   policy-valid snapshot cannot be replayed for a different approval card
+OK   arbitrary commands fail closed
+OK   unknown verification checks fail closed
+OK   permission expansion fails closed
+OK   policy-only permission claims are unavailable to custom specs
+OK   policy-only side effects are unavailable to custom specs
+OK   model-authored provider routes fail closed
+OK   unavailable route capabilities fail before launch
+OK   budget expansion fails closed
+OK   graph bombs fail closed
+OK   backward transitions require an explicit bounded-loop control
+OK   transition traversal bombs fail closed
+OK   filesystem paths cannot hide in context pointers
+
+All custom pipeline tests passed.
+ok - first custom visit is a deterministic child with bounded outcomes
+ok - next visit binds the accepted receipt and exposes declared decision outcomes
+ok - declared backward decision replays as one bounded next visit
+ok - undeclared model decisions fail closed
+ok - loop visit 2 targets the declared step
+ok - loop visit 3 targets the declared step
+ok - loop visit 4 targets the declared step
+ok - loop visit 5 targets the declared step
+ok - loop traversal exhaustion becomes a typed attention boundary
+ok - custom model transport stops at the code-owned verification boundary
+
+All custom sequence tests passed.
+OK   custom runtime reconciles result-only steps through verify/review
+OK   custom runtime reconciles result-only steps through verify/review
+ERROR: verification resolution is invalid: verification escalation resolution is invalid
+ERROR: verification resolution is invalid: verification escalation resolution is invalid
+ERROR: only the originating coordinator session may resolve this escalation
+ERROR: same-HEAD retry response publication failed: same-HEAD mechanism-flake retry is not authorized
+ERROR: verification escalation authority is invalid: verification escalation identity is invalid
+escalation 6016d81d-31fc-4fd0-9d40-a52b0e147510 sent to coordinator; task must remain paused
+decision relayed to task surface 11111111-1111-1111-1111-111111111111
+decision relayed to task surface 11111111-1111-1111-1111-111111111111
+OK   verification resubmission keeps retry-mechanism-flake canonical and publishes the one authorized same-HEAD response automatically
+OK   screen progress resets the idle clock without a model call
+OK   ten quiet minutes produce content-free suspected idle
+OK   fifteen quiet minutes allow one bounded nudge
+OK   nudge budget prevents repeated token spend
+OK   twenty quiet minutes allow one identity-bound restart
+OK   exhausted recovery becomes durable attention
+OK   interactive provider is never interrupted
+OK   first typed result read waits for stability
+OK   stable result without callback selects model-free reconcile
+OK   provider death is distinct from live idle
+OK   durable controller records each recovery stage once
+OK   liveness state and receipts remain owner-only
+OK   first liveness state publication fsyncs file and directory
+OK   callback reservation is durable before provider effect
+OK   provider effect follows the durable reservation receipt
+OK   sent callback transition fsyncs state and receipt
+OK   accepted callback retirement fsyncs state and receipt
+OK   uncertain callback transition fsyncs state and receipt
+OK   typed artifact settlement starts from one exact reservation
+OK   typed artifact retires only the reserved submit without refunding nudge
+OK   typed artifact settlement replays without another state transition
+OK   artifact settlement kill point is deterministic
+OK   artifact settlement repairs the retired-state reserved-receipt phase
+OK   artifact settlement rejects a changed replay artifact
+OK   receipt from an earlier review generation is not liveness progress
+OK   receipt matching the current callback target is liveness progress
+OK   exact duplicate receipt reconstructed after broker acceptance is progress
+OK   duplicate receipt with the wrong run is not liveness progress
+OK   callback submit reserves the shared nudge budget exactly once
+OK   callback submit sent state is durable and idempotent
+OK   accepted callback retires only its exact submit binding
+OK   concurrent callback retirement replays idempotently
+OK   a different callback generation cannot reuse the reservation
+OK   malformed callback submit receipt fails closed
+OK   sent transition kill point persists the exact replay-healable phase
+OK   retirement kill point leaves one exact resumable mixed phase
+OK   accepted retirement replay completes without another provider effect
+OK   accepted retirement never clears a foreign live binding
+OK   incomplete callback generation identity fails closed
+OK   callback generation identity cannot change its binding
+OK   accepted callback must match the reserved run identity
+OK   callback submit cannot be marked sent without reservation
+OK   callback submit cannot be marked uncertain without reservation
+OK   callback submit uncertainty starts from an exact reservation
+OK   uncertain callback transport fails closed and remains idempotent
+OK   callback submit cannot reserve without liveness state
+
+All liveness tests passed.
+OK   elapsed deadline has zero positive reviewer effect
+OK   dead provider has zero positive reviewer effect
+OK   unknown provider has zero positive reviewer effect
+OK   stable screen and elapsed time cannot authorize callback submit
+OK   turn-stopped is telemetry-only until a production adapter exists
+OK   reviewer runtime contains no restart authority
+
+All event-only reviewer effect tests passed.
+OK   named trace test_exact_head_review_attempt is GREEN
+OK   named trace test_event_only_review_effects is GREEN
+OK   named trace test_split_base_identity is GREEN
+OK   exact-attempt trace is terminal and inspect-only across old HEADs
+OK   provider-event trace is attention-only and has no reviewer restart
+OK   Split trace binds branch drift and rejects unrelated history
+OK   fresh artifact repair remains inside the measured authority contour
+OK   the amendment reader's production owner is independently measured
+OK   the separately owned authority manifest is the exact measured contour
+OK   active review contour has no writable or incident-pinned authority
+OK   audit manifest admits no deleted lifecycle authority
+OK   every critical coverage floor still names a live audited module
+OK   incremental receipt ladder is complete through Slice G
+OK   Slice A receipt binds an ancestor commit
+OK   Slice A stayed below the pre-integration broad gate
+OK   Slice B receipt binds an ancestor commit
+OK   Slice B stayed below the pre-integration broad gate
+OK   Slice C receipt binds an ancestor commit
+OK   Slice C stayed below the pre-integration broad gate
+OK   Slice D receipt binds an ancestor commit
+OK   Slice D stayed below the pre-integration broad gate
+OK   Slice E receipt binds an ancestor commit
+OK   Slice E stayed below the pre-integration broad gate
+OK   Slice F receipt binds an ancestor commit
+OK   Slice F stayed below the pre-integration broad gate
+OK   Slice G receipt binds an ancestor commit
+OK   Slice G stayed below the pre-integration broad gate
+OK   bounded RC1 dogfood preserves both callbacks and has no resource tail
+OK   dogfood terminal inventory is complete and resource-free
+OK   dogfood callback-ingestion defect is explicitly deferred to RC2
+
+2.6.6 RC1 integrated E1-E7 trace passed
+OK   registry exposes execution and typed control descriptors
+OK   human gate and bounded loop are immutable non-step controls
+OK   built-in model work requires only the preflight fact it can prove
+OK   built-ins cover lifecycle and both engineering profiles
+OK   fix contract explicitly resolves the bounded controls
+OK   fix compiler exposes the static worst-case of three passes
+OK   both request-time completion modes share one immutable fix contract
+OK   engineering fix is executable only by exact compiled hash
+OK   unknown built-in name fails closed
+OK   unknown executable contract hash fails closed
+OK   fix compiler rejects a partial completion policy set
+OK   approval is a precondition rather than a fake runtime primitive
+OK   lifecycle describes dispatch review reap-ready semantics
+OK   change profile describes the engineering sequence
+OK   fix profile describes reproduce root-cause regression minimal-fix
+OK   all built-ins end at the coordinator-owned reap-ready boundary
+OK   engineering descriptors retain installed skill semantics
+OK   RED callback-delivered-twice -> GREEN tests/harness/test_callbacks.py
+OK   RED claude-trust-footer-drift -> GREEN tests/harness/test_callbacks.py
+OK   RED close-before-process-exit -> GREEN tests/harness/test_runtime_sessions.py
+OK   RED codex-trust-footer-drift -> GREEN tests/harness/test_release_blocker_runtime.py
+OK   RED duplicate-review-surfaces -> GREEN tests/harness/test_review_vertical.py
+OK   RED interrupted-write-ahead-transition -> GREEN tests/harness/test_store.py
+OK   RED process-exited-surface-remains -> GREEN tests/harness/test_callbacks.py
+OK   RED recycled-process-group -> GREEN tests/harness/test_adapters.py
+OK   RED retry-uncertain-spawn -> GREEN tests/harness/test_workflows.py
+OK   RED same-session-verify-second-surface -> GREEN tests/harness/test_review_vertical.py
+OK   RED surface-vanished-process-remains -> GREEN tests/harness/test_callbacks.py
+OK   RED unknown-choice-prompt -> GREEN tests/harness/test_callbacks.py
+OK   RED upgrade-active-operation -> GREEN tests/test_upgrade_preflight.py
+OK   constructing a store is read-only
+OK   listing an absent store is read-only
+OK   reading an absent store is read-only
+OK   CLI status does not initialize an absent store
+OK   CLI inspect does not initialize an absent store
+OK   CLI doctor does not initialize an absent store
+OK   create persists initial record
+OK   lane and run identity survive restart
+OK   same assigned spec create is idempotent
+OK   effect outcome requires the bounded enum
+OK   durable operation identity cannot be rebound by save
+OK   stale operation revision fails closed
+OK   run identity belongs to exactly one operation
+OK   idempotency collision fails closed
+OK   effect intent is durable before effect
+OK   same effect intent is idempotent
+OK   restart preserves unresolved effect boundary
+OK   unresolved effect blocks state advance
+OK   effect outcome is durable and clears reconciliation
+OK   same effect resolution is idempotent
+OK   completed effect intent cannot be reopened by retry
+OK   legal transition advances revision
+OK   illegal transition rejected
+OK   attention reason round-trips
+OK   callback timeout rearm rejects invalid deadlines
+OK   callback timeout rearm restores state and deadline atomically
+OK   callback timeout rearm rejects unrelated attention
+OK   repeated terminal transition is an idempotent no-op
+OK   concurrent create serializes idempotency-key ownership
+OK   corrupt durable state fails closed through the store seam
+OK   non-object durable state fails closed through the store seam
+OK   CLI status reports durable operation assignment without cmux
+OK   CLI inspect is read-only
+OK   CLI resume contains an unresolved effect as attention-required
+OK   CLI resume rearms one expired callback window after explicit recovery
+OK   CLI resume restores interrupted cleanup and proves zero owned resources
+OK   CLI reconcile reports the durable pending-effect recovery boundary
+OK   CLI cancel reaches a terminal state when no resources remain
+OK   CLI close completes an interrupted cancelling transition
+OK   CLI reconcile completes a resource-free cancelling operation
+OK   CLI reconcile preserves an accepted callback as completion
+OK   CLI cancel preserves an accepted callback as completion
+OK   CLI plain reconcile renders action rows without a kind field
+OK   CLI reconcile keeps healthy exact resources report-only
+OK   CLI cancel clears only proven-dead exact resources
+OK   CLI cancel clears proven-dead callback-invalid resources
+OK   CLI cancel closes an exact orphan surface and confirms its removal
+OK   CLI cancel closes only the exact surface in a live observer workspace
+OK   CLI reconcile never closes a workspace before process binding
+OK   CLI cancel ignores workspace drift after exact surface disappearance
+OK   CLI cancel leaves an unguarded orphan process attention-required
+OK   one CLI cancel exits and cleans one exact live provider
+OK   repeated CLI cancel replays no provider exit or cleanup effect
+OK   modern cancellation publishes close authority without a result
+OK   CLI cancel fails closed when exact surface close is unproved
+OK   CLI cancel exhausts one fixed probe budget without replaying exit
+OK   CLI reviewer cleanup reconstructs exact durable parent ownership
+OK   CLI reviewer cleanup without result retains ownership idempotently
+OK   CLI reviewer cleanup preserves a live observer workspace
+OK   CLI reviewer cleanup rejects a stale or reused process identity
+OK   CLI reviewer cleanup ignores workspace drift with exact surface identity
+OK   CLI reviewer cleanup rejects a foreign launch surface
+OK   CLI exact Claude cleanup does not require unavailable checkpoint evidence
+OK   CLI non-Claude cleanup keeps missing checkpoint evidence fail-closed
+OK   CLI checkpointless Claude cleanup rejects lost requested evidence
+OK   CLI checkpointless Claude cleanup still proves the exact model route
+OK   CLI accepted callback exact identity advances signal-less exit
+OK   CLI accepted callback exact identity completes cleanup
+OK   CLI review cleanup follows exact callback generation and child receipt
+OK   CLI delegated review cleanup fails closed without its exact target generation
+OK   CLI accepted callback identity mismatch stays fail-closed
+OK   CLI accepted callback weak identity stays fail-closed
+OK   CLI accepted callback probe error stays fail-closed
+OK   CLI non-callback unknown ownership stays fail-closed
+OK   CLI close keeps unknown exact resources attention-required
+OK   terminal exact approval selects callback-free recovery
+OK   terminal exact findings select callback-free transport recovery
+OK   terminal cleanup attention selects accepted-callback recovery
+OK   accepted review recovery terminalizes dispatch exactly once
+OK   changes-requested recovery republishes the exact review generation
+OK   terminal findings recovery bypasses stale resolution parsing
+OK   completed resolution handoff advances instead of redelivering findings
+OK   the pinned durable identity still matches the canonical contract
+OK   proven zero-provider-effect failure retires without signaling
+OK   retirement replay is idempotent with zero store effect
+OK   CLI orchestration uses the signal-free retirement seam
+OK   failed reviewer retirement preserves a live observer workspace
+OK   proven input-unconfirmed reviewer retires after exact absence proof
+OK   retirement rejects live semantic process
+OK   retirement rejects unknown semantic supervisor
+OK   retirement declines missing workspace identity without a store effect
+OK   retirement declines empty workspace identity without a store effect
+OK   retirement declines invalid workspace identity without a store effect
+OK   retirement declines non-string workspace identity without a store effect
+OK   retirement rejects live surface
+OK   retirement rejects callback presence
+OK   retirement rejects provider effect success
+OK   retirement rejects stale run identity
+OK   retirement rejects a callback pointer with a symlinked ancestor
+pre-model reviewer retirement matrix: ok
+OK   a null-change retry publishes one typed decision and parks
+OK   delivery replay parks again without a second notification
+OK   a resolved decision chain parks without re-delivering
+OK   a later retry at the same HEAD publishes its own actionable decision
+OK   the later retry replays idempotently after a crash
+OK   changed delivery bytes stay fail-closed
+OK   an unresolved decision chain parks under its own cause
+null-change continuation matrix: ok
+OK   fixture reproduces the incident shape
+OK   one root cancel leaves every exact descendant terminal
+OK   root itself is terminal after cascade
+OK   already-terminal descendants keep their terminal state
+OK   cascade leaves the exact subtree resource-free
+OK   cascade is child-first: review-round precedes its review parent
+OK   cascade is child-first: every descendant precedes the root
+OK   sibling subtree under the same owner is untouched
+OK   foreign owner is untouched
+OK   the cascade transitions no foreign owner and nothing outside the subtree
+OK   unknown root is rejected as StoreError, not any exception
+OK   rejected drift applies no transition
+OK   a corrupt parent cycle raises StoreError
+OK   the cycle error names the repeated operation
+OK   the cycle guard applies no transition
+OK   repeated root cancel is state-idempotent
+OK   repeated root cancel writes no new revisions
+OK   public cancel exits 0
+OK   public cancel reports a terminal root
+OK   public cancel leaves no exact descendant nonterminal
+OK   public cancel does not touch the sibling subtree
+OK   one cascade cancel converges an exact live descendant
+OK   the release fixture actually binds resources first
+OK   a resource-bearing subtree still cascades to completion
+OK   every resource-bearing descendant reaches a terminal state
+OK   the cascade releases every exact owned surface
+OK   resource probes target only the exact owned surfaces
+OK   an unprovable reviewer descendant truncates the cascade
+OK   the unprovable reviewer descendant is held for cleanup attention
+OK   no surface is closed without durable cleanup ownership
+OK   the reviewer descendant keeps its owned surface
+OK   pending effect: the cascade reports itself truncated
+OK   pending effect: the outcome names the requested root, not the blocker
+OK   pending effect: the blocking descendant is identified
+OK   pending effect: the payload keys on the root and marks it partial
+OK   pending effect: the root is left nonterminal, not falsely cancelled
+OK   live owned surface: the cascade reports itself truncated
+OK   live owned surface: the outcome names the requested root, not the blocker
+OK   live owned surface: the blocking descendant is identified
+OK   live owned surface: the payload keys on the root and marks it partial
+OK   live owned surface: the root is left nonterminal, not falsely cancelled
+OK   public cancel does not exit 0 when the cascade is truncated
+OK   the truncated payload names the requested root
+OK   the truncated cascade leaves the root nonterminal
+OK   a live owned surface truncates the first cascade
+OK   re-running the same command makes forward progress
+OK   the retried cascade terminalizes the whole exact subtree
+cascade cancellation regressions: ok
+OK   split returns exact UUID and container identity
+OK   status matches exact UUID
+OK   workspace creation derives exact origin window without surface guessing
+OK   workspace creation derives the exact window for an offscreen origin
+OK   exact cmux calls ignore ambient caller targeting
+OK   workspace cleanup binds exact workspace and window
+OK   adapter never uses focus/title/index ownership guesses
+OK   split uses explicit direction and no-focus semantics
+OK   invalid surface rejected
+OK   generic key rejected
+OK   canonical workspace title ownership guess is rejected
+OK   offscreen exact surface remains observable through the all-workspace tree
+OK   closed exact surface is missing when identify has no caller
+OK   exact workspace remains observable independently of its surface
+OK   workspace window identity drift is never reported missing
+OK   invalid all-workspace hierarchy raises typed adapter error
+OK   Darwin boot identity survives managed-sandbox EPERM
+OK   Darwin capture retains PID PGID and start generation without boot API
+OK   legacy process group without birth identity is unknown
+OK   legacy process group receives no probe or signal
+OK   recycled process group is never accepted as owned
+OK   recycled process group receives no mutating signal
+OK   initial owned process observation succeeds
+OK   identity changed after observation receives no TERM
+OK   ownership transfer at mutation boundary cannot hit a recycled PGID
+OK   sole parent pins the unreaped leader before group mutation
+OK   identity transfer at the guarded mutation boundary sends no signal
+OK   non-lookup signal errors are typed
+OK   Linux identity parser tolerates a closing paren in process name
+OK   failed identity capture contains and reaps the new provider
+OK   host identity backend recognizes one exact live child
+OK   dead exact child remains idempotent after reap
+OK   exited pinned leader still signals live same-PGID descendant
+OK   default runner is resolved at construction time
+OK   Claude reviewer is interactive dontAsk
+OK   Codex reviewer is read-only approval-never
+OK   Codex executor receives exact Git and cmux capabilities
+OK   Claude rejects wrong runtime
+OK   Codex rejects wrong runtime
+OK   initial exact acknowledgement is not itself a reconnect
+OK   completed exact SessionStart binds the external session and wakes
+OK   bound session hook may omit surface and workspace
+OK   unknown incomplete noisy and contradictory hook frames do not wake
+OK   notification surface and workspace events use hierarchical exact routing
+OK   dashboard surface and foreign workspace remain isolated
+OK   duplicate stale and contradictory source frames remain no-wake
+OK   a subsequent exact acknowledgement is a reconnect wake
+OK   an acknowledged cursor gap is an immediate cursor-gap wake
+OK   unbound session hooks never wake
+OK   contradictory SessionStart never creates a binding
+OK   malformed optional pane_id='not-a-uuid' is no-wake
+OK   malformed optional pane_id='not-a-uuid' cannot bind a session
+OK   malformed optional pane_id=7 is no-wake
+OK   malformed optional pane_id=7 cannot bind a session
+OK   malformed optional pane_id={} is no-wake
+OK   malformed optional pane_id={} cannot bind a session
+OK   malformed optional window_id='not-a-uuid' is no-wake
+OK   malformed optional window_id='not-a-uuid' cannot bind a session
+OK   malformed optional window_id=7 is no-wake
+OK   malformed optional window_id=7 cannot bind a session
+OK   malformed optional window_id={} is no-wake
+OK   malformed optional window_id={} cannot bind a session
+OK   malformed optional payload_truncated='false' is no-wake
+OK   malformed optional payload_truncated='false' cannot bind a session
+OK   malformed optional payload_truncated=0 is no-wake
+OK   malformed optional payload_truncated=0 cannot bind a session
+OK   malformed optional payload_truncated={} is no-wake
+OK   malformed optional payload_truncated={} cannot bind a session
+OK   UUID pane/window and false payload_truncated preserve the event payload
+OK   true payload_truncated remains a valid content-free no-wake frame
+OK   non-object frame degrades without interpreting content
+OK   wrong protocol degrades
+OK   wrong scalar types degrade
+OK   heartbeat frame degrades because launch disables heartbeats
+OK   unknown control frame degrades
+OK   adapter compiles one fixed filtered reconnecting subscription
+OK   adapter returns only content-free wake facts
+OK   adapter closes its exact child process
+OK   oversized NDJSON degrades to polling
+OK   malformed NDJSON degrades to polling
+OK   event-stream EOF degrades to polling
+OK   partial NDJSON cannot block past the event wait deadline
+OK   subscription launch failure is unavailable without attention
+OK   missing optional capability returns unavailable
+OK   capability probe is fixed and code-only
+OK   invalid acknowledgement degrades the first subscription
+OK   degraded retries cache capability and start only one new subscription
+OK   symlinked cursor root is unavailable without launch
+cmux wake source contract matrix: ok
+OK   Darwin EPERM plus exact running ownership reports both live
+OK   Darwin fallback sends no signal
+OK   EPERM fallback rejects provider PID reuse
+OK   EPERM fallback rejects provider PGID reuse
+OK   EPERM fallback rejects supervisor PID reuse
+OK   EPERM fallback rejects a provider with the wrong parent
+OK   EPERM fallback rejects an exact stopped process
+OK   EPERM fallback rejects an exact zombie process
+OK   EPERM fallback rejects an exact exited process
+OK   EPERM fallback rejects a zombie supervisor
+OK   permission without libproc proof remains unknown
+OK   ordinary absent processes remain dead without fallback
+OK   ordinary successful zero-signal probes preserve existing behavior
+OK   non-Darwin EPERM behavior remains unknown
+
+Darwin exact process status tests passed.
+OK   ProviderEvent vocabulary is exact and closed
+OK   ephemeral profile cannot emit an interactive Stop
+OK   interactive event stream binds one exact terminal cursor
+OK   ephemeral stream reaches one result and durable close without a surface
+OK   duplicate cursor rejected
+OK   stale cursor rejected
+OK   implicit cursor gap rejected
+OK   wrong durable owner rejected
+OK   wrong generation rejected
+OK   wrong surface rejected
+OK   source boot change rejected
+OK   ephemeral turn-stopped rejected
+OK   unknown vocabulary rejected at construction
+OK   screen and time cannot be smuggled into provider facts
+OK   cursor flags require exact booleans
+OK   cursor cannot claim unreachable terminal events
+OK   cursor result cannot precede accepted input
+OK   an explicit contiguous event-gap remains terminal business evidence
+OK   generated invalid lifecycle ordering rejected: result-published/input-accepted
+OK   generated invalid lifecycle ordering rejected: process-exited/input-accepted
+OK   generated invalid lifecycle ordering rejected: process-exited/result-published
+provider event contract matrix: ok
+OK   auth probes are fixed no-model-effect commands in sanitized environments
+OK   Claude print command is fixed, bounded, schema-only, and non-persistent
+OK   Codex exec command is fixed, ephemeral, schema-only, and read-only
+OK   both child environments remove ambient credentials and arbitrary secrets
+OK   runtime provider publishes the replaceable default logical registry
+OK   provider-neutral spec contains logical routes but no CLI transport names
+OK   native Claude subscription and Codex ChatGPT premises are equally ready
+OK   Codex accepts its exact stderr login marker after the supported PATH warning
+OK   Codex PATH warning without login marker remains fail-closed
+OK   Codex login marker with arbitrary stderr remains fail-closed
+OK   Codex missing login marker remains fail-closed
+OK   Codex nonzero login command remains fail-closed
+OK   Codex negated ChatGPT login fails closed before a model effect
+OK   Codex mixed ChatGPT and API-key status fails closed before a model effect
+OK   Codex conflicting stderr evidence fails closed before a model effect
+OK   anthropic ambiguous billing path stops before a model effect
+OK   openai ambiguous billing path stops before a model effect
+OK   bounded native-account probes permit exactly one compiled model effect
+OK   both providers normalize success through one event/result contract
+OK   transport identity remains diagnostic and never changes workflow identity
+OK   truncated provider output becomes a typed event-gap and durable close
+OK   nonzero exits are typed equally and never retain provider stderr
+OK   registry cannot silently substitute a different logical provider
+OK   unregistered provider cannot fall back to an interactive transport
+ephemeral provider conformance matrix: ok
+OK   first send is durably reserved before its provider-facing effect
+OK   one exact pre-accept retry reuses the idempotency key
+OK   ambiguous input survives restart and is never replayed blindly
+OK   delivery state remains owner-only and stores no prompt or screen body
+OK   durable reload rejects impossible terminal flags
+OK   durable reload rejects wrong cursor scalar types
+OK   durable reload rejects result before accepted input
+OK   concurrent first delivery linearizes to exactly one provider send
+OK   screen repaint after accepted input can only wait
+OK   deadline after accepted input can only terminate attention, never resend
+OK   typed interactive Stop fails closed without a production adapter
+OK   repeated interactive Stop remains attention with zero submit
+OK   schema-valid result closes business delivery without screen authority
+OK   ephemeral exit without result is terminal attention
+OK   explicit event gap is terminal attention
+OK   ephemeral resource close without result preserves attention
+OK   accepted input event must match the reserved idempotency key
+OK   screen change can only request another resource observation
+OK   deadline can terminate attention but cannot claim resource closure
+OK   alive exact task surface cannot be inferred closed from workspace state
+OK   unknown exact task surface remains fail-closed
+OK   disappeared owned resources converge through exactly one durable receipt
+OK   concurrent resource disappearance publishes exactly one close receipt
+OK   durable close receipt cannot be rebound to another owner
+OK   durable close receipt maps to one validated resource-closed event
+OK   production stream consumes the exact close receipt as its next event
+OK   missing provider result cannot publish close or clear exact ownership
+OK   duplicate eligible root contour latches attention without close authority
+OK   malformed root generation directory fails closed without close authority
+OK   symlinked root generation fails closed without close authority
+OK   identity-drifted root generation fails closed despite an exact callback stream
+OK   valid later callback generation completes while closure binds the immutable root
+OK   attention-latched root generation cannot receive a durable close receipt
+OK   deadline-latched root generation cannot receive a durable close receipt
+OK   symlinked provider-events authority fails closed without an outside write
+OK   symlinked delivery authority directory fails closed without close authority
+OK   symlinked runtime ancestor fails closed without an outside write
+OK   symlinked operation state root fails closed without an outside write
+OK   missing immutable root generation fails closed despite a live sibling stream
+OK   result published before callback with a conflicting digest latches attention
+OK   published result without an accepted callback retains ownership
+OK   foreign durable close receipt latches attention without provider close
+delivery and durable close matrix: ok
+OK   callback commits one legal transition
+OK   duplicate callback is an idempotent no-op
+OK   callback identity mutation rejected
+OK   callback from a different run is rejected
+OK   stale exact duplicate still rejects a different run
+OK   exact duplicate stays idempotent after terminal transition
+OK   fresh callback for a terminal operation is rejected
+OK   callback outside awaiting state is rejected
+OK   store lock serializes concurrent callback acceptance
+OK   stale callback transaction is rejected under the public seam
+OK   review callback rejects a mismatched deadline owner lane
+OK   crash before callback publication writes neither state nor identity
+OK   crash after callback publication retains one complete idempotent record
+OK   expired review round loses atomically to its parent deadline
+OK   exact Claude trust prompt recognized
+OK   exact Codex trust prompt recognized
+OK   near-match receives no input
+OK   background exit requires closure arm
+OK   read probe budget is bounded
+OK   uncertain effect reconciles before retry
+OK   dead process closes exact surface
+OK   orphan process without guardian fails closed
+OK   unknown ownership never mutates
+OK   production has no external private Store writer
+OK   reconcile never bypasses the sole-parent guardian
+OK   exact current idle generation remains observation-only
+OK   recovery binding excludes artifact races but includes exact generation
+OK   screen classifier recognizes only exact provider idle prompts
+OK   concurrent reconcile reserves the shared nudge exactly once
+OK   reservation replay is an idempotent no-op
+OK   same write-ahead receipt becomes sent idempotently
+OK   generation receipt is content-free and sent
+OK   typed input requires two stable bounded reads
+OK   stable typed input publishes through the authoritative validator
+OK   existing callback fast path needs no repeated submit
+OK   symlink input is typed invalid evidence
+OK   oversize input is typed invalid evidence
+OK   screen identity is not part of generation-bound action identity
+OK   stable typed input wins without model effect
+OK   stable callback wins without model effect
+OK   accepted receipt wins every recovery race
+OK   reserved effect is ambiguous and never replayed
+OK   sent effect is observed without replay
+OK   active provider produces zero effect
+OK   one idle observation produces zero effect
+OK   production floor blocks an early idle prompt
+OK   permission prompt fails closed
+OK   unknown prompt fails closed
+OK   lost process ownership fails closed
+OK   dead provider fails closed for submit recovery
+OK   stale generation fails closed
+OK   stale target fails closed
+OK   terminal parent fails closed
+OK   non-awaiting parent cannot start submit recovery
+OK   insufficient deadline fails closed
+OK   prior generic nudge state cannot authorize submit recovery
+OK   symlink input fails closed
+OK   oversize callback fails closed
+OK   unstable typed input is observed without effect
+OK   malformed identity and digest fail closed
+OK   bounded timing policy cannot create reviewer effect authority
+OK   accepted receipt binds the complete current callback identity
+OK   accepted receipt rejects a different valid broker callback identity
+OK   accepted receipt rejects malformed run_id
+OK   accepted receipt rejects malformed callback_id
+OK   accepted receipt rejects malformed payload_sha256
+OK   executed v2.6.3 snapshot binds exact scripts/harness/runtime_worker.py
+OK   executed v2.6.3 snapshot binds exact scripts/harness/runtime_worker_liveness.py
+OK   executed v2.6.3 snapshot binds exact scripts/harness/runtime_worker_loop.py
+OK   executed v2.6.3 snapshot binds exact scripts/harness/runtime_worker_execution.py
+OK   executed v2.6.3 snapshot binds exact scripts/harness/callbacks.py
+OK   executed v2.6.3 snapshot binds exact scripts/harness/store.py
+OK   exact v2.6.3 worker reproduces missing submit through callback timeout
+OK   current review identity never closes through superseded cleanup
+OK   superseded cleanup probes exact old process
+OK   superseded cleanup probes exact old supervisor
+OK   unknown superseded ownership fails closed without close
+OK   superseded cleanup probes exact old process
+OK   superseded cleanup probes exact old supervisor
+OK   superseded cleanup probes exact old process
+OK   superseded cleanup probes exact old supervisor
+OK   superseded cleanup probes exact old surface
+OK   superseded cleanup probes exact old surface
+OK   authorized superseded review cleanup reaches resource-free terminal once
+OK   attention transition failure is surfaced to the owning worker
+OK   failed transition leaves a durable typed marker without false state
+OK   matching marker replay still reaches durable operation attention
+OK   symlink callback pointer fails closed with zero runtime effects
+OK   symlinked callback parent is rejected before artifact observation
+OK   stable review input before Provider Stop has zero submit effect
+OK   turn-stopped cannot submit stable input without a production adapter
+
+All callback-submit recovery runtime tests passed.
+OK   accepted callback recovery uses the registered review drive without replay
+OK   authority baseline covers every approved lifecycle stage exactly once
+OK   baseline RED rows are exactly the callback capabilities closed by Subplan A
+OK   final authority trace closes every historical manual-ingress row
+OK   terminal model prose has zero lifecycle transition authority
+OK   final trace binds the approved fix PipelineSpec and bounded controls
+OK   final trace binds the effect-recorded engineering fix traversal
+OK   final trace derives callback, next-stage and cleanup evidence from dogfood receipt
+OK   typed observations alone drive verify review wait and terminal progression
+OK   envelope transport dispatch is code-owned and prose-independent
+OK   task-summary transport dispatch is code-owned and prose-independent
+OK   research-fetch transport dispatch is code-owned and prose-independent
+OK   callback lifecycle distinguishes observation from typed publication
+OK   provider prose cannot terminate an unhandled callback boundary
+OK   artifact repair exit waits for typed terminal child state
+OK   golden corridor reaches the durable wiki-summary boundary
+OK   corridor review gate is terminally approved at the resolved HEAD
+OK   corridor wakes exactly the origin surface with the reap command
+OK   corridor consumes exactly two product cycles ending approved
+OK   reap finalizes the exact accepted summary callback once
+OK   corridor terminates resource-free with no pending effect
+OK   corridor runs scoped verification once per reviewed HEAD
+OK   corridor review rounds carry exactly one accepted callback each
+OK   RC1 derives one material cell from accepted durable corridor owners
+harness control-plane tests passed
+OK   concurrent review-drive ticks linearize one transition and workflow
+OK   concurrent accepted-callback ticks linearize one transition and workflow
+OK   a never-launched reserved claim closes as an invalidated negative
+OK   reserved closure advances no sequence or streak evidence
+OK   repeating the same reserved closure is idempotent
+OK   reserved closure retains the durable failure artifacts
+OK   reserved closure permits cell 1 on the post-repair digest
+OK   a live root cannot close a reserved claim
+OK   an accepted input forbids reserved closure
+OK   a provider result forbids reserved closure
+OK   a succeeded start effect forbids reserved closure
+OK   owned resources forbid reserved closure
+OK   a launched dispatch-run record forbids reserved closure
+OK   a foreign request cannot close the reserved claim
+OK   a launched reservation must be completed by record, not closed
+OK   failed run with a durable resource leak stays reserved
+OK   failed durable run closes and resets the reservation
+OK   failed closure permits cell 1 on a changed digest
+OK   cancelled durable run closes and resets the reservation
+OK   cancelled closure permits cell 1 on a changed digest
+OK   corridor cccc0267-0267-4267-8267-000000000011 completes through real owners
+OK   an unexpected terminal effect identity stays rejected
+OK   corridor cccc0267-0267-4267-8267-000000000012 completes through real owners
+OK   corridor cccc0267-0267-4267-8267-000000000013 completes through real owners
+OK   three persisted real-store corridors complete the RC1 streak
+RC1 live streak gate tests passed
+OK   operation transition oracle is independent and mutation-sensitive
+OK   operation state matrix covers every source/target pair
+OK   effect lifecycle matrix covers idempotent and fail-closed branches
+OK   callback routing rejects unknown kinds and review verdicts
+OK   all built-in pipeline observation combinations reconcile deterministically
+OK   review resolution matrix covers simple and every deep mixed verdict
+OK   Wiki Summary disposition matrix covers every evidence/gap shape
+release transition matrix passed: 4370 cases
+OK   manifest declares the exact production state vocabulary
+OK   manifest declares the exact production edge denominator
+OK   every supported edge carries one closed-vocabulary classification
+OK   manifest declares the exact production entry-point event vocabulary
+OK   the provider-event denominator is the production contract
+OK   the simulator models a subset of the production provider events
+OK   the simulator gap is declared rather than silently absent
+OK   the manifest declares the exact simulator scenario vocabulary
+OK   no simulator verb leaks into the production event denominator
+OK   research is the only explicitly excluded callback transport
+OK   every declared forbidden edge is absent from the production table
+OK   the nine named lifecycle cases are declared exactly once each
+OK   the summary witness is named for the contract it exercises
+OK   certificate reports zero missing, extra, unclassified, or unvisited edges
+OK   certificate rejects the curated forbidden list and its whole closure
+OK   certificate binds the exact head and the production denominator bytes
+OK   every named case carries a passing bounded production witness
+OK   off-schema certificate is rejected
+OK   an incomplete verdict is rejected
+OK   a reported gap under a complete verdict is rejected
+OK   an empty excluded-transport claim is rejected
+OK   removing one declared edge is reported as a missing production edge
+OK   inventing an unsupported edge is reported as extra
+OK   removing the only covering scenario is reported as an unvisited edge
+OK   editing config and scenarios together still fails against production
+OK   declaring a legal edge forbidden is reported as an accepted transition
+OK   removing a production event is reported as a missing event
+OK   inventing an event is reported as extra
+OK   an unknown classification is reported as an unclassified edge
+OK   manifest with extra excluded transport is refused
+OK   manifest with unknown case witness is refused
+OK   manifest with repeated supported edge is refused
+OK   manifest with drifted denominator source is refused
+OK   every declared forbidden edge is rejected by the production reducer
+OK   no terminal release state accepts any outgoing transition
+OK   one accepted callback wins, its replay is a duplicate, a rival is refused
+OK   every production review verdict routes to its exact next state
+OK   a crash before the durable publish leaves an untorn causal prefix
+OK   the resumed lifecycle reaches resource-free completion with one close receipt
+OK   the crash and cleanup case crossed no real external effect boundary
+OK   the independent oracle still catches a leaked terminal resource
+OK   the independent oracle still catches terminal release resurrection
+
+All RC4 transition certificate tests passed.
+OK   unchanged inputs produce byte-identical manifest
+OK   ContextPacket carries typed deterministic roles
+OK   large ContextPacket inputs remain pointers
+OK   text ContextPacket inputs keep readable validated extensions
+OK   ContextPacket role vocabulary covers the approved handoff
+OK   built-in ContextPacket delivers the reserved canonical outcome input
+OK   ContextPacket rejects outcome identity drift
+OK   raw conversation is excluded from ContextPacket
+OK   large inline content must use a pointer
+OK   git snapshot binds base and head
+OK   git adapter rejects push
+OK   git adapter rejects broad/escaping stage
+OK   git adapter rejects broad pathspec .
+OK   git adapter rejects broad pathspec *.py
+OK   git adapter rejects broad pathspec scripts/
+OK   git adapter preserves one exact literal stage path
+OK   git adapter requires explicit stage authorization
+OK   git adapter creates one exact owned non-main worktree
+OK   owned cleanup rejects implicit dirty discard
+OK   owned cleanup preserves main and unrelated dirty user work
+OK   capability handshake never creates callback state
+OK   capability handshake rejects incomplete cmux command support
+OK   capability handshake rejects unsupported provider profile
+OK   capability handshake proves the read-only host contract
+OK   Claude capability handshake recovers pipe-truncated help from a regular file
+OK   Claude capability handshake rejects incomplete regular-file help
+OK   six verification profiles load
+OK   model checks append after the configured verification gate
+OK   verification scratch is caller-owned outside the product checkout
+OK   verification executes configured order before appended model checks
+OK   verification evidence binds HEAD and profile
+OK   verification evidence binds the exact persisted output bytes
+OK   verification output tamper invalidates the evidence binding
+OK   stale HEAD evidence rejected
+OK   failed command evidence is never reusable
+OK   wrong named profile evidence is rejected
+OK   dispatch binds the executable compiled lifecycle
+OK   dispatch defaults to automatic simple review
+OK   engineering change reuses the dispatch identity and binds its exact contract
+OK   workspace is a dispatch placement
+OK   simple review is one holistic session
+OK   deep review preserves two independent axes
+OK   simple review verify is bounded
+OK   deep aggregation preserves axes and material verdict
+OK   important findings require same-session resolution
+OK   multi-lane resolution identities are axis-qualified before aggregation
+OK   initial multi-lane findings reject reserved aggregate IDs
+OK   terminal aggregation rejects a canonically invalid finding
+OK   terminal aggregation rejects whitespace-only finding finding_id
+OK   terminal aggregation rejects whitespace-only finding file
+OK   terminal aggregation rejects whitespace-only finding summary
+OK   terminal aggregation rejects whitespace-only finding evidence
+OK   terminal aggregation rejects whitespace-only finding recommendation
+OK   terminal aggregation rejects oversized finding finding_id
+OK   terminal aggregation rejects oversized finding file
+OK   terminal aggregation rejects oversized finding summary
+OK   terminal aggregation rejects oversized finding evidence
+OK   terminal aggregation rejects oversized finding recommendation
+OK   terminal aggregation rejects duplicate finding ids
+OK   verification cannot open a second surface
+OK   safe research is minimal-context
+OK   safe research rejects full context
+OK   unsafe research is never implicit
+OK   Wiki Summary uses internal callback transport
+OK   dispatch public seam persists and awaits one typed callback
+OK   dispatch restart does not repeat a completed external effect
+OK   uncertain dispatch effect reconciles instead of spawning again
+OK   reap keeps an interrupted recoverable finalization durable
+OK   reap retries only its recovery-safe finalization before runtime cleanup
+OK   terminal reap replay is a no-op
+ok - engineering/fix facade preserves pure model identities after extraction
+ok - first phase is one deterministic resource-less child in the parent lane
+ok - bounded child ids retain the full parent identity in their callback
+ok - accepted callback becomes one immutable typed receipt and terminal child
+ok - next child binds the exact prior receipt schema hash and HEAD
+ok - envelope schema tampering fails before callback acceptance
+ok - rejected envelope leaves its child awaiting the exact callback
+ok - root-cause receipt advances an ordered prefix
+ok - regression-test receipt advances an ordered prefix
+ok - minimal-fix receipt advances an ordered prefix
+ok - four exact receipts reconstruct terminal semantic progress without controller state
+ok - retry starts at root-cause and binds reproduction verification and both HEADs
+ok - retry root-cause preserves the exact verification binding
+ok - retry regression-test preserves the exact verification binding
+ok - retry minimal-fix preserves the exact verification binding
+ok - three retry receipts reconstruct completion without repeating reproduce
+ok - retry receipt cannot replay against another failed HEAD
+ok - retry API rejects the initial iteration
+ok - out-of-order receipts fail closed
+ok - receipt definition drift fails closed
+ok - parent contract drift fails before a child operation is created
+ok - cannot-reproduce is an accepted typed result that reconstructs attention
+ok - cannot-reproduce is illegal outside the reproduce phase
+ok - initial phase API cannot synthesize a retry reproduce pass
+ok - accepted receipt storage is immutable
+OK   fetch isolation enables only its bounded network profile
+OK   synthesis isolation is networkless and historyless
+OK   research verification profile is registered
+OK   safe research persists through OperationStore
+OK   safe research identity is restart-stable
+OK   safe research rejects full context
+OK   unsafe research requires explicit authorization
+OK   unsafe research is a distinct explicit route
+OK   fetch artifact carries pointers instead of page bodies
+OK   strict artifact validation rejects blank fetch errors
+OK   fetch artifact rejects inline page bodies
+OK   synthesis returns one cited typed artifact
+OK   research workflow starts a harness-owned fetch stage
+OK   research fetch has one derived generic operation identity
+OK   research fetch uses the generic typed callback seam
+OK   early fetch poll keeps the precise callback diagnostic
+OK   accepted fetch completes before the separate synthesis stage
+OK   research synthesis shares the store FSM and callback seam
+OK   early synthesis poll keeps the precise callback diagnostic
+OK   advance pins only content-free synthesis input provenance
+OK   restart replay does not repeat the accepted fetch or synth start
+OK   finalization rejects a valid artifact that changed after advance
+OK   research workflow returns one cited artifact after exact cleanup
+OK   cancelled fetch digest mismatch starts no synthesis child or provider
+OK   exact cancelled fetch receipt recovers only with a nonterminal parent
+OK   terminal research parent rejects recovery before child or provider effects
+
+All research vertical tests passed.
+OK   thin research CLI excludes legacy notifier token deliver_watched_callback
+OK   thin research CLI excludes legacy notifier token write_notifier
+OK   thin research CLI excludes legacy notifier token CmuxAdapter
+OK   thin research CLI excludes legacy notifier token TaskSessionStore
+OK   generic runtime worker owns both research callback modes
+OK   generic runtime worker persists an idempotent wake marker
+OK   provider prompts delegate completion to the code-owned worker
+
+Generic research notification ownership: OK
+OK   debug has no scaffold residue
+OK   debug stays within skill budget
+OK   debug has a distinct trigger
+OK   debug names an authorization boundary
+OK   tdd has no scaffold residue
+OK   tdd stays within skill budget
+OK   tdd has a distinct trigger
+OK   tdd names an authorization boundary
+OK   design has no scaffold residue
+OK   design stays within skill budget
+OK   design has a distinct trigger
+OK   design names an authorization boundary
+OK   codebase-design has no scaffold residue
+OK   codebase-design stays within skill budget
+OK   codebase-design has a distinct trigger
+OK   codebase-design names an authorization boundary
+OK   implementation-plan has no scaffold residue
+OK   implementation-plan stays within skill budget
+OK   implementation-plan has a distinct trigger
+OK   implementation-plan names an authorization boundary
+OK   prototype has no scaffold residue
+OK   prototype stays within skill budget
+OK   prototype has a distinct trigger
+OK   prototype names an authorization boundary
+OK   resolve-conflict has no scaffold residue
+OK   resolve-conflict stays within skill budget
+OK   resolve-conflict has a distinct trigger
+OK   resolve-conflict names an authorization boundary
+OK   review has no scaffold residue
+OK   review stays within skill budget
+OK   review has a distinct trigger
+OK   review names an authorization boundary
+OK   research has no scaffold residue
+OK   research stays within skill budget
+OK   research has a distinct trigger
+OK   research names an authorization boundary
+OK   debug diagnosis-only mode stops before edits
+OK   debug removes temporary instrumentation and reruns the original loop
+OK   TDD defines a vertical red-green-original-loop workflow
+OK   TDD names bounded non-executable exemptions
+OK   debug has a verifiable completion marker
+OK   debug keeps one authoritative SKILL source
+OK   tdd has a verifiable completion marker
+OK   tdd keeps one authoritative SKILL source
+OK   design has a verifiable completion marker
+OK   design keeps one authoritative SKILL source
+OK   codebase-design has a verifiable completion marker
+OK   codebase-design keeps one authoritative SKILL source
+OK   implementation-plan has a verifiable completion marker
+OK   implementation-plan keeps one authoritative SKILL source
+OK   prototype has a verifiable completion marker
+OK   prototype keeps one authoritative SKILL source
+OK   resolve-conflict has a verifiable completion marker
+OK   resolve-conflict keeps one authoritative SKILL source
+OK   review has a verifiable completion marker
+OK   review keeps one authoritative SKILL source
+OK   research has a verifiable completion marker
+OK   research keeps one authoritative SKILL source
+OK   skill governance is covered by the repository-wide structural audit
+OK   changed engineering skills keep positive and false-positive router coverage
+OK   prototype has one bounded run command
+OK   prototype runs exactly one bounded command in its disposable worktree
+OK   prototype decision is durable before cleanup
+OK   prototype cleanup cannot erase its own decision
+OK   conflict defaults to no stage/continue/abort authority
+OK   conflict cannot authorize continue and abort
+OK   conflict workflow gathers evidence but does not mutate before authorization
+OK   conflict workflow binds BASE ours and theirs evidence
+OK   conflict workflow stages exact authorized paths and continues exact operation
+OK   engineering contract owns exactly one authoritative review denominator
+OK   review denominator names each of the six sections exactly once
+OK   review denominator explicitly checks logic and edge cases
+OK   review denominator explicitly checks error and resource behavior
+OK   review denominator explicitly checks races and data integrity
+OK   review denominator explicitly checks implementation completeness and wiring
+OK   review denominator explicitly checks test branches
+OK   review denominator explicitly checks integration/concurrency/time/cleanup independence
+OK   review denominator explicitly checks branch-added overengineering
+OK   review denominator explicitly checks injection and secret leakage
+OK   review denominator stays a coverage floor and adds no topology
+OK   anthropic-holistic verification=False binds the authoritative rubric file
+OK   anthropic-holistic verification=False binds the whole six-part denominator
+OK   anthropic-holistic verification=False keeps repository overrides authoritative
+OK   anthropic-holistic verification=True binds the authoritative rubric file
+OK   anthropic-holistic verification=True binds the whole six-part denominator
+OK   anthropic-holistic verification=True keeps repository overrides authoritative
+OK   openai-engineering verification=False binds the authoritative rubric file
+OK   openai-engineering verification=False binds the whole six-part denominator
+OK   openai-engineering verification=False keeps repository overrides authoritative
+OK   openai-engineering verification=True binds the authoritative rubric file
+OK   openai-engineering verification=True binds the whole six-part denominator
+OK   openai-engineering verification=True keeps repository overrides authoritative
+OK   intent verification=False stays outcome-only without the denominator
+OK   intent verification=True stays outcome-only without the denominator
+OK   prompt denominator sections match the rubric sections exactly
+OK   no prompt section drifts away from a rubric heading
+OK   a prompt section with no rubric heading is rejected as drift
+OK   a prompt that drops the denominator entirely is rejected as drift
+OK   status reports exact HEAD and porcelain state
+OK   status rejects a stale exact HEAD
+OK   recent log is bounded and rooted at the validated ref
+OK   diff exposes stat names and a path-scoped bounded patch
+OK   diff --check has a dedicated bounded form
+OK   one commit exposes bounded metadata or path-scoped content
+OK   validated SHA containment reports local branches and tags only
+OK   review-inspect rejects uppercase object ids
+OK   review-inspect rejects non-commit object ids
+OK   review-inspect rejects every SHA-1 abbreviation
+OK   review-inspect accepts one complete lowercase SHA-256 commit id
+OK   review-inspect rejects every SHA-256 abbreviation
+OK   review-inspect rejects symbolic refs
+OK   review-inspect rejects path traversal
+OK   review-inspect rejects short-form Git exclusion pathspec magic
+OK   review-inspect rejects long-form Git exclusion pathspec magic
+OK   review-inspect rejects top-level Git pathspec magic
+OK   review-inspect rejects control character in a path
+OK   review-inspect rejects unknown operations
+OK   all review inspection leaves worktree and Git metadata byte-stable
+
+All review-inspect tests passed.
+Initialized empty Git repository in /private/var/folders/w7/vtxrl9d178d9zsg47p1_1ls80000gn/T/plan-review-facade.9mhh0hod/repo/.git/
+OK   1 valid plan compiles four independent artifacts
+OK   2 design artifact replaces every protected region with its digest
+OK   3 missing Outcome heading fails closed
+OK   4 duplicated Outcome heading fails closed
+OK   5 missing dispositions without explicit pointer fails closed
+OK   6 missing evidence map without explicit pointer fails closed
+OK   7 absent inline sections accept two distinct exact pointers
+OK   8 overlapping explicit artifacts fail closed
+OK   9 symlinked parent aliases cannot duplicate a protected artifact
+OK   10 a plan reached through a symlinked parent is rejected before launch
+OK   11 single-parent exact plan commit derives HEAD parent
+OK   12 dirty plan bytes are rejected before provider launch
+OK   plan packet and prompt expose exact OIDs and four literal inspect commands
+OK   13 symbolic base is rejected before launch
+OK   14 dirty explicit protected bytes are rejected before provider launch
+OK   15 current plan review without a safe base fails closed
+OK   16 mixed plan and product HEAD requires an explicit trusted base
+OK   17 legacy current --plan rejects the ambiguous implementation default
+OK   design-only rebind binds reviewed/resolved plan digests and exact Git delta
+OK   retained-lane rebind updates exact scratch without a new session
+OK   retained plan rebind replays every authoritative publication crash
+OK   Outcome dispositions and evidence-map deltas remain protected
+OK   every active protected delta requires amendment plus fresh boundary
+
+Plan review facade RED/green matrix passed.
+OK   every material finding receives one terminal typed disposition
+OK   harness evidence binds finding IDs heads axis and exact fix delta
+OK   executor response binds the exact current review callbacks
+OK   attempted is not terminal
+OK   rejection requires rationale
+OK   out-of-scope requires durable follow-up
+OK   applied cannot masquerade as follow-up
+OK   material findings cannot be omitted
+OK   material findings cannot be duplicated
+OK   applied evidence requires a new HEAD
+OK   prior-boundary callback identity is rejected
+
+All review resolution tests passed.
+OK   partial deep resolution preserves full transport identity
+OK   partial deep resolution retains already-staged material findings
+OK   remaining material axis receives its exact evidence
+OK   material finding order is canonical when standards stages first
+OK   verifying replay rebuilds the fully persisted resolution batch
+OK   fresh deep review keeps transport and resolution identities separate
+OK   a second verification fix preserves the original boundary HEAD
+OK   historical evidence is skipped without replacing the current batch
+OK   persisted identity requires exact-head evidence
+OK   one axis cannot be staged twice
+OK   persisted evidence cannot substitute a changed fix delta
+OK   persisted finding rulings are immutable across resume
+OK   large resolution input is atomically materialized as a pointer
+
+All review resolution bundle tests passed.
+OK   large exact delta splits at a file boundary into two bounded parts
+OK   delta packet manifest binds exact heads complete digest and ordered parts
+OK   delta packet generation is byte-identical on replay
+OK   one-file delta uses a safe UTF-8 line boundary
+OK   exact per-artifact boundary remains one part
+OK   first byte over the artifact boundary becomes two ordered parts
+OK   tampered delta part fails closed
+OK   missing delta part fails closed
+OK   reordered delta manifest fails closed
+OK   foreign resolved HEAD fails closed
+OK   third delta part fails closed
+OK   oversized total delta fails closed
+OK   non-UTF-8 delta fails closed
+OK   complete materialized packet is valid before prompt delivery
+OK   tampered packet becomes durable attention before continuation effect
+
+All review delta packet tests passed.
+OK   large canonical text delta uses deterministic v2 chunks
+OK   v2 manifest binds heads identity canonical mode length and digest
+OK   v2 chunks round-trip opaque binary canonical bytes
+OK   legacy inline packet remains byte-identical and compatible
+OK   resolution evidence accepts and hashes the complete bounded canonical delta
+OK   large resolution evidence requires the existing review identity
+OK   tampered chunk fails closed
+OK   missing chunk fails closed
+OK   extra chunk fails closed
+OK   reordered chunk manifest fails closed
+OK   duplicate chunk manifest entry fails closed
+OK   chunk name traversal fails closed
+OK   reviewed HEAD drift fails closed
+OK   resolved HEAD drift fails closed
+OK   review identity drift fails closed
+OK   canonical digest drift fails closed
+OK   canonical diff mode drift fails closed
+OK   unsupported chunk manifest version fails closed
+OK   oversized chunk fails closed
+OK   oversized canonical total fails closed
+OK   chunk count above eight fails closed
+OK   large delta without review identity fails closed
+OK   pointer materialization reconstructs the exact canonical delta
+OK   materialized chunk hash drift fails closed
+OK   mixed inline and chunked payloads fail closed
+OK   chunk pointer traversal outside the owner root fails closed
+OK   symlinked chunk pointer fails closed
+OK   writer rejects a symlinked owner pointer root
+
+All chunked review delta tests passed.
+......
+----------------------------------------------------------------------
+Ran 6 tests in 0.017s
+
+OK
+......
+----------------------------------------------------------------------
+Ran 6 tests in 0.055s
+
+OK
+..
+----------------------------------------------------------------------
+Ran 2 tests in 0.000s
+
+OK
+...........
+----------------------------------------------------------------------
+Ran 11 tests in 0.079s
+
+OK
+OK   review severity producers share the executable review vocabulary
+OK   round start emits
+OK   callback acceptance emits
+OK   round completion emits severity counts
+OK   review lifecycle carries axis runtime duration iteration and terminal status
+OK   review telemetry excludes content-bearing fields
+OK   telemetry failure cannot change review outcome
+OK   invalid telemetry input remains non-fatal
+
+All review telemetry tests passed.
+OK   simple review contract accepted
+OK   legacy review mode rejected
+OK   callback publisher is an explicit narrow port
+OK   internal review round publishes the exact child receipt identity
+OK   review round rejects a canonically invalid finding
+OK   review round rejects duplicate finding ids
+OK   review round rejects the reserved aggregate finding prefix
+OK   review round rejects whitespace-only finding finding_id
+OK   review round rejects whitespace-only finding file
+OK   review round rejects whitespace-only finding summary
+OK   review round rejects whitespace-only finding evidence
+OK   review round rejects whitespace-only finding recommendation
+OK   review round rejects oversized finding finding_id
+OK   review round rejects oversized finding file
+OK   review round rejects oversized finding summary
+OK   review round rejects oversized finding evidence
+OK   review round rejects oversized finding recommendation
+OK   typed reviewer outbox accepted
+OK   callback binds exact operation and payload
+OK   review submit accepts one exact scratch input without shell redirection
+OK   review submit rejects every non-canonical input file
+OK   archive rejects stale ruling terminal HEAD
+OK   archive rejects a broken same-axis ruling chain
+OK   approved callback produces bounded dry-run archive proof
+OK   archive preserves an ordered multi-iteration ruling chain
+OK   archive validates coordinator config for a generic product root
+OK   archive renders durable per-finding disposition evidence
+OK   archive escapes reviewer prose that resembles Obsidian wikilinks
+OK   archive contains a post-commit pre-marker interruption
+OK   archive reconstructs its marker after the committed crash window
+OK   current exact archive is replay-safe without another vault write
+OK   legacy archive bytes are regenerated through the canonical writer
+OK   archive rejects split review/operation identity
+OK   archive rejects mismatched operation identity
+OK   archive rejects mismatched review schema
+OK   archive rejects mismatched reviewed HEAD
+OK   archive rejects mismatched run identity
+OK   archive rejects mismatched verification profile evidence
+OK   archive rejects callback digest mismatch
+OK   archive rejects evidence for a stale verification profile
+OK   archive rejects evidence for a stale worktree HEAD
+review transport tests passed
+OK   attempt identity round-trips without mutable aliases
+OK   identity parsing rejects a non-object lane without dropping it
+OK   attempt policy rejects a mutable verification budget
+OK   attempt follows the one-way pre-terminal state graph
+OK   terminal parsing rejects a non-object result without dropping it
+OK   changes-requested is a terminal attempt result
+OK   a terminal attempt cannot be written twice
+OK   a terminal attempt cannot be rearmed
+OK   an attempt cannot bind a changed HEAD
+OK   verification iterations are absent from an attempt
+OK   a terminal result must cover every frozen lane exactly once
+OK   historical resume is typed, read-only, and provider-effect free
+
+All immutable ReviewAttempt tests passed.
+OK   D-264-73 fixture reproduces child-after-terminal-parent causality
+OK   stale-exiting fixture separates physical loss from durable close
+OK   D-264-73 executable fixture creates the historical store interleaving
+OK   stale-exiting executable fixture preserves resource-free nonterminal state
+OK   new task flow has a zero call graph to cross-HEAD continuation
+OK   review-program rejects nonterminal attempt authority
+OK   changed HEAD is rejected before another provider start
+OK   verification iteration is rejected before callback/provider effects
+OK   material findings terminalize the exact attempt without a child
+OK   review-program authority keeps the attempt on its original HEAD
+OK   review-program rejects cross-HEAD attempt authority
+OK   cross-axis review input substitution fails before provider start
+OK   same-attempt scratch substitution fails before provider start
+OK   terminal input rollover preserves prior authority and starts fresh
+OK   checkpointless unaccepted attempt stays fail-closed
+OK   two exact accepted callbacks rehydrate without reviewer checkpoints
+OK   zero-lane preflight attention routes to exact code-owned recovery
+OK   two accepted callbacks route before the legacy response precondition
+OK   legacy recovery still requires its verification response
+OK   legacy recovery remains eligible with its verification response
+OK   accepted checkpointless callback replay terminalizes without effects
+OK   accepted callback crash prefix has no executor packet
+OK   exact accepted callbacks materialize one typed executor packet
+OK   exact-HEAD no-review policy terminates without a provider effect
+OK   an amendment while awaiting callback preserves the stale lane without replay
+OK   production selector terminalizes iteration zero without legacy effects
+OK   changed-HEAD resolution reserves the next bounded ledger cycle
+OK   same-HEAD summary follow-up refuses any additional context drift
+OK   summary follow-up launch failure is zero-effect cycle 3
+OK   same-HEAD summary drift reserves one predecessor-bound follow-up
+OK   unchanged reviewed summary reuses terminal approval idempotently
+OK   changed HEAD never reuses an approved terminal attempt
+OK   changed HEAD never reuses a blocked terminal attempt
+OK   changed HEAD cannot replace a cleanup-retained attention attempt
+OK   production selector makes a pre-activation gate inspect-only
+OK   provider start failure terminalizes once without replay
+OK   approval artifacts are non-authoritative before atomic terminal commit
+OK   terminal attempts become digest-bound program decisions
+
+All exact-HEAD ReviewAttempt gate tests passed.
+OK   same-HEAD retry preserves authority and advances only the bounded index
+OK   changed HEAD starts a distinct attempt-zero lineage
+OK   typed resolution derives the private action from the one public decision
+OK   the private retry alias is not an accepted decision token
+OK   typed verification resolution rejects one copied identity token
+OK   attempt values are immutable
+OK   a second same-HEAD retry is rejected
+OK   changed-HEAD path requires a different exact HEAD
+OK   attempt index cannot exceed the code-owned ceiling
+OK   attempt serialization is exact and hash-stable
+OK   VerificationAttempt is immutable, exact, and bounded
+OK   schema-v2 receipt is one immutable verification authority
+OK   canonical verification input digest rejects a self-consistent fork
+OK   runtime and dashboard use the same current-schema authority
+OK   schema-v1 fails explicitly at the single authority ingress
+OK   legacy rejection has zero operation effect
+OK   attempt digest authority mutation fails closed
+OK   attempt HEAD authority mutation fails closed
+OK   operation authority mutation fails closed
+OK   lane authority mutation fails closed
+OK   run authority mutation fails closed
+OK   effect authority mutation fails closed
+OK   definition authority mutation fails closed
+OK   profile digest authority mutation fails closed
+OK   false exit code authority mutation fails closed
+OK   true exit code authority mutation fails closed
+OK   boolean exit code False is invalid for every consumer
+OK   boolean exit code True is invalid for every consumer
+OK   the finalizing producer's schema-v2 receipt consumes the resubmit budget
+OK   a second changed-HEAD resubmit is unavailable after that receipt
+OK   malformed resubmit budget evidence fails closed
+OK   foreign changed-HEAD budget evidence fails closed
+OK   the attempt-1 successor identity is distinct and predecessor-bound
+OK   no attempt-2 verification identity exists
+OK   the attempt-1 successor receipt is one immutable authority
+OK   stale-HEAD receipt cannot authorize the current HEAD
+verification authority matrix: ok
+OK   exact variable-count manifest preview has zero effects
+OK   unproven independence selects one-child fallback
+OK   coordination cost cannot manufacture fan-out
+OK   valid manifest produces one effect-free validation capability
+OK   all eight invalid classes reject with zero effects
+OK   ready waves and workspace-locality data are deterministic
+OK   exact approved receipts join in manifest order
+OK   join stops on attention/failure/cancel/conflict/stale/order drift
+OK   published split schema matches the exact manifest envelope
+OK   preview facade exposes no dispatch activation path
+
+All disabled Split component tests passed.
+OK   activated Split compiles exact workspace-local waves
+OK   first wave is bounded and exact launch receipts prevent replay
+OK   dependency waves advance only from exact approved terminal receipts
+OK   deterministic join requires exact receipts and resource-free children
+OK   terminal child attention stops later waves with zero new effects
+OK   all eight validation classes remain zero-effect after activation
+OK   activated waves use existing workspace dispatch results and frozen budgets
+OK   child request base drift fails before any dispatch effect
+OK   public Split activation validation stays zero-effect
+
+All activated Split integration tests passed.
+OK   replay fixture starts from one schema-valid public request
+OK   recovery rejects missing child metadata before launch evidence
+OK   recovery rejects durable child base drift before launch evidence
+OK   completed dispatch crash window recovers without a second launch
+OK   launch and terminal evidence retain the sealed ancestor commit
+OK   replay rejects launch evidence with a drifted sealed base
+OK   public start receipt round-trips into exact Join
+OK   caller launch receipt forgery is rejected
+OK   caller terminal receipt forgery is rejected
+OK   caller HEAD claims are comparison-only
+OK   sealed terminal evidence is revalidated against current child HEAD
+Split durable evidence matrix: ok
+OK   sealed base survives branch movement and deletion
+OK   unrelated history cannot satisfy Split ancestry
+OK   Split parent contract carries an exact base SHA
+OK   worktree creation consumes the sealed SHA, not the diagnostic branch
+
+All sealed Split base identity tests passed.
+verification-receipt: test-evidence 1/2 proof-output
+verification-receipt: test-evidence 2/2 clean-status
+verification-receipt: test-failure 1/1 fails
+verification-receipt: test-failure 1/1 fails
+verification-receipt: test-stability-bootstrap 1/3 mcp-sync-config
+verification-receipt: test-stability-bootstrap 2/3 codex-mcp-sync
+verification-receipt: test-stability-bootstrap 3/3 clean-status
+scripts/mcp-gateway/runtime.env
+verification-receipt: test-stability-bootstrap 1/3 mcp-sync-config
+OK   external staging is invisible to Git until atomic publication
+OK   receipt retains and binds exact command output
+OK   exact subject validation rejects ancestor and profile drift
+OK   output tampering invalidates the receipt
+OK   failed gate retains a complete non-evidence diagnostic bundle
+OK   failed gate publishes no partial evidence bundle
+OK   failed diagnostics are isolated by immutable attempt identity
+OK   expected HEAD mismatch fails before command execution
+OK   staging inside the subject is rejected before commands
+OK   symlink staging cannot resolve into the subject
+OK   release-final includes exact-candidate secret evidence
+OK   fresh stability checkout bootstraps ignored config before sync
+OK   failed stability bootstrap publishes nothing and stops sync
+verification receipt matrix: ok
+OK   small reversible work collapses intent into implementation
+OK   standard work preserves intent and implementation checkpoints
+OK   architecture requires all three review purposes
+OK   migration requires all three review purposes
+OK   release requires all three review purposes
+OK   skill-integration requires all three review purposes
+OK   compiler rejects a missing required review purpose
+OK   compiler rejects reordered review purposes
+OK   compiler rejects duplicated review purposes
+OK   intent requires design and capability disposition digests
+OK   intent digest requires an exact artifact path
+OK   review evidence paths stay repository-relative
+OK   implementation requires exact HEAD and verification evidence
+OK   release requires integration HEAD and complete evidence map
+OK   review program preserves one Outcome Contract across boundaries
+OK   review boundary input round-trips through an exact typed mapping
+OK   review boundary input rejects unknown fields
+OK   accepted intent evidence advances only to implementation
+OK   three additive exact-digest approvals reach release-ready
+OK   a stale implementation receipt cannot authorize release
+OK   release finding stops instead of opening a hidden fix loop
+OK   review context identity binds purpose and exact boundary input
+OK   release review cannot open a verification fix loop
+OK   code-owned CLI selects the intent checkpoint from approved risk
+OK   code-owned CLI advances only after an exact typed receipt
+OK   fabricated receipt cannot advance the trusted review program
+OK   approved architecture risk cannot be caller-downgraded
+OK   non-terminal gate cannot mint a review receipt
+OK   tampered terminal result bytes cannot mint a review receipt
+OK   implementation authority rejects a missing verification output
+OK   implementation authority rejects a tampered verification output
+OK   synthetic same-HEAD simple intent approval without accepted callbacks fails closed
+OK   synthetic same-HEAD deep intent approval without accepted callbacks fails closed
+OK   synthetic same-HEAD simple implementation approval without accepted callbacks fails closed
+OK   synthetic same-HEAD deep implementation approval without accepted callbacks fails closed
+OK   synthetic same-HEAD simple release approval without accepted callbacks fails closed
+OK   synthetic same-HEAD deep release approval without accepted callbacks fails closed
+OK   trusted deep approval rejects a missing final axis
+OK   trusted approval rejects a truncated callback envelope
+OK   trusted approval rejects a wrong callback run
+OK   trusted approval rejects a wrong callback kind
+OK   trusted approval rejects a mismatched payload digest
+OK   intent design drift makes trusted authority stale
+OK   intent design symlink escape fails closed
+OK   intent capability dispositions drift makes trusted authority stale
+OK   intent capability dispositions symlink escape fails closed
+OK   intent success evidence drift makes trusted authority stale
+OK   intent success evidence symlink escape fails closed
+OK   implementation verification evidence drift makes trusted authority stale
+OK   implementation verification evidence symlink escape fails closed
+OK   release outcome evidence drift makes trusted authority stale
+OK   release outcome evidence symlink escape fails closed
+OK   release accepted deviations drift makes trusted authority stale
+OK   release accepted deviations symlink escape fails closed
+OK   intent receipt accepts the exact immediate implementation HEAD
+OK   intent receipt rejects drifted next implementation evidence
+OK   intent receipt rejects a mismatched next implementation HEAD
+OK   actual candidate HEAD mismatch blocks implementation receipt minting
+OK   empty post-approval resolution injection cannot rebind implementation authority
+OK   synthetic round history without accepted callbacks cannot rebind authority
+OK   trusted resolution evidence authorizes the exact terminal implementation HEAD
+OK   arbitrary fix-delta digest cannot rebind implementation authority
+OK   tampered resolution evidence cannot rebind an implementation receipt
+OK   an explicit later release boundary authorizes its exact newer HEAD
+OK   actual candidate HEAD mismatch blocks release completion
+
+Review program policy tests passed.
+OK   RC4 control-plane baseline fixture is exact and content-bound
+OK   RC4 baseline premises perform zero provider, model, cmux, or replay effects
+OK   full is an explicit review mode
+OK   status projection covers every canonical review parent kind
+OK   simple keeps one selected-model holistic lane
+OK   default deep uses two independent holistic models
+OK   single-model deep splits intent and engineering
+OK   full is the ordered dual-model specialist grid
+OK   full reuses the deep verification budget
+OK   effective topology serializes one exact canonical value
+OK   any concrete route mutation changes the effective topology digest
+OK   caller-supplied logical route is digest-bound without runtime inference
+OK   two adaptive routes promote Simple to the existing holistic Deep topology
+OK   responsibility is derived from the exact lane identity
+OK   provider identity is independent from mutable model aliases
+OK   unreleased model-family lane identities have no compatibility path
+OK   single-model full fails fast with a deep recommendation
+OK   simple request binds its exact lane
+OK   default deep request binds both holistic lanes
+OK   single-model deep request binds both specialist lanes
+OK   full request binds all four specialist lanes
+OK   deep and full are mutually exclusive
+OK   full runtime override is rejected before routing
+OK   full model override is rejected before routing
+OK   simple route and identity stay on the selected model
+OK   default deep routes one holistic lane to each provider
+OK   single-model deep has zero route to the other provider
+OK   full routes the exact four-lane provider grid
+OK   every runtime request carries the canonical effective topology digest
+OK   runtime consumes the topology digest frozen at dispatch
+OK   generated default Deep metadata equals finalization-bound runtime topology
+OK   generated cross-model Simple metadata equals finalization-bound runtime topology
+OK   runtime rejects temporal topology drift before provider effects
+OK   non-primary route drift rejects the request before provider effect
+OK   default deep compiles two holistic parent sessions
+OK   single-model deep compiles intent and engineering parents
+OK   full compiles four specialist parent sessions
+OK   anthropic-holistic independently owns outcome and engineering review
+OK   openai-holistic independently owns outcome and engineering review
+OK   anthropic-intent is intent-only
+OK   openai-intent is intent-only
+OK   anthropic-engineering is engineering-only
+OK   openai-engineering is engineering-only
+OK   outcome review remains mandatory without an implementer summary
+OK   review uses the generic runtime session request contract
+OK   review facade preserves contract type identity
+OK   review facade preserves result type identity
+OK   review facade preserves aggregate callable identity
+OK   one schema accepts simple review evidence
+OK   operation identity is a bounded callback identifier
+OK   approve with material findings is rejected
+OK   simple verification budget is enforced
+OK   top-level verdict must match independent axes
+OK   legacy severity vocabulary is rejected
+OK   finding paths are repository-relative POSIX paths
+OK   deep review preserves both independently budgeted axes
+OK   workflow aggregation rejects over-budget verification
+OK   verification reuses exact axis lane and surface
+OK   published schema exposes the same evidence and severity vocabulary
+OK   context-ready review builds one reviewer-readonly OperationSpec
+OK   review public seam persists through OperationStore
+OK   simple public start opens one persistent holistic runtime lane
+OK   initial callback uses a terminal one-shot child in the parent lane
+OK   simple verification registers a new receipt and continues exact session
+OK   simple verification exhaustion persists attention without another prompt
+OK   deep public start opens two independent runtime lanes
+OK   partial deep replay reconstructs complete and live parents without launch
+OK   deep lanes aggregate without reranking into canonical archive evidence
+OK   full public start keeps four real independent specialist states
+OK   full replay trusts already-owned exact lanes without new provider preflight
+OK   full preflights every provider before the first durable or external effect
+OK   one material full-lane finding blocks aggregate approval without voting
+OK   verification callback gets a distinct receipt without owning resources
+OK   terminal approval exits and cleans only the parent reviewer session
+OK   public review runner starts the durable automatic gate and typed callback
+review vertical tests passed
+OK   current review supersedes an exact zero-row pre-provider attention gate
+OK   current review keeps any persisted operation row fail closed
+OK   review presets are deterministic
+OK   no-review cannot hide an enabled preset
+OK   accepted callback recovery reaches the registered gate workflow once
+OK   release finding stops the boundary without a fix loop
+OK   automatic simple gate starts one persistent holistic lane
+OK   controller rejects prior-boundary review identity
+OK   material finding waits for resolution, then continues exact session
+OK   accepted material round rearms its exact timed-out parent before verification
+OK   unpublished resolution crash residue is replaced before durable publication
+OK   review gate persists per-finding resolution evidence before verification
+OK   approved evidence unlocks task summary and reap
+OK   approved finalization fails closed without durable lane identity
+OK   stale review evidence never unlocks finalization
+OK   empty review checkpoint hydrates once and persists its digest
+OK   checkpoint interruption occurs before a provider effect
+OK   checkpoint recovery reuses one unpublished child and one provider effect
+OK   accepted terminal callback does not require a resume checkpoint
+OK   missing checkpoint recovery does not create a child round
+OK   partial Full callback tolerates live sibling lanes without checkpoints
+OK   full partial progress stops lane N before its prompt effect
+OK   multi-lane replay resumes from N without replaying prior effects
+OK   real controller resolution and same-session approval mint moved-HEAD authority
+OK   canonical maximum finding summaries are preserved in final evidence
+OK   cleanup attention blocks approval after bounded exact-lane retries
+OK   accepted callback cleanup restores an exact attempt payload
+OK   accepted callback cleanup resumes the same attempt without replay
+OK   late reviewer approval cannot erase durable callback timeout
+OK   explicit runtime recovery rearms only the existing bound review gate
+OK   deep resolution cannot mask durable callback timeout
+OK   orphan termination remains a bounded cleanup wait before approval
+OK   verification exhaustion is durable attention instead of ValueError
+OK   deep gate preserves independent lanes and approves only after both axes
+OK   later deep-axis approval cannot mask durable blocked attention
+OK   deep minor findings preserve callback bytes and authorize
+OK   full minor findings preserve callback bytes and authorize
+OK   deep defer keeps blocked verdict as durable attention
+OK   explicit no-review is the only evidence-free finalization route
+OK   deep barrier preserves callback bytes and publishes a qualified resolution identity
+OK   deep material resolution keeps both independent parents for the new HEAD
+OK   current checkout review needs no dispatch metadata and keeps scratch external
+OK   current review launches one explicit root observer without task metadata
+OK   current checkout review resumes its initialized pre-launch gate
+OK   writer emits an exact zero-effect attention gate
+OK   durable current-review interface supersedes a zero-effect failure
+OK   durable current-review interface keeps any operation row fail closed
+OK   zero-effect-missing-gate stops after its active pointer and before its gate
+OK   zero-effect active pointer without a gate is superseded safely
+OK   owned-missing-gate stops after its active pointer and before its gate
+OK   active pointer without a gate retains any operation row fail closed
+OK   current release review binds one external artifact root
+OK   release callback wake is an idempotent active-review resume
+OK   current release review rejects checkout ancestor /var/folders/w7/vtxrl9d178d9zsg47p1_1ls80000gn/T/current-release-artifacts.18gog3g9/valid
+OK   current release review rejects checkout ancestor /
+OK   current release review rejects artifact-root drift on resume
+OK   current release review rejects an out-of-root outcome artifact
+OK   current release review rejects a symlinked deviations artifact
+OK   terminal parent cannot turn a pending gate into reviewing
+OK   dead identified parent cannot turn a pending gate into reviewing
+OK   pending replay retries one inconclusive read-only liveness probe
+OK   raced supervisor-dead parent must prove resumable liveness
+OK   Deep facade seals the terminal HEAD and starts one fresh attempt
+OK   terminal zero-lane preflight recovery installs one replay-safe pending attempt
+OK   recovered zero-lane preflight starts exactly one fresh bound lane
+OK   late ready callback replaces only its false zero-lane terminal
+
+All review gate tests passed.
+OK   lost provider child accepts only the exact durable requested-exit branch
+OK   event wake performs the full durable inspection before the fallback
+OK   provider exit remains independently observable without a full reconcile
+OK   one-read transport evidence schedules the unchanged short confirmation
+OK   prompt cadence remains light-only after stable confirmation
+OK   eventless transport retains the exact thirty-second full fallback
+OK   eventless parent transport observes cross-session progress within one second
+OK   production polling requires one explicit wake source
+OK   reconnect and cursor gaps only request durable reconciliation
+OK   a degraded source reconciles once and enters bounded retry without attention
+OK   an unavailable optional source degrades to deadlines without a full poll
+OK   callback liveness and checkpoint deadlines stay independent of full transport
+OK   elapsed callback deadlines retain a bounded blocking wait
+OK   persistent wake degradation has bounded retries and one reconcile
+OK   invalid optional wake identity degrades without failing worker startup
+OK   transport confirmation inventory includes stable_reads
+OK   transport confirmation inventory includes review_input_stable_reads
+OK   transport confirmation inventory includes summary_stable_reads
+OK   transport confirmation inventory includes callback_recovery_input_reads
+OK   transport confirmation inventory includes callback_recovery_reads
+OK   transport confirmation inventory includes fix_callback_stable_reads
+OK   transport confirmation inventory includes fix_result_stable_reads
+OK   transport confirmation inventory includes fix_output_stable_reads
+OK   transport confirmation inventory includes custom_callback_stable_reads
+OK   transport confirmation inventory includes custom_result_stable_reads
+OK   transport confirmation inventory includes custom_output_stable_reads
+OK   initial provider input waits for the native idle editor
+OK   surface command waits for a visible shell before first transport
+OK   surface command does not treat a startup banner as a shell prompt
+OK   surface readiness tolerates bounded transient cmux read failures
+OK   initial provider input resolves an exact safe native prompt before delivery
+OK   partial native prompt repaint waits without guessing a response
+OK   Codex update prompt is skipped without changing reminder policy
+OK   Codex receives one compact pointer bound to the complete prompt digest
+OK   Claude receives one compact pointer bound to the complete prompt digest
+OK   initial Claude input accepts a changed collapsed editor state
+OK   process probe targets exact owned identity
+OK   supervisor probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   sandboxed reviewer cleanup trusts the typed product binding instead of argv text
+OK   research credentials cannot overlap writable scratch
+OK   research wake is exactly one line
+OK   status targets an exact origin or owned surface
+OK   start anchors the exact origin surface
+OK   submission uses exact surface and allowlisted Enter
+OK   checkpoint probe binds exact surface/runtime
+OK   worker accepts a canonical launch spec passed by relative path
+OK   parent pins env shebang interpreter for the protected worker
+OK   status targets an exact origin or owned surface
+OK   start anchors the exact origin surface
+OK   submission uses exact surface and allowlisted Enter
+OK   checkpoint probe binds exact surface/runtime
+OK   parent pins env shebang interpreter for ordinary providers
+OK   ordinary runtime rejects a product root outside cwd
+OK   ordinary worker rejects an omitted product root
+OK   ordinary worker rejects an empty product root
+OK   ordinary parent materializes the exact cwd binding
+OK   driver receives the typed route
+OK   failed preflight has zero durable or external effects
+OK   new runtime rejects a pre-existing callback outbox
+OK   stale callback rejection has no durable or external effects
+OK   coordinator callback seam arbitrates the exact reviewer parent
+OK   new task runtime rejects a pre-existing summary handoff
+OK   stale summary rejection has no durable or external effects
+OK   driver receives the typed route
+OK   status targets an exact origin or owned surface
+OK   start anchors the exact origin surface
+OK   worker receives exact callback identity
+OK   submission uses exact surface and allowlisted Enter
+OK   checkpoint probe binds exact surface/runtime
+OK   driver receives the typed route
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   supervisor probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   checkpoint probe binds exact surface/runtime
+OK   idempotent task replay accepts its existing owned summary handoff
+OK   driver receives the typed route
+OK   status targets an exact origin or owned surface
+OK   start anchors the exact origin surface
+OK   worker receives exact callback identity
+OK   submission uses exact surface and allowlisted Enter
+OK   checkpoint probe binds exact surface/runtime
+OK   task-summary runtime can start on an exact phase child target
+OK   status targets an exact origin or owned surface
+OK   status targets an exact origin or owned surface
+OK   global route preflight proves every exact origin before first start
+OK   driver receives the typed route
+OK   status targets an exact origin or owned surface
+OK   start anchors the exact origin surface
+OK   preparation sees durable exact surface before prompt
+OK   worker receives exact callback identity
+OK   submission uses exact surface and allowlisted Enter
+OK   checkpoint probe binds exact surface/runtime
+OK   start persists caller-provided lane and run identities
+OK   surface preparation happens before provider prompt
+OK   surface transport durably records command submission
+OK   start binds exact surface and PGID then awaits callback
+OK   status notifications publish preflight starting and final exact owner states
+OK   durable checkpoint hydration binds the exact parent session
+OK   durable checkpoint rejects lane mismatch
+OK   durable checkpoint rejects stale run
+OK   durable checkpoint rejects model mismatch
+OK   durable checkpoint rejects missing evidence
+OK   durable checkpoint rejects symlink evidence
+OK   resumable parent retains its exact surface without closing any surface
+OK   driver receives the typed route
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   supervisor probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   checkpoint probe binds exact surface/runtime
+OK   idempotent repeated start never opens a duplicate surface
+OK   driver receives the typed route
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   supervisor probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   idempotent start exposes non-live replay status
+OK   driver receives the typed route
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   supervisor probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   checkpoint probe binds exact surface/runtime
+OK   idempotent start preserves supervisor attention status
+OK   driver receives the typed route
+OK   status targets an exact origin or owned surface
+OK   idempotent start rejects changed runtime pointers
+OK   provider callback is accepted exactly once
+OK   driver receives the typed route
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   supervisor probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   checkpoint probe binds exact surface/runtime
+OK   idempotent replay accepts its existing owned callback outbox
+OK   idempotent replay accepts only a regular non-symlink outbox
+OK   runtime rearms accepted callback state and budget in one boundary
+OK   checkpoint probe binds exact surface/runtime
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   submission uses exact surface and allowlisted Enter
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   continuation reuses exact surface with a fresh bounded attempt
+OK   driver receives the typed route
+OK   status targets an exact origin or owned surface
+OK   start anchors the exact origin surface
+OK   worker receives exact callback identity
+OK   submission uses exact surface and allowlisted Enter
+OK   checkpoint probe binds exact surface/runtime
+OK   process probe targets exact owned identity
+OK   supervisor probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   checkpoint probe binds exact surface/runtime
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   submission uses exact surface and allowlisted Enter
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   live Claude reviewer continues on exact ownership without a checkpoint
+OK   status targets an exact origin or owned surface
+OK   start anchors the exact origin surface
+OK   worker receives exact callback identity
+OK   submission uses exact surface and allowlisted Enter
+OK   checkpoint probe binds exact surface/runtime
+OK   checkpoint probe binds exact surface/runtime
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   submission uses exact surface and allowlisted Enter
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   Codex continuation stays one compact contract pointer
+OK   status targets an exact origin or owned surface
+OK   start anchors the exact origin surface
+OK   worker receives exact callback identity
+OK   submission uses exact surface and allowlisted Enter
+OK   checkpoint probe binds exact surface/runtime
+OK   checkpoint probe binds exact surface/runtime
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   submission uses exact surface and allowlisted Enter
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   transport success without provider activity becomes typed attention
+OK   status targets an exact origin or owned surface
+OK   start anchors the exact origin surface
+OK   worker receives exact callback identity
+OK   submission uses exact surface and allowlisted Enter
+OK   checkpoint probe binds exact surface/runtime
+OK   checkpoint probe binds exact surface/runtime
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   legacy false-success continuation without durable baseline needs attention
+OK   continuation retry fixture starts with one unused recovery budget
+OK   checkpoint probe binds exact surface/runtime
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   submission uses exact surface and allowlisted Enter
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   submission uses exact surface and allowlisted Enter
+OK   continuation retry crash preserves the worker generation binding
+OK   checkpoint probe binds exact surface/runtime
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   confirmed retry replay promotes the reservation without duplicate input
+OK   driver receives the typed route
+OK   status targets an exact origin or owned surface
+OK   start anchors the exact origin surface
+OK   worker receives exact callback identity
+OK   submission uses exact surface and allowlisted Enter
+OK   checkpoint probe binds exact surface/runtime
+OK   checkpoint probe binds exact surface/runtime
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   submission uses exact surface and allowlisted Enter
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   submission uses exact surface and allowlisted Enter
+OK   late retry crash cannot publish submit-retried before sent-state durability
+OK   checkpoint probe binds exact surface/runtime
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   late retry crash replay promotes the exact reservation without duplicate input
+OK   serial child callback target reuses parent ownership
+OK   unvalidated review input is not continuation evidence
+OK   exact accepted review receipt is continuation evidence
+OK   failed child is not continuation evidence
+OK   cancelled child is not continuation evidence
+OK   timed-out child is not continuation evidence
+OK   attention-required child is not continuation evidence
+OK   checkpoint probe binds exact surface/runtime
+OK   checkpoint mismatch sends no prompt
+OK   process probe targets exact owned identity
+OK   supervisor probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   checkpoint probe binds exact surface/runtime
+OK   status is read-only and reports exact live ownership
+OK   process probe targets exact owned identity
+OK   supervisor probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   unknown ownership becomes visible attention without mutation
+OK   process probe targets exact owned identity
+OK   supervisor probe targets exact owned identity
+OK   manager non-callback unknown ownership stays fail-closed
+OK   process probe targets exact owned identity
+OK   supervisor probe targets exact owned identity
+OK   callback cleanup fails closed when exact identities do not match
+OK   process probe targets exact owned identity
+OK   supervisor probe targets exact owned identity
+OK   guardian signal binds exact durable ownership
+OK   any accepted callback cleanup re-probes exact identities before exit
+OK   process probe targets exact owned identity
+OK   supervisor probe targets exact owned identity
+OK   guardian signal binds exact durable ownership
+OK   research fetch deadline fixture records successful exact exit request
+OK   process probe targets exact owned identity
+OK   supervisor probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   guardian signal binds exact durable ownership
+OK   accepted research fetch escalates exact cleanup after deadline
+OK   process probe targets exact owned identity
+OK   supervisor probe targets exact owned identity
+OK   guardian signal binds exact durable ownership
+OK   research fetch deadline fixture records successful exact exit request
+OK   process probe targets exact owned identity
+OK   supervisor probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   expired research fetch identity mismatch stays fail-closed
+OK   process probe targets exact owned identity
+OK   supervisor probe targets exact owned identity
+OK   guardian signal binds exact durable ownership
+OK   research fetch deadline fixture records successful exact exit request
+OK   process probe targets exact owned identity
+OK   supervisor probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   guardian signal binds exact durable ownership
+OK   accepted research synthesis escalates exact cleanup after deadline
+OK   process probe targets exact owned identity
+OK   supervisor probe targets exact owned identity
+OK   guardian signal binds exact durable ownership
+OK   research fetch deadline fixture records successful exact exit request
+OK   process probe targets exact owned identity
+OK   supervisor probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   research synthesis cleanup rejects a non-protected profile
+OK   process probe targets exact owned identity
+OK   supervisor probe targets exact owned identity
+OK   guardian signal binds exact durable ownership
+OK   exit requests the exact PGID before surface close
+OK   process probe targets exact owned identity
+OK   supervisor probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   accepted callback exiting cleanup re-probes exact identities
+OK   process probe targets exact owned identity
+OK   supervisor probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   cleanup also waits for the owned supervisor process
+OK   process probe targets exact owned identity
+OK   supervisor probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   status targets an exact origin or owned surface
+OK   transient terminal ownership stays retryable without mutation
+OK   process probe targets exact owned identity
+OK   supervisor probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   dead provider tolerates one transient surface probe and clears ownership
+OK   driver receives the typed route
+OK   status targets an exact origin or owned surface
+OK   start anchors the exact origin surface
+OK   failed preparation closes only owned surface before provider launch
+OK   driver receives the typed route
+OK   status targets an exact origin or owned surface
+OK   start anchors the exact origin surface
+OK   worker receives exact callback identity
+OK   submission uses exact surface and allowlisted Enter
+OK   checkpoint probe binds exact surface/runtime
+OK   cleanup preserves a concurrent attention boundary for exact recovery
+OK   process probe targets exact owned identity
+OK   supervisor probe targets exact owned identity
+OK   guardian signal binds exact durable ownership
+OK   process probe targets exact owned identity
+OK   supervisor probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   retargeted root cleanup uses immutable generation and preserves observer
+OK   driver receives the typed route
+OK   status targets an exact origin or owned surface
+OK   start anchors the exact origin surface
+OK   worker receives exact callback identity
+OK   submission uses exact surface and allowlisted Enter
+OK   checkpoint probe binds exact surface/runtime
+OK   process probe targets exact owned identity
+OK   supervisor probe targets exact owned identity
+OK   process probe targets exact owned identity
+OK   supervisor probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   status targets an exact origin or owned surface
+OK   live task surface closes exactly without closing observer workspace
+OK   driver receives the typed route
+OK   status targets an exact origin or owned surface
+OK   start anchors the exact origin surface
+OK   worker receives exact callback identity
+OK   submission uses exact surface and allowlisted Enter
+OK   checkpoint probe binds exact surface/runtime
+OK   process probe targets exact owned identity
+OK   supervisor probe targets exact owned identity
+OK   guardian signal binds exact durable ownership
+OK   process probe targets exact owned identity
+OK   supervisor probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   modern root without accepted result retains exact surface ownership
+OK   ordinary launch materializer persists the exact cwd binding
+OK   envelope worker preserves one bounded current-review wake
+OK   reviewer sandbox identity is bound to durable operation authority
+OK   submission uses exact surface and allowlisted Enter
+OK   short-lived worker starts exact PGID and brokers provider outbox
+OK   live worker retargets serial same-lane child without restart
+OK   scripted worker event plus confirmation accepts real stable callback transport
+OK   public launch and live worker durably order input before result and exit
+OK   submission uses exact surface and allowlisted Enter
+OK   Codex worker sends one compact contract pointer through cmux
+OK   sole-parent guardian consumes durable signal before reaping
+OK   natural leader exit contains descendants before guardian reap
+OK   Claude executor remains interactive auto while reviewer stays locked
+OK   Claude option parsing stops before the runtime appends its prompt
+OK   Claude reviewer keeps model, effort, context, and limits visible
+OK   Claude reviewer status renderer covers the normal payload in-process
+OK   Claude reviewer status renderer fails safe for a malformed payload
+OK   Claude reviewer status renderer fails safe for missing fields
+OK   Claude reviewer status renderer fails safe for wrong field types
+OK   review callback profile uses Edit path permissions for isolated scratch transport
+OK   Codex reviewer excludes ambient temporary roots and shell credentials
+OK   Codex reviewer rejects missing sandbox_workspace_write.exclude_slash_tmp=true
+OK   Codex reviewer rejects missing sandbox_workspace_write.exclude_tmpdir_env_var=true
+OK   Codex reviewer rejects missing sandbox_workspace_write.network_access=false
+OK   Codex reviewer rejects missing sandbox_workspace_write.writable_roots=[]
+OK   Codex reviewer rejects missing shell_environment_policy.ignore_default_excludes=false
+OK   Codex reviewer rejects a foreign callback root
+OK   Codex reviewer rejects an extra writable root
+OK   Codex reviewer rejects a conflicting sandbox override
+OK   Codex reviewer rejects a short-form config override
+OK   Codex reviewer rejects a short-form cwd override
+OK   Codex reviewer rejects a short-form sandbox override
+OK   Codex reviewer rejects a short-form approval override
+OK   Codex reviewer rejects an equals-form writable root
+OK   persisted Codex reviewer commands fail closed before replay
+OK   persisted claude reviewer requires product_root before replay
+OK   persisted codex reviewer requires product_root before replay
+OK   review sandbox rejects a product write root
+OK   review sandbox rejects the unsandboxed escape hatch
+OK   review sandbox rejects network expansion
+OK   review sandbox rejects subprocess exclusions
+OK   review sandbox rejects a foreign status line
+OK   review sandbox rejects inherited user permissions
+OK   review sandbox rejects a foreign product path
+OK   review sandbox rejects bare because subscription OAuth is unavailable
+OK   review sandbox rejects safe mode because it suppresses status line
+OK   redirect subprocess and git-write attempts inherit the same native sandbox
+OK   review sandbox provisions one owned ephemeral test root
+OK   Codex reviewer temp is contained by its exact callback lane
+OK   reviewer environment requires product_root
+OK   review sandbox rejects a callback symlink escape
+OK   Codex reviewer rejects a sibling callback symlink
+OK   Codex research profile is strict and writable only in isolated scratch
+OK   live worker enforces reviewer deadline before provider exit
+OK   reviewer early exit remains supervised until callback deadline
+OK   review callback profile rejects writable product overlap
+OK   cross-process cleanup never signals without the guardian
+OK   false repaint never becomes an initial provider start
+OK   a static first-response wait stays unconfirmed
+OK   normal Claude activity acknowledges the initial start
+OK   Claude 2.1.220 spaced activity acknowledges the initial start
+OK   normal Codex activity acknowledges the initial start
+OK   a native permission dialog returns immediately as permission
+OK   an unchanged composer reports still-composing
+OK   an unrecognized surface reports unknown
+OK   a typed artifact acknowledges the start without a screen transition
+OK   a provider checkpoint acknowledges the start
+OK   an activity screen identical to the paste screen is not a start
+OK   initial start acknowledgement stays inside its exact budget
+OK   initial start acknowledgement rejects an invalid budget
+OK   submission uses exact surface and allowlisted Enter
+OK   an unconfirmed initial start publishes no input-accepted
+OK   an unconfirmed initial start settles the reserved send as ambiguous
+OK   an unconfirmed initial start fails closed into existing containment
+OK   an unconfirmed initial start never replays the provider input
+OK   submission uses exact surface and allowlisted Enter
+OK   an acknowledged initial start publishes exactly one input-accepted
+OK   an acknowledged initial start sends exactly one prompt and Enter
+OK   submission uses exact surface and allowlisted Enter
+OK   malformed optional wake binding starts and falls back without attention
+OK   submission uses exact surface and allowlisted Enter
+OK   worker reached the delayed semantic acknowledgement
+OK   status targets an exact origin or owned surface
+OK   worker publishes exact process ownership before input acknowledgement
+OK   submission uses exact surface and allowlisted Enter
+OK   submission uses exact surface and allowlisted Enter
+OK   one swallowed Enter recovers with exactly one second Enter
+OK   submission uses exact surface and allowlisted Enter
+OK   submission uses exact surface and allowlisted Enter
+OK   a still-composing second window stays contained without replay
+OK   submission uses exact surface and allowlisted Enter
+OK   executor worker reached the held semantic window
+OK   an executor publishes exact process ownership before input acknowledgement
+OK   the early executor handshake does not synthesize input-accepted
+OK   a later semantic failure stays typed attention without replay
+OK   a failed semantic start rewrites the ready handshake fail-closed
+OK   process probe targets exact owned identity
+OK   supervisor probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   process probe targets exact owned identity
+OK   supervisor probe targets exact owned identity
+OK   status targets an exact origin or owned surface
+OK   late ready recovery binds exact ownership and reopens one round
+OK   late ready recovery is idempotent and never replays input
+OK   submission uses exact surface and allowlisted Enter
+OK   a recognized post-submit dialog preserves one task delivery
+OK   a recognized post-submit dialog reaches exact input acceptance
+OK   submission uses exact surface and allowlisted Enter
+OK   a crash after Enter never records a durable acceptance
+OK   a crash after Enter leaves exactly one unreplayable send
+OK   failed automatic review keeps only a typed content-free reason
+OK   unrecognized runner failures keep the generic typed reason
+OK   distinct review cycles retain immutable failure receipts
+OK   durable summary refresh replay performs no duplicate cmux effect
+OK   review resolution cmux crash windows never replay effects
+OK   deterministic repair precedes two bounded review-resolution corrections
+OK   torn review resolution correction stays uncertain without duplicate prompt
+OK   a resolved changed HEAD drives verification before any review launch
+OK   a receipt for the reviewed HEAD cannot authorize the changed-HEAD review
+OK   a complete exact-HEAD receipt at the fix HEAD releases the review drive
+OK   corridors without a changed-HEAD resolution stay untouched
+OK   resolved changed HEAD gates review on the exact-HEAD receipt
+OK   a rejected drive over a live durable review stays waiting
+OK   a rejected drive while the bound round verifies stays waiting
+OK   a terminal bound round stays fail-closed
+OK   the live review completes without any coordinator resume
+OK   a failed reviewer handshake stays fail-closed
+OK   a changed HEAD stays fail-closed
+OK   a mismatched reviewer identity stays fail-closed
+OK   a dead reviewer process stays fail-closed
+OK   rejected drive over a live durable review stays waiting
+OK   durable review packet generation advances exactly once
+OK   resolution HEAD drift wakes the executor exactly once
+OK   request carries canonical task-summary mode without a wake command
+OK   terminal invalidated attempt: one wake creates exactly one exact-HEAD successor and finishes through the ordinary summary path
+OK   terminal invalidated attempt: the invalidation record binds the stale attempt to its exact successor
+OK   repeated wake after the handoff stays idempotent: no duplicate verifier and no second effect
+OK   request carries canonical task-summary mode without a wake command
+OK   settled non-terminal invalidated attempt: one wake creates exactly one exact-HEAD successor and finishes through the ordinary summary path
+OK   settled non-terminal invalidated attempt: the invalidation record binds the stale attempt to its exact successor
+OK   request carries canonical task-summary mode without a wake command
+OK   restart resumes the interrupted predecessor-bound successor and creates no third attempt
+OK   request carries canonical task-summary mode without a wake command
+OK   exhausted successor identities stay typed attention with no replacement and no probe replay
+OK   automatic review drive waits for the complete resolution handoff
+OK   automatic review drive resumes after the exact durable handoff
+OK   terminal exact review resumes after the durable resolution handoff
+OK   terminal non-resolution result cannot consume finding evidence
+OK   automatic review drive rejects a prior-boundary callback identity
+OK   automatic review drive accepts one material anthropic-holistic axis
+OK   automatic review drive accepts one material openai-holistic axis
+OK   request carries canonical task-summary mode without a wake command
+OK   task-summary watcher never observes partial synthetic JSON
+OK   atomic synthetic summary reaches the normal callback boundary
+OK   request carries canonical task-summary mode without a wake command
+OK   valid canonical v3 summary becomes one durable parent callback
+OK   accepted receipt wakes only the exact origin with code-owned reap command
+OK   notification marker records exact durable callback before send completion
+OK   request carries canonical task-summary mode without a wake command
+OK   valid canonical v4 summary binds declared outcome evidence
+OK   request carries canonical task-summary mode without a wake command
+OK   partially-achieved v4 summary remains callback-eligible
+OK   request carries canonical task-summary mode without a wake command
+OK   engineering change runs verification in one derived operation
+OK   request carries canonical task-summary mode without a wake command
+OK   engineering fix multiplexes four typed children in one persistent session
+OK   engineering fix persists exact immutable phase intervals bound to accepted receipts
+OK   engineering fix exposes each prior evidence pointer and opaque hash semantics
+OK   request carries canonical task-summary mode without a wake command
+OK   engineering fix adopts the pre-launched reproduce result exactly once
+OK   request carries canonical task-summary mode without a wake command
+OK   phase callback watcher never observes partial synthetic JSON
+OK   engineering fix restarts one provider without replaying an accepted phase
+OK   request carries canonical task-summary mode without a wake command
+OK   engineering fix stops when provider restart budget is exhausted
+OK   request carries canonical task-summary mode without a wake command
+OK   engineering fix records one exact two-pass lifecycle trace
+OK   engineering fix retries once from the original reproduction receipt
+OK   request carries canonical task-summary mode without a wake command
+OK   a null-change bounded retry publishes one typed continuation
+OK   a null-change retry never completes the fix transport on the same HEAD
+OK   request carries canonical task-summary mode without a wake command
+OK   attention fix policy defers summary until verification is terminal
+OK   request carries canonical task-summary mode without a wake command
+OK   autonomous fix policy fails terminally after three total passes
+OK   request carries canonical task-summary mode without a wake command
+OK   cannot reproduce is a typed durable attention boundary
+OK   request carries canonical task-summary mode without a wake command
+OK   fix-and-resubmit consumes an identity-bound response and reaches review
+OK   request carries canonical task-summary mode without a wake command
+OK   one authorized same-HEAD attempt preserves attempt-zero evidence
+OK   request carries canonical task-summary mode without a wake command
+OK   a second same-HEAD retry stops at typed attention
+OK   request carries canonical task-summary mode without a wake command
+OK   pipeline verification binds its exact parent operation
+OK   crash fixture stops after child receipt and before controller link
+OK   restart recovers an orphan failed receipt before resubmission
+OK   duplicate summary callback never duplicates coordinator notification
+OK   request carries canonical task-summary mode without a wake command
+OK   invalid handoff gets one same-session correction before dead-session attention
+OK   request carries canonical task-summary mode without a wake command
+OK   unbound lifecycle operation stops as typed contract drift
+OK   request carries canonical task-summary mode without a wake command
+OK   worker outlives provider and accepts once typed review state arrives
+OK   request carries canonical task-summary mode without a wake command
+OK   compiled lifecycle starts the missing review gate without model orchestration
+OK   automatic review launch has one durable local receipt
+OK   request carries canonical task-summary mode without a wake command
+OK   default pipeline resolves a material finding without a verify primitive
+OK   eventless review handoff stays within the cross-session bound
+OK   request carries canonical task-summary mode without a wake command
+OK   summary-only refresh reuses the exact-HEAD verification identity and effect
+OK   typed review wakes return the original executor session to healthy idle
+OK   executor receives a bounded typed decision packet
+OK   review resolution cannot finalize with its pre-resolution summary
+OK   request carries canonical task-summary mode without a wake command
+OK   pending receipt plus live gate resumes the idempotent drive
+OK   request carries canonical task-summary mode without a wake command
+OK   explicit durable resume clears only the matching summary attention latch
+OK   same-generation review-drive recovery is receipt-bound and exactly once
+OK   distinct recovery identities retain independent exactly-once slots
+OK   a documented not-ready workflow result retries the same prepared identity
+OK   wiki-summary-invalid remains mutation-free in the same generation
+OK   callback-wake-effect-uncertain remains mutation-free in the same generation
+OK   pipeline-verification-effect-uncertain remains mutation-free in the same generation
+OK   env shebang is pinned before the research PATH is sanitized
+OK   protected research bypasses the cmux wrapper under sanitized PATH
+OK   ordinary runtimes retain the exact-surface cmux wrapper
+OK   fetch callback is stable-read into one content-free receipt
+OK   provider boundary preserves malformed fetch errors for strict rejection
+OK   fetch receives only the bounded research environment
+OK   accepted research callback never duplicates its origin wake
+OK   synth callback validates citations without storing their content
+OK   synth receives only the bounded research environment
+OK   synth rejects a valid artifact swapped after provider launch
+OK   invalid research artifact fails closed without waking origin
+OK   supervisor identity failure contains and reaps its provider
+OK   nonzero research provider exit becomes immediate typed attention
+OK   gate root is derived from trusted vault/task identity
+OK   missing gate is a typed non-terminal wait state
+OK   full review finalization has a typed pre-review state
+OK   active review is a typed non-terminal wait state
+OK   executor resolution remains a typed non-terminal review state
+OK   only a typed exact-HEAD no-review skip bypasses provider review
+OK   typed skip is exposed without an archive requirement
+OK   typed skip needs no compatibility archive wrapper
+OK   a later HEAD produces a typed stale terminal state
+OK   invalid gate evidence produces a typed attention terminal state
+OK   generic product roots do not need a local verification config
+
+All review finalization tests passed.
+OK   concurrent duplicate reservation is linearizable
+OK   a distinct attempt cannot overlap the active reservation
+OK   the first terminal attempt preserves its exact reservation
+OK   an identical terminal replay is idempotent
+OK   a terminal attempt is immutable
+OK   cycle 2 survives changed task/worktree/provider inputs
+OK   cycle 3 survives changed task/worktree/provider inputs
+OK   cycle 4 survives changed task/worktree/provider inputs
+OK   cycle 5 survives changed task/worktree/provider inputs
+OK   the fifth unsuccessful terminal attempt exhausts the lineage
+OK   the sixth attempt is denied with zero ledger effect
+OK   lineage identity does not reset across mutable execution identity
+OK   approval closes only its exact HEAD
+OK   a changed HEAD reopens the bounded lineage after approval
+OK   an explicit amended boundary reopens approved same-HEAD lineage
+OK   a mechanism outcome releases its product-cycle reservation
+OK   a mechanism outcome replay is idempotent
+OK   a released product cycle requires its exact predecessor generation
+OK   the released cycle number is reserved again by the retry
+OK   autonomous continuation repeat ticks do not duplicate a product cycle
+OK   a blocked review is mechanism evidence, not a product cycle
+OK   five material failures exhaust the lineage despite mechanism receipts
+OK   mechanism receipts do not reopen the exhausted lineage
+OK   exact accepted-callback cleanup restores its released reservation
+OK   recovered callback records its actual terminal review verdict
+OK   predecessor fixture reserves product cycle 1
+OK   predecessor fixture reserves product cycle 2
+OK   predecessor fixture reserves product cycle 3
+OK   predecessor fixture reserves product cycle 4
+OK   predecessor fixture reserves the bounded fifth product cycle
+OK   a predecessor-bound retry retains product cycle five
+OK   a predecessor-bound retry reservation replays idempotently
+OK   a missing predecessor fails closed with zero ledger effect
+OK   a retry generation cannot synthesize product cycle six
+OK   a legacy ledger without attempt receipts fails closed
+OK   mechanism recovery evidence is separately bounded
+
+All finalization ledger tests passed.
+OK   registered primary route is the Fable High product reviewer
+OK   registered structural route is Sol X-High on the other provider
+OK   cycle 1 stays on the primary route even after a pivot
+OK   cycle 2 stays on the primary route even after a pivot
+OK   cycle 3 stays on the primary route even after a pivot
+OK   cycle 4 adds the structural route from the accepted pivot
+OK   cycle 4 without a pivot performs no availability probe effect
+OK   cycle 5 adds the structural route from the accepted pivot
+OK   cycle 5 without a pivot performs no availability probe effect
+OK   two material failures do not require a pivot
+OK   the exact third material failure requires the pivot
+OK   the pivot packet freezes exactly the three failed attempts
+OK   an accepted receipt binds the exact packet and structural route
+OK   receipt mutation fails closed: ['packet_sha256']
+OK   receipt mutation fails closed: ['route_alias']
+OK   receipt mutation fails closed: ['status']
+OK   receipt mutation fails closed: ['read_only']
+OK   receipt mutation fails closed: ['structural_recommendation']
+OK   product cycle 1 reserves on the primary route
+OK   product cycle 2 reserves on the primary route
+OK   product cycle 3 reserves on the primary route
+OK   a disk-only receipt cannot bypass workflow cleanup before cycle four
+OK   the accepted and cleaned pivot workflow opens cycle four with both routes
+OK   the fifth cycle keeps the structural route
+OK   the fifth material failure exhausts the lineage
+OK   a sixth attempt has zero route, session, and ledger effect
+OK   production pivot wiring opens cycle four exactly once after callback
+
+All finalization policy tests passed.
+OK   two failures reserve no packet, operation, or provider effect
+OK   the exact third failure publishes one immutable packet and operation
+OK   duplicate reservation reuses the exact packet and operation bytes
+OK   plan digest drift cannot fork the frozen pivot
+OK   Outcome Contract digest drift cannot fork the frozen pivot
+OK   terminal HEAD drift cannot fork the frozen pivot
+OK   a symlinked packet fails closed before operation creation
+OK   a torn packet fails closed before operation creation
+OK   a pre-existing conflicting operation identity fails closed
+OK   the operation resolves concrete transport only from the logical alias
+OK   start uses one registered read-only review-input session and child round
+OK   repeated start observes the same operation without another provider effect
+OK   the accepted callback projects one bounded total receipt and cleans resources
+OK   duplicate callback reconciliation reuses receipt and cleanup evidence
+OK   ambiguous start retains one provider effect and never infers replay
+OK   a test-written receipt has no authority without the accepted child operation
+OK   a callback with foreign operation/run identity fails closed
+OK   restart after callback-accepted converges without duplicate provider effect
+OK   restart after child-exiting converges without duplicate provider effect
+OK   restart after receipt-published converges without duplicate provider effect
+OK   provider exit without callback becomes typed attention with no replay
+
+All structural pivot workflow tests passed.
+OK   finalization routes are registered as independent provider choices
+OK   routing documentation gates the structural route on an accepted pivot receipt
+OK   cycle 1 materializes only finalization-primary
+OK   cycle 2 materializes only finalization-primary
+OK   cycle 3 materializes only finalization-primary
+OK   cycle 4 expands only on fresh typed availability
+OK   typed unavailability keeps the single primary route
+OK   missing availability cannot trigger a probe or route expansion
+OK   unknown availability cannot trigger a probe or route expansion
+OK   stale availability cannot trigger a probe or route expansion
+OK   frozen provider policy denial wins over availability
+OK   explicit single-model precedence suppresses late expansion
+OK   unknown explicit model alias fails before effects
+OK   unknown finalization route alias fails before effects
+OK   cycle ceiling fails before effects
+OK   availability route identity mismatch fails before effects
+OK   statusline text is not a typed availability authority
+OK   routing config requires both finalization aliases
+OK   routing config requires provider independence
+OK   standalone Deep remains the dual-provider holistic topology
+OK   simple cycle 1 availability False is classified exactly
+OK   simple cycle 1 availability True is classified exactly
+OK   simple cycle 2 availability False is classified exactly
+OK   simple cycle 2 availability True is classified exactly
+OK   simple cycle 3 availability False is classified exactly
+OK   simple cycle 3 availability True is classified exactly
+OK   simple cycle 4 availability False is classified exactly
+OK   simple cycle 4 availability True is classified exactly
+OK   simple cycle 5 availability False is classified exactly
+OK   simple cycle 5 availability True is classified exactly
+OK   deep cycle 1 availability False is classified exactly
+OK   deep cycle 1 availability True is classified exactly
+OK   deep cycle 2 availability False is classified exactly
+OK   deep cycle 2 availability True is classified exactly
+OK   deep cycle 3 availability False is classified exactly
+OK   deep cycle 3 availability True is classified exactly
+OK   deep cycle 4 availability False is classified exactly
+OK   deep cycle 4 availability True is classified exactly
+OK   deep cycle 5 availability False is classified exactly
+OK   deep cycle 5 availability True is classified exactly
+OK   full cycle 1 availability False is classified exactly
+OK   full cycle 1 availability True is classified exactly
+OK   full cycle 2 availability False is classified exactly
+OK   full cycle 2 availability True is classified exactly
+OK   full cycle 3 availability False is classified exactly
+OK   full cycle 3 availability True is classified exactly
+OK   full cycle 4 availability False is classified exactly
+OK   full cycle 4 availability True is classified exactly
+OK   full cycle 5 availability False is classified exactly
+OK   full cycle 5 availability True is classified exactly
+OK   the bounded topology matrix has zero unclassified cases
+OK   cross-provider responsibility pairs remain forbidden
+
+All finalization routing tests passed.
+OK   at least one committed PipelineSpec example exists
+OK   legacy example parses without policy rewrite: document-project-v1.json
+OK   the committed compatibility fixture keeps its exact compiled hash
+OK   PipelineSpec v1 required fields are unchanged by the additive property
+OK   optional finalization policy is canonical and hash-bound
+OK   approval exposes the bounded finalization delta
+OK   cycle ceiling is code-owned
+OK   independent route cannot start before cycle 4
+OK   finalization execution cannot expand to interactive
+OK   unknown primary alias is rejected before effects
+OK   inline model override is not part of the DSL
+OK   pre-expanded provider arrays are not part of the DSL
+OK   task metadata compiles the same adaptive finalization contract
+OK   task review explicit single-model wins over adaptive expansion
+OK   historical v4 task metadata remains readable without policy
+OK   atomic task reservation selects cycle 1 policy
+OK   atomic task reservation selects cycle 2 policy
+OK   atomic task reservation selects cycle 3 policy
+OK   atomic task reservation selects cycle 4 policy
+
+All finalization DSL tests passed.
+OK   effect-free retry anchors to the live coordinator after task surface loss
+OK   ordinary review never changes its frozen task origin
+OK   pending structural pivot returns a reviewing receipt
+OK   accepted resolution callback is archived idempotently before retry
+OK   zero-lane restart recovers the preceding exact finding boundary
+OK   zero-lane retry archives the exact callback from a prior terminal cycle
+OK   zero-lane retry preserves and rejects an unowned callback
+OK   older result for the same axis does not hide a ready iteration
+OK   the exact recorded axis iteration remains idempotently filtered
+OK   purpose-bound round metadata preserves the exact configured route
+OK   bound attention remains paused for non-attention status
+OK   bound attention remains paused for empty lanes
+OK   bound attention remains paused for missing owner
+OK   bound attention remains paused for non-object lane
+OK   bound attention remains paused for missing axis
+OK   bound attention remains paused for missing operation
+OK   bound attention remains paused for missing store row
+OK   bound attention remains paused for one invalid lane in a multi-lane state
+OK   bound attention remains paused while its runtime row is created
+OK   bound attention remains paused without its exact callback
+OK   bound attention remains paused for a symlink callback
+OK   exact callback and awaiting runtime row resume the real gate once
+OK   resolved runtime attention restores the awaiting-resolution phase
+OK   resolved running continuation restores awaiting-resolution
+OK   running review without a resolution boundary remains paused
+OK   the first exact callback is durable before its sibling exists
+OK   restart preserves the accepted prefix without reviewer replay
+OK   the first missing callback terminalizes once after restart
+OK   simple prefix matrix starts every reviewer exactly once
+OK   simple zero-prefix restart performs no reviewer replay
+OK   simple foreign callback rejects before durable mutation
+OK   simple accepted prefix 1 is durable and exact
+OK   simple accepted prefix 1 releases exact resources
+OK   simple duplicate prefix 1 performs zero effects
+OK   deep prefix matrix starts every reviewer exactly once
+OK   deep zero-prefix restart performs no reviewer replay
+OK   deep foreign callback rejects before durable mutation
+OK   deep accepted prefix 1 is durable and exact
+OK   deep accepted prefix 1 releases exact resources
+OK   deep duplicate prefix 1 performs zero effects
+OK   deep restart after prefix 1 resumes first missing
+OK   deep accepted prefix 2 is durable and exact
+OK   deep accepted prefix 2 releases exact resources
+OK   deep duplicate prefix 2 performs zero effects
+OK   full prefix matrix starts every reviewer exactly once
+OK   full zero-prefix restart performs no reviewer replay
+OK   full foreign callback rejects before durable mutation
+OK   full accepted prefix 1 is durable and exact
+OK   full accepted prefix 1 releases exact resources
+OK   full duplicate prefix 1 performs zero effects
+OK   full restart after prefix 1 resumes first missing
+OK   full accepted prefix 2 is durable and exact
+OK   full accepted prefix 2 releases exact resources
+OK   full duplicate prefix 2 performs zero effects
+OK   full restart after prefix 2 resumes first missing
+OK   full accepted prefix 3 is durable and exact
+OK   full accepted prefix 3 releases exact resources
+OK   full duplicate prefix 3 performs zero effects
+OK   full restart after prefix 3 resumes first missing
+OK   full accepted prefix 4 is durable and exact
+OK   full accepted prefix 4 releases exact resources
+OK   full duplicate prefix 4 performs zero effects
+
+All task review flow unit tests passed.
+OK   raised and resolved records stay durable while Git remains clean
+OK   record directory entries are durable before pointer publication
+OK   new writer emits a pointer-only latest marker
+OK   record-first crash replay restores only its matching pointer
+OK   repeated immutable raise preserves record and pointer bytes
+OK   two decisions retain the complete ordered history
+OK   amendment binds frozen plan and Outcome digests idempotently
+OK   stale expected predecessor cannot overwrite a newer decision
+OK   stale writer leaves the authoritative pointer unchanged
+OK   record tamper fails closed
+OK   record chain is bound to its originating task identity
+OK   duplicate record identity with changed payload fails closed
+OK   chain semantics reject a re-digested forged resolution
+OK   symlinked records root cannot redirect immutable writes
+OK   symlinked latest marker cannot masquerade as absent
+OK   legacy full marker fails closed at the current-schema reader
+OK   legacy full marker cannot trigger implicit migration
+OK   legacy rejection has zero immutable-store or pointer effect
+OK   custom runtime writer is record-first and replay-idempotent
+OK   resolved custom decision cannot replay a stale wakeup
+OK   engineering/fix writer is record-first and replay-idempotent
+OK   integration assertion must resolve the pointer through the authoritative reader
+OK   resolved engineering/fix decision cannot replay a stale wakeup
+All task escalation record tests passed.
+task session store IO matrix passed
+OK   dispatch creates one provider-backed task-summary session
+OK   dispatch lane and run identities are deterministic
+OK   task metadata hook receives exact container identity before prompt
+OK   task summary transport stays canonical and code-owned
+OK   engineering/fix initial reproduce publishes the canonical runtime request
+OK   custom dispatch publishes complete step authority before launch
+OK   runtime inventory retains 10 active paths and removes 7 classic paths
+OK   provider adapters accept registered model effort and fixed profile
+OK   Codex pins resumed sessions to the current task worktree
+OK   Claude rejects an unregistered model
+OK   Codex rejects an unsupported effort
+OK   Claude resume requires an exact checkpoint
+OK   unknown provider status output fails closed
+OK   provider restart resumes the exact Claude or Codex session
+OK   provider restart never re-injects the original task prompt
+OK   provider restart fails closed without a checkpoint
+OK   early runtime-worker failure leaves one durable diagnostic
+OK   accepted current-review callback wakes its exact coordinator once
+OK   callback wake after-send crash is fail-closed and never replayed
+OK   callback wake after-enter crash is fail-closed and never replayed
+OK   concurrent callback wake reconcile has one provider-facing effect
+OK   durable harness state is repository-ignored
+OK   callback transports exit only after handling or durable shutdown
+OK   runtime worker selects only the exact surface provider wrapper
+OK   runtime worker rejects a wrapper from another surface
+OK   runtime worker rejects a writable provider wrapper
+OK   zero-effect handshake proves the complete runtime route
+OK   Codex capability handshake accepts the exact stderr login marker and PATH warning
+OK   capability probes are read-only
+OK   routing fingerprint mismatch fails before any effect
+OK   read-only provider profile cannot claim callback permission
+OK   known production dialogs have exact deterministic key sequences
+OK   clipped Codex trust footer rejects near-match
+OK   Codex rate-limit choice rejects changed safe option
+OK   unknown native choice is interactive but never allowlisted
+OK   unknown interactive prompt durably requests attention without input
+OK   Codex rate-limit prompt keeps the bound model without disabling reminders
+OK   attempt/time/token budgets survive restart and exhaust to attention
+OK   live reviewer deadline becomes durable callback-timeout attention
+OK   live timeout stays scoped to reviewer sessions
+OK   one unrelated malformed cmux entry does not hide a live program
+OK   ref-only controller placement fails closed instead of reading idle
+OK   SessionStart preserves progress when active placement is ambiguous
+OK   terminal update preserves progress when another owner is ambiguous
+OK   duplicate cross-workspace placement is attention, never guessed
+OK   status inventory is bounded and timeout leaves the current bar untouched
+OK   Claude and Codex share one content-free progress label
+OK   active snapshot publishes one workspace progress bar
+OK   progress update clears the legacy pill and targets the exact workspace
+OK   empty store clears stale pill
+OK   clear removes both legacy pill and workspace progress
+OK   missing workspace is a non-blocking no-op
+OK   positional workspace refs fail before inventory or UI mutation
+OK   malformed environment workspace fails before cmux mutation
+OK   terminal transition clears progress instead of preserving 100 percent
+OK   workspace aggregate includes only exact live programs from its origin
+OK   missing exact controller surface makes the workspace idle
+OK   unknown live inventory preserves the existing projection
+OK   collection cannot represent missing inventory as idle
+OK   collection requires an exact workspace scope
+OK   surface-bound controller without exact ownership is idle
+OK   attention controller with a known missing exact surface is idle
+OK   terminal program descendants cannot attach to a live same-contract program
+OK   explicit parent identity survives controller prefix collisions
+OK   explicit parent identity survives bounded child id truncation
+OK   unparented shared-contract child is excluded instead of guessed
+OK   research placement and liveness come only from its exact current stage
+OK   missing exact research fetch surface makes the program idle
+OK   missing exact research synth surface makes the program idle
+OK   preflight controller is visible before surface binding
+OK   starting controller is visible before surface binding
+OK   exact preflight trigger excludes stale created and preflight peers
+OK   same-owner terminal trigger clears abandoned pre-surface peers
+OK   SessionStart ignores abandoned pre-surface controllers
+OK   terminal top-level controller suppresses a stale nonterminal child
+OK   corrupt active identity renders attention without a false denominator
+OK   terminal update preserves progress for another corrupt active owner
+OK   malformed runtime origin renders attention for its exact trigger
+OK   SessionStart never clears progress for malformed active origin
+OK   another owner never clears progress for malformed active origin
+OK   malformed owned live surface renders attention instead of idle
+OK   corrupt inactive history cannot establish live workspace work
+{"attention_reason": null, "changed": true, "operation_id": "op-cancel", "previous_state": "exiting", "revision": 3, "state": "cancelled"}
+OK   CLI cancel succeeds
+{"attention_reason": null, "changed": true, "operation_id": "op-close", "previous_state": "exiting", "revision": 3, "state": "cancelled"}
+OK   CLI close succeeds
+[{"action": "cancel-complete", "operation_id": "op-reconcile", "state": "cancelled"}]
+OK   CLI reconcile succeeds
+OK   CLI cancel close and reconcile clear stale progress
+OK   code observer catches a durable callback pending ingestion
+OK   diagnostic packet is content-free and bounded
+OK   diagnostics expose only bounded latest wake identities
+OK   unreleased single-file recovery receipt has no diagnostic authority
+OK   scoped accepted callback receipt refines the pending-ingestion diagnostic
+OK   code observer catches typed findings pending task delivery
+OK   unknown attention delegates only compact read-only triage
+OK   review drive receipt replaces unclassified attention
+OK   review drive refusal remains typed and receipt-bound
+OK   a recovery receipt cannot suppress unrelated owner attention
+harness diagnostics tests passed
+OK   the dashboard facade registry is explicit and complete
+OK   facades compile exact temporary or durable root commands
+OK   every real facade boundary calls the one bound launcher
+OK   launch success emits one content-free receipt
+OK   current and plan review launch from explicit authority without task metadata
+OK   root creation compiles one temporary-to-durable rebind effect
+OK   dashboard launch failure is contained and content-free
+OK   blocking dashboard launch and rebind degrade and reap at the timeout
+OK   temporary-to-root rebind reuses one split without duplication
+OK   root-first cross-facade rebind closes the duplicate observer
+All dashboard facade tests passed.
+OK   verification inherits the exact durable root and parent
+OK   review facade parent and every provider lane carry the task root
+OK   the durable store rejects foreign-root lineage before publication
+All root lineage tests passed.
+OK   root projection shows pivot route, elapsed wait, callback child, and lineage
+OK   dashboard projects compact self-heal count and current stage
+OK   terminal result is exact-summary-bound and content-free
+OK   malformed or foreign repair evidence never increments self-healed
+OK   root projection shows terminal resource-free pivot cleanup
+All dashboard observability tests passed.
+usage: harness-dashboard [-h] --store STORE (--root ROOT | --all) [--once]
+                         [--interval INTERVAL] [--recent {2,3}] [--no-color]
+harness-dashboard: error: one of the arguments --root --all is required
+usage: harness-dashboard [-h] --store STORE (--root ROOT | --all) [--once]
+                         [--interval INTERVAL] [--recent {2,3}] [--no-color]
+harness-dashboard: error: argument --all: not allowed with argument --root
+usage: harness-dashboard [-h] --store STORE (--root ROOT | --all) [--once]
+                         [--interval INTERVAL] [--recent {2,3}] [--no-color]
+harness-dashboard: error: argument --root: root must be one exact bounded operation identity
+usage: harness-dashboard [-h] --store STORE (--root ROOT | --all) [--once]
+                         [--interval INTERVAL] [--recent {2,3}] [--no-color]
+harness-dashboard: error: argument --root: root must be one exact bounded operation identity
+usage: harness-dashboard open [-h] --vault VAULT --store STORE
+                              --surface SURFACE (--root ROOT |
+                              --temporary TEMPORARY) [--facade FACADE]
+harness-dashboard open: error: one of the arguments --root --temporary is required
+OK   read-only dashboard projection does not import the provider runtime worker
+OK   classification escalation is ordered and fails closed on unknown values
+OK   projection resolves the real compiled pipeline from the operation contract
+OK   loop visits come from durable per-pass receipts
+OK   compiled reconciliation drives step status and the next action
+OK   engineering fix projects each accepted identity-bound phase interval independently
+OK   engineering fix timing rejects missing start without changing phase status
+OK   engineering fix timing rejects missing completion without changing phase status
+OK   engineering fix timing rejects unexpected start key without changing phase status
+OK   engineering fix timing rejects drifted start owner without changing phase status
+OK   engineering fix timing rejects drifted completion receipt without changing phase status
+OK   engineering fix timing rejects reversed interval without changing phase status
+OK   engineering fix timing rejects future start without changing phase status
+OK   engineering fix timing rejects future completion without changing phase status
+OK   engineering fix timing rejects non-numeric start without changing phase status
+OK   engineering fix timing rejects non-finite completion without changing phase status
+OK   engineering fix timing rejects negative start without changing phase status
+OK   engineering fix timing rejects symlinked start without changing phase status
+OK   engineering fix timing rejects symlinked completion without changing phase status
+OK   engineering fix projects the newest active retry instead of stale duration
+OK   engineering fix projects a valid active phase sidecar as elapsed time
+OK   parallel operation lanes and review axes are both projected
+OK   a live recorded surface is proven against the bounded cmux probe
+OK   a surface missing from the cmux tree is attention, never silent cleanup
+OK   an unreadable cmux tree requests coordinator classification
+OK   an ambiguous surface requests coordinator classification
+OK   projection never mutates durable state
+OK   the rendered dashboard is bounded English terminal text
+OK   the TTY renderer uses the approved truecolor palette without changing plain bytes
+OK   the approved hierarchy expands only current work and keeps timing on every row
+OK   every viewport budget is bounded, equivalent, and truthfully prioritized
+OK   display timing uses deterministic whole-second terminal formatting
+OK   the root product view matches the exact 80 100 and 120 column goldens
+OK   the root product maps every semantic RGB role and preserves plain bytes
+OK   the root viewport matrix preserves identity current work and explicit truncation
+OK   root clipping retains task marker short identity timing and stable width
+OK   maximum current step identities retain state timing and ANSI equivalence
+OK   the live root CLI samples one terminal size and wires 80 and 120 column priority
+OK   the CLI renders the dashboard without touching lifecycle authority
+OK   the CLI emits one typed JSON projection with an unavailable probe
+OK   malformed fix evidence is attention and never a completed visit
+OK   a valid-looking receipt without durable callback acceptance is invalid
+OK   a receipt drifting from its accepted callback identity is invalid
+OK   an unknown pipeline contract never invents progress
+OK   all active programs remain visible while issues stay bounded
+OK   a non-English persisted reason is omitted rather than translated
+OK   an unparseable durable record is reported, never skipped in silence
+OK   accepted complete verification receipts count without inventing a loop
+OK   valid failed verification evidence becomes bounded attention
+OK   wrong-identity verification evidence is invalid, never complete
+OK   malformed verification evidence is contained as one bounded issue
+OK   a receipt disappearing during a read is invalid rather than passed
+OK   an old failed HEAD cannot poison successful exact-HEAD verification
+OK   tampered current-HEAD attempt identity remains visible attention
+OK   missing exact-HEAD verification has one accurate program-level outcome
+OK   an unrelated running verification child cannot hide missing exact-HEAD evidence
+OK   only the durably matching current verification attempt defers the missing receipt
+OK   a failed root stops only its interrupted frontier
+OK   a failed root expands its stopped frontier before future pending work
+OK   a cancelled root stops only its interrupted frontier
+OK   a cancelled root expands its stopped frontier before future pending work
+OK   one dispatch renders as exactly one root program, not three
+OK   verification and review children nest under their owning pipeline step
+OK   active verification never leaves the finished implementation highlighted
+OK   pipelines without bounded-loop control report no loop counter
+OK   each step shows the frozen route of the record that executes it
+OK   the rendered tree shows one program with nested route-annotated steps
+OK   history caps retain the current review lineage axes and drop counts
+OK   an active Sol XHigh structural pivot replaces the Sol High display route
+OK   multiple active finalization-independent records fail closed as unknown
+OK   a cancelled review parent with a complete round is finished, not attention
+OK   cancelled nested operations render with the explicit stopped marker
+OK   absent step metadata is labeled unknown rather than inferred
+OK   a running record owning no runtime resource is unresolved, not live
+OK   nested operations stay distinguishable on production-shaped ids
+OK   an ambiguous step binding stays at the program level, never guessed
+OK   a frozen custom dispatch projects its exact compiled graph
+OK   a bounded redraw keeps the newest live program above compact old attention summaries
+OK   viewport exact-fit preserves full detail while one-short truncates truthfully
+OK   bounded rendering retains multiple live identities and compacts attention-only views
+OK   small full-footer viewports retain the newest live program before old evidence
+OK   live redraw re-reads terminal rows while TTY --once stays byte-stable and unbounded
+OK   the owner-wide diagnostic samples one display clock without authority
+OK   the standalone CLI shows every active pipeline and bounded terminal history
+OK   the standalone CLI bounds --interval
+OK   the standalone CLI bounds --recent
+OK   live mode redraws locally and exits cleanly on Ctrl-C
+OK   root projection renders exactly one root with its descendants and no unrelated owner
+OK   record mtime never enters displayed timing or lifecycle truth
+OK   a pre-start root observer is empty, waiting, and read-only
+OK   an early start failure is visible inside its root observer
+OK   a non-root identity fails closed without rendering its parent tree
+OK   normal mode requires exactly one exact --root and --all stays a separate diagnostic
+OK   the CLI renders one root in normal mode while --all keeps the global diagnostic
+OK   the external launcher creates once, reuses exactly, and never owns Harness state
+OK   dashboard split identity binds vault, workspace, and exact root
+OK   a foreign root marker fails closed without touching another surface
+OK   an inexact or missing root identity is rejected before any cmux effect
+OK   simultaneous dead-ready recovery owns exactly one replacement split
+OK   simultaneous retryable recovery owns exactly one replacement split
+OK   the external launcher recovers after open failure
+OK   the external launcher recovers after send failure
+OK   the external launcher recovers after enter failure
+OK   fresh reservations reject concurrency while stale reservations recover once
+OK   one critical section binds one immutable caller placement probe
+OK   stale starting-published state closes and replaces its exact split
+OK   stale startup-delivered state closes and replaces its exact split
+OK   ambiguous caller placement is rejected before any cmux effect
+OK   a split response cannot alias or mutate the coordinator surface
+OK   persisted caller aliases are retryable without reuse or caller cleanup
+OK   live root and exact active child expose fixed-clock elapsed timing
+OK   the root-owned TDD step freezes when exact verification begins
+OK   the frozen TDD token renders as duration with complete semantics
+OK   verification receipt freezes TDD without synthetic child liveness
+OK   contradictory verification receipt cannot freeze TDD
+OK   later dashboard frames cannot increase completed TDD duration
+OK   invalid later-step liveness makes the TDD freeze unavailable
+OK   reversed later-step timestamps cannot freeze TDD
+OK   non-current child run identity cannot freeze TDD
+OK   accepted verification evidence freezes the exact step duration
+OK   run_profile numeric epoch evidence freezes the accepted verification duration
+OK   validated reap evidence freezes terminal root duration
+OK   task display evidence rejects C0 C1 and DEL before colored or plain rendering
+OK   task timing rejects a symlinked parent above the original session cwd
+OK   projection rejects a symlinked parent above the original store boundary
+OK   stale review HEAD axes lanes runs and attempt expose no summary metrics
+OK   terminal review summary validates exact gate HEAD axes lanes runs and attempt
+OK   review summary rejects a gate reached through a symlinked ancestor
+OK   two exact review cycles retain ordered review fix and re-verification history
+OK   terminal cycle counts and every current-root reviewer identity remain visible
+OK   terminal reviewer rows and review phases freeze their validated child intervals
+OK   review timing rejects missing partial identity digest timestamp and symlink evidence
+OK   three-cycle reviewer history keeps active elapsed and freezes each terminal duration
+OK   root rendering tells the complete compact correction story
+OK   history preserves narrow color and no-color terminal contracts
+OK   symlinked mismatched and over-cap cycle evidence never becomes history authority
+OK   review remediation renders explicit fixing and re-verifying subphases
+OK   future durable liveness is rejected instead of becoming display truth
+OK   liveness rejects the complete malformed timestamp revision and symlink matrix
+OK   task timing rejects the complete malformed identity timestamp and symlink matrix
+OK   verification timing rejects malformed reversed future and ancestor symlink evidence
+OK   root CLI samples one clock per frame while active time advances and terminal duration freezes
+OK   the path guard fails closed on a raw absolute path whose '..' erases a symlink
+OK   projection rejects a caller store whose traversed symlink was erased by '..'
+OK   task display evidence rejects a bound session cwd whose '..' erases a symlink
+OK   task metadata mapping and digest are derived from one coherent read
+OK   atomically replaced task metadata yields one coherent revision or unknown
+OK   one coherent task metadata read keeps digest binding and actual-file rejection
+OK   every nonterminal current root identity including WAITING renders primary and bold
+OK   the selected pending pre-start step is primary and bold while later rows stay dim
+OK   root identity outranks history for every nonterminal root under row pressure
+harness dashboard tests passed
+harness suite registration: ok (96 files)

@@ -307,6 +307,19 @@ through ``owners/<owner>/runtime/<operation>/provider-events/generation-1``
 and its ``delivery``/``events`` leaves. The correction adds 9 measured lines
 in the same cleanup owner and no production module; the ceilings move to the
 exact 290-file / 108,558-line reviewed candidate with no speculative headroom.
+
+The 2.7.3 invalidated-verification handoff then closed the recovery gap the
+preserved 2.7.2 dispatch proved live: a settled succeeded own-identity
+verification effect without a persisted receipt could never hand off to a
+fresh attempt at the current clean HEAD, leaving the root callback-invalid
+forever. The repair is the code-owned invalidated-attempt classification and
+exact-current-HEAD successor adoption inside the existing verification owner
+(``harness/runtime_worker_verification.py``, 72 lines) plus its two seam
+invocations (``harness/runtime_worker_summary.py``, 4 lines;
+``harness/runtime_worker_review_bridge.py``, 2 lines). No production module
+is added; the file ceiling is unchanged and the line ceiling moves by the
+measured 78-line cost to the exact 290-file / 108,636-line candidate with no
+speculative headroom.
 """
 
 from __future__ import annotations
@@ -314,11 +327,11 @@ from __future__ import annotations
 from pathlib import Path
 
 
-#: Maximum tracked Python files under ``scripts/`` for the 2.7.2 candidate.
+#: Maximum tracked Python files under ``scripts/`` for the 2.7.3 candidate.
 SCRIPT_FILE_CEILING = 290
 
-#: Maximum total lines across those files for the 2.7.2 cleanup candidate.
-SCRIPT_LINE_CEILING = 108_558
+#: Maximum total lines across those files for the 2.7.3 handoff candidate.
+SCRIPT_LINE_CEILING = 108_636
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:
@@ -337,13 +350,13 @@ def assert_within_ceilings(scripts_dir: Path) -> tuple[int, int]:
     files, lines = measure(scripts_dir)
     if files > SCRIPT_FILE_CEILING:
         raise AssertionError(
-            f"scripts/ holds {files} Python files, above the 2.7.2 ceiling "
+            f"scripts/ holds {files} Python files, above the 2.7.3 ceiling "
             f"{SCRIPT_FILE_CEILING}; justify and raise the ceiling in the same "
             "commit as the growth"
         )
     if lines > SCRIPT_LINE_CEILING:
         raise AssertionError(
-            f"scripts/ holds {lines} lines, above the 2.7.2 ceiling "
+            f"scripts/ holds {lines} lines, above the 2.7.3 ceiling "
             f"{SCRIPT_LINE_CEILING}; justify and raise the ceiling in the same "
             "commit as the growth"
         )
