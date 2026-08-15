@@ -119,7 +119,7 @@ def fixture(root: Path, name: str) -> tuple[Worker, Path, Path]:
     return worker, worktree, notify_path
 
 
-def state() -> FixTransportState:
+def state(iteration: int = 1) -> FixTransportState:
     return FixTransportState(
         "attention",
         2,
@@ -127,8 +127,8 @@ def state() -> FixTransportState:
         HEAD,
         object(),
         [],
-        1,
-        Path("pass-1"),
+        iteration,
+        Path(f"pass-{iteration}"),
         [],
         object(),
         {"current_head_sha": HEAD},
@@ -193,6 +193,42 @@ with tempfile.TemporaryDirectory(prefix="null-change-continuation.") as raw:
         and not resolved_notify.exists()
         and resolved_worker.cmux_adapter.sent == [],
         (resolved_worker.parked, resolved_worker.cmux_adapter.sent),
+    )
+
+    # A later retry at the same HEAD is a distinct decision: resolving the
+    # first one must not suppress the second, and its own replay stays quiet.
+    sequential, sequential_worktree, sequential_notify = fixture(root, "sequential")
+    sequential.continue_null_change_retry(state(1))
+    append_resolution(sequential_worktree, "retry-with-scope")
+    first_decision = load_attention(sequential_worktree)
+    sequential.parked.clear()
+    sequential.cmux_adapter.sent.clear()
+    sequential.continue_null_change_retry(state(2))
+    second_decision = load_attention(sequential_worktree)
+    second_notify = sequential_notify.with_name("null-change-notify.json").parent.parent / "pass-2" / "null-change-notify.json"
+    check(
+        "a later retry at the same HEAD publishes its own actionable decision",
+        sequential.parked
+        == [("pipeline-fix-retry-null-change", AttentionReason.ATTENTION_REQUIRED)]
+        and second_notify.is_file()
+        and json.loads(second_notify.read_text(encoding="utf-8"))["iteration"] == 2
+        and second_decision is not None
+        and second_decision["status"] == "pending"
+        and second_decision["iteration"] == 2
+        and second_decision["id"] != first_decision["id"]
+        and len(sequential.cmux_adapter.sent) == 1,
+        (sequential.parked, first_decision, second_decision, sequential.cmux_adapter.sent),
+    )
+
+    sequential.parked.clear()
+    sequential.continue_null_change_retry(state(2))
+    check(
+        "the later retry replays idempotently after a crash",
+        sequential.parked
+        == [("pipeline-fix-retry-null-change", AttentionReason.ATTENTION_REQUIRED)]
+        and len(sequential.cmux_adapter.sent) == 1
+        and load_attention(sequential_worktree)["id"] == second_decision["id"],
+        (sequential.parked, sequential.cmux_adapter.sent),
     )
 
     changed_worker, _changed_worktree, changed_notify = fixture(root, "changed")
