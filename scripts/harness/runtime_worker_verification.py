@@ -20,8 +20,10 @@ from .runtime_worker import (
     _review_resolution_handoff_ready,
     _submit_failure_requires_attention,
 )
+from .contracts import OwnedResources
 from .store import StoreError
 from .verification import (
+    _authority_path_is_safe,
     VerificationAuthority,
     VerificationAuthorityError,
 )
@@ -840,6 +842,18 @@ class RuntimeWorkerVerificationMixin:
         elif failed_record.state not in {"attention-required", "failed"}:
             raise RuntimeWorkerError("failed verification operation state is invalid")
 
+    def product_tree_is_clean(self) -> bool:
+        """Observe exact tracked-and-untracked product cleanliness at HEAD."""
+
+        status = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=self.spec["cwd"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        return status.returncode == 0 and not status.stdout.strip()
+
     def invalidated_verification_attempt(self) -> object | None:
         """Return the bound attempt's record when its authority is invalid.
 
@@ -847,8 +861,11 @@ class RuntimeWorkerVerificationMixin:
         proves the probes ran to completion once but can never prove
         verification authority for the current candidate: the receipt is the
         only durable outcome, and settlement closes the resumable window.
-        Pending, foreign, unsettled, or receipt-bearing attempts are never
-        classified here — they stay with their existing owners.
+        The record must carry the exact derived identity — spec, lane, run,
+        own effect — with released resources and no symlinked or unsafe
+        receipt path. Pending, foreign, unsettled, receipt-bearing, or
+        identity-drifted attempts are never classified here — they stay with
+        their existing fail-closed owners.
         """
 
         try:
@@ -858,7 +875,13 @@ class RuntimeWorkerVerificationMixin:
         except StoreError:
             return None
         if (
-            self.verification_receipt_path.exists()
+            self.verification_receipt_path.is_symlink()
+            or not _authority_path_is_safe(self.verification_receipt_path)
+            or self.verification_receipt_path.exists()
+            or record.spec != self.verification_spec
+            or record.lane_id != self.verification_lane_id
+            or record.run_id != self.verification_run_id
+            or record.resources != OwnedResources()
             or record.pending_effect
             or record.effect_id != self.verification_effect_id
             or record.effect_outcome != EffectOutcome.SUCCEEDED
@@ -873,13 +896,20 @@ class RuntimeWorkerVerificationMixin:
         The stale attempt is durably terminalized and linked to exactly one
         predecessor-bound fresh attempt through the existing identity
         constructors; repeated wakes and crash re-entry converge on the same
-        successor. An exhausted successor identity space stays typed
-        attention with no replacement and no probe replay.
+        successor. A dirty product tree or an exhausted successor identity
+        space stays typed attention with no mutation, no replacement, and no
+        probe replay.
         """
 
         stale = self.invalidated_verification_attempt()
         if stale is None:
             return True
+        if not self.product_tree_is_clean():
+            self.summary_attention(
+                "pipeline-verification-dirty-tree",
+                AttentionReason.ATTENTION_REQUIRED,
+            )
+            return False
         if self.verification_attempt.attempt_index >= MAX_SAME_HEAD_ATTEMPT_INDEX:
             self.summary_attention(
                 "pipeline-verification-retry-exhausted",
@@ -887,6 +917,8 @@ class RuntimeWorkerVerificationMixin:
             )
             return False
         stale_operation_id = stale.spec.operation_id
+        predecessor_attempt_sha256 = self.verification_attempt.sha256
+        predecessor_effect_id = self.verification_effect_id
         if stale.state not in TERMINAL:
             self.store.transition(
                 self.spec["owner_id"], stale_operation_id, "failed"
@@ -903,7 +935,11 @@ class RuntimeWorkerVerificationMixin:
                 "schema_version": 1,
                 "operation_id": stale_operation_id,
                 "parent_operation_id": self.spec["operation_id"],
+                "predecessor_attempt_sha256": predecessor_attempt_sha256,
+                "predecessor_effect_id": predecessor_effect_id,
                 "successor_operation_id": self.verification_spec.operation_id,
+                "successor_attempt_sha256": self.verification_attempt.sha256,
+                "successor_effect_id": self.verification_effect_id,
                 "current_head_sha": self.verification_head,
                 "status": "invalidated",
             },
@@ -985,6 +1021,15 @@ class RuntimeWorkerVerificationMixin:
                 ):
                     raise VerificationError(
                         "verification HEAD changed during execution"
+                    )
+                if (
+                    self.verification_attempt.attempt_index > 0
+                    and not self.product_tree_is_clean()
+                ):
+                    # A replacement attempt attests the exact clean HEAD, so
+                    # bytes mutated during its probes can never be receipted.
+                    raise VerificationError(
+                        "verification tree became dirty during execution"
                     )
                 return evidence
 

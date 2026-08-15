@@ -1686,6 +1686,12 @@ def assert_invalidated_verification_hands_off_to_exact_head_replacement(
             and preserved_a == facts["receipt_a"],
             (rc, parent, children, fresh_receipt, linked, probe_commands[task]),
         )
+        predecessor_attempt = VerificationAttempt(
+            task, "scoped", profile.sha256, str(facts["head_b"]), 0
+        )
+        successor_attempt = VerificationAttempt(
+            task, "scoped", profile.sha256, str(facts["head_b"]), 1
+        )
         check(
             f"{label}: the invalidation record binds the stale attempt to "
             "its exact successor",
@@ -1693,7 +1699,15 @@ def assert_invalidated_verification_hands_off_to_exact_head_replacement(
             and invalidation.get("schema_version") == 1
             and invalidation.get("operation_id") == facts["stale_b0"]
             and invalidation.get("parent_operation_id") == task
+            and invalidation.get("predecessor_attempt_sha256")
+            == predecessor_attempt.sha256
+            and invalidation.get("predecessor_effect_id")
+            == pipeline_verify_effect_id(str(facts["input_b"]), 0)
             and invalidation.get("successor_operation_id") == successor
+            and invalidation.get("successor_attempt_sha256")
+            == successor_attempt.sha256
+            and invalidation.get("successor_effect_id")
+            == pipeline_verify_effect_id(str(facts["input_b"]), 1)
             and invalidation.get("current_head_sha") == facts["head_b"]
             and invalidation.get("status") == "invalidated",
             invalidation,
@@ -1843,6 +1857,130 @@ def assert_invalidated_verification_hands_off_to_exact_head_replacement(
         )
         is None,
         (exhausted_rc, exhausted_parent, verify_children(exhausted_store)),
+    )
+
+    # Tracked or untracked product dirt at the current HEAD refuses the
+    # handoff outright: typed attention with no terminalization, no
+    # invalidation record, no successor, and no probe effect.
+    for dirt_label, dirt_task, make_dirty in (
+        (
+            "tracked product dirt",
+            "27300000-2730-4273-8273-273000000005",
+            lambda worktree: (worktree / "product.txt").write_text(
+                "ready\ndirty\n", encoding="utf-8"
+            ),
+        ),
+        (
+            "untracked product dirt",
+            "27300000-2730-4273-8273-273000000006",
+            lambda worktree: (worktree / "junk.txt").write_text(
+                "junk\n", encoding="utf-8"
+            ),
+        ),
+    ):
+
+        def seed_with_dirt(task: str, make_dirty=make_dirty):
+            seed = seed_invalidated_state(task, stale_terminal=False)
+
+            def before_start(
+                vault: Path, worktree: Path, state: Path, profile_sha: str
+            ) -> None:
+                seed(vault, worktree, state, profile_sha)
+                make_dirty(worktree)
+
+            return before_start
+
+        dirt_store, _dirt_cmux, dirt_state, dirt_rc = run_case(
+            root,
+            dirt_task,
+            summary,
+            pipeline_name="engineering/change",
+            before_start=seed_with_dirt(dirt_task),
+            verification_runner=make_probe_runner(dirt_task),
+            review_launcher=approve_at_current_head(dirt_task),
+            review_state="missing",
+            wake_source=FallbackWakeSource(),
+        )
+        dirt_facts = seeded[dirt_task]
+        dirt_parent = dirt_store.read("owner-1", dirt_task)
+        dirt_latch = read_state_json(dirt_state, "callback-error.json")
+        check(
+            f"{dirt_label} before the handoff stays typed attention with "
+            "no mutation, no replacement, and no probes",
+            dirt_rc == 0
+            and dirt_parent.state == "attention-required"
+            and dirt_parent.attention_reason
+            == AttentionReason.ATTENTION_REQUIRED
+            and not dirt_parent.accepted_callback_id
+            and verify_children(dirt_store)
+            == {
+                str(dirt_facts["complete_a"]): "complete",
+                str(dirt_facts["stale_b0"]): "verifying",
+            }
+            and probe_commands[dirt_task] == []
+            and read_state_json(
+                dirt_state,
+                "pipeline-verification",
+                str(dirt_facts["stale_b0"]),
+                "invalidation.json",
+            )
+            is None
+            and isinstance(dirt_latch, dict)
+            and dirt_latch.get("status") == "pipeline-verification-dirty-tree",
+            (dirt_rc, dirt_parent, verify_children(dirt_store), dirt_latch),
+        )
+
+    # Bytes mutated while the replacement's probes run can never be attested
+    # as the clean HEAD: no successor receipt and no root-attention clearance.
+    probe_dirt_task = "27300000-2730-4273-8273-273000000007"
+    probe_dirt_worktree = root / f"worktree-{probe_dirt_task}"
+    probe_dirt_recorded = probe_commands.setdefault(probe_dirt_task, [])
+
+    def dirtying_probe_runner(argv: list[str], **kwargs: object):
+        if argv == ["git", "rev-parse", "HEAD"]:
+            return subprocess.run(
+                argv,
+                cwd=kwargs["cwd"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+        (probe_dirt_worktree / "probe-junk.txt").write_text(
+            "mutated during probes\n", encoding="utf-8"
+        )
+        probe_dirt_recorded.append(tuple(argv))
+        return subprocess.CompletedProcess(argv, 0, "ok\n", "")
+
+    probe_dirt_store, _probe_cmux, probe_dirt_state, probe_dirt_rc = run_case(
+        root,
+        probe_dirt_task,
+        summary,
+        pipeline_name="engineering/change",
+        before_start=seed_invalidated_state(
+            probe_dirt_task, stale_terminal=True
+        ),
+        verification_runner=dirtying_probe_runner,
+        review_launcher=approve_at_current_head(probe_dirt_task),
+        review_state="missing",
+        wake_source=FallbackWakeSource(),
+    )
+    probe_dirt_facts = seeded[probe_dirt_task]
+    probe_dirt_parent = probe_dirt_store.read("owner-1", probe_dirt_task)
+    check(
+        "during-probe dirt on the replacement is never receipted and never "
+        "clears root attention",
+        probe_dirt_rc == 0
+        and probe_dirt_parent.state == "attention-required"
+        and not probe_dirt_parent.accepted_callback_id
+        and len(probe_dirt_recorded) >= 1
+        and read_state_json(
+            probe_dirt_state,
+            "pipeline-verification",
+            str(probe_dirt_facts["successor_b1"]),
+            "receipt.json",
+        )
+        is None,
+        (probe_dirt_rc, probe_dirt_parent, probe_dirt_recorded),
     )
 
 
@@ -2046,7 +2184,17 @@ def run_case(
         check=True,
     )
     (worktree / "product.txt").write_text("ready\n", encoding="utf-8")
-    subprocess.run(["git", "add", "product.txt"], cwd=worktree, check=True)
+    # Runtime transport is repository-ignored exactly as in the product
+    # checkout (`.git/info/exclude` there), so cleanliness observation sees
+    # only real product dirt.
+    (worktree / ".gitignore").write_text(
+        ".task-*\n..task-*\n.provider-*\n.atomic-*\n"
+        ".null-change-retry\n.review-*\n",
+        encoding="utf-8",
+    )
+    subprocess.run(
+        ["git", "add", "product.txt", ".gitignore"], cwd=worktree, check=True
+    )
     subprocess.run(
         ["git", "commit", "-m", "ready"],
         cwd=worktree,

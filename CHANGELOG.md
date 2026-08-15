@@ -34,15 +34,26 @@ live-accepted. Builds on the preserved combined 2.7.1 + 2.7.2 candidate.
 - The changed-HEAD review-resolution gate adopts the same invalidated-attempt
   handoff before launching verification, so its rebound attempt identity can
   never re-enter the recovery dead end.
+- After its accepted Sol review round: the receiptless invalidation
+  classifier is identity-exact and symlink-safe — the derived spec, lane,
+  run, released resources, and own settled succeeded effect must all match,
+  and a dangling receipt symlink is tamper evidence, not absence; the handoff
+  is gated on an exact tracked-and-untracked clean-tree observation (typed
+  `pipeline-verification-dirty-tree` attention with zero mutation when
+  dirty); a replacement attempt rechecks cleanliness at receipt issuance so
+  bytes mutated during its probes can never be attested as the clean HEAD;
+  and the immutable invalidation record binds the predecessor and successor
+  attempt/effect digests.
 
 ### Governance
 
 - The RC1 active-authority contour is rebaselined at the exact measured
-  15123 LOC (unchanged 27-file manifest, zero writable authorities, zero
+  15168 LOC (unchanged 27-file manifest, zero writable authorities, zero
   incident literals), the verification owner is an owned file-lines hotspot at
-  exactly its measured 1051 lines, and the live scripts scope ratchet moves by
-  the measured 78-line repair cost to the exact 290-file / 108,636-line
-  candidate with no speculative headroom.
+  exactly its measured 1096 lines, and the live scripts scope ratchet moves by
+  the measured 123-line repair cost to the exact 290-file / 108,681-line
+  candidate with no speculative headroom. Exact-HEAD complete-gate evidence is
+  recorded owner-externally so recording it cannot move the product HEAD.
 
 ## [2.7.2] - 2026-08-15
 

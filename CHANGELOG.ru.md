@@ -42,15 +42,26 @@
 - Changed-HEAD review-resolution gate применяет тот же invalidated-attempt
   handoff перед запуском verification, поэтому его перепривязанная identity
   попытки больше не может вернуться в recovery-тупик.
+- После принятого Sol review round: receiptless invalidation-классификатор
+  identity-exact и symlink-safe — производные spec, lane, run, освобождённые
+  resources и собственный установленный успешный effect обязаны совпадать, а
+  висячий symlink receipt — свидетельство подделки, а не отсутствия; handoff
+  ограничен точным наблюдением чистоты tracked и untracked дерева
+  (типизированный `pipeline-verification-dirty-tree` attention без единой
+  мутации при грязном дереве); replacement-попытка перепроверяет чистоту при
+  выпуске receipt, поэтому байты, изменённые во время её проб, никогда не
+  аттестуются как чистый HEAD; неизменяемый invalidation record связывает
+  digest'ы попыток/effect'ов предшественника и преемника.
 
 ### Управление
 
-- RC1 active-authority contour перебазирован на точно измеренные 15123 LOC
+- RC1 active-authority contour перебазирован на точно измеренные 15168 LOC
   (неизменный манифест из 27 файлов, ноль writable authorities, ноль incident
   literals), verification owner стал owned file-lines hotspot ровно на
-  измеренных 1051 строках, а scope ratchet живых scripts сдвинут на измеренную
-  стоимость ремонта в 78 строк к точному кандидату 290 файлов /
-  108 636 строк без запасного headroom.
+  измеренных 1096 строках, а scope ratchet живых scripts сдвинут на измеренную
+  стоимость ремонта в 123 строки к точному кандидату 290 файлов /
+  108 681 строка без запасного headroom. Полное exact-HEAD gate-свидетельство
+  записывается вне владельца, чтобы его запись не сдвигала product HEAD.
 
 ## [2.7.2] — 2026-08-15
 

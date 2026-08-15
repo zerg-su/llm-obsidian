@@ -571,4 +571,180 @@ with tempfile.TemporaryDirectory(prefix="verification-authority.") as raw:
         raise AssertionError("stale-HEAD evidence authorized a different HEAD")
     check("stale-HEAD receipt cannot authorize the current HEAD", True)
 
+    # Receiptless invalidation classification is identity-exact and
+    # symlink-safe: only the derived spec/lane/run with released resources and
+    # a settled succeeded own effect qualifies; any drift or a dangling
+    # receipt symlink stays with the existing fail-closed owners.
+    from harness.runtime_worker_control import RuntimeWorkerControlMixin
+
+    inval_store = OperationStore(base / "store-invalidation")
+    inval_owner = "invalidation-parent"
+    inval_head = "b" * 40
+    inval_input = verification_input_sha256(
+        definition_sha256,
+        inval_head,
+        profile.sha256,
+        VERIFICATION_STEP_SCHEMA_VERSION,
+    )
+    inval_parent = inval_store.create(
+        OperationSpec(
+            inval_owner,
+            "invalidation-parent-key",
+            "dispatch",
+            inval_owner,
+            route,
+            "packets/task.json",
+            profile.name,
+            contract_sha256=definition_sha256,
+        ),
+        lane_id="parent-lane",
+        run_id="parent-run",
+    )
+    inval_spec, inval_lane, inval_run = pipeline_verify_identity(
+        inval_parent.spec,
+        definition_sha256=definition_sha256,
+        input_sha256=inval_input,
+        profile=profile.name,
+        attempt_index=0,
+    )
+    inval_store.create(inval_spec, lane_id=inval_lane, run_id=inval_run)
+    for state in ("preflight", "starting", "running", "verifying"):
+        inval_store.transition(inval_owner, inval_spec.operation_id, state)
+    inval_effect = pipeline_verify_effect_id(inval_input, 0)
+    inval_store.begin_effect(inval_owner, inval_spec.operation_id, inval_effect)
+    inval_store.resolve_effect(
+        inval_owner, inval_spec.operation_id, EffectOutcome.SUCCEEDED
+    )
+    inval_runtime = (
+        inval_store.root / "owners" / inval_owner / "runtime" / inval_owner
+    )
+    inval_receipt_path = (
+        inval_runtime
+        / "pipeline-verification"
+        / inval_spec.operation_id
+        / "receipt.json"
+    )
+    inval_attempt = VerificationAttempt(
+        inval_owner, profile.name, profile.sha256, inval_head, 0
+    )
+    inval_successor_spec, _s_lane, _s_run = pipeline_verify_identity(
+        inval_parent.spec,
+        definition_sha256=definition_sha256,
+        input_sha256=inval_input,
+        profile=profile.name,
+        attempt_index=1,
+    )
+
+    def make_inval_worker() -> SimpleNamespace:
+        worker = SimpleNamespace(
+            store=inval_store,
+            spec={"owner_id": inval_owner, "operation_id": inval_owner},
+            spec_path=inval_runtime / "launch.json",
+            verification_spec=inval_spec,
+            verification_lane_id=inval_lane,
+            verification_run_id=inval_run,
+            verification_effect_id=inval_effect,
+            verification_attempt=inval_attempt,
+            verification_head=inval_head,
+            verification_receipt_path=inval_receipt_path,
+            attention_calls=[],
+            bind_calls=[],
+        )
+        worker.product_tree_is_clean = lambda: True
+        worker.summary_attention = (
+            lambda *args, **kwargs: worker.attention_calls.append(args)
+        )
+
+        def bind(index: int) -> None:
+            worker.bind_calls.append(index)
+            worker.verification_spec = inval_successor_spec
+            worker.verification_effect_id = pipeline_verify_effect_id(
+                inval_input, index
+            )
+            worker.verification_attempt = inval_attempt.same_head_retry()
+
+        worker._bind_verification_attempt = bind
+        worker.invalidated_verification_attempt = (
+            lambda: RuntimeWorkerVerificationMixin.invalidated_verification_attempt(
+                worker
+            )
+        )
+        worker.adopt_invalidated_verification_successor = (
+            lambda: RuntimeWorkerVerificationMixin.adopt_invalidated_verification_successor(
+                worker
+            )
+        )
+        worker.write_immutable_json = (
+            lambda path, value: RuntimeWorkerControlMixin.write_immutable_json(
+                worker, path, value
+            )
+        )
+        return worker
+
+    inval_record_path = (
+        inval_store.root
+        / "owners"
+        / inval_owner
+        / "operations"
+        / f"{inval_spec.operation_id}.json"
+    )
+    pristine_record = inval_record_path.read_text(encoding="utf-8")
+    check(
+        "a pristine receiptless settled attempt classifies as invalidated",
+        make_inval_worker().invalidated_verification_attempt() is not None,
+    )
+
+    def mutated_record(**changes: object) -> str:
+        value = json.loads(pristine_record)
+        for key, item in changes.items():
+            container, _, field = key.partition(".")
+            if field:
+                value[container][field] = item
+            else:
+                value[key] = item
+        return json.dumps(value, sort_keys=True)
+
+    identity_mutations = {
+        "lane": mutated_record(lane_id="f" * 32),
+        "run": mutated_record(run_id="f" * 32),
+        "spec": mutated_record(**{"spec.verification_profile": "full"}),
+        "resources": mutated_record(**{"resources.surface_id": "S"}),
+    }
+    for label, encoded in identity_mutations.items():
+        inval_record_path.write_text(encoded + "\n", encoding="utf-8")
+        check(
+            f"receiptless {label} drift is never classified as invalidated",
+            make_inval_worker().invalidated_verification_attempt() is None,
+        )
+    inval_record_path.write_text(pristine_record, encoding="utf-8")
+
+    inval_receipt_path.parent.mkdir(parents=True)
+    inval_receipt_path.symlink_to(
+        inval_receipt_path.parent / "missing-receipt.json"
+    )
+    symlinked_worker = make_inval_worker()
+    check(
+        "a dangling receipt symlink is tamper evidence, not absence",
+        symlinked_worker.invalidated_verification_attempt() is None
+        and symlinked_worker.adopt_invalidated_verification_successor() is True
+        and symlinked_worker.bind_calls == []
+        and symlinked_worker.attention_calls == []
+        and not (inval_receipt_path.parent / "invalidation.json").exists()
+        and inval_record_path.read_text(encoding="utf-8") == pristine_record,
+    )
+    inval_receipt_path.unlink()
+
+    (inval_receipt_path.parent / "invalidation.json").write_text(
+        '{"schema_version": 1, "status": "forged"}\n', encoding="utf-8"
+    )
+    try:
+        make_inval_worker().adopt_invalidated_verification_successor()
+    except RuntimeWorkerError:
+        pass
+    else:
+        raise AssertionError(
+            "conflicting invalidation bytes were silently overwritten"
+        )
+    check("conflicting invalidation record bytes fail closed", True)
+
 print("verification authority matrix: ok")

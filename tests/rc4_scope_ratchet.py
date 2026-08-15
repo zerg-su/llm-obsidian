@@ -320,6 +320,17 @@ invocations (``harness/runtime_worker_summary.py``, 4 lines;
 is added; the file ceiling is unchanged and the line ceiling moves by the
 measured 78-line cost to the exact 290-file / 108,636-line candidate with no
 speculative headroom.
+
+The accepted 2.7.3 Sol review round then hardened the same handoff: the
+receiptless invalidation classifier became identity-exact and symlink-safe
+(derived spec/lane/run, released resources, no dangling or unsafe receipt
+path), the handoff and the replacement's receipt issuance became gated on an
+exact clean-tree observation so tracked, untracked, or during-probe dirt can
+never be attested as the clean HEAD, and the immutable invalidation record
+binds the predecessor and successor attempt/effect digests.  The correction
+adds 45 measured lines in the same verification owner and no production
+module; the ceilings move to the exact 290-file / 108,681-line candidate with
+no speculative headroom.
 """
 
 from __future__ import annotations
@@ -331,7 +342,7 @@ from pathlib import Path
 SCRIPT_FILE_CEILING = 290
 
 #: Maximum total lines across those files for the 2.7.3 handoff candidate.
-SCRIPT_LINE_CEILING = 108_636
+SCRIPT_LINE_CEILING = 108_681
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:
