@@ -10,6 +10,26 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.7.2] - 2026-08-15
+
+Bounded root-generation cleanup authority candidate; not tagged, published, or
+live-accepted. Builds on the preserved 2.7.1 candidate.
+
+### Fixed
+
+- Runtime session cleanup closes owned resources only through the immutable
+  provider root generation minted at session start; a later review-callback
+  generation still carries the accepted result but can no longer substitute as
+  resource ownership. A missing, duplicate, malformed, symlinked, or
+  identity-drifted root generation — and a conflicting result digest — fails
+  closed to typed attention before any close receipt or resource clearing,
+  while a valid same-session later-generation review callback cleanup still
+  completes exactly once (`docs/acceptance/v2.7.2-root-generation-cleanup-authority.md`).
+- The live scripts scope ratchet (`rc4_scope_ratchet`) is rebased to the exact
+  measured 2.7.2 candidate — 290 files, 108,525 lines, no speculative
+  headroom — absorbing the 2.7.1-base `review_cleanup_recovery.py` module that
+  landed without a ceiling raise plus the 30-line cleanup-authority repair.
+
 ## [2.7.1] - 2026-08-15
 
 Bounded verification stabilization candidate; not tagged, published, or

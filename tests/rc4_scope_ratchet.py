@@ -272,6 +272,17 @@ owners by a net six lines without touching the ceiling, and ``527e2667`` raised
 it to 108,143 one commit late; this commit adds the distinct per-iteration
 decision identity and raises the ceiling to 289 files / 108,157 lines with its
 own growth. Each figure is pinned exactly with no speculative headroom.
+
+The 2.7.1 verification-stabilization base then inherited one production module,
+``harness/review_cleanup_recovery.py`` (added at ``e7cb0cbc`` without raising
+this ceiling — the justification here is late rather than backdated), plus the
+2.7.1 canonical retry-decision and exact-generation repairs inside existing
+owners, measuring 290 files / 108,495 lines at the preserved candidate
+``e62bd7f1``. The 2.7.2 root-generation cleanup authority repair adds no
+production module: its measured 30 lines restore the immutable root-generation
+binding and the separate root/callback authority selector inside the existing
+``harness/runtime_session_cleanup.py`` owner. Both ceilings are pinned at the
+exact 290-file / 108,525-line candidate with no speculative headroom.
 """
 
 from __future__ import annotations
@@ -279,11 +290,11 @@ from __future__ import annotations
 from pathlib import Path
 
 
-#: Maximum tracked Python files under ``scripts/`` for the 2.6.7 RC6.11 candidate.
-SCRIPT_FILE_CEILING = 289
+#: Maximum tracked Python files under ``scripts/`` for the 2.7.2 candidate.
+SCRIPT_FILE_CEILING = 290
 
-#: Maximum total lines across those files for the RC6.11 reviewer candidate.
-SCRIPT_LINE_CEILING = 108_157
+#: Maximum total lines across those files for the 2.7.2 cleanup candidate.
+SCRIPT_LINE_CEILING = 108_525
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:
@@ -302,13 +313,13 @@ def assert_within_ceilings(scripts_dir: Path) -> tuple[int, int]:
     files, lines = measure(scripts_dir)
     if files > SCRIPT_FILE_CEILING:
         raise AssertionError(
-            f"scripts/ holds {files} Python files, above the RC6.11 ceiling "
+            f"scripts/ holds {files} Python files, above the 2.7.2 ceiling "
             f"{SCRIPT_FILE_CEILING}; justify and raise the ceiling in the same "
             "commit as the growth"
         )
     if lines > SCRIPT_LINE_CEILING:
         raise AssertionError(
-            f"scripts/ holds {lines} lines, above the RC6.11 ceiling "
+            f"scripts/ holds {lines} lines, above the 2.7.2 ceiling "
             f"{SCRIPT_LINE_CEILING}; justify and raise the ceiling in the same "
             "commit as the growth"
         )
