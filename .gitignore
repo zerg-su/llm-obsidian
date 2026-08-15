@@ -171,6 +171,9 @@ _attachments/
 /.task-escalation-records/
 /.acceptance-sandbox.json
 /.task-review-resolution.json
+/.task-pipeline/
+/.task-pipeline-step-request.json
+/.task-pipeline-step-callback.json
 
 # DevOps-specific secret containers (defense-in-depth for MG vault)
 # Terraform state can hold plaintext secrets even if the .tf files don't

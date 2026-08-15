@@ -934,6 +934,202 @@ with tempfile.TemporaryDirectory(prefix="delivery-boundary.") as raw:
         and authority_replay.action == "terminal",
     )
 
+    latched_manager, latched_supervisor, latched_spec = (
+        prepare_modern_cleanup_case(
+            "root-attention-latch",
+            target_generation=2,
+        )
+    )
+    latched_sha256 = accepted_case_callback(
+        latched_manager,
+        latched_spec,
+        "root-attention-latch",
+    )
+    latched_root = case_stream(
+        latched_manager,
+        latched_spec,
+        "root-attention-latch",
+        generation=1,
+    )
+    assert latched_root.event_gap("test-gap").action == "attention"
+    latched_stream = case_stream(
+        latched_manager,
+        latched_spec,
+        "root-attention-latch",
+        generation=2,
+    )
+    assert latched_stream.result(latched_sha256).action == "close"
+    latched_manager.request_exit(
+        latched_spec.owner_id,
+        latched_spec.operation_id,
+    )
+    assert latched_stream.process_exited(0).action == "close"
+    latched_cleanup = latched_manager.cleanup(
+        latched_spec.owner_id,
+        latched_spec.operation_id,
+    )
+    latched_receipt = (
+        latched_manager._state_root(latched_cleanup.record)
+        / "provider-events"
+        / "resource-closed.json"
+    )
+    latched_event_kinds = [
+        json.loads(path.read_text(encoding="utf-8"))["kind"]
+        for path in sorted(
+            (
+                latched_manager._state_root(latched_cleanup.record)
+                / "provider-events"
+                / "generation-1"
+                / "events"
+            ).glob("*.json")
+        )
+    ]
+    check(
+        "attention-latched root generation cannot receive a durable close receipt",
+        latched_cleanup.record.state == "attention-required"
+        and latched_cleanup.record.resources.surface_id
+        == "root-attention-latch-surface"
+        and not latched_receipt.exists()
+        and "resource-closed" not in latched_event_kinds,
+    )
+
+    deadline_manager, deadline_supervisor, deadline_spec = (
+        prepare_modern_cleanup_case(
+            "root-deadline-latch",
+            target_generation=2,
+        )
+    )
+    deadline_sha256 = accepted_case_callback(
+        deadline_manager,
+        deadline_spec,
+        "root-deadline-latch",
+    )
+    deadline_root = case_stream(
+        deadline_manager,
+        deadline_spec,
+        "root-deadline-latch",
+        generation=1,
+    )
+    assert (
+        deadline_root.controller.decide(deadline_reached=True).action
+        == "attention"
+    )
+    deadline_stream = case_stream(
+        deadline_manager,
+        deadline_spec,
+        "root-deadline-latch",
+        generation=2,
+    )
+    assert deadline_stream.result(deadline_sha256).action == "close"
+    deadline_manager.request_exit(
+        deadline_spec.owner_id,
+        deadline_spec.operation_id,
+    )
+    assert deadline_stream.process_exited(0).action == "close"
+    deadline_cleanup = deadline_manager.cleanup(
+        deadline_spec.owner_id,
+        deadline_spec.operation_id,
+    )
+    deadline_receipt = (
+        deadline_manager._state_root(deadline_cleanup.record)
+        / "provider-events"
+        / "resource-closed.json"
+    )
+    check(
+        "deadline-latched root generation cannot receive a durable close receipt",
+        deadline_cleanup.record.state == "attention-required"
+        and deadline_cleanup.record.resources.surface_id
+        == "root-deadline-latch-surface"
+        and not deadline_receipt.exists(),
+    )
+
+    escape_manager, escape_supervisor, escape_spec = (
+        prepare_modern_cleanup_case(
+            "symlinked-provider-root",
+            target_generation=1,
+        )
+    )
+    escape_sha256 = accepted_case_callback(
+        escape_manager,
+        escape_spec,
+        "symlinked-provider-root",
+    )
+    escape_stream = case_stream(
+        escape_manager,
+        escape_spec,
+        "symlinked-provider-root",
+        generation=1,
+    )
+    assert escape_stream.result(escape_sha256).action == "close"
+    escape_manager.request_exit(
+        escape_spec.owner_id,
+        escape_spec.operation_id,
+    )
+    assert escape_stream.process_exited(0).action == "close"
+    escape_state_root = escape_manager._state_root(escape_supervisor.read())
+    escape_outside = root / "symlinked-provider-root-outside"
+    (escape_state_root / "provider-events").rename(escape_outside)
+    (escape_state_root / "provider-events").symlink_to(escape_outside)
+    escape_cleanup = escape_manager.cleanup(
+        escape_spec.owner_id,
+        escape_spec.operation_id,
+    )
+    check(
+        "symlinked provider-events authority fails closed without an outside write",
+        escape_cleanup.record.state == "attention-required"
+        and escape_cleanup.record.resources.surface_id
+        == "symlinked-provider-root-surface"
+        and not (escape_outside / "resource-closed.json").exists(),
+    )
+
+    delegated_manager, delegated_supervisor, delegated_spec = (
+        prepare_modern_cleanup_case(
+            "symlinked-delivery-authority",
+            target_generation=1,
+        )
+    )
+    delegated_sha256 = accepted_case_callback(
+        delegated_manager,
+        delegated_spec,
+        "symlinked-delivery-authority",
+    )
+    delegated_stream = case_stream(
+        delegated_manager,
+        delegated_spec,
+        "symlinked-delivery-authority",
+        generation=1,
+    )
+    assert delegated_stream.result(delegated_sha256).action == "close"
+    delegated_manager.request_exit(
+        delegated_spec.owner_id,
+        delegated_spec.operation_id,
+    )
+    assert delegated_stream.process_exited(0).action == "close"
+    delegated_generation_dir = (
+        delegated_manager._state_root(delegated_supervisor.read())
+        / "provider-events"
+        / "generation-1"
+    )
+    delegated_outside = root / "symlinked-delivery-authority-outside"
+    (delegated_generation_dir / "delivery").rename(delegated_outside)
+    (delegated_generation_dir / "delivery").symlink_to(delegated_outside)
+    delegated_cleanup = delegated_manager.cleanup(
+        delegated_spec.owner_id,
+        delegated_spec.operation_id,
+    )
+    delegated_receipt = (
+        delegated_manager._state_root(delegated_cleanup.record)
+        / "provider-events"
+        / "resource-closed.json"
+    )
+    check(
+        "symlinked delivery authority directory fails closed without close authority",
+        delegated_cleanup.record.state == "attention-required"
+        and delegated_cleanup.record.resources.surface_id
+        == "symlinked-delivery-authority-surface"
+        and not delegated_receipt.exists(),
+    )
+
     drift_manager, drift_supervisor, drift_spec = prepare_modern_cleanup_case(
         "root-generation-drift",
         target_generation=2,

@@ -393,13 +393,15 @@ class RuntimeSessionCleanupMixin:
             surface_id=resources.surface_id,
         )
         root_state = root_stream.controller.current_state()
-        if require_result:
-            if (
-                not callback_record.accepted_callback_id
-                or not callback_record.accepted_callback_sha256
-            ):
-                return "attention"
-        elif root_state.attention_reason not in {"", "result-missing"}:
+        # A root stream already latched in typed attention (beyond the
+        # narrowly tolerated result-missing state) must never receive a
+        # durable close receipt.
+        if root_state.attention_reason not in {"", "result-missing"}:
+            return "attention"
+        if require_result and (
+            not callback_record.accepted_callback_id
+            or not callback_record.accepted_callback_sha256
+        ):
             return "attention"
         observation = ResourceObservation(
             process_status=process_status,
@@ -705,12 +707,23 @@ class RuntimeSessionCleanupMixin:
     ) -> RuntimeProviderEventStream | None:
         """Bind resource closure to the immutable provider root generation."""
 
-        provider_root = self._state_root(record) / "provider-events"
+        state_root = self._state_root(record)
+        provider_root = state_root / "provider-events"
         root_directory = (
             provider_root / f"generation-{self._ROOT_PROVIDER_GENERATION}"
         )
-        if root_directory.is_symlink() or not root_directory.is_dir():
-            return None
+        # Every authority path component is validated without following
+        # symlinks so rehydration and the closure ledger can never read or
+        # write outside the operation's owned state root.
+        for authority_path in (
+            state_root,
+            provider_root,
+            root_directory,
+            root_directory / "delivery",
+            root_directory / "events",
+        ):
+            if authority_path.is_symlink() or not authority_path.is_dir():
+                return None
         try:
             stream = RuntimeProviderEventStream.rehydrate(
                 provider_root, self._ROOT_PROVIDER_GENERATION
