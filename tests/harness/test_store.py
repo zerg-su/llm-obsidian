@@ -1618,6 +1618,7 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
         "op-accepted-unknown-cli",
         accepted_payload_sha256,
     )
+    write_callback_target("op-accepted-unknown-cli", generation=2)
     accepted_process = FakeProcess(
         "unknown",
         supervisor_status="unknown",

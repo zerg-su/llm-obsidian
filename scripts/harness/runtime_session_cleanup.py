@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 from time import time
 
@@ -315,10 +316,12 @@ class RuntimeSessionCleanupMixin:
             # cleanup-compatible but cannot manufacture a typed event identity.
             return "legacy"
         target = self._callback_target(record)
-        generation = int(target["generation"])
         target_operation_id = str(target["operation_id"])
         callback_record = record
-        if require_result:
+        if require_result and not (
+            record.accepted_callback_id
+            and record.accepted_callback_sha256
+        ):
             try:
                 callback_record = self.store.read(
                     record.spec.owner_id, target_operation_id
@@ -353,6 +356,12 @@ class RuntimeSessionCleanupMixin:
             # the complete new provider/resource identity. Cleanup remains
             # possible, but no typed close receipt is fabricated for them.
             return "legacy"
+        selected = self._exact_result_stream(
+            record, metadata, callback_record.accepted_callback_sha256
+        )
+        if require_result and selected is None:
+            return "attention"
+        generation = selected[1] if selected is not None else int(target["generation"])
         identity = ResourceIdentity(
             owner_id=record.spec.owner_id,
             operation_id=record.spec.operation_id,
@@ -365,22 +374,14 @@ class RuntimeSessionCleanupMixin:
             workspace_id=workspace_id,
             surface_id=resources.surface_id,
         )
-        delivery_state = (
-            self._state_root(record)
-            / "provider-events"
-            / f"generation-{generation}"
-            / "delivery"
-            / "delivery-state.json"
-        )
-        if not delivery_state.is_file() or delivery_state.is_symlink():
-            return "attention"
-        try:
-            stream = RuntimeProviderEventStream.rehydrate(
-                self._state_root(record) / "provider-events",
-                generation,
-            )
-        except RuntimeProviderEventError:
-            return "attention"
+        stream = selected[0] if selected is not None else None
+        if stream is None:
+            try:
+                stream = RuntimeProviderEventStream.rehydrate(
+                    self._state_root(record) / "provider-events", generation
+                )
+            except RuntimeProviderEventError:
+                return "attention"
         state = stream.controller.current_state()
         if require_result:
             if (
@@ -388,12 +389,6 @@ class RuntimeSessionCleanupMixin:
                 or not callback_record.accepted_callback_sha256
                 or not state.cursor.result_published
             ):
-                return "attention"
-            try:
-                # The event is already published, so this is an idempotent exact
-                # accepted-payload digest assertion and cannot synthesize a result.
-                stream.result(callback_record.accepted_callback_sha256)
-            except RuntimeProviderEventError:
                 return "attention"
         elif state.attention_reason not in {"", "result-missing"}:
             return "attention"
@@ -694,3 +689,49 @@ class RuntimeSessionCleanupMixin:
             process_status="dead",
             surface_status="missing",
         )
+    def _exact_result_stream(
+        self,
+        record: OperationRecord,
+        metadata: dict[str, object],
+        result_sha256: str,
+    ) -> tuple[RuntimeProviderEventStream, int] | None:
+        """Select one existing provider generation by immutable identity."""
+
+        provider_root = self._state_root(record) / "provider-events"
+        candidates: list[tuple[RuntimeProviderEventStream, int]] = []
+        directories = (
+            sorted(provider_root.glob("generation-*"))
+            if provider_root.is_dir()
+            else []
+        )
+        if len(directories) > 25:
+            return None
+        for directory in directories:
+            match = re.fullmatch(r"generation-([1-9][0-9]*)", directory.name)
+            if match is None or directory.is_symlink() or not directory.is_dir():
+                return None
+            generation = int(match.group(1))
+            try:
+                stream = RuntimeProviderEventStream.rehydrate(
+                    provider_root, generation
+                )
+                state = stream.controller.current_state()
+                identity = state.identity
+                if (
+                    identity.owner_id != record.spec.owner_id
+                    or identity.operation_id != record.spec.operation_id
+                    or identity.run_id != record.run_id
+                    or identity.generation != generation
+                    or identity.process_identity
+                    != record.resources.process_identity
+                    or identity.workspace_id
+                    != str(metadata.get("workspace_id") or "")
+                    or identity.surface_id != record.resources.surface_id
+                    or not state.cursor.result_published
+                ):
+                    continue
+                stream.result(result_sha256)
+            except RuntimeProviderEventError:
+                continue
+            candidates.append((stream, generation))
+        return candidates[0] if len(candidates) == 1 else None
