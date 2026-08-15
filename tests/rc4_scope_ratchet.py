@@ -299,6 +299,14 @@ generation-1, delivery, events — is validated without following symlinks so
 the ledger can never write outside the owned state root. The corrections add
 13 measured lines and no production module; the ceilings move to the exact
 290-file / 108,549-line reviewed candidate with no speculative headroom.
+
+The third accepted 2.7.2 Sol review round then closed the ancestor variant of
+the same escape: ``Path.is_symlink()`` checks only the final entry, so the
+no-follow guard now validates every component from the trusted store root
+through ``owners/<owner>/runtime/<operation>/provider-events/generation-1``
+and its ``delivery``/``events`` leaves. The correction adds 9 measured lines
+in the same cleanup owner and no production module; the ceilings move to the
+exact 290-file / 108,558-line reviewed candidate with no speculative headroom.
 """
 
 from __future__ import annotations
@@ -310,7 +318,7 @@ from pathlib import Path
 SCRIPT_FILE_CEILING = 290
 
 #: Maximum total lines across those files for the 2.7.2 cleanup candidate.
-SCRIPT_LINE_CEILING = 108_549
+SCRIPT_LINE_CEILING = 108_558
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

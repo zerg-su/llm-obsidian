@@ -712,17 +712,26 @@ class RuntimeSessionCleanupMixin:
         root_directory = (
             provider_root / f"generation-{self._ROOT_PROVIDER_GENERATION}"
         )
-        # Every authority path component is validated without following
-        # symlinks so rehydration and the closure ledger can never read or
-        # write outside the operation's owned state root.
-        for authority_path in (
-            state_root,
-            provider_root,
-            root_directory,
-            root_directory / "delivery",
-            root_directory / "events",
+        # Every path component from the trusted store root down to the
+        # closure authority directories is validated without following
+        # symlinks — Path.is_symlink() checks only the final entry, so a
+        # symlinked ancestor would otherwise be followed silently — and the
+        # ledger writes to the same validated location.
+        authority_path = self.store.root
+        for component in (
+            "owners",
+            record.spec.owner_id,
+            "runtime",
+            record.spec.operation_id,
+            "provider-events",
+            f"generation-{self._ROOT_PROVIDER_GENERATION}",
         ):
+            authority_path = authority_path / component
             if authority_path.is_symlink() or not authority_path.is_dir():
+                return None
+        for leaf in ("delivery", "events"):
+            leaf_path = root_directory / leaf
+            if leaf_path.is_symlink() or not leaf_path.is_dir():
                 return None
         try:
             stream = RuntimeProviderEventStream.rehydrate(

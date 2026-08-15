@@ -32,14 +32,15 @@ live-accepted. Builds on the preserved 2.7.1 candidate.
   itself keeps its own durable earlier-generation contract.
 - A root stream already latched in typed attention (beyond the tolerated
   `result-missing` state) can never receive a durable close receipt, and every
-  closure authority path component — state root, `provider-events`,
-  `generation-1`, `delivery`, `events` — is validated without following
-  symlinks, so the closure ledger can never write outside the operation's
-  owned state root. Task pipeline transport (`.task-pipeline/`,
-  `.task-pipeline-step-*.json`) is repository-ignored so candidates stay
-  clean.
+  path component from the trusted store root through the closure authority
+  directories — `owners/<owner>/runtime/<operation>/provider-events/generation-1`
+  with its `delivery` and `events` leaves — is validated without following
+  symlinks (including symlinked ancestors), so the closure ledger can never
+  write outside the operation's owned state tree. Task pipeline transport
+  (`.task-pipeline/`, `.task-pipeline-step-*.json`) is repository-ignored so
+  candidates stay clean.
 - The live scripts scope ratchet (`rc4_scope_ratchet`) is rebased to the exact
-  measured 2.7.2 reviewed candidate — 290 files, 108,549 lines, no speculative
+  measured 2.7.2 reviewed candidate — 290 files, 108,558 lines, no speculative
   headroom — absorbing the 2.7.1-base `review_cleanup_recovery.py` module that
   landed without a ceiling raise plus the measured cleanup-authority repair and
   its review corrections.

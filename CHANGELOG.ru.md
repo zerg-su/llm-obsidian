@@ -40,14 +40,15 @@
   генерации.
 - Root stream, уже защёлкнутый в typed attention (кроме допустимого состояния
   `result-missing`), больше никогда не получает durable close receipt, а
-  каждый компонент authority-пути закрытия — state root, `provider-events`,
-  `generation-1`, `delivery`, `events` — проверяется без следования symlink,
-  так что closure ledger не может писать за пределы owned state root
-  операции. Task pipeline transport (`.task-pipeline/`,
-  `.task-pipeline-step-*.json`) добавлен в repository ignore, чтобы кандидаты
-  оставались чистыми.
+  каждый компонент пути от доверенного store root до authority-директорий
+  закрытия — `owners/<owner>/runtime/<operation>/provider-events/generation-1`
+  с листьями `delivery` и `events` — проверяется без следования symlink
+  (включая symlink-ancestors), так что closure ledger не может писать за
+  пределы owned state tree операции. Task pipeline transport
+  (`.task-pipeline/`, `.task-pipeline-step-*.json`) добавлен в repository
+  ignore, чтобы кандидаты оставались чистыми.
 - Live scope ratchet скриптов (`rc4_scope_ratchet`) перепривязан к точному
-  измерению reviewed-кандидата 2.7.2 — 290 файлов, 108,549 строк, без
+  измерению reviewed-кандидата 2.7.2 — 290 файлов, 108,558 строк, без
   запасного headroom — с учётом модуля `review_cleanup_recovery.py` из базы
   2.7.1, добавленного без поднятия потолка, измеренного ремонта cleanup
   authority и его review-коррекций.

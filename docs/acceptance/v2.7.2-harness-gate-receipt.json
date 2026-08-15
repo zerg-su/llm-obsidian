@@ -1,0 +1,12 @@
+{
+  "environment": "Executor environment with an owner-writable scratch directory; rerunnable verbatim from the candidate tree root. The reviewer sandbox failure of tests/harness/test_review_inspect.py is an environment mechanism limit (the self-test strips the callback-owned TMPDIR and the sandbox has no writable system temp root), not product evidence.",
+  "exit_code": 0,
+  "gate": "make test-harness",
+  "measured_tree_note": "git write-tree of the exact working tree the gate ran on. The resolved HEAD tree differs from it by exactly three gate-inert receipt artifacts written afterward: docs/acceptance/v2.7.2-harness-gate-output.log, this receipt file, and the acceptance note's complete-gate receipt section. Verify with: git diff --stat bc6b63a5c43bf579469dfda07252fc19d1b709f0 <resolved-head> — no other path may appear. No registered gate reads these artifacts.",
+  "measured_tree_sha": "bc6b63a5c43bf579469dfda07252fc19d1b709f0",
+  "output_lines": 3176,
+  "output_pointer": "docs/acceptance/v2.7.2-harness-gate-output.log",
+  "output_sha256": "506d4f5d94141e18df1a6eb4ba250ff55fd4090ebf10499026d7fb98a1955093",
+  "registered_suite_files": 96,
+  "schema_version": 1
+}

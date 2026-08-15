@@ -1130,6 +1130,96 @@ with tempfile.TemporaryDirectory(prefix="delivery-boundary.") as raw:
         and not delegated_receipt.exists(),
     )
 
+    ancestor_manager, ancestor_supervisor, ancestor_spec = (
+        prepare_modern_cleanup_case(
+            "symlinked-runtime-ancestor",
+            target_generation=1,
+        )
+    )
+    ancestor_sha256 = accepted_case_callback(
+        ancestor_manager,
+        ancestor_spec,
+        "symlinked-runtime-ancestor",
+    )
+    ancestor_stream = case_stream(
+        ancestor_manager,
+        ancestor_spec,
+        "symlinked-runtime-ancestor",
+        generation=1,
+    )
+    assert ancestor_stream.result(ancestor_sha256).action == "close"
+    ancestor_manager.request_exit(
+        ancestor_spec.owner_id,
+        ancestor_spec.operation_id,
+    )
+    assert ancestor_stream.process_exited(0).action == "close"
+    ancestor_runtime_dir = ancestor_manager._state_root(
+        ancestor_supervisor.read()
+    ).parent
+    ancestor_outside = root / "symlinked-runtime-ancestor-outside"
+    ancestor_runtime_dir.rename(ancestor_outside)
+    ancestor_runtime_dir.symlink_to(ancestor_outside)
+    ancestor_cleanup = ancestor_manager.cleanup(
+        ancestor_spec.owner_id,
+        ancestor_spec.operation_id,
+    )
+    ancestor_escaped_receipt = (
+        ancestor_outside
+        / ancestor_spec.operation_id
+        / "provider-events"
+        / "resource-closed.json"
+    )
+    check(
+        "symlinked runtime ancestor fails closed without an outside write",
+        ancestor_cleanup.record.state == "attention-required"
+        and ancestor_cleanup.record.resources.surface_id
+        == "symlinked-runtime-ancestor-surface"
+        and not ancestor_escaped_receipt.exists(),
+    )
+
+    staterow_manager, staterow_supervisor, staterow_spec = (
+        prepare_modern_cleanup_case(
+            "symlinked-state-root",
+            target_generation=1,
+        )
+    )
+    staterow_sha256 = accepted_case_callback(
+        staterow_manager,
+        staterow_spec,
+        "symlinked-state-root",
+    )
+    staterow_stream = case_stream(
+        staterow_manager,
+        staterow_spec,
+        "symlinked-state-root",
+        generation=1,
+    )
+    assert staterow_stream.result(staterow_sha256).action == "close"
+    staterow_manager.request_exit(
+        staterow_spec.owner_id,
+        staterow_spec.operation_id,
+    )
+    assert staterow_stream.process_exited(0).action == "close"
+    staterow_state_root = staterow_manager._state_root(
+        staterow_supervisor.read()
+    )
+    staterow_outside = root / "symlinked-state-root-outside"
+    staterow_state_root.rename(staterow_outside)
+    staterow_state_root.symlink_to(staterow_outside)
+    staterow_cleanup = staterow_manager.cleanup(
+        staterow_spec.owner_id,
+        staterow_spec.operation_id,
+    )
+    check(
+        "symlinked operation state root fails closed without an outside write",
+        staterow_cleanup.record.state == "attention-required"
+        and staterow_cleanup.record.resources.surface_id
+        == "symlinked-state-root-surface"
+        and not (
+            staterow_outside / "provider-events" / "resource-closed.json"
+        ).exists(),
+    )
+
     drift_manager, drift_supervisor, drift_spec = prepare_modern_cleanup_case(
         "root-generation-drift",
         target_generation=2,
