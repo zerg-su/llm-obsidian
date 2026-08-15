@@ -104,8 +104,10 @@ check(
     <= int(quality_ceiling["final_max_writable_authorities"])
     and len(authority["incident_literals"])
     <= int(quality_ceiling["final_max_incident_literals"])
+    # The configured value is the exact measured final contour, not a growth
+    # allowance: both production-authority growth and stale headroom fail.
     and int(authority["production_loc"])
-    <= int(quality_ceiling["final_max_production_loc"])
+    == int(quality_ceiling["final_max_production_loc"])
     and len(authority["production_files"])
     == int(quality_ceiling["final_production_file_count"]),
     authority,
