@@ -1455,6 +1455,7 @@ def run_case(
     fix_outcome: str = "complete",
     fix_retry_passes: int = 0,
     fix_retry_summary: object | None = None,
+    fix_retry_null_change: bool = False,
     fix_restart_after: str = "",
     model_restart_limit: int | None = None,
     completion_policy: str = "attention",
@@ -1758,7 +1759,8 @@ def run_case(
             "    if marker.is_file(): break\n"
             "    time.sleep(0.01)\n"
             "  else: raise SystemExit(5)\n"
-            "  subprocess.run(['git','commit','--allow-empty','-m',f'provider pass {iteration + 1}'],cwd=root,text=True,capture_output=True,check=True)\n"
+            "  if iteration==0 or not (root/'.null-change-retry').is_file():\n"
+            "    subprocess.run(['git','commit','--allow-empty','-m',f'provider pass {iteration + 1}'],cwd=root,text=True,capture_output=True,check=True)\n"
             "  publish_summary(summary,sys.argv[6] if iteration and len(sys.argv)>6 else sys.argv[2])\n"
             "time.sleep(0.3)\n",
             encoding="utf-8",
@@ -1886,6 +1888,12 @@ def run_case(
         origin_surface=ORIGIN,
     )
     cmux = FakeCmux()
+    if fix_retry_null_change:
+        # The retry provider reads this marker and leaves HEAD untouched, so the
+        # bounded retry completes with an intentionally empty change set.
+        (worktree / ".null-change-retry").write_text(
+            "null-change\n", encoding="utf-8"
+        )
     if before_start is not None:
         before_start(
             vault,
@@ -3393,6 +3401,111 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
             ).encode()
         ).hexdigest(),
         (retry_parent, retry_receipts, retry_verifications, retry_intent),
+    )
+
+    null_change_task = "edefeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+    null_change_pass = [0]
+
+    def fail_once_null_change_verification(
+        argv: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        if argv == ["git", "rev-parse", "HEAD"]:
+            return subprocess.run(
+                argv,
+                cwd=kwargs["cwd"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+        if argv == ["make", "test-harness"]:
+            null_change_pass[0] += 1
+        return subprocess.CompletedProcess(
+            argv,
+            1 if null_change_pass[0] == 1 else 0,
+            "",
+            "failed\n" if null_change_pass[0] == 1 else "",
+        )
+
+    null_change_store, null_change_cmux, null_change_state, null_change_rc = (
+        run_case(
+            root,
+            null_change_task,
+            valid_summary,
+            pipeline_name="engineering/fix",
+            fix_retry_passes=2,
+            fix_retry_summary={
+                **valid_summary,
+                "body": "Retry verified the repair without changing the tree.",
+            },
+            fix_retry_null_change=True,
+            verification_runner=fail_once_null_change_verification,
+        )
+    )
+    null_change_parent = null_change_store.read("owner-1", null_change_task)
+    null_change_intent = read_json_eventually(
+        null_change_state / "pipeline-fix" / "pass-1" / "retry-intent.json"
+    )
+    null_change_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=root / f"worktree-{null_change_task}",
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout.strip()
+    null_change_notify = (
+        null_change_state / "pipeline-fix" / "pass-1" / "null-change-notify.json"
+    )
+    null_change_attention = load_attention(root / f"worktree-{null_change_task}")
+    null_change_notifications = [
+        item
+        for item in null_change_cmux.sent
+        if item[0] == ORIGIN and "pipeline-decision" in item[1]
+    ]
+    check(
+        "a null-change bounded retry publishes one typed continuation",
+        null_change_rc == 0
+        and null_change_head == null_change_intent["current_head_sha"]
+        and null_change_notify.is_file()
+        and json.loads(null_change_notify.read_text(encoding="utf-8"))
+        == {
+            "schema_version": 1,
+            "operation_id": null_change_task,
+            "iteration": 1,
+            "head_sha": null_change_head,
+            "status": "sent",
+        }
+        and null_change_attention is not None
+        and null_change_attention["category"] == "pipeline-decision"
+        and null_change_attention["status"] == "pending"
+        and null_change_attention["allowed_decisions"]
+        == ["stop", "retry-with-scope"]
+        and null_change_attention["head_sha"] == null_change_head
+        and len(null_change_notifications) == 1
+        and "task_escalation.py" in null_change_notifications[0][1]
+        and "resolve --worktree" in null_change_notifications[0][1],
+        (
+            null_change_parent,
+            null_change_intent,
+            null_change_attention,
+            null_change_notifications,
+        ),
+    )
+    check(
+        "a null-change retry never completes the fix transport on the same HEAD",
+        null_change_parent.state == "attention-required"
+        and null_change_parent.attention_reason
+        == AttentionReason.ATTENTION_REQUIRED
+        and not null_change_parent.accepted_callback_id
+        and not (null_change_state / "callback-receipt.json").exists()
+        and len(
+            [
+                record
+                for record in null_change_store.list("owner-1")
+                if record.spec.kind == "pipeline-verify"
+            ]
+        )
+        == 1,
+        null_change_parent,
     )
 
     attention_limit_task = "eceeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
