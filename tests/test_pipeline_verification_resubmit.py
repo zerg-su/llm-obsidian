@@ -439,6 +439,26 @@ with tempfile.TemporaryDirectory(prefix="verification-resubmit.") as raw:
         else:
             raise AssertionError("an attempt-1 packet produced a typed raise")
 
+    # An invalidated attempt — its probes ran at a HEAD the product has since
+    # left — can never be revived through the public same-HEAD path: the
+    # exact-HEAD binding fails closed and leaves no response artifact.
+    packet_path.write_text(
+        json.dumps(packet, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    try:
+        resubmit.publish_same_head_response(worktree, escalation_id)
+    except resubmit.ResubmitError as exc:
+        if "cannot replace changed-HEAD repair" not in str(exc):
+            raise AssertionError(exc)
+    else:
+        raise AssertionError(
+            "a stale-HEAD attempt was revived through the same-HEAD path"
+        )
+    if response_path.exists():
+        raise AssertionError(
+            "a refused stale-HEAD authorization left a response artifact"
+        )
+
 print(
     "OK   verification resubmission keeps retry-mechanism-flake canonical and "
     "publishes the one authorized same-HEAD response automatically"

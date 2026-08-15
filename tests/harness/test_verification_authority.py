@@ -446,5 +446,129 @@ with tempfile.TemporaryDirectory(prefix="verification-authority.") as raw:
     else:
         raise AssertionError("foreign changed-HEAD receipt was counted")
     check("foreign changed-HEAD budget evidence fails closed", True)
+    import shutil as _shutil
+
+    _shutil.rmtree(foreign_response.parent)
+
+    # Invalidated-handoff identity: the attempt-1 successor of one exact
+    # verification input is a distinct predecessor-bound operation, and the
+    # identity space ends there.
+    from harness.verification_attempt import VerificationAttemptError
+
+    successor_spec, successor_lane, successor_run = pipeline_verify_identity(
+        parent.spec,
+        definition_sha256=definition_sha256,
+        input_sha256=input_sha256,
+        profile=profile.name,
+        attempt_index=1,
+    )
+    successor_effect = pipeline_verify_effect_id(input_sha256, 1)
+    check(
+        "the attempt-1 successor identity is distinct and predecessor-bound",
+        successor_spec.operation_id == f"{child_spec.operation_id}-a1"
+        and successor_spec.parent_operation_id == parent.spec.operation_id
+        and successor_spec.idempotency_key != child_spec.idempotency_key
+        and successor_lane != lane_id
+        and successor_run != run_id
+        and successor_effect != effect_id,
+    )
+    for factory in (
+        lambda: pipeline_verify_identity(
+            parent.spec,
+            definition_sha256=definition_sha256,
+            input_sha256=input_sha256,
+            profile=profile.name,
+            attempt_index=2,
+        ),
+        lambda: pipeline_verify_effect_id(input_sha256, 2),
+        lambda: attempt.same_head_retry().same_head_retry(),
+    ):
+        try:
+            factory()
+        except VerificationAttemptError:
+            pass
+        else:
+            raise AssertionError("an attempt-2 verification identity was minted")
+    check("no attempt-2 verification identity exists", True)
+
+    # A successor receipt validates as one immutable authority of its own.
+    store.create(
+        successor_spec, lane_id=successor_lane, run_id=successor_run
+    )
+    for state in ("preflight", "starting", "running", "verifying"):
+        store.transition(owner, successor_spec.operation_id, state)
+    store.begin_effect(owner, successor_spec.operation_id, successor_effect)
+    store.resolve_effect(
+        owner, successor_spec.operation_id, EffectOutcome.SUCCEEDED
+    )
+    store.transition(owner, successor_spec.operation_id, "failed")
+    successor_attempt = attempt.same_head_retry()
+    successor_receipt_path = (
+        runtime_root
+        / "pipeline-verification"
+        / successor_spec.operation_id
+        / "receipt.json"
+    )
+    successor_output = successor_receipt_path.parent / "evidence" / "scoped-1.log"
+    successor_output.parent.mkdir(parents=True)
+    successor_output.write_bytes(b"failed\n")
+    successor_receipt = {
+        **receipt,
+        "operation_id": successor_spec.operation_id,
+        "lane_id": successor_lane,
+        "run_id": successor_run,
+        "effect_id": successor_effect,
+        "verification_attempt": successor_attempt.as_dict(),
+        "verification_attempt_sha256": successor_attempt.sha256,
+        "evidence": [
+            {
+                **receipt["evidence"][0],
+                "output_pointer": successor_output.relative_to(
+                    runtime_root
+                ).as_posix(),
+            }
+        ],
+    }
+    successor_receipt_path.write_text(
+        json.dumps(successor_receipt, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    successor_authority = VerificationAuthority.load(
+        successor_receipt_path,
+        store=store,
+        parent=parent,
+        runtime_root=runtime_root,
+        expected_definition_sha256=definition_sha256,
+        expected_profile=profile.name,
+        expected_profile_sha256=profile.sha256,
+        expected_head_sha=failed_head,
+        allowed_statuses=("failed",),
+        child_states=("failed",),
+        require_released=True,
+        require_effect_succeeded=True,
+    )
+    check(
+        "the attempt-1 successor receipt is one immutable authority",
+        successor_authority.to_dict() == successor_receipt
+        and successor_authority.attempt == successor_attempt
+        and successor_authority.operation_id == successor_spec.operation_id,
+    )
+
+    # Stale evidence can never authorize a different HEAD at the ingress.
+    try:
+        VerificationAuthority.validate(
+            receipt,
+            store=store,
+            parent=parent,
+            runtime_root=runtime_root,
+            expected_definition_sha256=definition_sha256,
+            expected_profile=profile.name,
+            expected_profile_sha256=profile.sha256,
+            expected_head_sha="b" * 40,
+        )
+    except VerificationAuthorityError:
+        pass
+    else:
+        raise AssertionError("stale-HEAD evidence authorized a different HEAD")
+    check("stale-HEAD receipt cannot authorize the current HEAD", True)
 
 print("verification authority matrix: ok")

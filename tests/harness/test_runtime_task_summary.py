@@ -1313,6 +1313,535 @@ def assert_resolution_head_drift_wakes_once(root: Path) -> None:
     )
 
 
+def assert_invalidated_verification_hands_off_to_exact_head_replacement(
+    root: Path,
+) -> None:
+    """Preserved 2.7.2 ordering: green probes at HEAD A, amend to HEAD B before
+    callback acceptance, interrupted own-identity effect on the HEAD-B attempt,
+    settlement/terminalization — the verification owner must invalidate the
+    stale attempt and create exactly one predecessor-bound exact-B successor."""
+
+    from harness.contracts import EffectOutcome
+    from harness.verification_attempt import pipeline_verify_effect_id
+
+    profile = load_profiles(ROOT / "config" / "verification-profiles.toml")[
+        "scoped"
+    ]
+    pipeline = compile_pipeline(
+        builtin_definitions()["engineering/change"],
+        builtin_registry(),
+        capabilities=("route:resolved",),
+    )
+    summary = {
+        "schema_version": 1,
+        "type": "session",
+        "title": "Runtime Result",
+        "session": "executor-session",
+        "body": "Bounded completed task.",
+    }
+    seeded: dict[str, dict[str, object]] = {}
+    probe_commands: dict[str, list[tuple[str, ...]]] = {}
+
+    def make_probe_runner(task: str):
+        recorded = probe_commands.setdefault(task, [])
+
+        def runner(argv: list[str], **kwargs: object):
+            if argv == ["git", "rev-parse", "HEAD"]:
+                return subprocess.run(
+                    argv,
+                    cwd=kwargs["cwd"],
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+            recorded.append(tuple(argv))
+            return subprocess.CompletedProcess(argv, 0, "ok\n", "")
+
+        return runner
+
+    def approve_at_current_head(task: str):
+        def launcher(vault: Path, worktree: Path) -> None:
+            meta = json.loads(
+                (worktree / ".task-meta.json").read_text(encoding="utf-8")
+            )
+            head = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=worktree,
+                text=True,
+                capture_output=True,
+                check=True,
+            ).stdout.strip()
+            ReviewGateController.skip(
+                vault / ".vault-meta" / "harness" / "review-data" / task / task,
+                dispatch_operation_id=task,
+                owner_id=task,
+                preset=ReviewPreset.from_flags(no_review=True),
+                context=ReviewContext(
+                    "packets/task/manifest.json",
+                    head,
+                    "scoped",
+                    meta["review_policy"]["verification_profile_sha256"],
+                ),
+                product_root=worktree,
+            )
+
+        return launcher
+
+    def build_child(
+        store: OperationStore,
+        parent: object,
+        input_sha256: str,
+        attempt_index: int,
+    ) -> tuple[object, str, str, str]:
+        spec, lane_id, run_id = _pipeline_verify_identity(
+            parent.spec,
+            definition_sha256=pipeline.definition_sha256,
+            input_sha256=input_sha256,
+            profile="scoped",
+            attempt_index=attempt_index,
+        )
+        store.create(spec, lane_id=lane_id, run_id=run_id)
+        supervisor = OperationSupervisor(store, "owner-1", spec.operation_id)
+        supervisor.configure_budget(
+            attempt_limit=1,
+            model_restart_limit=0,
+            time_budget_seconds=DEFAULT_TIME_BUDGET_SECONDS,
+            token_limit=DEFAULT_TOKEN_LIMIT,
+        )
+        for child_state in ("preflight", "starting", "running", "verifying"):
+            supervisor.transition(child_state)
+        supervisor.consume_attempt()
+        effect_id = pipeline_verify_effect_id(input_sha256, attempt_index)
+        store.begin_effect("owner-1", spec.operation_id, effect_id)
+        return spec, lane_id, run_id, effect_id
+
+    def seed_invalidated_state(
+        task: str,
+        *,
+        stale_terminal: bool,
+        seed_attempt1: str = "",
+    ):
+        def before_start(
+            vault: Path, worktree: Path, state: Path, profile_sha: str
+        ) -> None:
+            store = OperationStore(vault / ".vault-meta" / "harness")
+            parent = store.read("owner-1", task)
+            head_a = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=worktree,
+                text=True,
+                capture_output=True,
+                check=True,
+            ).stdout.strip()
+
+            # Green probes finish at HEAD A: complete settled child, linked
+            # schema-v2 receipt, all scoped commands green.
+            input_a = verification_input_sha256(
+                pipeline.definition_sha256, head_a, profile_sha, 1
+            )
+            spec_a, lane_a, run_a, effect_a = build_child(
+                store, parent, input_a, 0
+            )
+            attempt_a = VerificationAttempt(
+                task, "scoped", profile_sha, head_a, 0
+            )
+            evidence_dir = (
+                state / "pipeline-verification" / spec_a.operation_id / "evidence"
+            )
+            evidence_dir.mkdir(parents=True)
+            evidence = []
+            for index in range(3):
+                output = evidence_dir / f"scoped-{index + 1}.log"
+                output.write_text("ok\n", encoding="utf-8")
+                evidence.append(
+                    {
+                        "schema_version": 2,
+                        "profile": "scoped",
+                        "profile_sha256": profile_sha,
+                        "head_sha": head_a,
+                        "command_id": f"scoped-{index + 1}",
+                        "cwd": ".",
+                        "exit_code": 0,
+                        "started_at": "1",
+                        "finished_at": "2",
+                        "output_pointer": output.relative_to(state).as_posix(),
+                        "output_sha256": hashlib.sha256(
+                            output.read_bytes()
+                        ).hexdigest(),
+                        "output_bytes": len(output.read_bytes()),
+                    }
+                )
+            receipt_a = {
+                "schema_version": 2,
+                "operation_id": spec_a.operation_id,
+                "parent_operation_id": task,
+                "lane_id": lane_a,
+                "run_id": run_a,
+                "definition_sha256": pipeline.definition_sha256,
+                "step_id": "verify",
+                "head_sha": head_a,
+                "input_sha256": input_a,
+                "profile": "scoped",
+                "profile_sha256": profile_sha,
+                "effect_id": effect_a,
+                "status": "complete",
+                "evidence": evidence,
+                "verification_attempt": attempt_a.as_dict(),
+                "verification_attempt_sha256": attempt_a.sha256,
+            }
+            write_json(
+                state
+                / "pipeline-verification"
+                / spec_a.operation_id
+                / "receipt.json",
+                receipt_a,
+            )
+            write_json(state / "pipeline-step-verify.json", receipt_a)
+            store.resolve_effect(
+                "owner-1", spec_a.operation_id, EffectOutcome.SUCCEEDED
+            )
+            supervisor_a = OperationSupervisor(
+                store, "owner-1", spec_a.operation_id
+            )
+            for child_state in ("finalizing", "exiting", "complete"):
+                supervisor_a.transition(child_state)
+
+            # The evidence/doc amend moves the clean product HEAD to B before
+            # any callback acceptance.
+            (worktree / "EVIDENCE.md").write_text(
+                "evidence amend\n", encoding="utf-8"
+            )
+            subprocess.run(
+                ["git", "add", "EVIDENCE.md"], cwd=worktree, check=True
+            )
+            subprocess.run(
+                ["git", "commit", "-m", "docs: bind evidence"],
+                cwd=worktree,
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            head_b = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=worktree,
+                text=True,
+                capture_output=True,
+                check=True,
+            ).stdout.strip()
+
+            # The HEAD-B attempt-0 verifier dies mid own-identity effect (no
+            # receipt), then its stale effect is settled; terminalization
+            # varies by scenario.
+            input_b = verification_input_sha256(
+                pipeline.definition_sha256, head_b, profile_sha, 1
+            )
+            spec_b0, _lane_b0, _run_b0, _effect_b0 = build_child(
+                store, parent, input_b, 0
+            )
+            partial = (
+                state
+                / "pipeline-verification"
+                / spec_b0.operation_id
+                / "evidence"
+            )
+            partial.mkdir(parents=True)
+            (partial / "scoped-1.log").write_text(
+                "interrupted\n", encoding="utf-8"
+            )
+            store.resolve_effect(
+                "owner-1", spec_b0.operation_id, EffectOutcome.SUCCEEDED
+            )
+            if stale_terminal:
+                store.transition(
+                    "owner-1",
+                    spec_b0.operation_id,
+                    "attention-required",
+                    reason=AttentionReason.ATTENTION_REQUIRED,
+                )
+                store.transition("owner-1", spec_b0.operation_id, "failed")
+
+            spec_b1 = _pipeline_verify_identity(
+                parent.spec,
+                definition_sha256=pipeline.definition_sha256,
+                input_sha256=input_b,
+                profile="scoped",
+                attempt_index=1,
+            )[0]
+            if seed_attempt1:
+                spec_b1, _lane, _run, _effect = build_child(
+                    store, parent, input_b, 1
+                )
+                partial_b1 = (
+                    state
+                    / "pipeline-verification"
+                    / spec_b1.operation_id
+                    / "evidence"
+                )
+                partial_b1.mkdir(parents=True)
+                (partial_b1 / "scoped-1.log").write_text(
+                    "interrupted successor\n", encoding="utf-8"
+                )
+                if seed_attempt1 == "terminal":
+                    store.resolve_effect(
+                        "owner-1", spec_b1.operation_id, EffectOutcome.SUCCEEDED
+                    )
+                    store.transition(
+                        "owner-1",
+                        spec_b1.operation_id,
+                        "attention-required",
+                        reason=AttentionReason.ATTENTION_REQUIRED,
+                    )
+                    store.transition(
+                        "owner-1", spec_b1.operation_id, "failed"
+                    )
+
+            seeded[task] = {
+                "head_a": head_a,
+                "head_b": head_b,
+                "input_b": input_b,
+                "complete_a": spec_a.operation_id,
+                "stale_b0": spec_b0.operation_id,
+                "successor_b1": spec_b1.operation_id,
+                "receipt_a": receipt_a,
+            }
+
+        return before_start
+
+    def read_state_json(state: Path, *parts: str) -> object:
+        path = state.joinpath(*parts)
+        if not path.is_file():
+            return None
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def verify_children(store: OperationStore) -> dict[str, str]:
+        return {
+            record.spec.operation_id: record.state
+            for record in store.list("owner-1")
+            if record.spec.kind == "pipeline-verify"
+        }
+
+    scoped_commands = [
+        ("make", "test-harness"),
+        ("make", "test-model-routing"),
+        ("git", "diff", "--check"),
+    ]
+
+    def assert_handoff_completes(label: str, task: str, *, stale_terminal: bool):
+        store, _cmux, state, rc = run_case(
+            root,
+            task,
+            summary,
+            pipeline_name="engineering/change",
+            before_start=seed_invalidated_state(
+                task, stale_terminal=stale_terminal
+            ),
+            verification_runner=make_probe_runner(task),
+            review_launcher=approve_at_current_head(task),
+            review_state="missing",
+            wake_source=FallbackWakeSource(),
+        )
+        facts = seeded[task]
+        parent = store.read("owner-1", task)
+        children = verify_children(store)
+        successor = str(facts["successor_b1"])
+        fresh_receipt = read_state_json(
+            state, "pipeline-verification", successor, "receipt.json"
+        )
+        linked = read_state_json(state, "pipeline-step-verify.json")
+        invalidation = read_state_json(
+            state,
+            "pipeline-verification",
+            str(facts["stale_b0"]),
+            "invalidation.json",
+        )
+        preserved_a = read_state_json(
+            state,
+            "pipeline-verification",
+            str(facts["complete_a"]),
+            "receipt.json",
+        )
+        check(
+            f"{label}: one wake creates exactly one exact-HEAD successor "
+            "and finishes through the ordinary summary path",
+            rc == 0
+            and parent.state == "finalizing"
+            and bool(parent.accepted_callback_id)
+            and children
+            == {
+                str(facts["complete_a"]): "complete",
+                str(facts["stale_b0"]): "failed",
+                successor: "complete",
+            }
+            and isinstance(fresh_receipt, dict)
+            and fresh_receipt["status"] == "complete"
+            and fresh_receipt["head_sha"] == facts["head_b"]
+            and fresh_receipt["verification_attempt"]["attempt_index"] == 1
+            and isinstance(linked, dict)
+            and linked["operation_id"] == successor
+            and probe_commands[task] == scoped_commands
+            and preserved_a == facts["receipt_a"],
+            (rc, parent, children, fresh_receipt, linked, probe_commands[task]),
+        )
+        check(
+            f"{label}: the invalidation record binds the stale attempt to "
+            "its exact successor",
+            isinstance(invalidation, dict)
+            and invalidation.get("schema_version") == 1
+            and invalidation.get("operation_id") == facts["stale_b0"]
+            and invalidation.get("parent_operation_id") == task
+            and invalidation.get("successor_operation_id") == successor
+            and invalidation.get("current_head_sha") == facts["head_b"]
+            and invalidation.get("status") == "invalidated",
+            invalidation,
+        )
+        return store, state
+
+    # Exact preserved live ordering: settled and terminalized stale attempt.
+    terminal_task = "27300000-2730-4273-8273-273000000001"
+    terminal_store, terminal_state = assert_handoff_completes(
+        "terminal invalidated attempt",
+        terminal_task,
+        stale_terminal=True,
+    )
+
+    # A repeated worker wake after the handoff creates no duplicate verifier
+    # and no second verification effect.
+    children_before = verify_children(terminal_store)
+    probes_before = list(probe_commands[terminal_task])
+    worktree = root / f"worktree-{terminal_task}"
+    relaunch = ProcessAdapter().prepare_surface_launch(
+        argv=(
+            str(Path(sys.executable).resolve()),
+            "-c",
+            "import time; time.sleep(0.15)",
+        ),
+        cwd=worktree,
+        state_root=root / f"state-{terminal_task}",
+        worker=ROOT / "scripts" / "harness-runtime-worker.py",
+        callback_pointer=worktree / ".task-summary.json",
+        store_root=terminal_store.root,
+        owner_id="owner-1",
+        operation_id=terminal_task,
+        run_id=f"run-{terminal_task}",
+        surface_id=CHILD,
+        runtime="codex",
+        callback_mode="task-summary",
+        task_summary_pointer=worktree / ".task-summary.json",
+        origin_surface=ORIGIN,
+    )
+    rewake_rc = run_worker(
+        relaunch.spec_path,
+        poll_seconds=0.02,
+        checkpoint_probe=lambda _surface, _runtime: "checkpoint-1",
+        cmux_adapter=FakeCmux(),
+        verification_runner=make_probe_runner(terminal_task),
+        wake_source=FallbackWakeSource(),
+    )
+    check(
+        "repeated wake after the handoff stays idempotent: no duplicate "
+        "verifier and no second effect",
+        rewake_rc == 0
+        and verify_children(terminal_store) == children_before
+        and probe_commands[terminal_task] == probes_before,
+        (rewake_rc, verify_children(terminal_store), probe_commands[terminal_task]),
+    )
+
+    # Settlement without terminalization is the same invalidated class: the
+    # owner itself must terminalize the stale attempt before the handoff.
+    assert_handoff_completes(
+        "settled non-terminal invalidated attempt",
+        "27300000-2730-4273-8273-273000000002",
+        stale_terminal=False,
+    )
+
+    # Crash re-entry: the successor already exists mid own-identity effect;
+    # restart completes the same predecessor-bound handoff with no third
+    # attempt.
+    resume_task = "27300000-2730-4273-8273-273000000003"
+    resume_store, _resume_cmux, resume_state, resume_rc = run_case(
+        root,
+        resume_task,
+        summary,
+        pipeline_name="engineering/change",
+        before_start=seed_invalidated_state(
+            resume_task, stale_terminal=True, seed_attempt1="pending"
+        ),
+        verification_runner=make_probe_runner(resume_task),
+        review_launcher=approve_at_current_head(resume_task),
+        review_state="missing",
+        wake_source=FallbackWakeSource(),
+    )
+    resume_facts = seeded[resume_task]
+    resume_parent = resume_store.read("owner-1", resume_task)
+    resume_children = verify_children(resume_store)
+    resume_receipt = read_state_json(
+        resume_state,
+        "pipeline-verification",
+        str(resume_facts["successor_b1"]),
+        "receipt.json",
+    )
+    check(
+        "restart resumes the interrupted predecessor-bound successor and "
+        "creates no third attempt",
+        resume_rc == 0
+        and resume_parent.state == "finalizing"
+        and resume_children
+        == {
+            str(resume_facts["complete_a"]): "complete",
+            str(resume_facts["stale_b0"]): "failed",
+            str(resume_facts["successor_b1"]): "complete",
+        }
+        and isinstance(resume_receipt, dict)
+        and resume_receipt["status"] == "complete"
+        and resume_receipt["head_sha"] == resume_facts["head_b"]
+        and resume_receipt["verification_attempt"]["attempt_index"] == 1
+        and probe_commands[resume_task] == scoped_commands,
+        (resume_rc, resume_parent, resume_children, resume_receipt),
+    )
+
+    # Both same-HEAD attempt identities burned without receipts: the handoff
+    # budget is exhausted — typed attention, no replacement, no probes.
+    exhausted_task = "27300000-2730-4273-8273-273000000004"
+    exhausted_store, _exhausted_cmux, exhausted_state, exhausted_rc = run_case(
+        root,
+        exhausted_task,
+        summary,
+        pipeline_name="engineering/change",
+        before_start=seed_invalidated_state(
+            exhausted_task, stale_terminal=True, seed_attempt1="terminal"
+        ),
+        verification_runner=make_probe_runner(exhausted_task),
+        review_launcher=approve_at_current_head(exhausted_task),
+        review_state="missing",
+        wake_source=FallbackWakeSource(),
+    )
+    exhausted_facts = seeded[exhausted_task]
+    exhausted_parent = exhausted_store.read("owner-1", exhausted_task)
+    check(
+        "exhausted successor identities stay typed attention with no "
+        "replacement and no probe replay",
+        exhausted_rc == 0
+        and exhausted_parent.state == "attention-required"
+        and exhausted_parent.attention_reason == AttentionReason.RETRY_EXHAUSTED
+        and not exhausted_parent.accepted_callback_id
+        and verify_children(exhausted_store)
+        == {
+            str(exhausted_facts["complete_a"]): "complete",
+            str(exhausted_facts["stale_b0"]): "failed",
+            str(exhausted_facts["successor_b1"]): "failed",
+        }
+        and probe_commands[exhausted_task] == []
+        and read_state_json(
+            exhausted_state,
+            "pipeline-verification",
+            str(exhausted_facts["successor_b1"]),
+            "receipt.json",
+        )
+        is None,
+        (exhausted_rc, exhausted_parent, verify_children(exhausted_store)),
+    )
+
+
 def write_json(path: Path, value: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, sort_keys=True) + "\n", encoding="utf-8")
@@ -2141,6 +2670,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
     assert_rejected_drive_with_live_review_stays_waiting(root)
     assert_durable_review_packet_generation_can_advance(root)
     assert_resolution_head_drift_wakes_once(root)
+    assert_invalidated_verification_hands_off_to_exact_head_replacement(root)
     handoff = root / "resolution-handoff"
     handoff.mkdir()
     reviewed_head = "a" * 40
