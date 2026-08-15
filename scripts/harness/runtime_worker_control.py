@@ -871,9 +871,47 @@ class RuntimeWorkerControlMixin:
         self.write_immutable_json(notify_path, marker)
         return True
 
+    def publish_pipeline_decision(
+        self,
+        *,
+        marker: dict[str, object],
+        notify_path: Path,
+        delivery: dict[str, object],
+        body: str,
+        allowed_decisions: tuple[str, ...],
+    ) -> None:
+        """Append one pending decision and deliver it exactly once."""
+
+        raised = append_raise(self.spec["cwd"], marker)
+        if raised.record_id != marker["id"] or raised.payload.get("status") != "pending":
+            return
+        if notify_path.is_file() and (not notify_path.is_symlink()):
+            if json.loads(notify_path.read_text(encoding="utf-8")) != delivery:
+                raise RuntimeWorkerError("pipeline decision delivery changed")
+            return
+        attention_path = self.spec["cwd"] / ".task-needs-attention.json"
+        command = (
+            "python3 "
+            + shlex.quote(
+                str(
+                    self.spec["store_root"].parent.parent
+                    / "scripts"
+                    / "task_escalation.py"
+                )
+            )
+            + " resolve --worktree "
+            + shlex.quote(str(self.spec["cwd"]))
+            + " --decision <decision>"
+        )
+        message = f"Typed task escalation callback received. Category: pipeline-decision. {body} Inspect {attention_path} and resolve from the originating coordinator with: {command}. Allowed decisions: {', '.join(allowed_decisions)}."
+        if len(message.encode()) > 4096:
+            raise RuntimeWorkerError("pipeline decision notification exceeds its bound")
+        self.cmux_adapter.send(self.spec["origin_surface"], message)
+        self.cmux_adapter.send_key(self.spec["origin_surface"], "Enter")
+        self.write_immutable_json(notify_path, delivery)
+
     def notify_cannot_reproduce(self, receipt: FixStepReceipt) -> None:
         receipt_sha256 = receipt.receipt_sha256
-        attention_path = self.spec["cwd"] / ".task-needs-attention.json"
         marker = {
             "version": 1,
             "id": f"pipeline-decision-{receipt_sha256[:24]}",
@@ -890,40 +928,21 @@ class RuntimeWorkerControlMixin:
             "allowed_decisions": ["stop", "retry-with-fixture"],
         }
         try:
-            raised = append_raise(self.spec["cwd"], marker)
+            self.publish_pipeline_decision(
+                marker=marker,
+                notify_path=(
+                    self.spec_path.parent
+                    / "pipeline-fix"
+                    / "cannot-reproduce-notify.json"
+                ),
+                delivery={
+                    "schema_version": 1,
+                    "operation_id": self.spec["operation_id"],
+                    "receipt_sha256": receipt_sha256,
+                    "status": "sent",
+                },
+                body="The approved engineering/fix pipeline cannot reproduce the defect.",
+                allowed_decisions=("stop", "retry-with-fixture"),
+            )
         except EscalationRecordError as exc:
             raise RuntimeWorkerError(f"pipeline decision packet is invalid: {exc}") from exc
-        if raised.record_id != marker["id"] or raised.payload.get("status") != "pending":
-            return
-        notify_path = (
-            self.spec_path.parent / "pipeline-fix" / "cannot-reproduce-notify.json"
-        )
-        delivery = {
-            "schema_version": 1,
-            "operation_id": self.spec["operation_id"],
-            "receipt_sha256": receipt_sha256,
-            "status": "sent",
-        }
-        if notify_path.is_file() and (not notify_path.is_symlink()):
-            if json.loads(notify_path.read_text(encoding="utf-8")) != delivery:
-                raise RuntimeWorkerError("pipeline decision delivery changed")
-            return
-        command = (
-            "python3 "
-            + shlex.quote(
-                str(
-                    self.spec["store_root"].parent.parent
-                    / "scripts"
-                    / "task_escalation.py"
-                )
-            )
-            + " resolve --worktree "
-            + shlex.quote(str(self.spec["cwd"]))
-            + " --decision <decision>"
-        )
-        message = f"Typed task escalation callback received. Category: pipeline-decision. The approved engineering/fix pipeline cannot reproduce the defect. Inspect {attention_path} and resolve from the originating coordinator with: {command}. Allowed decisions: stop, retry-with-fixture."
-        if len(message.encode()) > 4096:
-            raise RuntimeWorkerError("pipeline decision notification exceeds its bound")
-        self.cmux_adapter.send(self.spec["origin_surface"], message)
-        self.cmux_adapter.send_key(self.spec["origin_surface"], "Enter")
-        self.write_immutable_json(notify_path, delivery)
