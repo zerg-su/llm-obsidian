@@ -13,6 +13,7 @@ from .runtime_worker import (
     _callback_target,
     _envelope,
 )
+from task_escalation_records import EscalationRecordError, append_raise
 from .artifact_repair import ContractArtifactOwner
 from .workflows.engineering_fix import fix_phase_request
 
@@ -390,6 +391,85 @@ class RuntimeWorkerFixMixin:
             retry_intent,
         )
 
+    def publish_null_change_continuation(self, state: FixTransportState) -> None:
+        """Raise one typed decision for a retry that changed nothing."""
+
+        head_sha = self.git_head()
+        notify_path = (
+            self.spec_path.parent
+            / "pipeline-fix"
+            / f"pass-{state.iteration}"
+            / "null-change-notify.json"
+        )
+        delivery = {
+            "schema_version": 1,
+            "operation_id": self.spec["operation_id"],
+            "iteration": state.iteration,
+            "head_sha": head_sha,
+            "status": "sent",
+        }
+        if notify_path.is_file() and (not notify_path.is_symlink()):
+            if json.loads(notify_path.read_text(encoding="utf-8")) != delivery:
+                raise RuntimeWorkerError("null-change continuation changed")
+            return
+        attention_path = self.spec["cwd"] / ".task-needs-attention.json"
+        marker = {
+            "version": 1,
+            "id": f"pipeline-decision-{head_sha[:24]}",
+            "status": "pending",
+            "task_name": "engineering/fix retry changed nothing",
+            "category": "pipeline-decision",
+            "reason": "The bounded fix retry completed without changing the verified HEAD",
+            "question": "Choose stop or retry-with-scope",
+            "worktree": str(self.spec["cwd"]),
+            "task_surface": self.spec["surface_id"],
+            "raised_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "iteration": state.iteration,
+            "head_sha": head_sha,
+            "allowed_decisions": ["stop", "retry-with-scope"],
+        }
+        try:
+            raised = append_raise(self.spec["cwd"], marker)
+        except EscalationRecordError as exc:
+            raise RuntimeWorkerError(f"pipeline decision packet is invalid: {exc}") from exc
+        if raised.record_id != marker["id"] or raised.payload.get("status") != "pending":
+            return
+        command = (
+            "python3 "
+            + shlex.quote(
+                str(
+                    self.spec["store_root"].parent.parent
+                    / "scripts"
+                    / "task_escalation.py"
+                )
+            )
+            + " resolve --worktree "
+            + shlex.quote(str(self.spec["cwd"]))
+            + " --decision <decision>"
+        )
+        message = f"Typed task escalation callback received. Category: pipeline-decision. Bounded fix retry {state.iteration} completed with an empty change set at {head_sha}. Inspect {attention_path} and resolve from the originating coordinator with: {command}. Allowed decisions: stop, retry-with-scope."
+        if len(message.encode()) > 4096:
+            raise RuntimeWorkerError("pipeline decision notification exceeds its bound")
+        emit_compiled_pipeline_event(
+            self.spec["cwd"],
+            event="fix-retry-null-change",
+            pipeline_id=self.pipeline.definition.pipeline_id,
+            pipeline_version=self.pipeline.definition.version,
+            profile=self.pipeline.definition.profile,
+            compiler_outcome="resolved",
+            definition_sha=self.pipeline.definition_sha256,
+            primitive_count=len(self.pipeline.definition.steps),
+            loop_iteration=state.iteration,
+            attention_category="retry-null-change",
+        )
+        self.cmux_adapter.send(self.spec["origin_surface"], message)
+        self.cmux_adapter.send_key(self.spec["origin_surface"], "Enter")
+        self.write_immutable_json(notify_path, delivery)
+        self.summary_attention(
+            "pipeline-fix-retry-null-change",
+            AttentionReason.ATTENTION_REQUIRED,
+        )
+
     def prepare_fix_round(self, state: FixTransportState) -> object | None:
         if state.progress.action == "complete":
             self.retarget_fix_callback(
@@ -414,6 +494,12 @@ class RuntimeWorkerFixMixin:
                 state.retry_intent is not None
                 and self.git_head() == state.retry_intent["current_head_sha"]
             ):
+                # An unchanged HEAD cannot carry the failed verification into
+                # completion. Wait for the retry to publish its finalization,
+                # then hand the null-change outcome to the coordinator instead
+                # of returning silently forever.
+                if self.spec["task_summary_pointer"].is_file():
+                    self.publish_null_change_continuation(state)
                 return None
             self.fix_transport_complete = True
             return None

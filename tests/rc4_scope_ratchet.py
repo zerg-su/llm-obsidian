@@ -259,6 +259,14 @@ and exact-surface cleanup in the existing owners. The candidate is 289 files /
 108,051 lines, pinned exactly with no speculative headroom. That growth landed
 before this ceiling was raised, so the justification is late rather than
 backdated, and the RC6.10 record above remains the RC6.10 measurement.
+
+The RC6.11 follow-up repairs the null-change retry-completion seam in
+``harness/runtime_worker_fix.py``. A bounded retry that finishes with an empty
+change set at the verified HEAD now publishes one typed decision continuation
+instead of returning silently, which costs 86 lines in that existing owner and
+adds no production module. The candidate is 289 files / 108,137 lines, raised
+in the same commit as the growth and pinned exactly with no speculative
+headroom.
 """
 
 from __future__ import annotations
@@ -270,7 +278,7 @@ from pathlib import Path
 SCRIPT_FILE_CEILING = 289
 
 #: Maximum total lines across those files for the RC6.11 reviewer candidate.
-SCRIPT_LINE_CEILING = 108_051
+SCRIPT_LINE_CEILING = 108_137
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

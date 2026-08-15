@@ -37,7 +37,12 @@
 - Cleanup старта review теперь завершает exact dead reviewer только когда
   durable provider events доказывают `provider-started` без `input-accepted`;
   event identity строится через канонический контракт `ProviderEventIdentity`.
-- Ratchet live scripts теперь охватывает 289 Python files / 108 051 lines.
+- Bounded retry engineering/fix, который завершился с пустым change set на
+  verified HEAD, теперь публикует один типизированный `pipeline-decision`
+  continuation (`stop` или `retry-with-scope`) и уходит в attention вместо
+  молчаливого возврата. Он не создаёт commit и не завершает fix transport на
+  failed HEAD.
+- Ratchet live scripts теперь охватывает 289 Python files / 108 137 lines.
 
 ### Граница кандидата
 
