@@ -603,6 +603,12 @@ class RuntimeWorkerReviewBridgeMixin:
         receipt_sha256 = hashlib.sha256(
             json.dumps(receipt, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
+        receipt_pointer = (
+            self.spec_path.parent
+            / "pipeline-verification"
+            / str(receipt["operation_id"])
+            / "receipt.json"
+        ).resolve()
         admission_path = (
             self.trusted_vault
             / ".vault-meta"
@@ -624,6 +630,7 @@ class RuntimeWorkerReviewBridgeMixin:
                 "verification_lane_id": str(receipt["lane_id"]),
                 "verification_run_id": str(receipt["run_id"]),
                 "receipt_sha256": receipt_sha256,
+                "receipt_pointer": str(receipt_pointer),
                 "head_sha": str(receipt["head_sha"]),
                 "status": "admitted",
             },

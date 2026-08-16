@@ -40,15 +40,29 @@
   receipt, clean-state или launch input; malformed или symlinked admission
   никогда не считается отсутствующей (F274.POST_CHECK_LAUNCH_RACE)
   (`docs/acceptance/v2.7.5-durable-exact-consumer-admission.md`).
+- После Sol implementation review (оба findings применены одним bounded
+  patch): flow потребляет durable receipt, названный опубликованным в
+  admission указателем receipt pointer, через настоящий
+  VerificationAuthority ingress — с привязкой к найденной dispatch-записи,
+  её скомпилированному contract и замороженному verification profile — и
+  требует admission для dispatch-contract'ов с verify-шагом, поэтому
+  удаление admission или receipt отказывает запуску
+  (F275.RECEIPT_ADMISSION_NOT_CONSUMED); та же admission-замыкающая
+  проверка повторяется внутри launch-транзакции gate как последнее
+  наблюдение непосредственно перед каждым свежим provider start, поэтому
+  drift после более ранних чтений flow оставляет максимум effect-free
+  attention-резервацию с нулём provider-стартов
+  (F275.POST_CHECK_PROVIDER_RACE).
 
 ### Управление
 
-- Контур RC1 active-authority ребазлайнен на точно измеренные 15417 LOC
+- Контур RC1 active-authority ребазлайнен на точно измеренные 15599 LOC
   (неизменный манифест из 27 файлов, ноль writable authorities, ноль
-  incident literals), hotspot'ы verification owner, review bridge и review
-  flow переходят ровно на измеренные 1276/1139/1258 строк, а live scripts
-  scope ratchet сдвигается на измеренную стоимость закрытия в 149 строк к
-  точному кандидату 290 файлов / 109 064 строки без запаса.
+  incident literals), hotspot'ы verification owner, review bridge, review
+  flow и gate attempt переходят ровно на измеренные 1276/1146/1438/1051
+  строк, а live scripts scope ratchet сдвигается на измеренную стоимость
+  закрытия в 149 строк плюс измеренную стоимость findings-patch в 199
+  строк к точному кандидату 290 файлов / 109 263 строки без запаса.
 
 ## [2.7.4] — 2026-08-16
 

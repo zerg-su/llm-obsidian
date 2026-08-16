@@ -17,9 +17,9 @@
       "evidence": "accepted review-child interval validation and complete fail-closed matrix in tests/harness/test_harness_dashboard.py"
     },
     "file-lines:scripts/harness/runtime_worker_review_bridge.py": {
-      "max_value": 1139,
+      "max_value": 1146,
       "owner": "v2.7.5 durable exact consumer admission",
-      "evidence": "inherited rc3 review corridor repairs plus the 2.7.5 exact receipt/HEAD launch admission published at the drive boundary instead of a carried boolean; post-check clean-commit launch injection and exact-pair control in tests/harness/test_runtime_task_summary.py"
+      "evidence": "inherited rc3 review corridor repairs plus the 2.7.5 exact receipt/HEAD launch admission published at the drive boundary instead of a carried boolean; post-check clean-commit launch injection and exact-pair control in tests/harness/test_runtime_task_summary.py; the F275 findings patch binds the published pair to its durable receipt pointer"
     },
     "file-lines:scripts/harness/runtime_worker_verification.py": {
       "max_value": 1276,
@@ -32,14 +32,14 @@
       "evidence": "bounded reviewer readiness recovery with focused replay tests"
     },
     "file-lines:scripts/harness/workflows/review_gate_attempt.py": {
-      "max_value": 1049,
-      "owner": "v2.6.7 RC6.4 reviewed-summary identity boundary",
-      "evidence": "exact same-HEAD implementer-summary follow-up admission and fail-closed context-drift coverage in tests/harness/test_exact_head_review_attempt.py"
+      "max_value": 1051,
+      "owner": "v2.7.5 durable exact consumer admission",
+      "evidence": "exact same-HEAD implementer-summary follow-up admission and fail-closed context-drift coverage in tests/harness/test_exact_head_review_attempt.py; begin_attempt threads the exact-candidate launch admission to the provider-start boundary (tests/harness/test_exact_head_review_attempt.py)"
     },
     "file-lines:scripts/task_review_flow.py": {
-      "max_value": 1258,
+      "max_value": 1438,
       "owner": "v2.7.5 durable exact consumer admission",
-      "evidence": "manifest-proven summary-only drift, predecessor-bound reservation, accepted predecessor-callback rollover after a zero-effect launch failure, active replay, and unchanged-summary idempotency coverage in tests/harness/test_exact_head_review_attempt.py, plus the 2.7.5 launch-admission gate that verifies the pipeline's exact receipt/HEAD pair against the actual review context before reservation or provider effect (fail-closed matrix in tests/harness/test_task_review_flow_units.py)"
+      "evidence": "manifest-proven summary-only drift, predecessor-bound reservation, accepted predecessor-callback rollover after a zero-effect launch failure, active replay, and unchanged-summary idempotency coverage in tests/harness/test_exact_head_review_attempt.py, plus the 2.7.5 launch-admission gate that verifies the pipeline's exact receipt/HEAD pair against the actual review context before reservation or provider effect (fail-closed matrix in tests/harness/test_task_review_flow_units.py); the F275 findings patch consumes the durable receipt through the real VerificationAuthority ingress, requires the admission for verify-owning contracts, and re-admits at the provider-start boundary"
     },
     "function-branches:scripts/harness/workflows/review_gate_attempt.py:recover_late_started_attempt": {
       "max_value": 80,
@@ -62,9 +62,9 @@
       "evidence": "registered gate admission preserves plan amendment, mechanism retry, ceiling, and summary-only follow-up boundaries"
     },
     "function-lines:scripts/task_review_flow.py:_run_exact_head_review": {
-      "max_value": 448,
+      "max_value": 455,
       "owner": "v2.7.5 durable exact consumer admission",
-      "evidence": "canonical flow preserves resolution inputs and deterministic attempt identity across one active summary follow-up replay and one zero-effect predecessor rearm, and consults the 2.7.5 launch-admission gate in exactly one pre-reservation line"
+      "evidence": "canonical flow preserves resolution inputs and deterministic attempt identity across one active summary follow-up replay and one zero-effect predecessor rearm, and binds the 2.7.5 launch admission once before reservation and once, through the same closure, at the provider-start boundary"
     }
   },
   "rc1_active_authority": {
@@ -78,10 +78,10 @@
       "operation-uuid": 27,
       "operator-local-path": 2
     },
-    "final_max_production_loc": 15417,
+    "final_max_production_loc": 15599,
     "final_production_file_count": 27,
     "final_max_writable_authorities": 0,
     "final_max_incident_literals": 0,
-    "evidence": "docs/acceptance/v2.6.6-rc1-active-authority-baseline.md and docs/acceptance/v2.7.1-verification-stabilization.md plus the separately owned exact 27-file RC5.5 review/recovery authority manifest, including atomic immutable-plan publication, amendment-safe finalization lineage, callback drain, crash replay, acceptance-bound one-time fresh artifact reconciliation, explicit current-review dashboard binding, typed reap-close owners, the crash-resumable structural-pivot workflow owner, the directly tested pending-pivot reviewing-receipt seam, the RC6.4 exact-HEAD plus implementer-summary approval binding with one predecessor-bound follow-up and accepted predecessor-callback rollover after a zero-effect launch failure, the RC6.9 bounded cancellation owner, and the RC6.11 exact pre-input reviewer retirement proof derived from canonical provider identity; the 2.7.1 verification stabilization rebaselines the same contour at exactly the measured 15051 LOC with zero headroom, zero writable authorities, and zero incident literals; the 2.7.3 invalidated-verification handoff (docs/acceptance/v2.7.3-invalidated-verification-handoff.md) grows only scripts/harness/runtime_worker_verification.py by the 117-LOC code-owned invalidated-attempt successor and rebaselines the unchanged 27-file contour at exactly the measured 15168 LOC with zero headroom after its first Sol review round hardened the invalidated-attempt classifier (identity-exact, symlink-safe, clean-tree gated); the 2.7.4 exact verification closure (docs/acceptance/v2.7.4-exact-verification-closure.md) closes the two terminal 2.7.3 review findings by growing only scripts/harness/runtime_worker_verification.py by the 137-LOC read-only orphan predecessor census and current-candidate authority-consumption predicate, rebaselining the unchanged 27-file contour at exactly the measured 15333 LOC with zero headroom after its Sol implementation review findings (bracketed candidate observation; identity-exact wait-only resolution marker) were applied in one bounded patch; the 2.7.5 durable exact consumer admission (docs/acceptance/v2.7.5-durable-exact-consumer-admission.md) closes the frozen F274.POST_CHECK_LAUNCH_RACE class by growing scripts/harness/runtime_worker_verification.py by the 15-LOC boundary-admitted controller link and scripts/task_review_flow.py by the 69-LOC pre-reservation launch-admission gate, rebaselining the unchanged 27-file contour at exactly the measured 15417 LOC with zero headroom"
+    "evidence": "docs/acceptance/v2.6.6-rc1-active-authority-baseline.md and docs/acceptance/v2.7.1-verification-stabilization.md plus the separately owned exact 27-file RC5.5 review/recovery authority manifest, including atomic immutable-plan publication, amendment-safe finalization lineage, callback drain, crash replay, acceptance-bound one-time fresh artifact reconciliation, explicit current-review dashboard binding, typed reap-close owners, the crash-resumable structural-pivot workflow owner, the directly tested pending-pivot reviewing-receipt seam, the RC6.4 exact-HEAD plus implementer-summary approval binding with one predecessor-bound follow-up and accepted predecessor-callback rollover after a zero-effect launch failure, the RC6.9 bounded cancellation owner, and the RC6.11 exact pre-input reviewer retirement proof derived from canonical provider identity; the 2.7.1 verification stabilization rebaselines the same contour at exactly the measured 15051 LOC with zero headroom, zero writable authorities, and zero incident literals; the 2.7.3 invalidated-verification handoff (docs/acceptance/v2.7.3-invalidated-verification-handoff.md) grows only scripts/harness/runtime_worker_verification.py by the 117-LOC code-owned invalidated-attempt successor and rebaselines the unchanged 27-file contour at exactly the measured 15168 LOC with zero headroom after its first Sol review round hardened the invalidated-attempt classifier (identity-exact, symlink-safe, clean-tree gated); the 2.7.4 exact verification closure (docs/acceptance/v2.7.4-exact-verification-closure.md) closes the two terminal 2.7.3 review findings by growing only scripts/harness/runtime_worker_verification.py by the 137-LOC read-only orphan predecessor census and current-candidate authority-consumption predicate, rebaselining the unchanged 27-file contour at exactly the measured 15333 LOC with zero headroom after its Sol implementation review findings (bracketed candidate observation; identity-exact wait-only resolution marker) were applied in one bounded patch; the 2.7.5 durable exact consumer admission (docs/acceptance/v2.7.5-durable-exact-consumer-admission.md) closes the frozen F274.POST_CHECK_LAUNCH_RACE class by growing scripts/harness/runtime_worker_verification.py by the 15-LOC boundary-admitted controller link and scripts/task_review_flow.py by the 69-LOC pre-reservation launch-admission gate, rebaselining the unchanged 27-file contour at exactly the measured 15417 LOC with zero headroom; its Sol implementation review findings (F275.RECEIPT_ADMISSION_NOT_CONSUMED, F275.POST_CHECK_PROVIDER_RACE) were applied in one bounded patch — the flow consumes the durable receipt through the real VerificationAuthority ingress, requires the admission for verify-owning dispatch contracts, and re-admits inside the provider-start launch transaction — rebaselining the unchanged 27-file contour at exactly the measured 15599 LOC with zero headroom"
   }
 }

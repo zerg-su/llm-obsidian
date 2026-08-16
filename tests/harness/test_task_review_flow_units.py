@@ -954,15 +954,39 @@ for mode, expected_lanes in (("simple", 1), ("deep", 2), ("full", 4)):
                     and runtime.started == expected_lanes,
                 )
 
-# 2.7.5 F274.POST_CHECK_LAUNCH_RACE: the exact-HEAD flow verifies the
-# pipeline's launch admission — the exact verification receipt/HEAD pair —
-# against the actual review context before reservation or provider effect.
-# Any HEAD, identity, clean-state, or launch-input mismatch fails closed;
-# a malformed or symlinked admission is never treated as absent.
+# 2.7.5 F274.POST_CHECK_LAUNCH_RACE (with F275.RECEIPT_ADMISSION_NOT_CONSUMED
+# applied): the exact-HEAD flow consumes the durable verification receipt
+# named by the pipeline's launch admission through the real
+# VerificationAuthority ingress and verifies it against the actual review
+# context before reservation or provider effect.  A verify-owning contract
+# requires the admission — absence is fail-closed, never compatibility — and
+# any HEAD, receipt-identity, clean-state, or launch-input mismatch, or a
+# malformed/symlinked admission, is never treated as absent.
+import hashlib  # noqa: E402
+import shutil  # noqa: E402
 import subprocess  # noqa: E402
 
+from harness.contracts import (  # noqa: E402
+    EffectOutcome,
+    OperationSpec,
+    VerificationEvidence,
+)
+from harness.pipeline_builtins import compiled_builtin  # noqa: E402
+from harness.verification import (  # noqa: E402
+    VerificationAuthority,
+    load_profiles,
+)
+from harness.verification_attempt import (  # noqa: E402
+    VERIFICATION_STEP_SCHEMA_VERSION,
+    VerificationAttempt,
+    pipeline_verify_effect_id,
+    pipeline_verify_identity,
+    verification_input_sha256,
+)
 from task_review_flow import _admitted_review_launch  # noqa: E402
 from task_review_shared import TaskReviewError  # noqa: E402
+
+ROOT = Path(__file__).resolve().parents[2]
 
 with tempfile.TemporaryDirectory(prefix="launch-admission.") as raw:
     base = Path(raw)
@@ -997,17 +1021,128 @@ with tempfile.TemporaryDirectory(prefix="launch-admission.") as raw:
         ).stdout.strip()
 
     head_b = land_commit("base")
+    vault = base / "vault"
+    (vault / "config").mkdir(parents=True)
+    shutil.copy(
+        ROOT / "config" / "verification-profiles.toml",
+        vault / "config" / "verification-profiles.toml",
+    )
+    profile = load_profiles(ROOT / "config" / "verification-profiles.toml")[
+        "scoped"
+    ]
+    meta = {
+        "review_policy": {
+            "verification_profile": "scoped",
+            "verification_profile_sha256": profile.sha256,
+        }
+    }
+    admission_route = RuntimeRoute(
+        "claude", "sonnet", "medium", "executor", "6" * 64
+    )
+    verify_contract = compiled_builtin("engineering/change").definition_sha256
+    no_verify_contract = compiled_builtin(
+        "lifecycle/default"
+    ).definition_sha256
+    task_id = "admission-task"
+    store = OperationStore(vault / ".vault-meta" / "harness")
+    parent = store.create(
+        OperationSpec(
+            task_id,
+            f"{task_id}-key",
+            "dispatch",
+            task_id,
+            admission_route,
+            "packets/task.json",
+            "scoped",
+            contract_sha256=verify_contract,
+        ),
+        lane_id="task-lane",
+        run_id="task-run",
+    )
+    dispatch_runtime = store.root / "owners" / task_id / "runtime" / task_id
+
+    input_sha = verification_input_sha256(
+        verify_contract, head_b, profile.sha256, VERIFICATION_STEP_SCHEMA_VERSION
+    )
+    attempt = VerificationAttempt(
+        task_id, profile.name, profile.sha256, head_b, 0
+    )
+    child_spec, child_lane, child_run = pipeline_verify_identity(
+        parent.spec,
+        definition_sha256=verify_contract,
+        input_sha256=input_sha,
+        profile=profile.name,
+        attempt_index=0,
+    )
+    store.create(child_spec, lane_id=child_lane, run_id=child_run)
+    for state in ("preflight", "starting", "running", "verifying"):
+        store.transition(task_id, child_spec.operation_id, state)
+    effect_id = pipeline_verify_effect_id(input_sha, 0)
+    store.begin_effect(task_id, child_spec.operation_id, effect_id)
+    store.resolve_effect(
+        task_id, child_spec.operation_id, EffectOutcome.SUCCEEDED
+    )
+    for state in ("finalizing", "exiting", "complete"):
+        store.transition(task_id, child_spec.operation_id, state)
+    receipt_dir = (
+        dispatch_runtime / "pipeline-verification" / child_spec.operation_id
+    )
+    evidence_rows = []
+    for index in range(len(profile.commands)):
+        output = receipt_dir / "evidence" / f"scoped-{index + 1}.log"
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(b"ok\n")
+        evidence_rows.append(
+            VerificationEvidence(
+                profile.name,
+                profile.sha256,
+                head_b,
+                f"scoped-{index + 1}",
+                ".",
+                0,
+                "1",
+                "2",
+                output.relative_to(dispatch_runtime).as_posix(),
+                hashlib.sha256(b"ok\n").hexdigest(),
+                3,
+                2,
+            )
+        )
+    authority = VerificationAuthority.issue(
+        store=store,
+        parent=parent,
+        runtime_root=dispatch_runtime,
+        definition_sha256=verify_contract,
+        input_sha256=input_sha,
+        profile=profile.name,
+        profile_sha256=profile.sha256,
+        attempt=attempt,
+        evidence=tuple(evidence_rows),
+        expected_command_ids=tuple(
+            f"scoped-{index + 1}" for index in range(len(profile.commands))
+        ),
+    )
+    receipt = authority.to_dict()
+    receipt_path = receipt_dir / "receipt.json"
+    receipt_bytes = (
+        json.dumps(receipt, sort_keys=True) + "\n"
+    ).encode("utf-8")
+    receipt_path.write_bytes(receipt_bytes)
+    receipt_sha256 = hashlib.sha256(
+        json.dumps(receipt, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
     runtime_root = base / "review-runtime"
     runtime_root.mkdir()
     admission_path = runtime_root / "review-launch-admission.json"
-    task_id = "admission-task"
     exact_admission = {
         "schema_version": 1,
         "operation_id": task_id,
-        "verification_operation_id": "verify-op",
-        "verification_lane_id": "verify-lane",
-        "verification_run_id": "verify-run",
-        "receipt_sha256": "a" * 64,
+        "verification_operation_id": receipt["operation_id"],
+        "verification_lane_id": receipt["lane_id"],
+        "verification_run_id": receipt["run_id"],
+        "receipt_sha256": receipt_sha256,
+        "receipt_pointer": str(receipt_path.resolve()),
         "head_sha": head_b,
         "status": "admitted",
     }
@@ -1027,60 +1162,122 @@ with tempfile.TemporaryDirectory(prefix="launch-admission.") as raw:
             manifest="packets/review/manifest.json",
             head_sha=head,
             verification_profile="scoped",
-            verification_profile_sha256="8" * 64,
+            verification_profile_sha256=profile.sha256,
             purpose="implementation",
             boundary_input_sha256="",
         )
 
-    def admission_verdict(head: str) -> str:
+    def admission_verdict(head: str, *, task: str = task_id) -> str:
         try:
             _admitted_review_launch(
-                runtime_root, worktree, task_id, context_at(head)
+                meta, vault, runtime_root, worktree, task, context_at(head)
             )
         except TaskReviewError as exc:
             return str(exc)
         return "admitted"
 
     check(
-        "a missing launch admission keeps existing gates",
-        admission_verdict(head_b) == "admitted",
+        "a verify-owning contract requires the launch admission — absence "
+        "fails closed",
+        "required" in admission_verdict(head_b),
     )
     write_admission(exact_admission)
     check(
-        "the exact admitted receipt/HEAD pair admits the clean launch",
+        "the exact durable receipt/HEAD pair admits the clean launch",
         admission_verdict(head_b) == "admitted",
     )
     check(
         "a context bound to another HEAD is refused before reservation",
         "another HEAD" in admission_verdict("c" * 40),
     )
-    head_c = land_commit("moved")
+    write_admission({**exact_admission, "receipt_sha256": "a" * 64})
     check(
-        "a clean commit after the admission refuses the stale pair",
-        "stale" in admission_verdict(head_b)
-        and "another HEAD" in admission_verdict(head_c),
+        "a well-formed admission that disagrees with the durable receipt "
+        "digest fails closed",
+        "disagrees" in admission_verdict(head_b),
     )
-    write_admission({**exact_admission, "head_sha": head_c})
+    write_admission(
+        {**exact_admission, "verification_lane_id": "forged-lane"}
+    )
     check(
-        "an admission rebound to the exact current head admits again",
-        admission_verdict(head_c) == "admitted",
+        "an admission naming a foreign lane identity fails closed",
+        "disagrees" in admission_verdict(head_b),
+    )
+    forged_pointer = receipt_path.resolve().parent.parent / "forged-verify-op" / "receipt.json"
+    write_admission(
+        {
+            **exact_admission,
+            "verification_operation_id": "forged-verify-op",
+            "receipt_pointer": str(forged_pointer),
+        }
+    )
+    check(
+        "an admission naming a receiptless verification identity fails "
+        "closed",
+        "no durable verification receipt" in admission_verdict(head_b),
+    )
+    write_admission(
+        {
+            **exact_admission,
+            "receipt_pointer": "pipeline-verification/x/receipt.json",
+        }
+    )
+    check(
+        "a relative receipt pointer fails closed",
+        "invalid" in admission_verdict(head_b),
+    )
+    write_admission(
+        {
+            **exact_admission,
+            "receipt_pointer": str(
+                receipt_path.resolve().with_name("other.json")
+            ),
+        }
+    )
+    check(
+        "a receipt pointer outside the exact admitted identity fails closed",
+        "invalid" in admission_verdict(head_b),
+    )
+    write_admission(exact_admission)
+    receipt_path.unlink()
+    check(
+        "a deleted durable receipt refuses the admitted launch",
+        "no durable verification receipt" in admission_verdict(head_b),
+    )
+    mutated = dict(receipt)
+    mutated["head_sha"] = "d" * 40
+    receipt_path.write_text(
+        json.dumps(mutated, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    check(
+        "a mutated durable receipt never validates through the authority "
+        "ingress",
+        "no durable verification receipt" in admission_verdict(head_b),
+    )
+    receipt_path.write_bytes(receipt_bytes)
+    check(
+        "the restored exact receipt admits again",
+        admission_verdict(head_b) == "admitted",
     )
     (worktree / "junk.txt").write_text("dirt\n", encoding="utf-8")
     check(
         "same-HEAD dirt refuses the admitted launch",
-        "stale" in admission_verdict(head_c),
+        "stale" in admission_verdict(head_b),
     )
     (worktree / "junk.txt").unlink()
     admission_rows = (
         ("foreign task", {**exact_admission, "operation_id": "foreign"}),
         ("drifted schema", {**exact_admission, "schema_version": 2}),
         ("unadmitted status", {**exact_admission, "status": "pending"}),
-        ("short receipt digest", {**exact_admission, "receipt_sha256": "a" * 63}),
-        ("empty lane identity", {**exact_admission, "verification_lane_id": ""}),
         (
-            "extra launch input",
-            {**exact_admission, "verified": True},
+            "short receipt digest",
+            {**exact_admission, "receipt_sha256": "a" * 63},
         ),
+        (
+            "empty lane identity",
+            {**exact_admission, "verification_lane_id": ""},
+        ),
+        ("extra launch input", {**exact_admission, "verified": True}),
         ("malformed bytes", "{malformed admission"),
     )
     for admission_case, admission_value in admission_rows:
@@ -1095,6 +1292,71 @@ with tempfile.TemporaryDirectory(prefix="launch-admission.") as raw:
     check(
         "a symlinked launch admission fails closed",
         "invalid" in admission_verdict(head_b),
+    )
+    admission_path.unlink()
+    write_admission(exact_admission)
+    head_c = land_commit("moved")
+    check(
+        "a clean commit after the admission refuses the stale pair at the "
+        "effect boundary",
+        "stale" in admission_verdict(head_b)
+        and "another HEAD" in admission_verdict(head_c),
+    )
+    subprocess.run(
+        ["git", "-C", str(worktree), "reset", "--hard", head_b],
+        check=True,
+        capture_output=True,
+    )
+
+    no_verify_task = "no-verify-task"
+    store.create(
+        OperationSpec(
+            no_verify_task,
+            f"{no_verify_task}-key",
+            "dispatch",
+            no_verify_task,
+            admission_route,
+            "packets/task.json",
+            "scoped",
+            contract_sha256=no_verify_contract,
+        ),
+        lane_id="plain-lane",
+        run_id="plain-run",
+    )
+    plain_runtime = base / "plain-runtime"
+    plain_runtime.mkdir()
+
+    def plain_verdict(task: str) -> str:
+        try:
+            _admitted_review_launch(
+                meta, vault, plain_runtime, worktree, task, context_at(head_b)
+            )
+        except TaskReviewError as exc:
+            return str(exc)
+        return "admitted"
+
+    check(
+        "a contract without a verification owner keeps its existing gates "
+        "when no admission exists",
+        plain_verdict(no_verify_task) == "admitted",
+    )
+    check(
+        "a task without a dispatch record keeps its existing gates when no "
+        "admission exists",
+        plain_verdict("recordless-task") == "admitted",
+    )
+    (plain_runtime / "review-launch-admission.json").write_text(
+        json.dumps(
+            {**exact_admission, "operation_id": "recordless-task"},
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    check(
+        "a present admission without a resolvable dispatch contract fails "
+        "closed",
+        "no resolvable dispatch contract" in plain_verdict("recordless-task"),
     )
 
 print("\nAll task review flow unit tests passed.")

@@ -3912,6 +3912,15 @@ def assert_post_check_clean_commit_never_launches_review(root: Path) -> None:
         == "verify-launch-run"
         and control_admission.get("receipt_sha256")
         == expected_receipt_sha256
+        and control_admission.get("receipt_pointer")
+        == str(
+            (
+                control.state
+                / "pipeline-verification"
+                / "verify-launch-op"
+                / "receipt.json"
+            ).resolve()
+        )
         and control_admission.get("head_sha") == control.head_b
         and control_admission.get("status") == "admitted",
         (control_launched, control.launcher_calls, control_admission),

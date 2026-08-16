@@ -130,6 +130,7 @@ class ReviewGateController(
             Callable[[str, object, object, ReviewRound], None] | None
         ) = None,
         attempt: ReviewAttempt | None = None,
+        admit_launch: Callable[[], None] | None = None,
     ) -> ReviewGateRun:
         running_attempt = attempt.start(attempt.identity) if attempt else None
         if running_attempt is not None:
@@ -162,6 +163,7 @@ class ReviewGateController(
                 round_store=self.round_store,
                 prompt_pointers=prompt_pointers,
                 prepare_lane=prepared,
+                admit_launch=admit_launch,
             )
         except Exception:
             if running_attempt is not None:

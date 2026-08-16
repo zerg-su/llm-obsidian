@@ -372,6 +372,17 @@ against the actual review context before reservation or provider effect (69
 lines in the review flow).  No production module is added; the ceilings move
 by the measured 149-line closure cost to the exact 290-file / 109,064-line
 candidate with no speculative headroom.
+
+Its Sol implementation review findings were applied in one bounded patch:
+the flow now consumes the durable receipt named by the admission through the
+real VerificationAuthority ingress and requires the admission for
+verify-owning dispatch contracts (F275.RECEIPT_ADMISSION_NOT_CONSUMED), and
+the same admission closure re-runs inside the gate's launch transaction as
+the last observation immediately before each fresh provider start, so drift
+after the flow's earlier reads leaves at most an effect-free reservation
+(F275.POST_CHECK_PROVIDER_RACE).  No production module is added; the
+ceilings move by the measured 199-line patch cost to the exact 290-file /
+109,263-line candidate with no speculative headroom.
 """
 
 from __future__ import annotations
@@ -383,7 +394,7 @@ from pathlib import Path
 SCRIPT_FILE_CEILING = 290
 
 #: Maximum total lines across those files for the 2.7.5 admission candidate.
-SCRIPT_LINE_CEILING = 109_064
+SCRIPT_LINE_CEILING = 109_263
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

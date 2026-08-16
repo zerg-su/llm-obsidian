@@ -35,16 +35,28 @@ closes exactly the frozen F274.POST_CHECK_LAUNCH_RACE class.
   symlinked admissions never treated as absent
   (F274.POST_CHECK_LAUNCH_RACE)
   (`docs/acceptance/v2.7.5-durable-exact-consumer-admission.md`).
+- After its Sol implementation review (both findings applied in one bounded
+  patch): the flow consumes the durable receipt named by the admission's
+  published receipt pointer through the real VerificationAuthority ingress —
+  bound to the discovered dispatch record, its compiled contract, and the
+  frozen verification profile — and requires the admission for verify-owning
+  dispatch contracts, so deleting the admission or the receipt refuses the
+  launch (F275.RECEIPT_ADMISSION_NOT_CONSUMED); and the same admission
+  closure re-runs inside the gate's launch transaction as the last
+  observation immediately before each fresh provider start, so drift after
+  the flow's earlier reads leaves at most an effect-free attention
+  reservation with zero provider starts (F275.POST_CHECK_PROVIDER_RACE).
 
 ### Governance
 
 - The RC1 active-authority contour is rebaselined at the exact measured
-  15417 LOC (unchanged 27-file manifest, zero writable authorities, zero
-  incident literals), the verification owner, review bridge, and review
-  flow hotspots move to exactly their measured 1276/1139/1258 lines, and
-  the live scripts scope ratchet moves by the measured 149-line closure
-  cost to the exact 290-file / 109,064-line candidate with no speculative
-  headroom.
+  15599 LOC (unchanged 27-file manifest, zero writable authorities, zero
+  incident literals), the verification owner, review bridge, review flow,
+  and gate attempt hotspots move to exactly their measured
+  1276/1146/1438/1051 lines, and the live scripts scope ratchet moves by
+  the measured 149-line closure cost plus the measured 199-line
+  findings-patch cost to the exact 290-file / 109,263-line candidate with
+  no speculative headroom.
 
 ## [2.7.4] - 2026-08-16
 

@@ -25,9 +25,25 @@ from harness.pre_model_reviewer_retirement import (
     review_attempt_records_are_quiescent,
 )
 from harness.review_finalization import StructuralPivotPending
+from harness.contracts import ContractError as HarnessContractError
+from harness.custom_pipelines import (
+    CustomPipelinePolicy,
+    resolve_custom_executable,
+)
+from harness.finalization_ledger import IDENTIFIER
+from harness.pipeline_builtins import (
+    builtin_registry,
+    compiled_executable_for_contract,
+)
 from harness.review_cleanup_recovery import accepted_callback_cleanup_is_complete, recover_interrupted_review_attempt
 from harness.runtime_worker_verification import (
     _verification_candidate_is_current,
+)
+from harness.verification import (
+    VerificationAuthority,
+    VerificationAuthorityError,
+    compose_commands,
+    load_profiles,
 )
 from harness.runtime_sessions import RuntimeSessionManager
 from harness.store import OperationStore, StoreError
@@ -209,27 +225,116 @@ def _start_review(
         run=run,
     )
 
+def _dispatch_record_for_task(
+    store: OperationStore, task_id: str
+) -> object | None:
+    """Find the one dispatch record that owns this task's root operation.
+
+    The dispatch owner is not named by the task metadata, so the record is
+    discovered by its exact operation identity across the store's owner
+    directories.  An unreadable candidate or more than one owner claiming the
+    same dispatch identity is never resolved by guessing — both fail closed.
+    """
+
+    owners_root = store.root / "owners"
+    if not owners_root.is_dir():
+        return None
+    candidates = []
+    for owner_dir in sorted(owners_root.iterdir()):
+        record_path = owner_dir / "operations" / f"{task_id}.json"
+        if not owner_dir.is_dir() or not record_path.is_file():
+            continue
+        try:
+            record = store.read(owner_dir.name, task_id)
+        except StoreError as exc:
+            raise TaskReviewError(
+                "review launch dispatch record is unreadable"
+            ) from exc
+        if (
+            record.spec.kind == "dispatch"
+            and record.spec.operation_id == task_id
+            and record.spec.owner_id == owner_dir.name
+        ):
+            candidates.append(record)
+    if len(candidates) > 1:
+        raise TaskReviewError("review launch dispatch record is ambiguous")
+    return candidates[0] if candidates else None
+
+
+def _dispatch_verification_pipeline(
+    store: OperationStore, task_id: str
+) -> tuple[object | None, object | None, tuple[str, ...]]:
+    """Resolve the dispatch's compiled contract through its code owners.
+
+    The same resolvers the runtime worker binds decide here whether the
+    dispatched pipeline owns a verify step, so the launch-admission
+    requirement is derived from the immutable contract rather than from
+    mutable runtime evidence that could be deleted alongside the admission.
+    """
+
+    record = _dispatch_record_for_task(store, task_id)
+    if record is None:
+        return None, None, ()
+    contract = str(record.spec.contract_sha256 or "")
+    if not contract:
+        return record, None, ()
+    try:
+        _name, compiled = compiled_executable_for_contract(contract)
+        return record, compiled, ()
+    except ValueError:
+        pass
+    try:
+        _name, compiled, extra_commands, _spec = resolve_custom_executable(
+            store_root=store.root / "owners" / record.spec.owner_id / "runtime",
+            operation_id=task_id,
+            definition_sha256=contract,
+            registry=builtin_registry(),
+            policy=CustomPipelinePolicy.default(),
+            capabilities=("route:resolved",),
+        )
+    except (HarnessContractError, OSError, ValueError):
+        return record, None, ()
+    return record, compiled, tuple(extra_commands)
+
+
 def _admitted_review_launch(
+    meta: Mapping[str, Any],
+    vault: Path,
     runtime_root: Path,
     worktree: Path,
     task_id: str,
     context: ReviewContext,
 ) -> None:
-    """Verify the pipeline's launch admission against the actual context.
+    """Consume the durable verification receipt named by the launch admission.
 
-    The pipeline drive publishes the exact verification receipt/HEAD pair it
-    admitted; the exact-HEAD flow reserves and launches only while the actual
-    review context binds exactly the admitted HEAD and that HEAD is still the
-    clean current candidate.  Any identity, HEAD, or clean-state mismatch
-    fails closed before reservation or provider effect, and a malformed or
-    symlinked admission is never treated as absent.  Absence keeps launches
-    without a pipeline verification owner on their existing gates.
+    The pipeline drive publishes the exact receipt/HEAD pair it admitted; the
+    exact-HEAD flow re-reads that durable receipt itself — through the same
+    VerificationAuthority ingress the verification owner uses — and admits
+    reservation and provider start only while the receipt, the admission, the
+    actual review context, and the clean current candidate all name exactly
+    the same identity.  A dispatch whose compiled contract owns a verify step
+    must present the admission: absence there is fail-closed, never
+    compatibility, so deleting the admission or the receipt refuses the
+    launch.  Pipelines without a verification owner keep their existing
+    gates.  A malformed, symlinked, foreign, digest-drifted, or receiptless
+    admission is never treated as absent.
     """
 
+    store = OperationStore(vault / ".vault-meta" / "harness")
+    record, compiled, extra_commands = _dispatch_verification_pipeline(
+        store, task_id
+    )
+    owns_verification = compiled is not None and any(
+        step.primitive_id == "verify" for step in compiled.definition.steps
+    )
     admission_path = runtime_root / "review-launch-admission.json"
     if admission_path.is_symlink():
         raise TaskReviewError("review launch admission is invalid")
     if not admission_path.is_file():
+        if owns_verification:
+            raise TaskReviewError(
+                "review launch admission is required for a verified pipeline"
+            )
         return
     admission = _read_json(admission_path, "review launch admission")
     expected_keys = {
@@ -239,6 +344,7 @@ def _admitted_review_launch(
         "verification_lane_id",
         "verification_run_id",
         "receipt_sha256",
+        "receipt_pointer",
         "head_sha",
         "status",
     }
@@ -254,7 +360,11 @@ def _admitted_review_launch(
                 "verification_operation_id",
                 "verification_lane_id",
                 "verification_run_id",
+                "receipt_pointer",
             )
+        )
+        or not IDENTIFIER.fullmatch(
+            str(admission.get("verification_operation_id") or "")
         )
         or not re.fullmatch(
             "[0-9a-f]{64}", str(admission.get("receipt_sha256") or "")
@@ -264,6 +374,67 @@ def _admitted_review_launch(
         )
     ):
         raise TaskReviewError("review launch admission is invalid")
+    receipt_path = Path(str(admission["receipt_pointer"]))
+    if (
+        not receipt_path.is_absolute()
+        or receipt_path != receipt_path.resolve()
+        or receipt_path.name != "receipt.json"
+        or receipt_path.parent.name != admission["verification_operation_id"]
+        or receipt_path.parent.parent.name != "pipeline-verification"
+    ):
+        raise TaskReviewError("review launch admission is invalid")
+    if record is None or compiled is None:
+        raise TaskReviewError(
+            "review launch admission has no resolvable dispatch contract"
+        )
+    policy = meta.get("review_policy")
+    if not isinstance(policy, Mapping):
+        raise TaskReviewError("task verification policy is unavailable")
+    profile = load_profiles(
+        vault / "config" / "verification-profiles.toml"
+    ).get(str(policy.get("verification_profile") or ""))
+    if profile is None or profile.sha256 != policy.get(
+        "verification_profile_sha256"
+    ):
+        raise TaskReviewError("task verification profile binding is stale")
+    dispatch_runtime = receipt_path.parent.parent.parent
+    try:
+        authority = VerificationAuthority.load(
+            receipt_path,
+            store=store,
+            parent=record,
+            runtime_root=dispatch_runtime,
+            expected_definition_sha256=record.spec.contract_sha256,
+            expected_profile=profile.name,
+            expected_profile_sha256=profile.sha256,
+            expected_command_ids=[
+                f"{profile.name}-{index + 1}"
+                for index in range(
+                    len(compose_commands(profile, extra_commands))
+                )
+            ],
+        )
+    except VerificationAuthorityError as exc:
+        raise TaskReviewError(
+            "review launch admission has no durable verification receipt"
+        ) from exc
+    receipt = authority.to_dict()
+    receipt_sha256 = hashlib.sha256(
+        json.dumps(receipt, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    if (
+        receipt_sha256 != admission["receipt_sha256"]
+        or receipt.get("status") != "complete"
+        or receipt.get("operation_id")
+        != admission["verification_operation_id"]
+        or receipt.get("lane_id") != admission["verification_lane_id"]
+        or receipt.get("run_id") != admission["verification_run_id"]
+        or receipt.get("parent_operation_id") != task_id
+        or receipt.get("head_sha") != admission["head_sha"]
+    ):
+        raise TaskReviewError(
+            "review launch admission disagrees with its durable receipt"
+        )
     if admission["head_sha"] != context.head_sha:
         raise TaskReviewError("review launch admission targets another HEAD")
     if not _verification_candidate_is_current(
@@ -413,6 +584,7 @@ def _start_exact_head_review(
     origin_surface: str,
     approved_plan_amendment: bool = False,
     approved_summary_refresh: bool = False,
+    admit_launch: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     if not preset.enabled:
         raise TaskReviewError(
@@ -475,6 +647,7 @@ def _start_exact_head_review(
         approved_plan_amendment=approved_plan_amendment,
         approved_summary_refresh=approved_summary_refresh,
         prepare_lane=prepare_lane,
+        admit_launch=admit_launch,
     )
     return _receipt(
         status="reviewing",
@@ -1100,7 +1273,13 @@ def _run_exact_head_review(
                     )
         else:
             reserved_attempt_id = prior_attempt.identity.attempt_id
-    _admitted_review_launch(runtime_root, worktree, task_id, context)
+
+    def admit_launch() -> None:
+        _admitted_review_launch(
+            meta, vault, runtime_root, worktree, task_id, context
+        )
+
+    admit_launch()
     reservation = _reserve_or_reviewing(
         lambda: reserve_exact_head_attempt(
             meta,
@@ -1149,6 +1328,7 @@ def _run_exact_head_review(
             approved_summary_refresh=bool(
                 approved_summary_predecessor_attempt_id
             ),
+            admit_launch=admit_launch,
         )
     state = gate.read()
     attempt = ReviewAttempt.from_mapping(state["attempt"])

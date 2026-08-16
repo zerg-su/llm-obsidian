@@ -690,6 +690,7 @@ class ReviewGateAttemptMixin:
         prepare_lane: (
             Callable[[str, object, object, ReviewRound], None] | None
         ) = None,
+        admit_launch: Callable[[], None] | None = None,
     ) -> ReviewGateRun:
         """Start exactly one immutable attempt after all identity checks."""
 
@@ -723,6 +724,7 @@ class ReviewGateAttemptMixin:
             prompt_pointers=prompt_pointers,
             prepare_lane=prepare_lane,
             attempt=attempt,
+            admit_launch=admit_launch,
         )
 
     def rehydrate_attempt(self) -> ReviewGateRun:

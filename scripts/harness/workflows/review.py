@@ -88,6 +88,7 @@ def start_review(
         ]
         | None
     ) = None,
+    admit_launch: Callable[[], None] | None = None,
 ) -> ReviewExecution:
     """Start one simple lane or two independent deep lanes through the runtime."""
 
@@ -267,6 +268,13 @@ def start_review(
                     round_.run_id,
                     session_request.callback_pointer,
                 )
+            if admit_launch is not None:
+                # The caller's exact-candidate admission runs as the last
+                # observation inside this launch transaction, immediately
+                # before each fresh provider start: drift refused here leaves
+                # at most an effect-free reservation, never a provider
+                # effect, and the existing zero-effect recovery owns it.
+                admit_launch()
             result = runtime.start(
                 session_request,
                 on_surface_opened=on_surface_opened,

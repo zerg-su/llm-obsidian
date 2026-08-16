@@ -1967,4 +1967,99 @@ with tempfile.TemporaryDirectory(prefix="exact-attempt-program.") as raw:
         and approval.approved,
     )
 
+# 2.7.5 F275.POST_CHECK_PROVIDER_RACE: the exact-candidate launch admission
+# is consumed inside the provider-start owner's launch transaction — as the
+# last observation immediately before each fresh runtime start — so drift
+# observed after the flow's earlier reads and after reservation refuses the
+# start and leaves at most an effect-free reservation, with no provider
+# effect and no operation row to recover.
+with tempfile.TemporaryDirectory(prefix="launch-admission-boundary.") as raw:
+    base = Path(raw)
+
+    class RefusedLaunchAdmission(Exception):
+        """The exact-candidate admission observed drift at the boundary."""
+
+    boundary_events: list[str] = []
+
+    class SequencedRuntime(FakeRuntime):
+        def start(
+            self, request: object, *, on_surface_opened=None
+        ) -> SessionResult:
+            boundary_events.append("start")
+            return super().start(
+                request, on_surface_opened=on_surface_opened
+            )
+
+    refused_store = OperationStore(base / "refused-store")
+    refused_runtime = SequencedRuntime(refused_store)
+    refused_gate = ReviewGateController(
+        base / "refused-gate", refused_runtime, refused_store
+    )
+
+    def refuse_admission() -> None:
+        boundary_events.append("admit")
+        raise RefusedLaunchAdmission(
+            "a clean commit landed after the closing candidate read"
+        )
+
+    try:
+        refused_gate.begin_attempt(
+            dispatch_operation_id="task-1",
+            finalization_lineage_id="task-1",
+            cycle=1,
+            plan_sha256="1" * 64,
+            outcome_sha256="2" * 64,
+            request=request("a" * 40),
+            origin_surface="11111111-1111-4111-8111-111111111111",
+            cwd=base,
+            product_root=ROOT,
+            prompt_pointer="prompts/review.md",
+            callback_root="callbacks/review-1",
+            admit_launch=refuse_admission,
+        )
+    except RefusedLaunchAdmission:
+        pass
+    else:
+        raise AssertionError(
+            "a refused launch admission still started the provider"
+        )
+    refused_state = refused_gate.read()
+    check(
+        "a refused launch admission starts zero providers and leaves an "
+        "effect-free attention reservation",
+        boundary_events == ["admit"]
+        and refused_runtime.started == 0
+        and refused_state["status"] == "attention-required"
+        and refused_store.list("task-1") == [],
+    )
+
+    boundary_events.clear()
+    control_store = OperationStore(base / "control-store")
+    control_runtime = SequencedRuntime(control_store)
+    control_gate = ReviewGateController(
+        base / "control-gate", control_runtime, control_store
+    )
+    control_run = control_gate.begin_attempt(
+        dispatch_operation_id="task-1",
+        finalization_lineage_id="task-1",
+        cycle=1,
+        plan_sha256="1" * 64,
+        outcome_sha256="2" * 64,
+        request=request("a" * 40),
+        origin_surface="11111111-1111-4111-8111-111111111111",
+        cwd=base,
+        product_root=ROOT,
+        prompt_pointer="prompts/review.md",
+        callback_root="callbacks/review-1",
+        admit_launch=lambda: boundary_events.append("admit"),
+    )
+    lane_count = len(control_run.execution.lanes)
+    check(
+        "the unchanged exact clean candidate admits immediately before each "
+        "fresh provider start",
+        boundary_events == ["admit", "start"] * lane_count
+        and control_runtime.started == lane_count
+        and control_gate.read()["status"] == "reviewing",
+    )
+
 print("\nAll exact-HEAD ReviewAttempt gate tests passed.")
