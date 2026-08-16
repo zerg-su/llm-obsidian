@@ -71,6 +71,12 @@ rejected-but-useful 2.7.3 и закрывает два material findings тер�
   подразумевавшие review-approval, исправлены: findings его первого review
   round были применены, а его обновлённый терминальный review остаётся
   неизменяемым свидетельством проблемы.
+- Обновлённый 2.7.4 Sol review сообщил ещё один material finding в том же
+  классе потребления exact-HEAD authority (F274.POST_CHECK_LAUNCH_RACE:
+  candidate-предикат проверяется до, но не привязывается к durable
+  controller-link и review-launch эффектам). По утверждённому stop rule
+  slice заморожен, а finding остаётся неизменяемым свидетельством проблемы
+  для следующего узкого slice; 2.7.4 не является review-approved.
 
 ## [2.7.3] — 2026-08-16
 

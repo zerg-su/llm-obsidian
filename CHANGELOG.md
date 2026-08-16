@@ -62,6 +62,12 @@ the terminal 2.7.3 review.
   candidate with no speculative headroom. 2.7.3 wording that implied review
   approval is corrected: its first review round's findings were applied, and
   its refreshed terminal review remains immutable problem evidence.
+- The refreshed 2.7.4 Sol review reported one further material finding in
+  the same exact-HEAD consumption class (F274.POST_CHECK_LAUNCH_RACE: the
+  candidate predicate is checked before, but not bound to, the durable
+  controller-link and review-launch effects). Per the approved stop rule
+  the slice is frozen with that finding as immutable problem evidence for
+  the next narrow slice; 2.7.4 is not review-approved.
 
 ## [2.7.3] - 2026-08-16
 
