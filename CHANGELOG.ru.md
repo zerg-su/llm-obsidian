@@ -16,6 +16,40 @@
 внутренними контрольными точками и вошли в следующие публичные релизы; тегов и
 пакетов с этими номерами не выпускалось.
 
+## [2.7.5] — 2026-08-16
+
+Ограниченный кандидат durable-exact-consumer-admission; без тега, публикации
+и live-приёмки. Строится на сохранённом negative-evidence кандидате 2.7.4 и
+закрывает ровно замороженный класс F274.POST_CHECK_LAUNCH_RACE.
+
+### Исправлено
+
+- Потребление verification привязано к точной identity durable receipt/HEAD
+  вместо более раннего boolean-наблюдения, поэтому чистый commit, попавший
+  строго после закрывающего чтения кандидата, больше не может опубликовать
+  устаревшую controller authority или запустить review для непроверенного
+  кандидата. Durable controller link принимает завершённый receipt только
+  пока его точный HEAD — чистый текущий кандидат: наблюдение повторяется
+  непосредственно перед атомарной записью и ещё раз после неё, а post-write
+  несовпадение отзывает link; failed receipts остаются привязываемым
+  свидетельством отказа для существующей attention/resubmit-механики. Review
+  drive перечитывает durable verification receipt на границе запуска и
+  публикует точную пару receipt/HEAD как launch admission; exact-HEAD review
+  flow сверяет эту admission с фактическим review context до reservation и
+  любого provider-эффекта, fail-closed при любом несовпадении HEAD, identity
+  receipt, clean-state или launch input; malformed или symlinked admission
+  никогда не считается отсутствующей (F274.POST_CHECK_LAUNCH_RACE)
+  (`docs/acceptance/v2.7.5-durable-exact-consumer-admission.md`).
+
+### Управление
+
+- Контур RC1 active-authority ребазлайнен на точно измеренные 15417 LOC
+  (неизменный манифест из 27 файлов, ноль writable authorities, ноль
+  incident literals), hotspot'ы verification owner, review bridge и review
+  flow переходят ровно на измеренные 1276/1139/1258 строк, а live scripts
+  scope ratchet сдвигается на измеренную стоимость закрытия в 149 строк к
+  точному кандидату 290 файлов / 109 064 строки без запаса.
+
 ## [2.7.4] — 2026-08-16
 
 Ограниченный кандидат exact-verification-closure; без тега, публикации и

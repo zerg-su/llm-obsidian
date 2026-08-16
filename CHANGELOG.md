@@ -10,6 +10,42 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.7.5] - 2026-08-16
+
+Bounded durable-exact-consumer-admission candidate; not tagged, published, or
+live-accepted. Builds on the preserved 2.7.4 negative-evidence candidate and
+closes exactly the frozen F274.POST_CHECK_LAUNCH_RACE class.
+
+### Fixed
+
+- Verification consumption is bound to the exact durable receipt/HEAD
+  identity instead of a prior boolean observation, so a clean commit landing
+  strictly after the closing candidate read can no longer publish stale
+  controller authority or launch review for an unverified candidate. The
+  durable controller link admits a completed receipt only while its exact
+  HEAD is the clean current candidate — re-observed immediately before the
+  atomic write and once more after it, retracting on a post-write mismatch —
+  while failed receipts stay linkable failure evidence for the existing
+  attention/resubmit machinery. The review drive re-reads the durable
+  verification receipt at the launch boundary and publishes the exact
+  receipt/HEAD pair as the launch admission; the exact-HEAD review flow
+  verifies that admission against the actual review context before
+  reservation or provider effect, failing closed on any HEAD, receipt
+  identity, clean-state, or launch-input mismatch, with malformed or
+  symlinked admissions never treated as absent
+  (F274.POST_CHECK_LAUNCH_RACE)
+  (`docs/acceptance/v2.7.5-durable-exact-consumer-admission.md`).
+
+### Governance
+
+- The RC1 active-authority contour is rebaselined at the exact measured
+  15417 LOC (unchanged 27-file manifest, zero writable authorities, zero
+  incident literals), the verification owner, review bridge, and review
+  flow hotspots move to exactly their measured 1276/1139/1258 lines, and
+  the live scripts scope ratchet moves by the measured 149-line closure
+  cost to the exact 290-file / 109,064-line candidate with no speculative
+  headroom.
+
 ## [2.7.4] - 2026-08-16
 
 Bounded exact-verification-closure candidate; not tagged, published, or
