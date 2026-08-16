@@ -758,6 +758,7 @@ class LifecycleWorld:
             world._write_runtime_metadata()
             stream = world.stream()
             stream.start()
+            world._write_provider_ready()
             decision = stream.reserve_input()
             if decision.action == "send":
                 stream.accept_input()
@@ -841,6 +842,23 @@ class LifecycleWorld:
             input_sha256="f" * 64,
         )
 
+    def _write_provider_ready(self) -> None:
+        """Publish the exact modern generation-1 simulator ownership."""
+
+        _atomic_json(
+            self.runtime_root / "ready.json",
+            {
+                "schema_version": 1,
+                "status": "ready",
+                "pid": 4101,
+                "process_group": 4101,
+                "supervisor_pid": 4102,
+                "process_identity": PROCESS_IDENTITY,
+                "supervisor_identity": SUPERVISOR_IDENTITY,
+                "provider_generation": 1,
+            },
+        )
+
     def _publish_liveness(self) -> None:
         record = self.record()
         self.liveness.observe(
@@ -913,19 +931,7 @@ class LifecycleWorld:
         )
         stream = self.stream()
         stream.start()
-        _atomic_json(
-            self.runtime_root / "ready.json",
-            {
-                "schema_version": 1,
-                "status": "ready",
-                "pid": 4101,
-                "process_group": 4101,
-                "supervisor_pid": 4102,
-                "process_identity": PROCESS_IDENTITY,
-                "supervisor_identity": SUPERVISOR_IDENTITY,
-                "provider_generation": 1,
-            },
-        )
+        self._write_provider_ready()
         decision = stream.reserve_input()
         if decision.action != "send":
             raise RuntimeError("real delivery reducer did not reserve input")
