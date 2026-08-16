@@ -1796,8 +1796,15 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         def __init__(self, root: Path) -> None:
             self.store = OperationStore(root)
             self.started = 0
+            self.admissions = 0
 
-        def start(self, runtime_request, *, on_surface_opened=None):
+        def start(
+            self,
+            runtime_request,
+            *,
+            on_surface_opened=None,
+            admit_provider_start=None,
+        ):
             self.started += 1
             record = self.store.create(
                 runtime_request.spec,
@@ -1821,6 +1828,9 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
             )
             if on_surface_opened is not None:
                 on_surface_opened(opened)
+            if admit_provider_start is not None:
+                admit_provider_start()
+                self.admissions += 1
             supervisor.transition("running")
             final = supervisor.transition("awaiting-callback")
             return RuntimeSessionResult(
@@ -1858,6 +1868,7 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         "generated normalized task reaches the public exact-attempt runner",
         public_review["status"] == "reviewing"
         and public_runtime.started == len(public_review["lanes"])
+        and public_runtime.admissions == public_runtime.started
         and public_runtime.started > 0
         and public_gate["attempt"]["identity"]["cycle"] == 1
         and public_gate["attempt"]["identity"]["exact_head_sha"]
