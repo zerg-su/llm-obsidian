@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -28,8 +29,32 @@ from task_escalation_records import (  # noqa: E402
     record_path,
 )
 import task_escalation_records as escalation_records  # noqa: E402
+import task_escalation as task_escalation_cli  # noqa: E402
+from harness.contracts import (  # noqa: E402
+    EffectOutcome,
+    OperationSpec,
+    OwnedResources,
+    RuntimeRoute,
+)
+from harness.custom_pipelines import (  # noqa: E402
+    CustomPipelinePolicy,
+    ExplicitPipelineApproval,
+    FrozenPipelineStore,
+    compile_custom_spec,
+    freeze_custom_pipeline,
+    parse_pipeline_spec,
+    render_custom_approval,
+)
+from harness.pipeline_builtins import builtin_registry  # noqa: E402
 from harness.runtime_worker_control import RuntimeWorkerControlMixin  # noqa: E402
 from harness.runtime_worker_custom import RuntimeWorkerCustomMixin  # noqa: E402
+from harness.store import OperationStore  # noqa: E402
+from harness.workflows.custom_sequence import (  # noqa: E402
+    accept_custom_step,
+    custom_step_envelope,
+    custom_step_request,
+    prepare_custom_step,
+)
 
 
 def check(label: str, value: bool) -> None:
@@ -575,6 +600,394 @@ with tempfile.TemporaryDirectory(prefix="task-escalation-fix-writer.") as raw:
     check(
         "resolved engineering/fix decision cannot replay a stale wakeup",
         len(load_chain(worktree)) == 2 and len(writer.cmux_adapter.sent) == 2,
+    )
+
+
+def stale_custom_spec() -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "spec_id": "stale-custom-pipeline",
+        "version": "1.0.0",
+        "intent": "stale-escalation-regression",
+        "task_profile": "change",
+        "baseline_pipeline": "engineering/change",
+        "route_alias": "executor-default",
+        "required_capabilities": ["route:resolved"],
+        "input_schema": "approved-plan/v1",
+        "output_schema": "reap-ready/v1",
+        "steps": [
+            {
+                "step_id": "design",
+                "primitive_id": "model_step",
+                "primitive_version": "1.0.0",
+                "input_schema": "approved-plan/v1",
+                "output_schema": "approved-plan/v1",
+                "session_mode": "worktree",
+                "semantic_skills": ["dispatch"],
+            },
+            {
+                "step_id": "implement",
+                "primitive_id": "model_step",
+                "primitive_version": "1.0.0",
+                "input_schema": "approved-plan/v1",
+                "output_schema": "implementation-result/v1",
+                "session_mode": "parent-child",
+                "semantic_skills": ["tdd"],
+            },
+            {
+                "step_id": "verify",
+                "primitive_id": "verify",
+                "primitive_version": "1.0.0",
+                "input_schema": "implementation-result/v1",
+                "output_schema": "verified-result/v1",
+                "session_mode": "verification",
+                "semantic_skills": [],
+            },
+            {
+                "step_id": "review",
+                "primitive_id": "review",
+                "primitive_version": "1.0.0",
+                "input_schema": "verified-result/v1",
+                "output_schema": "reap-ready/v1",
+                "session_mode": "review",
+                "semantic_skills": ["review"],
+            },
+        ],
+        "transitions": [
+            {
+                "from_step": "design",
+                "outcome": "complete",
+                "target": "implement",
+                "max_traversals": 1,
+            },
+            {
+                "from_step": "implement",
+                "outcome": "complete",
+                "target": "verify",
+                "max_traversals": 1,
+            },
+            {
+                "from_step": "verify",
+                "outcome": "complete",
+                "target": "review",
+                "max_traversals": 1,
+            },
+            {
+                "from_step": "review",
+                "outcome": "complete",
+                "target": "terminal:completed",
+                "max_traversals": 1,
+            },
+        ],
+        "controls": [],
+        "budget": {
+            "attempt_limit": 2,
+            "model_restart_limit": 1,
+            "time_budget_seconds": 900,
+            "token_limit": 50000,
+        },
+        "completion_policy": "attention",
+        "requested_permissions": ["git-write", "product-worktree"],
+        "requested_side_effects": ["git-write", "worktree"],
+        "context_pointers": [],
+        "verification_checks": ["diff-check"],
+        "review_mode": "skip",
+        "human_gates": ["initial-approval"],
+        "terminal_outcomes": ["completed", "attention-required"],
+    }
+
+
+def stale_custom_fixture(root: Path, name: str) -> SimpleNamespace:
+    task_id = f"task-{name}"
+    project_id = f"project-{name}"
+    vault = root / f"vault-{name}"
+    worktree = root / f"worktree-{name}"
+    worktree.mkdir()
+    store = OperationStore(vault / ".vault-meta" / "harness")
+    parsed = parse_pipeline_spec(stale_custom_spec())
+    policy = CustomPipelinePolicy.default()
+    compiled = compile_custom_spec(
+        parsed,
+        builtin_registry(),
+        policy=policy,
+        capabilities=("route:resolved",),
+    )
+    card = render_custom_approval(parsed, compiled, policy=policy)
+    approval = ExplicitPipelineApproval.for_card(
+        definition_sha256=compiled.definition_sha256,
+        approval_card=card,
+        actor="user",
+        decision="approve",
+    )
+    frozen = freeze_custom_pipeline(parsed, compiled, approval, card)
+    plan_sha256 = "a" * 64
+    head_sha = "b" * 40
+    parent_spec = OperationSpec(
+        operation_id=task_id,
+        idempotency_key=hashlib.sha256(task_id.encode()).hexdigest(),
+        kind="dispatch",
+        owner_id=task_id,
+        route=RuntimeRoute(
+            "codex", "gpt-5.6-sol", "high", "executor", "c" * 64
+        ),
+        context_manifest="wiki/plans/approved.md",
+        verification_profile="scoped",
+        contract_sha256=compiled.definition_sha256,
+    )
+    parent = store.create(parent_spec, lane_id="custom-lane", run_id="custom-run")
+    for state in ("preflight", "starting", "running", "awaiting-callback"):
+        store.transition(task_id, task_id, state)
+    parent = store.read(task_id, task_id)
+    runtime_root = store.root / "owners" / task_id / "runtime" / task_id
+    FrozenPipelineStore(runtime_root.parent).save(
+        operation_id=task_id,
+        spec=parsed,
+        frozen=frozen,
+        approval=approval,
+    )
+    write_json(
+        runtime_root / "pipeline-custom" / "controller.json",
+        {
+            "schema_version": 1,
+            "operation_id": task_id,
+            "definition_sha256": compiled.definition_sha256,
+            "approved_plan_sha256": plan_sha256,
+            "initial_head_sha": head_sha,
+        },
+    )
+    first = prepare_custom_step(
+        store,
+        parent,
+        parsed,
+        definition_sha256=compiled.definition_sha256,
+        approved_plan_sha256=plan_sha256,
+        initial_head_sha=head_sha,
+        receipts=(),
+    )
+    first_envelope = custom_step_envelope(
+        first,
+        outcome="complete",
+        output_pointer=".task-pipeline/custom/00-design-output.md",
+        output_sha256="d" * 64,
+        head_sha=head_sha,
+    )
+    receipt = accept_custom_step(
+        store,
+        first,
+        first_envelope,
+        current_head_sha=head_sha,
+        receipt_path=runtime_root / "pipeline-custom" / "receipts" / "000.json",
+    )
+    second = prepare_custom_step(
+        store,
+        parent,
+        parsed,
+        definition_sha256=compiled.definition_sha256,
+        approved_plan_sha256=plan_sha256,
+        initial_head_sha=head_sha,
+        receipts=(receipt,),
+    )
+    request = custom_step_request(second)
+    write_json(worktree / ".task-pipeline-step-request.json", request)
+    meta_value = {
+        "version": 4,
+        "project_id": project_id,
+        "task_id": task_id,
+        "vault_root": str(vault.resolve()),
+        "worktree": str(worktree.resolve()),
+        "approved_plan_sha256": plan_sha256,
+        "pipeline_policy": {
+            "name": "custom",
+            "source": "custom",
+            "definition_sha256": compiled.definition_sha256,
+        },
+    }
+    write_json(worktree / ".task-meta.json", meta_value)
+    return SimpleNamespace(
+        worktree=worktree,
+        vault=vault,
+        store=store,
+        meta=meta_value,
+        runtime_root=runtime_root,
+        previous_operation_id=first.spec.operation_id,
+        successor_operation_id=second.spec.operation_id,
+        request=request,
+    )
+
+
+classify_stale = getattr(
+    task_escalation_cli,
+    "_classify_stale_post_self_heal",
+    lambda *_args, **_kwargs: None,
+)
+
+with tempfile.TemporaryDirectory(prefix="task-escalation-stale-self-heal.") as raw:
+    root = Path(raw)
+    positive = stale_custom_fixture(root, "positive")
+    classified = classify_stale(
+        positive.worktree, positive.meta, "mechanism-failure"
+    )
+    check(
+        "exact accepted custom predecessor and minted successor are stale escalation proof",
+        isinstance(classified, dict)
+        and classified.get("status") == "suppressed-stale-post-self-heal"
+        and classified.get("operation_id") == positive.previous_operation_id
+        and classified.get("successor_operation_id")
+        == positive.successor_operation_id,
+    )
+
+    matrix: list[tuple[str, object]] = []
+
+    callback_missing = stale_custom_fixture(root, "callback-missing")
+    child = callback_missing.store.read(
+        callback_missing.meta["task_id"], callback_missing.previous_operation_id
+    )
+    callback_missing.store.save(
+        replace(
+            child,
+            revision=child.revision + 1,
+            accepted_callback_id="",
+            accepted_callback_kind="",
+            accepted_callback_sha256="",
+        ),
+        expected_revision=child.revision,
+    )
+    matrix.append(("callback not accepted", callback_missing))
+
+    nonterminal = stale_custom_fixture(root, "nonterminal")
+    child = nonterminal.store.read(
+        nonterminal.meta["task_id"], nonterminal.previous_operation_id
+    )
+    nonterminal.store.save(
+        replace(child, state="finalizing", revision=child.revision + 1),
+        expected_revision=child.revision,
+    )
+    matrix.append(("child nonterminal", nonterminal))
+
+    retained_resource = stale_custom_fixture(root, "retained-resource")
+    child = retained_resource.store.read(
+        retained_resource.meta["task_id"], retained_resource.previous_operation_id
+    )
+    retained_resource.store.save(
+        replace(
+            child,
+            resources=OwnedResources(surface_id="retained-surface"),
+            revision=child.revision + 1,
+        ),
+        expected_revision=child.revision,
+    )
+    matrix.append(("child retains a resource", retained_resource))
+
+    retained_effect = stale_custom_fixture(root, "retained-effect")
+    child = retained_effect.store.read(
+        retained_effect.meta["task_id"], retained_effect.previous_operation_id
+    )
+    retained_effect.store.save(
+        replace(
+            child,
+            pending_effect="cleanup",
+            effect_id="cleanup",
+            effect_outcome=EffectOutcome.PENDING,
+            revision=child.revision + 1,
+        ),
+        expected_revision=child.revision,
+    )
+    matrix.append(("child retains an effect", retained_effect))
+
+    outbox = stale_custom_fixture(root, "outbox")
+    write_json(outbox.worktree / ".task-pipeline-step-callback.json", {})
+    matrix.append(("callback outbox exists", outbox))
+
+    missing_request = stale_custom_fixture(root, "missing-request")
+    (missing_request.worktree / ".task-pipeline-step-request.json").unlink()
+    matrix.append(("successor request absent", missing_request))
+
+    malformed_request = stale_custom_fixture(root, "malformed-request")
+    (malformed_request.worktree / ".task-pipeline-step-request.json").write_text(
+        "not json\n", encoding="utf-8"
+    )
+    matrix.append(("successor request malformed", malformed_request))
+
+    stale_request = stale_custom_fixture(root, "stale-request")
+    stale_value = dict(stale_request.request)
+    stale_value["visit"] = 0
+    write_json(stale_request.worktree / ".task-pipeline-step-request.json", stale_value)
+    matrix.append(("successor request stale", stale_request))
+
+    foreign_request = stale_custom_fixture(root, "foreign-request")
+    foreign_value = dict(foreign_request.request)
+    foreign_value["parent_operation_id"] = "foreign-parent"
+    write_json(
+        foreign_request.worktree / ".task-pipeline-step-request.json", foreign_value
+    )
+    matrix.append(("successor request foreign", foreign_request))
+
+    wrong_successor = stale_custom_fixture(root, "wrong-successor")
+    wrong_value = dict(wrong_successor.request)
+    wrong_value["input_sha256"] = "e" * 64
+    write_json(
+        wrong_successor.worktree / ".task-pipeline-step-request.json", wrong_value
+    )
+    matrix.append(("successor request is not exact", wrong_successor))
+
+    run_mismatch = stale_custom_fixture(root, "run-mismatch")
+    run_value = dict(run_mismatch.request)
+    run_value["run_id"] = "foreign-run"
+    write_json(run_mismatch.worktree / ".task-pipeline-step-request.json", run_value)
+    matrix.append(("successor run mismatches", run_mismatch))
+
+    owner_mismatch = stale_custom_fixture(root, "owner-mismatch")
+    owner_mismatch.meta["task_id"] = "foreign-owner"
+    write_json(owner_mismatch.worktree / ".task-meta.json", owner_mismatch.meta)
+    matrix.append(("owner mismatches", owner_mismatch))
+
+    unreadable_store = stale_custom_fixture(root, "unreadable-store")
+    unreadable_store.meta["vault_root"] = str((root / "missing-vault").resolve())
+    matrix.append(("store unreadable", unreadable_store))
+
+    noncustom = stale_custom_fixture(root, "noncustom")
+    noncustom.meta["pipeline_policy"] = {
+        "name": "engineering/change",
+        "definition_sha256": noncustom.meta["pipeline_policy"][
+            "definition_sha256"
+        ],
+    }
+    matrix.append(("pipeline is not custom", noncustom))
+
+    for label, fixture in matrix:
+        check(
+            f"{label} preserves fail-closed escalation",
+            classify_stale(
+                fixture.worktree, fixture.meta, "mechanism-failure"
+            )
+            is None,
+        )
+    check(
+        "non-mechanism category preserves fail-closed escalation",
+        classify_stale(positive.worktree, positive.meta, "scope") is None,
+    )
+
+    with patch.object(
+        task_escalation_cli,
+        "load_unattended",
+        return_value=(positive.meta, {}),
+    ), patch.object(task_escalation_cli, "append_raise") as append_mock, patch.object(
+        task_escalation_cli, "notify"
+    ) as notify_mock, patch.object(task_escalation_cli, "send") as send_mock:
+        suppressed_rc = task_escalation_cli.raise_escalation(
+            positive.worktree,
+            "mechanism-failure",
+            "delayed stale executor raise",
+            "classify the repository-owned mechanism",
+        )
+    check(
+        "proven stale raise has zero escalation, pointer, or notification effects",
+        suppressed_rc == 0
+        and append_mock.call_count == 0
+        and notify_mock.call_count == 0
+        and send_mock.call_count == 0
+        and not (positive.worktree / ".task-needs-attention.json").exists()
+        and not (positive.worktree / ".task-escalation-records").exists(),
     )
 
 
