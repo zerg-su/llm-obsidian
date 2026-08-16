@@ -3692,6 +3692,233 @@ def assert_resolution_marker_is_wait_only_never_authorization(root: Path) -> Non
         dashboard_facade.launch_bound_facade_dashboard = original_dashboard
 
 
+def assert_post_check_clean_commit_never_launches_review(root: Path) -> None:
+    """2.7.5 F274.POST_CHECK_LAUNCH_RACE (review-launch consumer): a clean
+    commit landing strictly after the closing candidate read and before the
+    review launch must never release a provider effect.  The launch is
+    admitted only by the exact durable verification receipt/HEAD pair, which
+    the drive publishes for the runner instead of a carried boolean; the
+    unchanged exact clean candidate keeps the ordinary launch path."""
+
+    import harness.runtime_worker_review_bridge as bridge_module
+
+    root = root.resolve()
+    profile = load_profiles(ROOT / "config" / "verification-profiles.toml")[
+        "scoped"
+    ]
+    real_subprocess = subprocess
+
+    def launch_world(name: str) -> SimpleNamespace:
+        product = root / f"launch-product-{name}"
+        product.mkdir()
+        for argv in (
+            ("init", "-b", "main"),
+            ("config", "user.email", "launch@example.invalid"),
+            ("config", "user.name", "Launch World"),
+        ):
+            real_subprocess.run(
+                ["git", "-C", str(product), *argv],
+                check=True,
+                capture_output=True,
+            )
+        (product / "product.txt").write_text("base\n", encoding="utf-8")
+        real_subprocess.run(
+            ["git", "-C", str(product), "add", "product.txt"],
+            check=True,
+            capture_output=True,
+        )
+        real_subprocess.run(
+            ["git", "-C", str(product), "commit", "-m", "base"],
+            check=True,
+            capture_output=True,
+        )
+        head_b = real_subprocess.run(
+            ["git", "-C", str(product), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        state = root / f"launch-state-{name}"
+        state.mkdir()
+        (state / "vault").mkdir()
+        operation_id = f"launch-admission-{name}"
+        receipt = {
+            "schema_version": 2,
+            "operation_id": "verify-launch-op",
+            "parent_operation_id": operation_id,
+            "lane_id": "verify-launch-lane",
+            "run_id": "verify-launch-run",
+            "head_sha": head_b,
+            "status": "complete",
+            "evidence": [{"head_sha": head_b}],
+        }
+        launcher_calls: list[tuple[object, ...]] = []
+
+        class LaunchWorker(RuntimeWorkerReviewBridgeMixin):
+            def __init__(self) -> None:
+                self.spec_path = state / "runtime.json"
+                self.spec = {"operation_id": operation_id, "cwd": product}
+                self.pipeline = SimpleNamespace(
+                    definition_sha256="6" * 64,
+                    definition=SimpleNamespace(
+                        steps=(SimpleNamespace(primitive_id="verify"),)
+                    ),
+                )
+                self.trusted_vault = state / "vault"
+                self.marker_path = state / "pipeline-review-marker.json"
+                self.review = SimpleNamespace(
+                    gate_root=state / "gate", status="missing"
+                )
+                self.review_launcher = (
+                    lambda vault, cwd: launcher_calls.append((vault, cwd))
+                )
+                self.profile = profile
+                self.verification_head = head_b
+                self.attention_calls: list[tuple[object, ...]] = []
+
+            def summary_attention(
+                self, code: str, reason: object = None, **kwargs: object
+            ) -> None:
+                self.attention_calls.append((code, reason))
+
+            def verification_receipt(self) -> dict[str, object]:
+                return dict(receipt)
+
+            def _bind_verification_attempt(self, index: int) -> None:
+                pass
+
+            def adopt_invalidated_verification_successor(self) -> bool:
+                return True
+
+            def run_verification(self) -> None:
+                pass
+
+        return SimpleNamespace(
+            product=product,
+            state=state,
+            head_b=head_b,
+            receipt=receipt,
+            launcher_calls=launcher_calls,
+            worker=LaunchWorker(),
+            admission_path=(
+                state
+                / "vault"
+                / ".vault-meta"
+                / "harness"
+                / "review-runtime"
+                / operation_id
+                / "review-launch-admission.json"
+            ),
+        )
+
+    def land_clean_commit(product: Path, name: str) -> str:
+        (product / "product.txt").write_text(name + "\n", encoding="utf-8")
+        real_subprocess.run(
+            ["git", "-C", str(product), "add", "product.txt"],
+            check=True,
+            capture_output=True,
+        )
+        real_subprocess.run(
+            ["git", "-C", str(product), "commit", "-m", name],
+            check=True,
+            capture_output=True,
+        )
+        return real_subprocess.run(
+            ["git", "-C", str(product), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+    def read_json_if(path: Path) -> object:
+        if not path.is_file():
+            return None
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    # Injection window: the clean commit lands strictly after the closing
+    # candidate read of the drive's currency check and before the launch.
+    raced = launch_world("raced")
+    armed = {"armed": True}
+    real_candidate_is_current = bridge_module._verification_candidate_is_current
+
+    def commit_after_closing_candidate_read(
+        cwd: Path, expected_head_sha: str
+    ) -> bool:
+        result = real_candidate_is_current(cwd, expected_head_sha)
+        if result and armed["armed"]:
+            armed["armed"] = False
+            land_clean_commit(raced.product, "post-check-move")
+        return result
+
+    bridge_module._verification_candidate_is_current = (
+        commit_after_closing_candidate_read
+    )
+    try:
+        raced_launched = raced.worker.drive_review()
+    finally:
+        bridge_module._verification_candidate_is_current = (
+            real_candidate_is_current
+        )
+    raced_marker = read_json_if(raced.state / "pipeline-review-marker.json")
+    raced_admission = read_json_if(raced.admission_path)
+    check(
+        "a clean commit after the closing candidate read and before the "
+        "review launch never releases a provider effect or a stale "
+        "launch admission",
+        armed["armed"] is False
+        and raced_launched is False
+        and raced.launcher_calls == []
+        and not (
+            isinstance(raced_marker, dict)
+            and raced_marker.get("status") == "started"
+        )
+        and not (
+            isinstance(raced_admission, dict)
+            and raced_admission.get("head_sha") == raced.head_b
+            and raced_admission.get("status") == "admitted"
+        ),
+        (armed, raced_launched, raced.launcher_calls, raced_marker),
+    )
+
+    # Control: the unchanged exact clean candidate launches once and binds
+    # the launch to the exact receipt/HEAD pair, not a carried boolean.
+    control = launch_world("control")
+    control_launched = control.worker.drive_review()
+    control_marker = read_json_if(
+        control.state / "pipeline-review-marker.json"
+    )
+    control_admission = read_json_if(control.admission_path)
+    expected_receipt_sha256 = hashlib.sha256(
+        json.dumps(
+            control.receipt, sort_keys=True, separators=(",", ":")
+        ).encode()
+    ).hexdigest()
+    check(
+        "the unchanged exact clean candidate launches once and publishes "
+        "the exact receipt/HEAD launch admission for the runner",
+        control_launched is True
+        and len(control.launcher_calls) == 1
+        and isinstance(control_marker, dict)
+        and control_marker.get("status") == "started"
+        and isinstance(control_admission, dict)
+        and control_admission.get("schema_version") == 1
+        and control_admission.get("operation_id")
+        == control.worker.spec["operation_id"]
+        and control_admission.get("verification_operation_id")
+        == "verify-launch-op"
+        and control_admission.get("verification_lane_id")
+        == "verify-launch-lane"
+        and control_admission.get("verification_run_id")
+        == "verify-launch-run"
+        and control_admission.get("receipt_sha256")
+        == expected_receipt_sha256
+        and control_admission.get("head_sha") == control.head_b
+        and control_admission.get("status") == "admitted",
+        (control_launched, control.launcher_calls, control_admission),
+    )
+    print("OK   post-check clean commit never launches review")
+
+
 with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
     root = Path(raw)
     assert_review_drive_failure_receipt_is_content_free()
@@ -3708,6 +3935,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
     assert_orphaned_predecessor_lineage_stays_attention(root)
     assert_clean_commit_race_never_consumes_stale_authority(root)
     assert_resolution_marker_is_wait_only_never_authorization(root)
+    assert_post_check_clean_commit_never_launches_review(root)
     handoff = root / "resolution-handoff"
     handoff.mkdir()
     reviewed_head = "a" * 40

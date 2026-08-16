@@ -1221,4 +1221,117 @@ with tempfile.TemporaryDirectory(prefix="verification-authority.") as raw:
         is False,
     )
 
+    # 2.7.5 F274.POST_CHECK_LAUNCH_RACE (controller-link consumer): a clean
+    # commit landing strictly after the closing candidate read and before the
+    # durable controller-link publication must never publish stale authority.
+    # The durable link is admitted only against the exact receipt/HEAD
+    # identity at its own boundary; the receipt stays immutable evidence.
+    def link_world(name: str) -> SimpleNamespace:
+        product, head_b = toctou_repo(f"link-{name}")
+        state = base / f"link-state-{name}"
+        state.mkdir()
+        receipt = {
+            "schema_version": 2,
+            "operation_id": "verify-link-op",
+            "parent_operation_id": f"link-{name}",
+            "lane_id": "verify-link-lane",
+            "run_id": "verify-link-run",
+            "head_sha": head_b,
+            "status": "complete",
+            "evidence": [{"head_sha": head_b}],
+        }
+        receipt_path = (
+            state / "pipeline-verification" / "verify-link-op" / "receipt.json"
+        )
+        receipt_path.parent.mkdir(parents=True)
+        receipt_path.write_text(
+            json.dumps(receipt, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        worker = SimpleNamespace(
+            spec={"cwd": product, "operation_id": f"link-{name}"},
+            spec_path=state / "runtime.json",
+            verification_controller_receipt_path=(
+                state / "pipeline-step-verify.json"
+            ),
+            verification_spec=SimpleNamespace(operation_id="verify-link-op"),
+            load_verification_receipt=(
+                lambda path, receipt=receipt, receipt_path=receipt_path: (
+                    dict(receipt) if path == receipt_path else None
+                )
+            ),
+            verification_response_accepted=lambda _receipt: False,
+        )
+        worker.link_verification_receipt = (
+            lambda value: RuntimeWorkerVerificationMixin.link_verification_receipt(
+                worker, value
+            )
+        )
+        worker.controller_verification_receipt = (
+            lambda: RuntimeWorkerVerificationMixin.controller_verification_receipt(
+                worker
+            )
+        )
+        return SimpleNamespace(
+            product=product,
+            state=state,
+            head_b=head_b,
+            worker=worker,
+            receipt_path=receipt_path,
+            receipt_bytes=receipt_path.read_bytes(),
+            link_path=state / "pipeline-step-verify.json",
+        )
+
+    raced_link = link_world("raced")
+    link_armed = {"armed": True}
+    real_candidate_is_current = rwv._verification_candidate_is_current
+
+    def commit_after_closing_candidate_read(
+        cwd: Path, expected_head_sha: str
+    ) -> bool:
+        result = real_candidate_is_current(cwd, expected_head_sha)
+        if result and link_armed["armed"]:
+            link_armed["armed"] = False
+            land_toctou_commit(raced_link.product)
+        return result
+
+    rwv._verification_candidate_is_current = commit_after_closing_candidate_read
+    try:
+        recovered = raced_link.worker.controller_verification_receipt()
+    finally:
+        rwv._verification_candidate_is_current = real_candidate_is_current
+    raced_linked = (
+        json.loads(raced_link.link_path.read_text(encoding="utf-8"))
+        if raced_link.link_path.is_file()
+        else None
+    )
+    check(
+        "a clean commit after the closing candidate read and before "
+        "controller-link publication never publishes stale authority",
+        link_armed["armed"] is False
+        and not (
+            isinstance(raced_linked, dict)
+            and raced_linked.get("head_sha") == raced_link.head_b
+        )
+        and isinstance(recovered, dict)
+        and recovered.get("head_sha") == raced_link.head_b
+        and raced_link.receipt_path.read_bytes() == raced_link.receipt_bytes,
+    )
+
+    control_link = link_world("control")
+    control_recovered = control_link.worker.controller_verification_receipt()
+    control_linked = (
+        json.loads(control_link.link_path.read_text(encoding="utf-8"))
+        if control_link.link_path.is_file()
+        else None
+    )
+    check(
+        "an unchanged exact clean candidate keeps controller-link "
+        "publication on the ordinary path",
+        isinstance(control_recovered, dict)
+        and isinstance(control_linked, dict)
+        and control_linked.get("head_sha") == control_link.head_b
+        and control_link.receipt_path.read_bytes()
+        == control_link.receipt_bytes,
+    )
+
 print("verification authority matrix: ok")
