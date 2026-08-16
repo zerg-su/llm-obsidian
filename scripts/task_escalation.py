@@ -13,6 +13,7 @@ import subprocess
 import sys
 import time
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, NoReturn
@@ -31,15 +32,19 @@ from harness.adapters.cmux import run_cmux
 from harness.contracts import (
     ContractError as HarnessContractError,
     EffectOutcome,
+    OperationRecord,
     OwnedResources,
 )
 from harness.custom_pipelines import (
     CustomPipelinePolicy,
+    PipelineSpec,
     resolve_custom_executable,
 )
 from harness.pipeline_builtins import builtin_registry
 from harness.store import OperationStore, StoreError
 from harness.workflows.custom_sequence import (
+    CustomStepReceipt,
+    CustomStepRound,
     CustomSequenceError,
     _expected_round,
     custom_step_envelope,
@@ -140,6 +145,225 @@ def notify(surface: str, title: str, body: str) -> None:
         die((result.stdout + result.stderr).strip() or "cmux notify failed", 3)
 
 
+@dataclass(frozen=True)
+class _StaleCustomContext:
+    worktree: Path
+    task_id: str
+    definition_sha256: str
+    approved_plan_sha256: str
+    initial_head_sha: str
+    store: OperationStore
+    parent: OperationRecord
+    pipeline_spec: PipelineSpec
+    receipts: tuple[CustomStepReceipt, ...]
+
+
+@dataclass(frozen=True)
+class _StaleCustomHandoff:
+    previous: CustomStepRound
+    successor: CustomStepRound
+    receipt: CustomStepReceipt
+
+
+def _regular_json(path: Path) -> dict[str, Any] | None:
+    try:
+        if path.is_symlink() or not path.is_file() or path.stat().st_size > 256 * 1024:
+            return None
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _load_stale_custom_context(
+    worktree: Path, meta: dict[str, Any]
+) -> _StaleCustomContext | None:
+    resolved_worktree = worktree.expanduser().resolve()
+    if _regular_json(resolved_worktree / ".task-meta.json") != meta:
+        return None
+    task_id = str(meta.get("task_id") or "")
+    project_id = str(meta.get("project_id") or "")
+    vault_value = str(meta.get("vault_root") or "")
+    policy = meta.get("pipeline_policy")
+    if (
+        not task_id
+        or not project_id
+        or str(meta.get("worktree") or "") != str(resolved_worktree)
+        or not isinstance(policy, dict)
+        or policy.get("name") != "custom"
+        or policy.get("source") != "custom"
+    ):
+        return None
+    vault_path = Path(vault_value).expanduser()
+    if not vault_path.is_absolute() or vault_path.is_symlink():
+        return None
+    vault = vault_path.resolve()
+    if vault_value != str(vault):
+        return None
+    definition_sha256 = str(policy.get("definition_sha256") or "")
+    approved_plan_sha256 = str(meta.get("approved_plan_sha256") or "")
+    if not re.fullmatch(r"[0-9a-f]{64}", definition_sha256) or not re.fullmatch(
+        r"[0-9a-f]{64}", approved_plan_sha256
+    ):
+        return None
+    store_root = vault / ".vault-meta" / "harness"
+    if store_root.is_symlink() or not store_root.is_dir():
+        return None
+    store = OperationStore(store_root)
+    parent = store.read(task_id, task_id)
+    if (
+        parent.spec.owner_id != task_id
+        or parent.spec.operation_id != task_id
+        or parent.spec.kind != "dispatch"
+        or parent.spec.contract_sha256 != definition_sha256
+        or not parent.lane_id
+        or not parent.run_id
+    ):
+        return None
+    runtime_root = store_root / "owners" / task_id / "runtime" / task_id
+    controller = _regular_json(runtime_root / "pipeline-custom" / "controller.json")
+    required_controller_fields = {
+        "schema_version",
+        "operation_id",
+        "definition_sha256",
+        "approved_plan_sha256",
+        "initial_head_sha",
+    }
+    if controller is None or set(controller) != required_controller_fields:
+        return None
+    initial_head_sha = str(controller.get("initial_head_sha") or "")
+    if (
+        controller.get("schema_version") != 1
+        or controller.get("operation_id") != task_id
+        or controller.get("definition_sha256") != definition_sha256
+        or controller.get("approved_plan_sha256") != approved_plan_sha256
+        or not re.fullmatch(r"[0-9a-f]{40,64}", initial_head_sha)
+    ):
+        return None
+    _baseline, _compiled, _commands, pipeline_spec = resolve_custom_executable(
+        store_root=runtime_root.parent,
+        operation_id=task_id,
+        definition_sha256=definition_sha256,
+        registry=builtin_registry(),
+        policy=CustomPipelinePolicy.default(),
+        capabilities=("route:resolved",),
+    )
+    receipt_root = runtime_root / "pipeline-custom" / "receipts"
+    if receipt_root.is_symlink() or not receipt_root.is_dir():
+        return None
+    receipt_paths = sorted(receipt_root.glob("*.json"))
+    expected_names = [f"{index:03d}.json" for index in range(len(receipt_paths))]
+    if not receipt_paths or [path.name for path in receipt_paths] != expected_names:
+        return None
+    return _StaleCustomContext(
+        worktree=resolved_worktree,
+        task_id=task_id,
+        definition_sha256=definition_sha256,
+        approved_plan_sha256=approved_plan_sha256,
+        initial_head_sha=initial_head_sha,
+        store=store,
+        parent=parent,
+        pipeline_spec=pipeline_spec,
+        receipts=tuple(load_custom_receipt(path) for path in receipt_paths),
+    )
+
+
+def _load_stale_custom_handoff(
+    context: _StaleCustomContext,
+) -> _StaleCustomHandoff | None:
+    common = {
+        "definition_sha256": context.definition_sha256,
+        "approved_plan_sha256": context.approved_plan_sha256,
+        "initial_head_sha": context.initial_head_sha,
+    }
+    progress = reconcile_custom_sequence(
+        context.parent,
+        context.pipeline_spec,
+        receipts=context.receipts,
+        **common,
+    )
+    if progress.action != "start" or progress.prior_receipt != context.receipts[-1]:
+        return None
+    successor = _expected_round(
+        context.parent,
+        context.pipeline_spec,
+        step_id=progress.step_id,
+        visit=progress.visit,
+        prior_receipt=progress.prior_receipt,
+        **common,
+    )
+    request = _regular_json(context.worktree / ".task-pipeline-step-request.json")
+    if request != custom_step_request(successor):
+        return None
+    previous_progress = reconcile_custom_sequence(
+        context.parent,
+        context.pipeline_spec,
+        receipts=context.receipts[:-1],
+        **common,
+    )
+    if previous_progress.action != "start":
+        return None
+    previous = _expected_round(
+        context.parent,
+        context.pipeline_spec,
+        step_id=previous_progress.step_id,
+        visit=previous_progress.visit,
+        prior_receipt=previous_progress.prior_receipt,
+        **common,
+    )
+    return _StaleCustomHandoff(previous, successor, context.receipts[-1])
+
+
+def _stale_custom_children_are_healed(
+    context: _StaleCustomContext, handoff: _StaleCustomHandoff
+) -> bool:
+    accepted = custom_step_envelope(
+        handoff.previous,
+        outcome=handoff.receipt.outcome,
+        output_pointer=handoff.receipt.output_pointer,
+        output_sha256=handoff.receipt.output_sha256,
+        head_sha=handoff.receipt.head_sha,
+    )
+    child = context.store.read(context.task_id, handoff.previous.spec.operation_id)
+    previous_is_exact = (
+        handoff.receipt.operation_id == handoff.previous.spec.operation_id
+        and handoff.receipt.run_id == handoff.previous.run_id
+        and handoff.receipt.lane_id == handoff.previous.lane_id
+        and handoff.receipt.callback_id == accepted.callback_id
+        and child.spec == handoff.previous.spec
+        and child.run_id == handoff.previous.run_id
+        and child.lane_id == handoff.previous.lane_id
+        and child.state == "complete"
+        and child.resources == OwnedResources()
+        and not child.pending_effect
+        and child.effect_outcome != EffectOutcome.PENDING
+        and child.accepted_callback_id == accepted.callback_id
+        and child.accepted_callback_kind == accepted.kind
+        and child.accepted_callback_sha256 == accepted.payload_sha256
+    )
+    outbox = context.worktree / ".task-pipeline-step-callback.json"
+    if not previous_is_exact or outbox.exists() or outbox.is_symlink():
+        return False
+    successor = context.store.read(
+        context.task_id, handoff.successor.spec.operation_id
+    )
+    return (
+        successor.spec == handoff.successor.spec
+        and successor.run_id == handoff.successor.run_id
+        and successor.lane_id == handoff.successor.lane_id
+        and successor.state == "awaiting-callback"
+        and successor.resources == OwnedResources()
+        and not successor.pending_effect
+        and not any(
+            (
+                successor.accepted_callback_id,
+                successor.accepted_callback_kind,
+                successor.accepted_callback_sha256,
+            )
+        )
+    )
+
+
 def _classify_stale_post_self_heal(
     worktree: Path,
     meta: dict[str, Any],
@@ -149,190 +373,12 @@ def _classify_stale_post_self_heal(
 
     if category != "mechanism-failure":
         return None
-
-    def regular_json(path: Path) -> dict[str, Any] | None:
-        try:
-            if (
-                path.is_symlink()
-                or not path.is_file()
-                or path.stat().st_size > 256 * 1024
-            ):
-                return None
-            value = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return None
-        return value if isinstance(value, dict) else None
-
     try:
-        resolved_worktree = worktree.expanduser().resolve()
-        if regular_json(resolved_worktree / ".task-meta.json") != meta:
+        context = _load_stale_custom_context(worktree, meta)
+        if context is None:
             return None
-        task_id = str(meta.get("task_id") or "")
-        project_id = str(meta.get("project_id") or "")
-        vault_value = str(meta.get("vault_root") or "")
-        policy = meta.get("pipeline_policy")
-        if (
-            not task_id
-            or not project_id
-            or str(meta.get("worktree") or "") != str(resolved_worktree)
-            or not isinstance(policy, dict)
-            or policy.get("name") != "custom"
-            or policy.get("source") != "custom"
-        ):
-            return None
-        vault_path = Path(vault_value).expanduser()
-        if not vault_path.is_absolute() or vault_path.is_symlink():
-            return None
-        vault = vault_path.resolve()
-        if vault_value != str(vault):
-            return None
-        definition_sha256 = str(policy.get("definition_sha256") or "")
-        approved_plan_sha256 = str(meta.get("approved_plan_sha256") or "")
-        if not re.fullmatch(r"[0-9a-f]{64}", definition_sha256) or not re.fullmatch(
-            r"[0-9a-f]{64}", approved_plan_sha256
-        ):
-            return None
-        store_root = vault / ".vault-meta" / "harness"
-        if store_root.is_symlink() or not store_root.is_dir():
-            return None
-        store = OperationStore(store_root)
-        parent = store.read(task_id, task_id)
-        if (
-            parent.spec.owner_id != task_id
-            or parent.spec.operation_id != task_id
-            or parent.spec.kind != "dispatch"
-            or parent.spec.contract_sha256 != definition_sha256
-            or not parent.lane_id
-            or not parent.run_id
-        ):
-            return None
-        runtime_root = store_root / "owners" / task_id / "runtime" / task_id
-        controller = regular_json(
-            runtime_root / "pipeline-custom" / "controller.json"
-        )
-        if controller is None or set(controller) != {
-            "schema_version",
-            "operation_id",
-            "definition_sha256",
-            "approved_plan_sha256",
-            "initial_head_sha",
-        }:
-            return None
-        initial_head_sha = str(controller.get("initial_head_sha") or "")
-        if (
-            controller.get("schema_version") != 1
-            or controller.get("operation_id") != task_id
-            or controller.get("definition_sha256") != definition_sha256
-            or controller.get("approved_plan_sha256") != approved_plan_sha256
-            or not re.fullmatch(r"[0-9a-f]{40,64}", initial_head_sha)
-        ):
-            return None
-        _baseline, _compiled, _commands, pipeline_spec = resolve_custom_executable(
-            store_root=runtime_root.parent,
-            operation_id=task_id,
-            definition_sha256=definition_sha256,
-            registry=builtin_registry(),
-            policy=CustomPipelinePolicy.default(),
-            capabilities=("route:resolved",),
-        )
-        receipt_root = runtime_root / "pipeline-custom" / "receipts"
-        if receipt_root.is_symlink() or not receipt_root.is_dir():
-            return None
-        receipt_paths = sorted(receipt_root.glob("*.json"))
-        if not receipt_paths or [path.name for path in receipt_paths] != [
-            f"{index:03d}.json" for index in range(len(receipt_paths))
-        ]:
-            return None
-        receipts = tuple(load_custom_receipt(path) for path in receipt_paths)
-        progress = reconcile_custom_sequence(
-            parent,
-            pipeline_spec,
-            definition_sha256=definition_sha256,
-            approved_plan_sha256=approved_plan_sha256,
-            initial_head_sha=initial_head_sha,
-            receipts=receipts,
-        )
-        if progress.action != "start" or progress.prior_receipt != receipts[-1]:
-            return None
-        successor = _expected_round(
-            parent,
-            pipeline_spec,
-            definition_sha256=definition_sha256,
-            approved_plan_sha256=approved_plan_sha256,
-            initial_head_sha=initial_head_sha,
-            step_id=progress.step_id,
-            visit=progress.visit,
-            prior_receipt=progress.prior_receipt,
-        )
-        request_path = resolved_worktree / ".task-pipeline-step-request.json"
-        request = regular_json(request_path)
-        if request != custom_step_request(successor):
-            return None
-        previous_progress = reconcile_custom_sequence(
-            parent,
-            pipeline_spec,
-            definition_sha256=definition_sha256,
-            approved_plan_sha256=approved_plan_sha256,
-            initial_head_sha=initial_head_sha,
-            receipts=receipts[:-1],
-        )
-        if previous_progress.action != "start":
-            return None
-        previous = _expected_round(
-            parent,
-            pipeline_spec,
-            definition_sha256=definition_sha256,
-            approved_plan_sha256=approved_plan_sha256,
-            initial_head_sha=initial_head_sha,
-            step_id=previous_progress.step_id,
-            visit=previous_progress.visit,
-            prior_receipt=previous_progress.prior_receipt,
-        )
-        receipt = receipts[-1]
-        accepted = custom_step_envelope(
-            previous,
-            outcome=receipt.outcome,
-            output_pointer=receipt.output_pointer,
-            output_sha256=receipt.output_sha256,
-            head_sha=receipt.head_sha,
-        )
-        child = store.read(task_id, previous.spec.operation_id)
-        if (
-            receipt.operation_id != previous.spec.operation_id
-            or receipt.run_id != previous.run_id
-            or receipt.lane_id != previous.lane_id
-            or receipt.callback_id != accepted.callback_id
-            or child.spec != previous.spec
-            or child.run_id != previous.run_id
-            or child.lane_id != previous.lane_id
-            or child.state != "complete"
-            or child.resources != OwnedResources()
-            or child.pending_effect
-            or child.effect_outcome == EffectOutcome.PENDING
-            or child.accepted_callback_id != accepted.callback_id
-            or child.accepted_callback_kind != accepted.kind
-            or child.accepted_callback_sha256 != accepted.payload_sha256
-        ):
-            return None
-        outbox = resolved_worktree / ".task-pipeline-step-callback.json"
-        if outbox.exists() or outbox.is_symlink():
-            return None
-        next_child = store.read(task_id, successor.spec.operation_id)
-        if (
-            next_child.spec != successor.spec
-            or next_child.run_id != successor.run_id
-            or next_child.lane_id != successor.lane_id
-            or next_child.state != "awaiting-callback"
-            or next_child.resources != OwnedResources()
-            or next_child.pending_effect
-            or any(
-                (
-                    next_child.accepted_callback_id,
-                    next_child.accepted_callback_kind,
-                    next_child.accepted_callback_sha256,
-                )
-            )
-        ):
+        handoff = _load_stale_custom_handoff(context)
+        if handoff is None or not _stale_custom_children_are_healed(context, handoff):
             return None
     except (
         HarnessContractError,
@@ -346,15 +392,15 @@ def _classify_stale_post_self_heal(
     return {
         "schema_version": 1,
         "status": "suppressed-stale-post-self-heal",
-        "parent_operation_id": task_id,
-        "parent_run_id": parent.run_id,
-        "operation_id": previous.spec.operation_id,
-        "run_id": previous.run_id,
-        "visit": previous.visit,
-        "successor_operation_id": successor.spec.operation_id,
-        "successor_run_id": successor.run_id,
-        "successor_visit": successor.visit,
-        "definition_sha256": definition_sha256,
+        "parent_operation_id": context.task_id,
+        "parent_run_id": context.parent.run_id,
+        "operation_id": handoff.previous.spec.operation_id,
+        "run_id": handoff.previous.run_id,
+        "visit": handoff.previous.visit,
+        "successor_operation_id": handoff.successor.spec.operation_id,
+        "successor_run_id": handoff.successor.run_id,
+        "successor_visit": handoff.successor.visit,
+        "definition_sha256": context.definition_sha256,
     }
 
 
