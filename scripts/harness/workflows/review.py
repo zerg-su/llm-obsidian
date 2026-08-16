@@ -268,17 +268,15 @@ def start_review(
                     round_.run_id,
                     session_request.callback_pointer,
                 )
+            start_kwargs: dict[str, object] = {
+                "on_surface_opened": on_surface_opened,
+            }
             if admit_launch is not None:
-                # The caller's exact-candidate admission runs as the last
-                # observation inside this launch transaction, immediately
-                # before each fresh provider start: drift refused here leaves
-                # at most an effect-free reservation, never a provider
-                # effect, and the existing zero-effect recovery owns it.
-                admit_launch()
-            result = runtime.start(
-                session_request,
-                on_surface_opened=on_surface_opened,
-            )
+                # Thread exact candidate authority into the real start-effect
+                # owner.  RuntimeSessionManager consumes it after provider
+                # preparation and immediately before registering start-provider.
+                start_kwargs["admit_provider_start"] = admit_launch
+            result = runtime.start(session_request, **start_kwargs)
             lane = _runtime_lane(
                 axis=axis,
                 spec=spec,

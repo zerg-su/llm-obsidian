@@ -10,6 +10,27 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.7.6] - 2026-08-16
+
+Bounded provider-start-admission candidate; not tagged, published, installed,
+or live-accepted. Builds on the preserved 2.7.5 negative candidate and closes
+only its two terminal Sol findings.
+
+### Fixed
+
+- The exact durable verification receipt/HEAD admission is now passed through
+  the existing review/runtime start seam and consumed by the real
+  provider-start effect owner after launch preparation and immediately before
+  `start-provider` registration. Candidate drift closes the prepared surface
+  with zero provider command or process effect; an unchanged exact candidate
+  starts once (`F275.PROVIDER_EFFECT_TOCTOU_REMAINS`).
+- Dispatch contract resolution now distinguishes recordless and legacy-empty,
+  resolved no-verify, resolved verify-owning, and unresolved nonempty
+  contracts. A present nonempty contract that neither canonical resolver can
+  compile fails closed before reservation or provider effect instead of being
+  treated as no-verify (`F275.UNRESOLVABLE_CONTRACT_FAILS_OPEN`)
+  (`docs/acceptance/v2.7.6-provider-start-admission.md`).
+
 ## [2.7.5] - 2026-08-16
 
 Bounded durable-exact-consumer-admission candidate; not tagged, published, or

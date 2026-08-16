@@ -263,7 +263,7 @@ def _dispatch_record_for_task(
 
 def _dispatch_verification_pipeline(
     store: OperationStore, task_id: str
-) -> tuple[object | None, object | None, tuple[str, ...]]:
+) -> tuple[str, object | None, object | None, tuple[str, ...]]:
     """Resolve the dispatch's compiled contract through its code owners.
 
     The same resolvers the runtime worker binds decide here whether the
@@ -274,13 +274,13 @@ def _dispatch_verification_pipeline(
 
     record = _dispatch_record_for_task(store, task_id)
     if record is None:
-        return None, None, ()
+        return "recordless", None, None, ()
     contract = str(record.spec.contract_sha256 or "")
     if not contract:
-        return record, None, ()
+        return "legacy-empty", record, None, ()
     try:
         _name, compiled = compiled_executable_for_contract(contract)
-        return record, compiled, ()
+        return "resolved", record, compiled, ()
     except ValueError:
         pass
     try:
@@ -293,8 +293,8 @@ def _dispatch_verification_pipeline(
             capabilities=("route:resolved",),
         )
     except (HarnessContractError, OSError, ValueError):
-        return record, None, ()
-    return record, compiled, tuple(extra_commands)
+        return "unresolved", record, None, ()
+    return "resolved", record, compiled, tuple(extra_commands)
 
 
 def _admitted_review_launch(
@@ -321,9 +321,13 @@ def _admitted_review_launch(
     """
 
     store = OperationStore(vault / ".vault-meta" / "harness")
-    record, compiled, extra_commands = _dispatch_verification_pipeline(
-        store, task_id
+    resolution, record, compiled, extra_commands = (
+        _dispatch_verification_pipeline(store, task_id)
     )
+    if resolution == "unresolved":
+        raise TaskReviewError(
+            "review launch dispatch contract cannot be resolved"
+        )
     owns_verification = compiled is not None and any(
         step.primitive_id == "verify" for step in compiled.definition.steps
     )
@@ -383,7 +387,7 @@ def _admitted_review_launch(
         or receipt_path.parent.parent.name != "pipeline-verification"
     ):
         raise TaskReviewError("review launch admission is invalid")
-    if record is None or compiled is None:
+    if resolution != "resolved" or record is None or compiled is None:
         raise TaskReviewError(
             "review launch admission has no resolvable dispatch contract"
         )

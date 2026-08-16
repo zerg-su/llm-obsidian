@@ -1789,6 +1789,50 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
     )
     (cwd / "callbacks" / "result.json").unlink()
 
+    # E276.PROVIDER_START_RED: admission belongs to the actual start-effect
+    # owner.  A rejection after surface/launch preparation must close the
+    # prepared surface without registering or executing a provider/process
+    # effect.
+    refused_events: list[str] = []
+    refused_store = OperationStore(root / "provider-admission-store")
+    refused_cmux = FakeCmux(refused_events)
+    refused_process = FakeProcess(refused_events)
+    refused_manager = RuntimeSessionManager(
+        refused_store,
+        refused_cmux,
+        refused_process,
+        {"claude": FakeDriver()},
+        preflight=lambda _route, _callback_dir: CapabilityReport(
+            route, True, ("provider:profile-valid",)
+        ),
+    )
+    admission_calls: list[str] = []
+
+    def refuse_provider_start() -> None:
+        admission_calls.append("admit")
+        raise RuntimeError("exact candidate moved before provider start")
+
+    try:
+        refused_manager.start(
+            request, admit_provider_start=refuse_provider_start
+        )
+    except RuntimeSessionError:
+        pass
+    else:
+        raise AssertionError("provider-start admission rejection must fail")
+    refused_record = refused_store.read("owner-1", "runtime-1")
+    check(
+        "provider-start owner rejects drift with zero provider/process effect",
+        admission_calls == ["admit"]
+        and refused_events
+        == ["surface-open", "launch-prepared", "surface-close"]
+        and refused_record.state == "failed"
+        and refused_record.pending_effect == ""
+        and refused_record.effect_id == "open-surface"
+        and refused_record.resources == OwnedResources(),
+        (admission_calls, refused_events, refused_record),
+    )
+
     seam_route = RuntimeRoute(
         "claude",
         "fable",
@@ -2036,7 +2080,17 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
             and result.window_ref == "window:7",
         )
 
-    started = manager.start(request, on_surface_opened=prepare_surface)
+    accepted_admissions: list[str] = []
+
+    def accept_provider_start() -> None:
+        accepted_admissions.append("admitted")
+        events.append("provider-admitted")
+
+    started = manager.start(
+        request,
+        on_surface_opened=prepare_surface,
+        admit_provider_start=accept_provider_start,
+    )
     transport_receipt = json.loads(
         (
             store.root
@@ -2059,6 +2113,14 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         < events.index("surface-prepared")
         < events.index("provider-send"),
         events,
+    )
+    check(
+        "unchanged provider-start admission is consumed once after preparation",
+        accepted_admissions == ["admitted"]
+        and events.index("launch-prepared")
+        < events.index("provider-admitted")
+        < events.index("provider-send"),
+        (accepted_admissions, events),
     )
     check(
         "surface transport durably records command submission",

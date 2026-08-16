@@ -106,6 +106,7 @@ class ProcessPort(Protocol):
 
 Preflight = Callable[[RuntimeRoute, Path], CapabilityReport]
 SurfacePrepared = Callable[["RuntimeSessionResult"], None]
+ProviderStartAdmission = Callable[[], None]
 StatusNotifier = Callable[[Path, str, str], object]
 
 

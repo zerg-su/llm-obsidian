@@ -335,6 +335,7 @@ class ReviewRuntimePort(Protocol):
         request: ReviewSessionRequest,
         *,
         on_surface_opened: Callable[[object], None] | None = None,
+        admit_provider_start: Callable[[], None] | None = None,
     ) -> object: ...
 
     def preflight_routes(

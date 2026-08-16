@@ -303,8 +303,14 @@ class TypedReviewRuntime:
         self.owner_id = owner_id
 
     def start(
-        self, request: object, *, on_surface_opened=None
+        self,
+        request: object,
+        *,
+        on_surface_opened=None,
+        admit_provider_start=None,
     ) -> FakeReviewSessionResult:
+        if admit_provider_start is not None:
+            admit_provider_start()
         record = self.store.create(
             request.spec, lane_id=request.lane_id, run_id=request.run_id
         )

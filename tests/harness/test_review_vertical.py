@@ -312,8 +312,14 @@ class FakeReviewRuntime:
         )
 
     def start(
-        self, request: object, *, on_surface_opened: object = None
+        self,
+        request: object,
+        *,
+        on_surface_opened: object = None,
+        admit_provider_start: object = None,
     ) -> FakeSessionResult:
+        if callable(admit_provider_start):
+            admit_provider_start()
         self.started.append(request)
         record = self.store.create(
             request.spec,

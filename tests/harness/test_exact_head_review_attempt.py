@@ -131,7 +131,15 @@ class FakeRuntime:
         self.rearmed = 0
         self.checkpoint = "checkpoint-1"
 
-    def start(self, request: object, *, on_surface_opened=None) -> SessionResult:
+    def start(
+        self,
+        request: object,
+        *,
+        on_surface_opened=None,
+        admit_provider_start=None,
+    ) -> SessionResult:
+        if admit_provider_start is not None:
+            admit_provider_start()
         self.started += 1
         record = self.store.create(
             request.spec, lane_id=request.lane_id, run_id=request.run_id
@@ -219,7 +227,15 @@ class FakeRuntime:
 
 
 class FailingStartRuntime(FakeRuntime):
-    def start(self, request: object, *, on_surface_opened=None) -> SessionResult:
+    def start(
+        self,
+        request: object,
+        *,
+        on_surface_opened=None,
+        admit_provider_start=None,
+    ) -> SessionResult:
+        if admit_provider_start is not None:
+            admit_provider_start()
         self.started += 1
         raise RuntimeError("provider start failed")
 
@@ -1967,14 +1983,47 @@ with tempfile.TemporaryDirectory(prefix="exact-attempt-program.") as raw:
         and approval.approved,
     )
 
-# 2.7.5 F275.POST_CHECK_PROVIDER_RACE: the exact-candidate launch admission
-# is consumed inside the provider-start owner's launch transaction — as the
-# last observation immediately before each fresh runtime start — so drift
-# observed after the flow's earlier reads and after reservation refuses the
-# start and leaves at most an effect-free reservation, with no provider
-# effect and no operation row to recover.
+# E276.PROVIDER_START_RED: move the real product HEAD after the flow's early
+# exact-candidate admission and before the provider-start owner consumes the
+# same authority. The owner must refuse the start with no provider effect;
+# the unchanged exact-HEAD control starts once.
 with tempfile.TemporaryDirectory(prefix="launch-admission-boundary.") as raw:
     base = Path(raw)
+    scratch = base / "scratch"
+    scratch.mkdir()
+    product = base / "product"
+    product.mkdir()
+    for argv in (
+        ("init", "-b", "main"),
+        ("config", "user.email", "owner-admission@example.invalid"),
+        ("config", "user.name", "Owner Admission"),
+    ):
+        subprocess.run(
+            ["git", "-C", str(product), *argv],
+            check=True,
+            capture_output=True,
+        )
+
+    def land_owner_boundary_commit(name: str) -> str:
+        (product / "product.txt").write_text(name + "\n", encoding="utf-8")
+        subprocess.run(
+            ["git", "-C", str(product), "add", "product.txt"],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(product), "commit", "-m", name],
+            check=True,
+            capture_output=True,
+        )
+        return subprocess.run(
+            ["git", "-C", str(product), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+    head_b = land_owner_boundary_commit("verified")
 
     class RefusedLaunchAdmission(Exception):
         """The exact-candidate admission observed drift at the boundary."""
@@ -1982,26 +2031,62 @@ with tempfile.TemporaryDirectory(prefix="launch-admission-boundary.") as raw:
     boundary_events: list[str] = []
 
     class SequencedRuntime(FakeRuntime):
+        def __init__(
+            self,
+            store: OperationStore,
+            *,
+            before_admission=None,
+        ) -> None:
+            super().__init__(store)
+            self.before_admission = before_admission
+
         def start(
-            self, request: object, *, on_surface_opened=None
+            self,
+            request: object,
+            *,
+            on_surface_opened=None,
+            admit_provider_start=None,
         ) -> SessionResult:
+            boundary_events.append("owner")
+            if admit_provider_start is None:
+                raise AssertionError(
+                    "provider-start owner did not receive exact admission"
+                )
+            if self.before_admission is not None:
+                self.before_admission()
+            admit_provider_start()
             boundary_events.append("start")
             return super().start(
                 request, on_surface_opened=on_surface_opened
             )
 
     refused_store = OperationStore(base / "refused-store")
-    refused_runtime = SequencedRuntime(refused_store)
+
+    def move_product_head() -> None:
+        land_owner_boundary_commit("moved")
+        boundary_events.append("head-moved")
+
+    refused_runtime = SequencedRuntime(
+        refused_store, before_admission=move_product_head
+    )
     refused_gate = ReviewGateController(
         base / "refused-gate", refused_runtime, refused_store
     )
 
-    def refuse_admission() -> None:
+    def admit_exact_head() -> None:
         boundary_events.append("admit")
-        raise RefusedLaunchAdmission(
-            "a clean commit landed after the closing candidate read"
-        )
+        current_head = subprocess.run(
+            ["git", "-C", str(product), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        if current_head != head_b:
+            raise RefusedLaunchAdmission(
+                "a clean commit landed after the early flow admission"
+            )
 
+    admit_exact_head()
     try:
         refused_gate.begin_attempt(
             dispatch_operation_id="task-1",
@@ -2009,13 +2094,13 @@ with tempfile.TemporaryDirectory(prefix="launch-admission-boundary.") as raw:
             cycle=1,
             plan_sha256="1" * 64,
             outcome_sha256="2" * 64,
-            request=request("a" * 40),
+            request=request(head_b),
             origin_surface="11111111-1111-4111-8111-111111111111",
-            cwd=base,
-            product_root=ROOT,
+            cwd=scratch,
+            product_root=product,
             prompt_pointer="prompts/review.md",
             callback_root="callbacks/review-1",
-            admit_launch=refuse_admission,
+            admit_launch=admit_exact_head,
         )
     except RefusedLaunchAdmission:
         pass
@@ -2027,37 +2112,44 @@ with tempfile.TemporaryDirectory(prefix="launch-admission-boundary.") as raw:
     check(
         "a refused launch admission starts zero providers and leaves an "
         "effect-free attention reservation",
-        boundary_events == ["admit"]
+        boundary_events == ["admit", "owner", "head-moved", "admit"]
         and refused_runtime.started == 0
         and refused_state["status"] == "attention-required"
         and refused_store.list("task-1") == [],
     )
 
+    subprocess.run(
+        ["git", "-C", str(product), "reset", "--hard", head_b],
+        check=True,
+        capture_output=True,
+    )
     boundary_events.clear()
     control_store = OperationStore(base / "control-store")
     control_runtime = SequencedRuntime(control_store)
     control_gate = ReviewGateController(
         base / "control-gate", control_runtime, control_store
     )
+    admit_exact_head()
     control_run = control_gate.begin_attempt(
         dispatch_operation_id="task-1",
         finalization_lineage_id="task-1",
         cycle=1,
         plan_sha256="1" * 64,
         outcome_sha256="2" * 64,
-        request=request("a" * 40),
+        request=request(head_b),
         origin_surface="11111111-1111-4111-8111-111111111111",
-        cwd=base,
-        product_root=ROOT,
+        cwd=scratch,
+        product_root=product,
         prompt_pointer="prompts/review.md",
         callback_root="callbacks/review-1",
-        admit_launch=lambda: boundary_events.append("admit"),
+        admit_launch=admit_exact_head,
     )
     lane_count = len(control_run.execution.lanes)
     check(
         "the unchanged exact clean candidate admits immediately before each "
         "fresh provider start",
-        boundary_events == ["admit", "start"] * lane_count
+        boundary_events == ["admit"]
+        + ["owner", "admit", "start"] * lane_count
         and control_runtime.started == lane_count
         and control_gate.read()["status"] == "reviewing",
     )

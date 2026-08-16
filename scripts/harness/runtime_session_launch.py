@@ -27,6 +27,7 @@ from .runtime_session_contracts import (
     RuntimeSessionError,
     RuntimeSessionRequest,
     RuntimeSessionResult,
+    ProviderStartAdmission,
     SurfacePrepared,
     _relative,
     checkpointless_reviewer_route,
@@ -405,6 +406,7 @@ class RuntimeSessionLaunchMixin:
         request: RuntimeSessionRequest,
         *,
         on_surface_opened: SurfacePrepared | None = None,
+        admit_provider_start: ProviderStartAdmission | None = None,
     ) -> RuntimeSessionResult:
         """Preflight, bind one exact surface, then launch one provider worker."""
 
@@ -635,6 +637,17 @@ class RuntimeSessionLaunchMixin:
                 supervisor, opened, request.placement
             )
             raise RuntimeSessionError("provider worker preparation failed") from exc
+
+        if admit_provider_start is not None:
+            try:
+                admit_provider_start()
+            except Exception as exc:
+                self._abort_prepared_surface(
+                    supervisor, opened, request.placement
+                )
+                raise RuntimeSessionError(
+                    "provider start admission refused"
+                ) from exc
 
         try:
             supervisor.effect(

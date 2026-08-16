@@ -203,9 +203,17 @@ class CorridorReviewRuntime:
         self.crashes = crashes
         self.started = 0
 
-    def start(self, request: object, *, on_surface_opened=None):
+    def start(
+        self,
+        request: object,
+        *,
+        on_surface_opened=None,
+        admit_provider_start=None,
+    ):
         if self.crashes is not None:
             self.crashes.observe("review-session-start")
+        if admit_provider_start is not None:
+            admit_provider_start()
         self.started += 1
         record = self.store.create(
             request.spec, lane_id=request.lane_id, run_id=request.run_id

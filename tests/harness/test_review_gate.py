@@ -657,7 +657,15 @@ class FakeRuntime:
             for route, _callback_dir, _origin_surface in requests
         )
 
-    def start(self, request: object, *, on_surface_opened=None) -> FakeSessionResult:
+    def start(
+        self,
+        request: object,
+        *,
+        on_surface_opened=None,
+        admit_provider_start=None,
+    ) -> FakeSessionResult:
+        if admit_provider_start is not None:
+            admit_provider_start()
         self.started.append(request)
         record = self.store.create(
             request.spec, lane_id=request.lane_id, run_id=request.run_id
@@ -2811,7 +2819,14 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
         return checkout
 
     class PreStoreFailureRuntime(EffectRecordingRuntime):
-        def start(self, request: object, *, on_surface_opened=None) -> FakeSessionResult:
+        def start(
+            self,
+            request: object,
+            *,
+            on_surface_opened=None,
+            admit_provider_start=None,
+        ) -> FakeSessionResult:
+            del on_surface_opened, admit_provider_start
             self.started.append(request)
             raise RuntimeError("pre-provider fixture failure")
 
@@ -3539,8 +3554,14 @@ with tempfile.TemporaryDirectory(prefix="review-raced-parent.") as raw:
 
     class RacedDeadRuntime(FakeRuntime):
         def start(
-            self, request: object, *, on_surface_opened=None
+            self,
+            request: object,
+            *,
+            on_surface_opened=None,
+            admit_provider_start=None,
         ) -> FakeSessionResult:
+            if admit_provider_start is not None:
+                admit_provider_start()
             record = self.store.create(
                 request.spec,
                 lane_id=request.lane_id,
@@ -3852,12 +3873,20 @@ with tempfile.TemporaryDirectory(prefix="review-zero-lane-preflight.") as raw:
     class PreflightFailureRuntime(FakeRuntime):
         fail_once = True
 
-        def start(self, request: object, *, on_surface_opened=None) -> object:
+        def start(
+            self,
+            request: object,
+            *,
+            on_surface_opened=None,
+            admit_provider_start=None,
+        ) -> object:
             if self.fail_once:
                 self.fail_once = False
                 raise RuntimeSessionError("runtime preflight failed")
             return super().start(
-                request, on_surface_opened=on_surface_opened
+                request,
+                on_surface_opened=on_surface_opened,
+                admit_provider_start=admit_provider_start,
             )
 
     failed_runtime = PreflightFailureRuntime(store)
@@ -3968,7 +3997,15 @@ with tempfile.TemporaryDirectory(prefix="review-late-ready-recovery.") as raw:
         def hydrate_durable_checkpoint(self, *_args: object) -> object:
             raise RuntimeCheckpointEvidenceMissing("checkpoint not yet published")
 
-        def start(self, request: object, *, on_surface_opened=None) -> object:
+        def start(
+            self,
+            request: object,
+            *,
+            on_surface_opened=None,
+            admit_provider_start=None,
+        ) -> object:
+            if admit_provider_start is not None:
+                admit_provider_start()
             self.started.append(request)
             record = self.store.create(
                 request.spec, lane_id=request.lane_id, run_id=request.run_id

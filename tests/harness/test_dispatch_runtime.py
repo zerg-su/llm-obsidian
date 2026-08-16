@@ -49,7 +49,13 @@ class FakeRuntime:
         self.visible_step_authority: tuple[dict[str, object], bool, bool] | None = None
         self.store = OperationStore(root)
 
-    def start(self, request: object, *, on_surface_opened=None) -> object:
+    def start(
+        self,
+        request: object,
+        *,
+        on_surface_opened=None,
+        admit_provider_start=None,
+    ) -> object:
         step_path = request.cwd / ".task-pipeline-step-request.json"
         if step_path.is_file():
             step = json.loads(step_path.read_text(encoding="utf-8"))
@@ -60,6 +66,8 @@ class FakeRuntime:
                 pointer.is_absolute() and pointer.is_file(),
                 result.is_file(),
             )
+        if admit_provider_start is not None:
+            admit_provider_start()
         self.requests.append(request)
         record = OperationRecord(
             request.spec,

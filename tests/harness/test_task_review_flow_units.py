@@ -130,7 +130,15 @@ class FakeRuntime:
         self.started = 0
         self.accepted = 0
 
-    def start(self, request: object, *, on_surface_opened=None) -> SessionResult:
+    def start(
+        self,
+        request: object,
+        *,
+        on_surface_opened=None,
+        admit_provider_start=None,
+    ) -> SessionResult:
+        if admit_provider_start is not None:
+            admit_provider_start()
         self.started += 1
         record = self.store.create(
             request.spec,
@@ -1340,10 +1348,51 @@ with tempfile.TemporaryDirectory(prefix="launch-admission.") as raw:
         "when no admission exists",
         plain_verdict(no_verify_task) == "admitted",
     )
+    legacy_empty_task = "legacy-empty-task"
+    store.create(
+        OperationSpec(
+            legacy_empty_task,
+            f"{legacy_empty_task}-key",
+            "dispatch",
+            legacy_empty_task,
+            admission_route,
+            "packets/task.json",
+            "scoped",
+            contract_sha256="",
+        ),
+        lane_id="legacy-empty-lane",
+        run_id="legacy-empty-run",
+    )
+    check(
+        "a legacy dispatch record with an empty contract keeps its existing "
+        "gates when no admission exists",
+        plain_verdict(legacy_empty_task) == "admitted",
+    )
     check(
         "a task without a dispatch record keeps its existing gates when no "
         "admission exists",
         plain_verdict("recordless-task") == "admitted",
+    )
+    unresolved_task = "unresolved-contract-task"
+    unresolved_record = store.create(
+        OperationSpec(
+            unresolved_task,
+            f"{unresolved_task}-key",
+            "dispatch",
+            unresolved_task,
+            admission_route,
+            "packets/task.json",
+            "scoped",
+            contract_sha256="f" * 64,
+        ),
+        lane_id="unresolved-lane",
+        run_id="unresolved-run",
+    )
+    check(
+        "a present nonempty contract that canonical resolvers cannot compile "
+        "fails closed before any reservation or provider effect",
+        "cannot be resolved" in plain_verdict(unresolved_task)
+        and store.list(unresolved_task) == [unresolved_record],
     )
     (plain_runtime / "review-launch-admission.json").write_text(
         json.dumps(

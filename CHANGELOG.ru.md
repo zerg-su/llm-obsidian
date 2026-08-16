@@ -16,6 +16,27 @@
 внутренними контрольными точками и вошли в следующие публичные релизы; тегов и
 пакетов с этими номерами не выпускалось.
 
+## [2.7.6] — 2026-08-16
+
+Ограниченный кандидат provider-start-admission; без тега, публикации,
+установки и live-приёмки. Строится на сохранённом отрицательном кандидате
+2.7.5 и закрывает только два его терминальных finding Sol.
+
+### Исправлено
+
+- Точная admission durable verification receipt/HEAD теперь передаётся через
+  существующую seam запуска review/runtime и потребляется реальным владельцем
+  provider-start эффекта после подготовки launch и непосредственно перед
+  регистрацией `start-provider`. Drift кандидата закрывает подготовленную
+  поверхность без provider-команды или process-эффекта; неизменный точный
+  кандидат запускается один раз (`F275.PROVIDER_EFFECT_TOCTOU_REMAINS`).
+- Resolution dispatch contract теперь различает recordless и legacy-empty,
+  resolved no-verify, resolved verify-owning и unresolved nonempty outcomes.
+  Непустой contract, который не может скомпилировать ни один канонический
+  resolver, fail-closed до reservation или provider-эффекта вместо трактовки
+  как no-verify (`F275.UNRESOLVABLE_CONTRACT_FAILS_OPEN`)
+  (`docs/acceptance/v2.7.6-provider-start-admission.md`).
+
 ## [2.7.5] — 2026-08-16
 
 Ограниченный кандидат durable-exact-consumer-admission; без тега, публикации
