@@ -2767,11 +2767,12 @@ def run_case(
             ),
             product_root=worktree,
         )
-    thread.join(
-        timeout=12
-        if wake_source is not None
-        else (8 if pipeline_name == "engineering/fix" else 3)
-    )
+    # The join timeout only bounds hang detection; passing workers join the
+    # moment they finish.  The multi-round resolution corridors re-observe
+    # the exact candidate HEAD and tree at every consumption boundary, which
+    # at the fixture's 0.02s poll cadence needs headroom a 1s production
+    # poll never does.
+    thread.join(timeout=12 if wake_source is not None else 8)
     if original_inspect_task_summary is not None:
         RuntimeWorkerExecution.inspect_task_summary = (
             original_inspect_task_summary
@@ -3416,6 +3417,281 @@ def assert_clean_commit_race_never_consumes_stale_authority(root: Path) -> None:
         dashboard_facade.launch_bound_facade_dashboard = original_dashboard
 
 
+def assert_resolution_marker_is_wait_only_never_authorization(root: Path) -> None:
+    """2.7.4 findings patch (F274.RESOLUTION_DRIFT_BYPASS): an exact valid
+    review-resolution notification suppresses only the stale-authority
+    attention latch.  It never authorizes linking, consuming, or
+    review-releasing stale or dirty verification authority."""
+
+    import harness.dashboard_facade as dashboard_facade
+    from harness.runtime_worker_summary import RuntimeWorkerSummaryMixin
+    from harness.runtime_worker_verification import (
+        RuntimeWorkerVerificationMixin,
+    )
+
+    root = root.resolve()
+    profile = load_profiles(ROOT / "config" / "verification-profiles.toml")[
+        "scoped"
+    ]
+    pipeline = compile_pipeline(
+        builtin_definitions()["engineering/change"],
+        builtin_registry(),
+        capabilities=("route:resolved",),
+    )
+    real_subprocess = subprocess
+
+    class MarkerWorker(RuntimeWorkerVerificationMixin, RuntimeWorkerSummaryMixin):
+        def __init__(
+            self,
+            *,
+            store: OperationStore,
+            operation: object,
+            state: Path,
+            product: Path,
+        ) -> None:
+            self.store = store
+            self.operation = operation
+            self.spec_path = state / "runtime.json"
+            self.spec = {
+                "owner_id": "owner-1",
+                "operation_id": operation.spec.operation_id,
+                "cwd": product,
+                "surface_id": "marker-surface",
+            }
+            self.pipeline = pipeline
+            self.pipeline_extra_commands = ()
+            self.profile = profile
+            self._pipeline_name = "engineering/change"
+            self.verification_step_schema_version = 1
+            self.verification_controller_receipt_path = (
+                state / "pipeline-step-verify.json"
+            )
+            self.verification_head = real_subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=product,
+                text=True,
+                capture_output=True,
+                check=True,
+            ).stdout.strip()
+            self.attention_calls: list[tuple[object, ...]] = []
+            self._bind_verification_attempt(0)
+
+            def green_runner(argv: list[str], **kwargs: object):
+                if argv == ["git", "rev-parse", "HEAD"]:
+                    return real_subprocess.run(
+                        argv,
+                        cwd=kwargs["cwd"],
+                        text=True,
+                        capture_output=True,
+                        check=False,
+                    )
+                return real_subprocess.CompletedProcess(argv, 0, "ok\n", "")
+
+            self.verification_runner = green_runner
+
+        def summary_attention(
+            self, code: str, reason: object = None, **kwargs: object
+        ) -> None:
+            self.attention_calls.append((code, reason))
+
+    def marker_world(name: str):
+        product = root / f"marker-product-{name}"
+        product.mkdir()
+        for argv in (
+            ("init", "-b", "main"),
+            ("config", "user.email", "marker@example.invalid"),
+            ("config", "user.name", "Marker World"),
+        ):
+            real_subprocess.run(
+                ["git", "-C", str(product), *argv],
+                check=True,
+                capture_output=True,
+            )
+        (product / "product.txt").write_text("base\n", encoding="utf-8")
+        real_subprocess.run(
+            ["git", "-C", str(product), "add", "product.txt"],
+            check=True,
+            capture_output=True,
+        )
+        real_subprocess.run(
+            ["git", "-C", str(product), "commit", "-m", "base"],
+            check=True,
+            capture_output=True,
+        )
+        state = root / f"marker-state-{name}"
+        state.mkdir()
+        store = OperationStore(root / f"marker-store-{name}")
+        operation_id = f"marker-{name}"
+        store.create(
+            OperationSpec(
+                operation_id,
+                f"{operation_id}-key",
+                "dispatch",
+                "owner-1",
+                RuntimeRoute("claude", "sonnet", "medium", "executor", "6" * 64),
+                "packets/task.json",
+                "scoped",
+            ),
+            lane_id="marker-lane",
+            run_id=f"run-{operation_id}",
+        )
+        for step in ("preflight", "starting", "running"):
+            store.transition("owner-1", operation_id, step)
+        worker = MarkerWorker(
+            store=store,
+            operation=store.read("owner-1", operation_id),
+            state=state,
+            product=product,
+        )
+        return SimpleNamespace(
+            product=product,
+            state=state,
+            store=store,
+            worker=worker,
+            head_b=worker.verification_head,
+        )
+
+    def write_exact_marker(world: SimpleNamespace, reviewed_head: str) -> None:
+        write_json(
+            world.state / "pipeline-review-resolution-notify.json",
+            {
+                "schema_version": 1,
+                "operation_id": world.worker.spec["operation_id"],
+                "packet_sha256": "c" * 64,
+                "reviewed_head_sha": reviewed_head,
+                "summary_sha256": "d" * 64,
+                "status": "sent",
+            },
+        )
+
+    def land_marker_commit(product: Path) -> None:
+        (product / "product.txt").write_text("resolved\n", encoding="utf-8")
+        real_subprocess.run(
+            ["git", "-C", str(product), "add", "product.txt"],
+            check=True,
+            capture_output=True,
+        )
+        real_subprocess.run(
+            ["git", "-C", str(product), "commit", "-m", "resolved"],
+            check=True,
+            capture_output=True,
+        )
+
+    def read_json_if(path: Path) -> object:
+        if not path.is_file():
+            return None
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    original_dashboard = dashboard_facade.launch_bound_facade_dashboard
+    dashboard_facade.launch_bound_facade_dashboard = lambda **kwargs: (
+        SimpleNamespace(status="skipped")
+    )
+    try:
+        # Summary consumption: the exact valid marker suppresses only the
+        # attention latch; the stale receipt is still never consumed.
+        consume = marker_world("summary")
+        consume.worker.run_verification()
+        write_exact_marker(consume, consume.head_b)
+        land_marker_commit(consume.product)
+        consumed, halted = consume.worker.resolve_current_verification(object())
+        check(
+            "an exact resolution marker never authorizes stale summary "
+            "consumption and stays latch-free",
+            consumed is None
+            and halted is True
+            and consume.worker.attention_calls == [],
+            (consumed, halted, consume.worker.attention_calls),
+        )
+
+        # Link recovery: the marker never authorizes relinking stale
+        # authority either.
+        (consume.state / "pipeline-step-verify.json").unlink()
+        consume.worker.controller_verification_receipt()
+        relinked = read_json_if(consume.state / "pipeline-step-verify.json")
+        check(
+            "an exact resolution marker never authorizes relinking stale "
+            "authority",
+            not (
+                isinstance(relinked, dict)
+                and relinked.get("head_sha") == consume.head_b
+            ),
+            relinked,
+        )
+
+        # Review drive: reviewed HEAD equals current HEAD, so the resolved
+        # gate is ready, but same-HEAD dirt stays wait-only with no launch
+        # and no rebind side effect.
+        drive = marker_world("drive")
+        drive.worker.run_verification()
+        write_exact_marker(drive, drive.head_b)
+        launcher_calls: list[tuple[object, ...]] = []
+        drive_calls: list[tuple[object, ...]] = []
+
+        class MarkerDriveWorker(RuntimeWorkerReviewBridgeMixin):
+            def __init__(self) -> None:
+                self.spec_path = drive.state / "runtime.json"
+                self.spec = {
+                    "operation_id": drive.worker.spec["operation_id"],
+                    "cwd": drive.product,
+                }
+                self.pipeline = pipeline
+                self.trusted_vault = drive.state / "vault"
+                self.marker_path = (
+                    drive.state / "pipeline-review-marker.json"
+                )
+                self.review = SimpleNamespace(
+                    gate_root=drive.state / "gate", status="missing"
+                )
+                self.review_launcher = (
+                    lambda vault, cwd: launcher_calls.append((vault, cwd))
+                )
+                self.profile = profile
+                self.verification_head = drive.head_b
+                self.attention_calls: list[tuple[object, ...]] = []
+
+            def summary_attention(
+                self, code: str, reason: object = None, **kwargs: object
+            ) -> None:
+                self.attention_calls.append((code, reason))
+
+            def verification_receipt(self) -> dict[str, object]:
+                return {
+                    "status": "complete",
+                    "head_sha": drive.head_b,
+                    "evidence": [{"head_sha": drive.head_b}],
+                }
+
+            def _bind_verification_attempt(self, index: int) -> None:
+                drive_calls.append(("bind", index))
+
+            def adopt_invalidated_verification_successor(self) -> bool:
+                drive_calls.append(("adopt",))
+                return True
+
+            def run_verification(self) -> None:
+                drive_calls.append(("verify",))
+
+        (drive.product / "junk.txt").write_text("dirt\n", encoding="utf-8")
+        launched = MarkerDriveWorker().drive_review()
+        drive_marker = read_json_if(
+            drive.state / "pipeline-review-marker.json"
+        )
+        check(
+            "an exact resolution marker never releases a review launch over "
+            "same-HEAD dirt, with no rebind side effect",
+            launched is False
+            and launcher_calls == []
+            and drive_calls == []
+            and not (
+                isinstance(drive_marker, dict)
+                and drive_marker.get("status") == "started"
+            ),
+            (launched, launcher_calls, drive_calls, drive_marker),
+        )
+    finally:
+        dashboard_facade.launch_bound_facade_dashboard = original_dashboard
+
+
 with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
     root = Path(raw)
     assert_review_drive_failure_receipt_is_content_free()
@@ -3431,6 +3707,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
     assert_invalidated_verification_hands_off_to_exact_head_replacement(root)
     assert_orphaned_predecessor_lineage_stays_attention(root)
     assert_clean_commit_race_never_consumes_stale_authority(root)
+    assert_resolution_marker_is_wait_only_never_authorization(root)
     handoff = root / "resolution-handoff"
     handoff.mkdir()
     reviewed_head = "a" * 40

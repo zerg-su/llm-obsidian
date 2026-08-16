@@ -15,10 +15,7 @@ from .runtime_worker import (
     _review_resolution_handoff_ready,
 )
 from . import runtime_callback_io
-from .runtime_worker_verification import (
-    _review_resolution_drift_in_flight,
-    _verification_candidate_is_current,
-)
+from .runtime_worker_verification import _verification_candidate_is_current
 from .review_continuation_recovery import (
     RecoveryDecision,
     RecoveryDisposition,
@@ -467,10 +464,6 @@ class RuntimeWorkerReviewBridgeMixin:
             return True
         if _verification_candidate_is_current(self.spec["cwd"], bound_head):
             return True
-        if _review_resolution_drift_in_flight(self):
-            # A durable review resolution owns this drift; the resolved-head
-            # gate above already bound the launch to its exact-HEAD receipt.
-            return True
         head_result = subprocess.run(
             ["git", "rev-parse", "HEAD"],
             cwd=self.spec["cwd"],
@@ -483,6 +476,10 @@ class RuntimeWorkerReviewBridgeMixin:
             "[0-9a-f]{40,64}", current_head
         ):
             raise RuntimeWorkerError("pipeline product HEAD is unavailable")
+        if current_head == bound_head:
+            # Same-HEAD dirt is wait-only: no launch, no rebind side effect;
+            # the next wake re-observes a settled tree.
+            return False
         if not self._current_head_verification_ready(current_head):
             return False
         return _verification_candidate_is_current(self.spec["cwd"], current_head)

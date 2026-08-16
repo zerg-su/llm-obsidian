@@ -35,19 +35,28 @@ def _verification_candidate_is_current(cwd: Path, expected_head_sha: str) -> boo
     """Re-observe the exact current HEAD and full tree cleanliness.
 
     Verification authority is consumed (controller linking, summary
-    acceptance, review drive) only against a fresh observation: the exact
-    expected HEAD with zero tracked or untracked dirt.  An unavailable
-    observation is never currency.
+    acceptance, review drive) only against a fresh bracketed observation:
+    the exact expected HEAD both before and after an empty tracked-and-
+    untracked tree observation.  Re-reading the HEAD after the tree
+    observation closes the schedule where a clean concurrent commit lands
+    between the two reads, so a moved candidate invalidates the whole
+    observation.  An unavailable observation is never currency.
     """
 
-    head = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        cwd=cwd,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    if head.returncode or head.stdout.strip() != expected_head_sha:
+    if not expected_head_sha:
+        return False
+
+    def observed_head() -> str:
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=cwd,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        return "" if head.returncode else head.stdout.strip()
+
+    if observed_head() != expected_head_sha:
         return False
     status = subprocess.run(
         ["git", "status", "--porcelain"],
@@ -56,19 +65,29 @@ def _verification_candidate_is_current(cwd: Path, expected_head_sha: str) -> boo
         capture_output=True,
         check=False,
     )
-    return status.returncode == 0 and not status.stdout.strip()
+    if status.returncode or status.stdout.strip():
+        return False
+    return observed_head() == expected_head_sha
 
 
-def _review_resolution_drift_in_flight(worker: object) -> bool:
-    """One durable review-resolution notification owns candidate drift.
+def _review_resolution_drift_in_flight(
+    worker: object, stale_head_sha: str
+) -> bool:
+    """One identity-exact resolution notification names this stale HEAD.
 
-    While the executor resolves review findings, the resolved commit and its
-    interim tree legitimately move past the receipted HEAD; that drift is
-    owned end-to-end by the existing resolution machinery
-    (`_resolved_head_verification_ready` and the summary refresh path), so
-    the stale-authority consumers must not latch attention over it.
+    While the executor commits a review resolution, the product tree
+    legitimately moves past the reviewed HEAD; that drift is owned
+    end-to-end by the existing resolution machinery
+    (`_resolved_head_verification_ready` and the summary refresh path).
+    This marker is wait-only: callers may suppress a typed attention latch
+    over exactly the notified reviewed HEAD, but the marker never
+    authorizes linking, consuming, or review-releasing stale authority.
+    Anything short of the exact sent, own-operation, packet-bound
+    notification for exactly this stale HEAD is not a resolution in flight.
     """
 
+    if not re.fullmatch("[0-9a-f]{40,64}", str(stale_head_sha or "")):
+        return False
     notify_path = (
         worker.spec_path.parent / "pipeline-review-resolution-notify.json"
     )
@@ -78,10 +97,17 @@ def _review_resolution_drift_in_flight(worker: object) -> bool:
         notified = json.loads(notify_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return False
-    return isinstance(notified, dict) and bool(
-        re.fullmatch(
-            "[0-9a-f]{40,64}", str(notified.get("reviewed_head_sha") or "")
+    return (
+        isinstance(notified, dict)
+        and notified.get("schema_version") == 1
+        and notified.get("operation_id") == worker.spec["operation_id"]
+        and notified.get("status") == "sent"
+        and bool(
+            re.fullmatch(
+                "[0-9a-f]{64}", str(notified.get("packet_sha256") or "")
+            )
         )
+        and notified.get("reviewed_head_sha") == stale_head_sha
     )
 
 
@@ -258,7 +284,6 @@ class RuntimeWorkerVerificationMixin:
                 or _verification_candidate_is_current(
                     self.spec["cwd"], str(recovered["head_sha"])
                 )
-                or _review_resolution_drift_in_flight(self)
             ):
                 self.link_verification_receipt(recovered)
             return recovered
@@ -1189,7 +1214,7 @@ class RuntimeWorkerVerificationMixin:
                 # current candidate.
                 if _verification_candidate_is_current(
                     self.spec["cwd"], str(persisted["head_sha"])
-                ) or _review_resolution_drift_in_flight(self):
+                ):
                     self.link_verification_receipt(persisted)
 
             supervisor.effect(
@@ -1222,11 +1247,14 @@ class RuntimeWorkerVerificationMixin:
             and not _verification_candidate_is_current(
                 self.spec["cwd"], str(existing["head_sha"])
             )
-            and not _review_resolution_drift_in_flight(self)
+            and not _review_resolution_drift_in_flight(
+                self, str(existing["head_sha"])
+            )
         ):
             # A clean commit or dirt landed after the in-effect observation:
             # the receipt survives as immutable evidence for its own HEAD but
-            # is never consumed as current authority.
+            # is never consumed as current authority.  A resolution in flight
+            # only suppresses the latch; it never restores currency.
             self.summary_attention(
                 "pipeline-verification-stale-authority",
                 AttentionReason.CONTRACT_DRIFT,

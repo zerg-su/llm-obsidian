@@ -348,6 +348,19 @@ consumers (``harness/runtime_worker_summary.py``, 14 lines;
 is added; the file ceiling is unchanged and the line ceiling moves by the
 measured 203-line cost to the exact 290-file / 108,884-line candidate with
 no speculative headroom.
+
+The 2.7.4 Sol implementation review then reported two material findings,
+both applied in one bounded findings patch: the current-candidate predicate
+now brackets its tree observation with two exact HEAD observations so a
+clean commit between any of its reads invalidates the whole observation
+(F274.CANDIDATE_PREDICATE_TOCTOU), and the review-resolution notification
+became identity-exact (sent, own-operation, packet-bound, reviewed-HEAD
+bound) and strictly wait-only — it suppresses one attention latch during an
+active resolution but never authorizes linking, consuming, or
+review-releasing stale or dirty authority (F274.RESOLUTION_DRIFT_BYPASS).
+The patch costs 31 measured lines across the same three owners and no
+production module; the ceilings move to the exact 290-file / 108,915-line
+candidate with no speculative headroom.
 """
 
 from __future__ import annotations
@@ -359,7 +372,7 @@ from pathlib import Path
 SCRIPT_FILE_CEILING = 290
 
 #: Maximum total lines across those files for the 2.7.4 closure candidate.
-SCRIPT_LINE_CEILING = 108_884
+SCRIPT_LINE_CEILING = 108_915
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

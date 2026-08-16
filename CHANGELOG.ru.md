@@ -50,15 +50,24 @@ rejected-but-useful 2.7.3 и закрывает два material findings тер�
   существующую resolution-механику; точный чистый same-HEAD receipt
   сохраняет обычный exactly-once путь (F273.EXACT_HEAD_ACCEPTANCE_RACE)
   (`docs/acceptance/v2.7.4-exact-verification-closure.md`).
+- После его Sol implementation review (оба findings применены одним
+  ограниченным патчем): current-candidate предикат обрамляет наблюдение
+  дерева двумя наблюдениями точного HEAD, поэтому чистый commit между
+  любыми его чтениями инвалидирует всё наблюдение
+  (F274.CANDIDATE_PREDICATE_TOCTOU); review-resolution notification стал
+  identity-exact и строго wait-only — он подавляет один attention latch во
+  время активной resolution, но никогда не авторизует привязку,
+  потребление или review-release устаревшей либо грязной authority
+  (F274.RESOLUTION_DRIFT_BYPASS).
 
 ### Управление
 
-- RC1 active-authority contour перебазирован на точно измеренные 15305 LOC
+- RC1 active-authority contour перебазирован на точно измеренные 15333 LOC
   (неизменный манифест из 27 файлов, ноль writable authorities, ноль
   incident literals), hotspot verification owner переходит ровно на его
-  измеренные 1233 строки, а live scripts scope ratchet сдвигается на
-  измеренную стоимость закрытия в 203 строки к точному кандидату
-  290 файлов / 108 884 строки без спекулятивного запаса. Формулировки 2.7.3,
+  измеренные 1261 строку, а live scripts scope ratchet сдвигается на
+  измеренную стоимость закрытия в 234 строки к точному кандидату
+  290 файлов / 108 915 строк без спекулятивного запаса. Формулировки 2.7.3,
   подразумевавшие review-approval, исправлены: findings его первого review
   round были применены, а его обновлённый терминальный review остаётся
   неизменяемым свидетельством проблемы.

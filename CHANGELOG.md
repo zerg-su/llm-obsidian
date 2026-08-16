@@ -42,14 +42,23 @@ the terminal 2.7.3 review.
   its existing resolution machinery; an exact clean same-HEAD receipt keeps
   the ordinary exactly-once path (F273.EXACT_HEAD_ACCEPTANCE_RACE)
   (`docs/acceptance/v2.7.4-exact-verification-closure.md`).
+- After its Sol implementation review (both findings applied in one bounded
+  patch): the current-candidate predicate brackets its tree observation
+  with two exact HEAD observations so a clean commit between any of its
+  reads invalidates the whole observation
+  (F274.CANDIDATE_PREDICATE_TOCTOU); and the review-resolution notification
+  is identity-exact and strictly wait-only — it suppresses one attention
+  latch during an active resolution but never authorizes linking,
+  consuming, or review-releasing stale or dirty authority
+  (F274.RESOLUTION_DRIFT_BYPASS).
 
 ### Governance
 
 - The RC1 active-authority contour is rebaselined at the exact measured
-  15305 LOC (unchanged 27-file manifest, zero writable authorities, zero
+  15333 LOC (unchanged 27-file manifest, zero writable authorities, zero
   incident literals), the verification owner hotspot moves to exactly its
-  measured 1233 lines, and the live scripts scope ratchet moves by the
-  measured 203-line closure cost to the exact 290-file / 108,884-line
+  measured 1261 lines, and the live scripts scope ratchet moves by the
+  measured 234-line closure cost to the exact 290-file / 108,915-line
   candidate with no speculative headroom. 2.7.3 wording that implied review
   approval is corrected: its first review round's findings were applied, and
   its refreshed terminal review remains immutable problem evidence.

@@ -423,13 +423,19 @@ class RuntimeWorkerSummaryMixin:
                 return None, True
             if not _verification_candidate_is_current(
                 self.spec["cwd"], str(existing["head_sha"])
-            ) and not _review_resolution_drift_in_flight(self):
+            ):
                 # The receipt stays immutable evidence for its own exact
-                # HEAD; a moved or dirty candidate can never consume it.
-                self.summary_attention(
-                    "pipeline-verification-stale-authority",
-                    AttentionReason.CONTRACT_DRIFT,
-                )
+                # HEAD; a moved or dirty candidate can never consume it.  An
+                # identity-exact resolution in flight only suppresses the
+                # attention latch (the resolution machinery re-verifies at
+                # the resolved HEAD); it never restores currency.
+                if not _review_resolution_drift_in_flight(
+                    self, str(existing["head_sha"])
+                ):
+                    self.summary_attention(
+                        "pipeline-verification-stale-authority",
+                        AttentionReason.CONTRACT_DRIFT,
+                    )
                 return None, True
         return existing, False
 

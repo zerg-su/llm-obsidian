@@ -1044,4 +1044,181 @@ with tempfile.TemporaryDirectory(prefix="verification-authority.") as raw:
         and fresh.worker.bind_calls == [],
     )
 
+    # 2.7.4 F274.CANDIDATE_PREDICATE_TOCTOU: the current-candidate predicate
+    # brackets its tree observation with two exact HEAD observations, so a
+    # clean commit landing between any of its reads invalidates the whole
+    # observation instead of yielding currency for the predecessor HEAD.
+    import subprocess as real_subprocess
+
+    import harness.runtime_worker_verification as rwv
+
+    def toctou_repo(name: str) -> tuple[Path, str]:
+        repo = base / f"toctou-{name}"
+        repo.mkdir()
+        for argv in (
+            ("init", "-b", "main"),
+            ("config", "user.email", "toctou@example.invalid"),
+            ("config", "user.name", "Toctou World"),
+        ):
+            real_subprocess.run(
+                ["git", "-C", str(repo), *argv], check=True, capture_output=True
+            )
+        (repo / "product.txt").write_text("base\n", encoding="utf-8")
+        real_subprocess.run(
+            ["git", "-C", str(repo), "add", "product.txt"],
+            check=True,
+            capture_output=True,
+        )
+        real_subprocess.run(
+            ["git", "-C", str(repo), "commit", "-m", "base"],
+            check=True,
+            capture_output=True,
+        )
+        head = real_subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        return repo, head
+
+    def land_toctou_commit(repo: Path) -> None:
+        (repo / "product.txt").write_text("moved\n", encoding="utf-8")
+        real_subprocess.run(
+            ["git", "-C", str(repo), "add", "product.txt"],
+            check=True,
+            capture_output=True,
+        )
+        real_subprocess.run(
+            ["git", "-C", str(repo), "commit", "-m", "moved"],
+            check=True,
+            capture_output=True,
+        )
+
+    toctou_windows = (
+        ("between the HEAD and tree observations", ["git", "rev-parse", "HEAD"]),
+        ("between the tree and closing HEAD observations",
+         ["git", "status", "--porcelain"]),
+    )
+    for window_name, trigger_argv in toctou_windows:
+        repo, head_b = toctou_repo(window_name.replace(" ", "-")[:24])
+        armed = {"armed": True, "reads": 0}
+
+        class CommitBetweenObservations:
+            CompletedProcess = real_subprocess.CompletedProcess
+
+            @staticmethod
+            def run(argv: list[str], **kwargs: object):
+                result = real_subprocess.run(argv, **kwargs)
+                armed["reads"] += 1
+                if list(argv) == trigger_argv and armed["armed"]:
+                    armed["armed"] = False
+                    land_toctou_commit(repo)
+                return result
+
+        original_subprocess = rwv.subprocess
+        rwv.subprocess = CommitBetweenObservations
+        try:
+            raced = rwv._verification_candidate_is_current(repo, head_b)
+        finally:
+            rwv.subprocess = original_subprocess
+        check(
+            f"a clean commit {window_name} never yields predecessor currency",
+            raced is False and armed["armed"] is False,
+        )
+
+    control_repo, control_head = toctou_repo("control")
+    check(
+        "an undisturbed exact clean candidate observation stays current",
+        rwv._verification_candidate_is_current(control_repo, control_head)
+        is True,
+    )
+    (control_repo / "junk.txt").write_text("dirt\n", encoding="utf-8")
+    check(
+        "untracked dirt refuses candidate currency",
+        rwv._verification_candidate_is_current(control_repo, control_head)
+        is False,
+    )
+    check(
+        "an empty expected HEAD is never currency",
+        rwv._verification_candidate_is_current(control_repo, "") is False,
+    )
+
+    # 2.7.4 F274.RESOLUTION_DRIFT_BYPASS: the resolution notification is
+    # wait-only and identity-exact.  Anything short of the exact sent,
+    # own-operation, packet-bound marker for exactly the stale HEAD is not a
+    # resolution in flight; and even the exact marker never appears at a
+    # linking/consumption call site as authorization.
+    marker_runtime = base / "resolution-marker-runtime"
+    marker_runtime.mkdir()
+    marker_worker = SimpleNamespace(
+        spec_path=marker_runtime / "launch.json",
+        spec={"operation_id": "marker-op", "owner_id": "marker-op"},
+    )
+    marker_path = marker_runtime / "pipeline-review-resolution-notify.json"
+    stale_head = "b" * 40
+    exact_marker = {
+        "schema_version": 1,
+        "operation_id": "marker-op",
+        "packet_sha256": "c" * 64,
+        "reviewed_head_sha": stale_head,
+        "summary_sha256": "d" * 64,
+        "status": "sent",
+    }
+
+    def write_marker(value: object) -> None:
+        if marker_path.is_symlink() or marker_path.exists():
+            marker_path.unlink()
+        if isinstance(value, str):
+            marker_path.write_text(value, encoding="utf-8")
+        else:
+            marker_path.write_text(
+                json.dumps(value, sort_keys=True) + "\n", encoding="utf-8"
+            )
+
+    check(
+        "a missing resolution notification is never a resolution in flight",
+        rwv._review_resolution_drift_in_flight(marker_worker, stale_head)
+        is False,
+    )
+    write_marker(exact_marker)
+    check(
+        "the exact sent own-operation packet-bound marker names its "
+        "reviewed HEAD",
+        rwv._review_resolution_drift_in_flight(marker_worker, stale_head)
+        is True,
+    )
+    marker_rows = (
+        ("foreign operation", {**exact_marker, "operation_id": "foreign-op"}),
+        ("pending status", {**exact_marker, "status": "pending"}),
+        ("missing packet digest", {**exact_marker, "packet_sha256": ""}),
+        ("drifted schema", {**exact_marker, "schema_version": 2}),
+        (
+            "foreign reviewed HEAD",
+            {**exact_marker, "reviewed_head_sha": "e" * 40},
+        ),
+        ("malformed bytes", "{malformed notification"),
+    )
+    for marker_case, marker_value in marker_rows:
+        write_marker(marker_value)
+        check(
+            f"a {marker_case} resolution notification is never a resolution "
+            "in flight",
+            rwv._review_resolution_drift_in_flight(marker_worker, stale_head)
+            is False,
+        )
+    marker_path.unlink()
+    marker_path.symlink_to(marker_runtime / "missing-notification.json")
+    check(
+        "a symlinked resolution notification is never a resolution in flight",
+        rwv._review_resolution_drift_in_flight(marker_worker, stale_head)
+        is False,
+    )
+    write_marker(exact_marker)
+    check(
+        "even the exact marker never restores candidate currency",
+        rwv._verification_candidate_is_current(control_repo, control_head)
+        is False,
+    )
+
 print("verification authority matrix: ok")
