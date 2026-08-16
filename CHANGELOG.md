@@ -12,8 +12,10 @@ packages were published for them.
 
 ## [2.7.7] - 2026-08-16
 
-Bounded actual-provider-generation cleanup candidate; not tagged, published,
-installed, or live-accepted. Builds only on the preserved 2.7.6 candidate.
+Stability release for long-running built-in and custom Harness pipelines. It
+consolidates the bounded 2.7.1–2.7.7 verification, cleanup, admission, and
+provider-generation repairs and is qualified by five lightweight live smoke
+corridors across OpenAI and Claude routes.
 
 ### Fixed
 
@@ -30,6 +32,12 @@ installed, or live-accepted. Builds only on the preserved 2.7.6 candidate.
 
 - The live scripts scope ratchet moves by the exact measured 59-line
   production cost to 290 files / 109,339 lines with no speculative headroom.
+- Final dogfood completed three built-in corridors and two custom corridors:
+  OpenAI-local, OpenAI-to-Claude, Claude-to-OpenAI, a four-step custom pipeline
+  with verification, and a three-step custom pipeline without verification.
+  Every corridor reached terminal reap. One custom callback self-healed before
+  a stale executor escalation was classified; suppressing that redundant
+  escalation is accepted as a minor follow-up rather than a release blocker.
 
 ## [2.7.6] - 2026-08-16
 
