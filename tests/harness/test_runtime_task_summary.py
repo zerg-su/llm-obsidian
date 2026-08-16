@@ -2810,6 +2810,612 @@ def run_case(
     return store, cmux, launch.spec_path.parent, result[0]
 
 
+def assert_orphaned_predecessor_lineage_stays_attention(root: Path) -> None:
+    """2.7.4 Slice A (F273.MISSING_PREDECESSOR_FAIL_OPEN): a lost attempt-0
+    predecessor record with a pending attempt-1 successor and a durable
+    invalidation record is an orphaned lineage.  The real worker must latch
+    typed attention with no probe effect, no minting, no receipt, no linking,
+    and no review; a repeated wake stays idempotent with zero new effects."""
+
+    from harness.verification_attempt import pipeline_verify_effect_id
+
+    profile = load_profiles(ROOT / "config" / "verification-profiles.toml")[
+        "scoped"
+    ]
+    pipeline = compile_pipeline(
+        builtin_definitions()["engineering/change"],
+        builtin_registry(),
+        capabilities=("route:resolved",),
+    )
+    summary = {
+        "schema_version": 1,
+        "type": "session",
+        "title": "Runtime Result",
+        "session": "executor-session",
+        "body": "Bounded completed task.",
+    }
+    task = "27400000-2740-4274-8274-274000000001"
+    recorded: list[tuple[str, ...]] = []
+    facts: dict[str, object] = {}
+
+    def probe_runner(argv: list[str], **kwargs: object):
+        if argv == ["git", "rev-parse", "HEAD"]:
+            return subprocess.run(
+                argv,
+                cwd=kwargs["cwd"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+        recorded.append(tuple(argv))
+        return subprocess.CompletedProcess(argv, 0, "ok\n", "")
+
+    def approve_launcher(vault: Path, worktree: Path) -> None:
+        meta = json.loads(
+            (worktree / ".task-meta.json").read_text(encoding="utf-8")
+        )
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=worktree,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.strip()
+        ReviewGateController.skip(
+            vault / ".vault-meta" / "harness" / "review-data" / task / task,
+            dispatch_operation_id=task,
+            owner_id=task,
+            preset=ReviewPreset.from_flags(no_review=True),
+            context=ReviewContext(
+                "packets/task/manifest.json",
+                head,
+                "scoped",
+                meta["review_policy"]["verification_profile_sha256"],
+            ),
+            product_root=worktree,
+        )
+
+    def before_start(
+        vault: Path, worktree: Path, state: Path, profile_sha: str
+    ) -> None:
+        store = OperationStore(vault / ".vault-meta" / "harness")
+        parent = store.read("owner-1", task)
+        head_b = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=worktree,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.strip()
+        input_b = verification_input_sha256(
+            pipeline.definition_sha256, head_b, profile_sha, 1
+        )
+        spec_b0 = _pipeline_verify_identity(
+            parent.spec,
+            definition_sha256=pipeline.definition_sha256,
+            input_sha256=input_b,
+            profile="scoped",
+            attempt_index=0,
+        )[0]
+        spec_b1, lane_b1, run_b1 = _pipeline_verify_identity(
+            parent.spec,
+            definition_sha256=pipeline.definition_sha256,
+            input_sha256=input_b,
+            profile="scoped",
+            attempt_index=1,
+        )
+        # The prior handoff's durable evidence survives — the pending
+        # attempt-1 successor record and the invalidation binding — while the
+        # attempt-0 predecessor record itself was lost.
+        store.create(spec_b1, lane_id=lane_b1, run_id=run_b1)
+        invalidation = {
+            "schema_version": 1,
+            "operation_id": spec_b0.operation_id,
+            "parent_operation_id": task,
+            "predecessor_attempt_sha256": VerificationAttempt(
+                task, "scoped", profile_sha, head_b, 0
+            ).sha256,
+            "predecessor_effect_id": pipeline_verify_effect_id(input_b, 0),
+            "successor_operation_id": spec_b1.operation_id,
+            "successor_attempt_sha256": VerificationAttempt(
+                task, "scoped", profile_sha, head_b, 1
+            ).sha256,
+            "successor_effect_id": pipeline_verify_effect_id(input_b, 1),
+            "current_head_sha": head_b,
+            "status": "invalidated",
+        }
+        write_json(
+            state
+            / "pipeline-verification"
+            / spec_b0.operation_id
+            / "invalidation.json",
+            invalidation,
+        )
+        facts.update(
+            head_b=head_b,
+            stale_b0=spec_b0.operation_id,
+            successor_b1=spec_b1.operation_id,
+            invalidation=json.dumps(invalidation, sort_keys=True) + "\n",
+        )
+
+    def read_json_if(path: Path) -> object:
+        if not path.is_file():
+            return None
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    store, _cmux, state, rc = run_case(
+        root,
+        task,
+        summary,
+        pipeline_name="engineering/change",
+        before_start=before_start,
+        verification_runner=probe_runner,
+        review_launcher=approve_launcher,
+        review_state="missing",
+        wake_source=FallbackWakeSource(),
+    )
+    parent = store.read("owner-1", task)
+    children = {
+        record.spec.operation_id: record.state
+        for record in store.list("owner-1")
+        if record.spec.kind == "pipeline-verify"
+    }
+    stale_receipt = read_json_if(
+        state
+        / "pipeline-verification"
+        / str(facts["stale_b0"])
+        / "receipt.json"
+    )
+    linked = read_json_if(state / "pipeline-step-verify.json")
+    latch = read_json_if(state / "callback-error.json")
+    invalidation_now = (
+        state
+        / "pipeline-verification"
+        / str(facts["stale_b0"])
+        / "invalidation.json"
+    ).read_text(encoding="utf-8")
+    check(
+        "an orphaned predecessor lineage stays typed attention with no probe, "
+        "no minting, no receipt, no link, and no review",
+        rc == 0
+        and parent.state == "attention-required"
+        and parent.attention_reason == AttentionReason.ATTENTION_REQUIRED
+        and not parent.accepted_callback_id
+        and children == {str(facts["successor_b1"]): "created"}
+        and recorded == []
+        and stale_receipt is None
+        and linked is None
+        and isinstance(latch, dict)
+        and latch.get("status") == "pipeline-verification-orphaned-lineage"
+        and invalidation_now == facts["invalidation"],
+        (rc, parent, children, recorded, latch),
+    )
+
+    # A repeated worker wake over the orphaned lineage stays idempotent:
+    # no new verifier, no probe effect, and the same latched attention.
+    children_before = dict(children)
+    worktree = root / f"worktree-{task}"
+    relaunch = ProcessAdapter().prepare_surface_launch(
+        argv=(
+            str(Path(sys.executable).resolve()),
+            "-c",
+            "import time; time.sleep(0.15)",
+        ),
+        cwd=worktree,
+        state_root=root / f"state-{task}",
+        worker=ROOT / "scripts" / "harness-runtime-worker.py",
+        callback_pointer=worktree / ".task-summary.json",
+        store_root=store.root,
+        owner_id="owner-1",
+        operation_id=task,
+        run_id=f"run-{task}",
+        surface_id=CHILD,
+        runtime="codex",
+        callback_mode="task-summary",
+        task_summary_pointer=worktree / ".task-summary.json",
+        origin_surface=ORIGIN,
+    )
+    rewake_rc = run_worker(
+        relaunch.spec_path,
+        poll_seconds=0.02,
+        checkpoint_probe=lambda _surface, _runtime: "checkpoint-1",
+        cmux_adapter=FakeCmux(),
+        verification_runner=probe_runner,
+        wake_source=FallbackWakeSource(),
+    )
+    rewake_children = {
+        record.spec.operation_id: record.state
+        for record in store.list("owner-1")
+        if record.spec.kind == "pipeline-verify"
+    }
+    rewake_parent = store.read("owner-1", task)
+    check(
+        "a repeated wake over the orphaned lineage stays attention with zero "
+        "new effects",
+        rewake_rc == 0
+        and rewake_children == children_before
+        and recorded == []
+        and rewake_parent.state == "attention-required",
+        (rewake_rc, rewake_children, recorded, rewake_parent),
+    )
+
+
+def assert_clean_commit_race_never_consumes_stale_authority(root: Path) -> None:
+    """2.7.4 Slice B (F273.EXACT_HEAD_ACCEPTANCE_RACE): a clean commit that
+    moves the product HEAD after the final HEAD observation must never yield
+    linked or consumed stale verification authority and must never release a
+    review effect.  The receipt stays immutable evidence for its own HEAD;
+    the continuation halts to the bounded handoff or typed attention.  An
+    exact clean same-HEAD receipt keeps the ordinary path."""
+
+    import harness.dashboard_facade as dashboard_facade
+    import harness.runtime_worker_verification as runtime_worker_verification
+    from harness.runtime_worker_summary import RuntimeWorkerSummaryMixin
+    from harness.runtime_worker_verification import (
+        RuntimeWorkerVerificationMixin,
+    )
+
+    root = root.resolve()
+    profile = load_profiles(ROOT / "config" / "verification-profiles.toml")[
+        "scoped"
+    ]
+    pipeline = compile_pipeline(
+        builtin_definitions()["engineering/change"],
+        builtin_registry(),
+        capabilities=("route:resolved",),
+    )
+    real_subprocess = subprocess
+
+    class RaceWorker(RuntimeWorkerVerificationMixin, RuntimeWorkerSummaryMixin):
+        def __init__(
+            self,
+            *,
+            store: OperationStore,
+            operation: object,
+            state: Path,
+            product: Path,
+            runner: object,
+        ) -> None:
+            self.store = store
+            self.operation = operation
+            self.spec_path = state / "runtime.json"
+            self.spec = {
+                "owner_id": "owner-1",
+                "operation_id": operation.spec.operation_id,
+                "cwd": product,
+                "surface_id": "race-surface",
+            }
+            self.pipeline = pipeline
+            self.pipeline_extra_commands = ()
+            self.profile = profile
+            self._pipeline_name = "engineering/change"
+            self.verification_runner = runner
+            self.verification_step_schema_version = 1
+            self.verification_controller_receipt_path = (
+                state / "pipeline-step-verify.json"
+            )
+            self.verification_head = real_subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=product,
+                text=True,
+                capture_output=True,
+                check=True,
+            ).stdout.strip()
+            self.attention_calls: list[tuple[object, ...]] = []
+            self._bind_verification_attempt(0)
+
+        def summary_attention(
+            self, code: str, reason: object = None, **kwargs: object
+        ) -> None:
+            self.attention_calls.append((code, reason))
+
+    def race_world(name: str):
+        product = root / f"race-product-{name}"
+        product.mkdir()
+        for argv in (
+            ("init", "-b", "main"),
+            ("config", "user.email", "race@example.invalid"),
+            ("config", "user.name", "Race World"),
+        ):
+            real_subprocess.run(
+                ["git", "-C", str(product), *argv],
+                check=True,
+                capture_output=True,
+            )
+        (product / "product.txt").write_text("base\n", encoding="utf-8")
+        real_subprocess.run(
+            ["git", "-C", str(product), "add", "product.txt"],
+            check=True,
+            capture_output=True,
+        )
+        real_subprocess.run(
+            ["git", "-C", str(product), "commit", "-m", "base"],
+            check=True,
+            capture_output=True,
+        )
+        state = root / f"race-state-{name}"
+        state.mkdir()
+        store = OperationStore(root / f"race-store-{name}")
+        operation_id = f"race-{name}"
+        store.create(
+            OperationSpec(
+                operation_id,
+                f"{operation_id}-key",
+                "dispatch",
+                "owner-1",
+                RuntimeRoute("claude", "sonnet", "medium", "executor", "6" * 64),
+                "packets/task.json",
+                "scoped",
+            ),
+            lane_id="race-lane",
+            run_id=f"run-{operation_id}",
+        )
+        for step in ("preflight", "starting", "running"):
+            store.transition("owner-1", operation_id, step)
+
+        def green_runner(argv: list[str], **kwargs: object):
+            if argv == ["git", "rev-parse", "HEAD"]:
+                return real_subprocess.run(
+                    argv,
+                    cwd=kwargs["cwd"],
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+            return real_subprocess.CompletedProcess(argv, 0, "ok\n", "")
+
+        worker = RaceWorker(
+            store=store,
+            operation=store.read("owner-1", operation_id),
+            state=state,
+            product=product,
+            runner=green_runner,
+        )
+        return SimpleNamespace(
+            product=product,
+            state=state,
+            store=store,
+            worker=worker,
+            head_b=worker.verification_head,
+        )
+
+    def land_clean_commit(product: Path, name: str) -> str:
+        (product / "product.txt").write_text(name + "\n", encoding="utf-8")
+        real_subprocess.run(
+            ["git", "-C", str(product), "add", "product.txt"],
+            check=True,
+            capture_output=True,
+        )
+        real_subprocess.run(
+            ["git", "-C", str(product), "commit", "-m", name],
+            check=True,
+            capture_output=True,
+        )
+        return real_subprocess.run(
+            ["git", "-C", str(product), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+    def read_json_if(path: Path) -> object:
+        if not path.is_file():
+            return None
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    original_dashboard = dashboard_facade.launch_bound_facade_dashboard
+    dashboard_facade.launch_bound_facade_dashboard = lambda **kwargs: (
+        SimpleNamespace(status="skipped")
+    )
+    try:
+        # Injection window: the clean commit lands immediately after the
+        # final untampered in-effect HEAD observation, before receipt
+        # persistence and controller linking.
+        persist = race_world("persist-window")
+        armed = {"armed": True, "head_c": ""}
+
+        class CommitAfterFinalObservation:
+            CompletedProcess = real_subprocess.CompletedProcess
+
+            @staticmethod
+            def run(argv: list[str], **kwargs: object):
+                result = real_subprocess.run(argv, **kwargs)
+                if list(argv) == ["git", "rev-parse", "HEAD"] and armed["armed"]:
+                    armed["armed"] = False
+                    armed["head_c"] = land_clean_commit(
+                        persist.product, "moved"
+                    )
+                return result
+
+        original_subprocess = runtime_worker_verification.subprocess
+        runtime_worker_verification.subprocess = CommitAfterFinalObservation
+        try:
+            persist.worker.run_verification()
+        finally:
+            runtime_worker_verification.subprocess = original_subprocess
+        persist_linked = read_json_if(persist.state / "pipeline-step-verify.json")
+        check(
+            "a clean commit inside the persistence window never becomes "
+            "linked stale authority and halts the continuation",
+            bool(armed["head_c"])
+            and not (
+                isinstance(persist_linked, dict)
+                and persist_linked.get("head_sha") == persist.head_b
+            )
+            and bool(persist.worker.attention_calls),
+            (armed, persist_linked, persist.worker.attention_calls),
+        )
+
+        # Injection window: crash after receipt persistence but before
+        # controller linking; the recovery census runs after a clean commit.
+        recovery = race_world("link-recovery-window")
+        recovery.worker.run_verification()
+        (recovery.state / "pipeline-step-verify.json").unlink()
+        land_clean_commit(recovery.product, "recovery-moved")
+        recovery.worker.controller_verification_receipt()
+        recovery_linked = read_json_if(
+            recovery.state / "pipeline-step-verify.json"
+        )
+        check(
+            "link recovery after a clean commit never relinks stale authority",
+            not (
+                isinstance(recovery_linked, dict)
+                and recovery_linked.get("head_sha") == recovery.head_b
+            ),
+            recovery_linked,
+        )
+
+        # Injection window: the clean commit lands after linking but before
+        # summary consumption / attention clearance.
+        consume = race_world("summary-window")
+        consume.worker.run_verification()
+        land_clean_commit(consume.product, "summary-moved")
+        consumed, _halted = consume.worker.resolve_current_verification(object())
+        check(
+            "summary consumption after a clean commit refuses stale authority "
+            "and halts to typed attention",
+            consumed is None and bool(consume.worker.attention_calls),
+            (consumed, consume.worker.attention_calls),
+        )
+
+        # Tracked-or-untracked dirt at the consumption boundary is the same
+        # refusal: stale-or-unattested authority is never consumed.
+        dirty = race_world("dirty-consumption")
+        dirty.worker.run_verification()
+        (dirty.product / "junk.txt").write_text("dirt\n", encoding="utf-8")
+        dirty_consumed, _dirty_halted = dirty.worker.resolve_current_verification(
+            object()
+        )
+        check(
+            "summary consumption over a dirty tree refuses verification "
+            "authority and halts to typed attention",
+            dirty_consumed is None and bool(dirty.worker.attention_calls),
+            (dirty_consumed, dirty.worker.attention_calls),
+        )
+
+        # Injection window: the clean commit lands immediately before the
+        # review drive; no provider effect may launch on stale authority.
+        drive_state = root / "race-review-drive"
+        drive_state.mkdir()
+        (drive_state / "vault").mkdir()
+        drive_product = root / "race-review-drive-product"
+        drive_product.mkdir()
+        for argv in (
+            ("init", "-b", "main"),
+            ("config", "user.email", "race@example.invalid"),
+            ("config", "user.name", "Race World"),
+        ):
+            real_subprocess.run(
+                ["git", "-C", str(drive_product), *argv],
+                check=True,
+                capture_output=True,
+            )
+        (drive_product / "product.txt").write_text("base\n", encoding="utf-8")
+        real_subprocess.run(
+            ["git", "-C", str(drive_product), "add", "product.txt"],
+            check=True,
+            capture_output=True,
+        )
+        real_subprocess.run(
+            ["git", "-C", str(drive_product), "commit", "-m", "base"],
+            check=True,
+            capture_output=True,
+        )
+        drive_head_b = real_subprocess.run(
+            ["git", "-C", str(drive_product), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        launcher_calls: list[tuple[object, ...]] = []
+        drive_calls: list[tuple[object, ...]] = []
+
+        class DriveWorker(RuntimeWorkerReviewBridgeMixin):
+            def __init__(self) -> None:
+                self.spec_path = drive_state / "runtime.json"
+                self.spec = {
+                    "operation_id": "race-review-drive",
+                    "cwd": drive_product,
+                }
+                self.pipeline = SimpleNamespace(
+                    definition_sha256="6" * 64,
+                    definition=SimpleNamespace(
+                        steps=(SimpleNamespace(primitive_id="verify"),)
+                    ),
+                )
+                self.trusted_vault = drive_state / "vault"
+                self.marker_path = drive_state / "pipeline-review-marker.json"
+                self.review = SimpleNamespace(
+                    gate_root=drive_state / "gate", status="missing"
+                )
+                self.review_launcher = lambda vault, cwd: launcher_calls.append(
+                    (vault, cwd)
+                )
+                self.profile = profile
+                self.verification_head = drive_head_b
+                self.attention_calls: list[tuple[object, ...]] = []
+
+            def summary_attention(
+                self, code: str, reason: object = None, **kwargs: object
+            ) -> None:
+                self.attention_calls.append((code, reason))
+
+            def verification_receipt(self) -> dict[str, object]:
+                return {
+                    "status": "complete",
+                    "head_sha": drive_head_b,
+                    "evidence": [{"head_sha": drive_head_b}],
+                }
+
+            def _bind_verification_attempt(self, index: int) -> None:
+                drive_calls.append(("bind", index))
+
+            def adopt_invalidated_verification_successor(self) -> bool:
+                drive_calls.append(("adopt",))
+                return True
+
+            def run_verification(self) -> None:
+                drive_calls.append(("verify",))
+
+        land_clean_commit(drive_product, "pre-drive-move")
+        drive_worker = DriveWorker()
+        drive_worker.drive_review()
+        drive_marker = read_json_if(drive_state / "pipeline-review-marker.json")
+        check(
+            "the review drive refuses current-HEAD drift on stale authority "
+            "and launches no provider effect",
+            launcher_calls == []
+            and not (
+                isinstance(drive_marker, dict)
+                and drive_marker.get("status") == "started"
+            ),
+            (launcher_calls, drive_marker, drive_calls),
+        )
+
+        # Control: an exact clean same-HEAD receipt keeps the ordinary path.
+        control = race_world("same-head-control")
+        control.worker.run_verification()
+        control_consumed, control_halted = (
+            control.worker.resolve_current_verification(object())
+        )
+        control_linked = read_json_if(
+            control.state / "pipeline-step-verify.json"
+        )
+        check(
+            "an exact clean same-HEAD receipt keeps the ordinary consumption "
+            "path with no attention",
+            isinstance(control_consumed, dict)
+            and control_consumed.get("head_sha") == control.head_b
+            and control_halted is False
+            and control.worker.attention_calls == []
+            and isinstance(control_linked, dict)
+            and control_linked.get("head_sha") == control.head_b,
+            (control_consumed, control_halted, control.worker.attention_calls),
+        )
+    finally:
+        dashboard_facade.launch_bound_facade_dashboard = original_dashboard
+
+
 with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
     root = Path(raw)
     assert_review_drive_failure_receipt_is_content_free()
@@ -2823,6 +3429,8 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
     assert_durable_review_packet_generation_can_advance(root)
     assert_resolution_head_drift_wakes_once(root)
     assert_invalidated_verification_hands_off_to_exact_head_replacement(root)
+    assert_orphaned_predecessor_lineage_stays_attention(root)
+    assert_clean_commit_race_never_consumes_stale_authority(root)
     handoff = root / "resolution-handoff"
     handoff.mkdir()
     reviewed_head = "a" * 40

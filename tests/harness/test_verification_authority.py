@@ -747,4 +747,301 @@ with tempfile.TemporaryDirectory(prefix="verification-authority.") as raw:
         )
     check("conflicting invalidation record bytes fail closed", True)
 
+    # 2.7.4 F273.MISSING_PREDECESSOR_FAIL_OPEN: when the deterministic
+    # attempt-0 predecessor record is absent while ANY attempt-1 successor or
+    # invalidation evidence exists, the lineage is orphaned.  The verification
+    # owner must latch exactly one typed attention and perform no adoption, no
+    # successor binding, no store mutation, and no minting.  Only a truly
+    # empty attempt identity space may classify as a fresh run.
+    from harness.store import StoreError
+
+    def orphan_world(case: str) -> SimpleNamespace:
+        world_store = OperationStore(base / f"store-orphan-{case}")
+        world_owner = f"orphan-{case}"
+        world_head = "b" * 40
+        world_input = verification_input_sha256(
+            definition_sha256,
+            world_head,
+            profile.sha256,
+            VERIFICATION_STEP_SCHEMA_VERSION,
+        )
+        world_parent = world_store.create(
+            OperationSpec(
+                world_owner,
+                f"{world_owner}-key",
+                "dispatch",
+                world_owner,
+                route,
+                "packets/task.json",
+                profile.name,
+                contract_sha256=definition_sha256,
+            ),
+            lane_id="parent-lane",
+            run_id="parent-run",
+        )
+        spec0, lane0, run0 = pipeline_verify_identity(
+            world_parent.spec,
+            definition_sha256=definition_sha256,
+            input_sha256=world_input,
+            profile=profile.name,
+            attempt_index=0,
+        )
+        successor_identity = pipeline_verify_identity(
+            world_parent.spec,
+            definition_sha256=definition_sha256,
+            input_sha256=world_input,
+            profile=profile.name,
+            attempt_index=1,
+        )
+        world_runtime = (
+            world_store.root / "owners" / world_owner / "runtime" / world_owner
+        )
+        worker = SimpleNamespace(
+            store=world_store,
+            operation=world_parent,
+            spec={"owner_id": world_owner, "operation_id": world_owner},
+            spec_path=world_runtime / "launch.json",
+            pipeline=SimpleNamespace(definition_sha256=definition_sha256),
+            profile=profile,
+            verification_spec=spec0,
+            verification_lane_id=lane0,
+            verification_run_id=run0,
+            verification_effect_id=pipeline_verify_effect_id(world_input, 0),
+            verification_input_sha256=world_input,
+            verification_attempt=VerificationAttempt(
+                world_owner, profile.name, profile.sha256, world_head, 0
+            ),
+            verification_head=world_head,
+            verification_receipt_path=(
+                world_runtime
+                / "pipeline-verification"
+                / spec0.operation_id
+                / "receipt.json"
+            ),
+            attention_calls=[],
+            bind_calls=[],
+        )
+        worker.product_tree_is_clean = lambda: True
+        worker.summary_attention = (
+            lambda *args, **kwargs: worker.attention_calls.append(args)
+        )
+        worker._bind_verification_attempt = (
+            lambda index: worker.bind_calls.append(index)
+        )
+        worker.invalidated_verification_attempt = (
+            lambda: RuntimeWorkerVerificationMixin.invalidated_verification_attempt(
+                worker
+            )
+        )
+        worker.adopt_invalidated_verification_successor = (
+            lambda: RuntimeWorkerVerificationMixin.adopt_invalidated_verification_successor(
+                worker
+            )
+        )
+        worker.write_immutable_json = (
+            lambda path, value: RuntimeWorkerControlMixin.write_immutable_json(
+                worker, path, value
+            )
+        )
+        return SimpleNamespace(
+            store=world_store,
+            owner=world_owner,
+            head=world_head,
+            input=world_input,
+            spec0=spec0,
+            successor_identity=successor_identity,
+            runtime=world_runtime,
+            invalidation_path=(
+                world_runtime
+                / "pipeline-verification"
+                / spec0.operation_id
+                / "invalidation.json"
+            ),
+            worker=worker,
+        )
+
+    def seed_successor_record(world: SimpleNamespace, target_state: str) -> None:
+        successor_spec, successor_lane, successor_run = world.successor_identity
+        world.store.create(
+            successor_spec, lane_id=successor_lane, run_id=successor_run
+        )
+        if target_state == "created":
+            return
+        for step in ("preflight", "starting", "running", "verifying"):
+            world.store.transition(world.owner, successor_spec.operation_id, step)
+        if target_state == "verifying":
+            return
+        world.store.begin_effect(
+            world.owner,
+            successor_spec.operation_id,
+            pipeline_verify_effect_id(world.input, 1),
+        )
+        world.store.resolve_effect(
+            world.owner, successor_spec.operation_id, EffectOutcome.SUCCEEDED
+        )
+        if target_state == "failed":
+            world.store.transition(
+                world.owner, successor_spec.operation_id, "failed"
+            )
+            return
+        for step in ("finalizing", "exiting", "complete"):
+            world.store.transition(world.owner, successor_spec.operation_id, step)
+
+    def seed_successor_receipt(world: SimpleNamespace) -> None:
+        seed_successor_record(world, "complete")
+        successor_spec = world.successor_identity[0]
+        successor_receipt_file = (
+            world.runtime
+            / "pipeline-verification"
+            / successor_spec.operation_id
+            / "receipt.json"
+        )
+        successor_receipt_file.parent.mkdir(parents=True, exist_ok=True)
+        successor_receipt_file.write_text(
+            json.dumps(
+                {
+                    "schema_version": 2,
+                    "operation_id": successor_spec.operation_id,
+                    "parent_operation_id": world.owner,
+                    "head_sha": world.head,
+                    "status": "complete",
+                },
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    def valid_invalidation_record(world: SimpleNamespace) -> dict[str, object]:
+        successor_spec = world.successor_identity[0]
+        return {
+            "schema_version": 1,
+            "operation_id": world.spec0.operation_id,
+            "parent_operation_id": world.owner,
+            "predecessor_attempt_sha256": VerificationAttempt(
+                world.owner, profile.name, profile.sha256, world.head, 0
+            ).sha256,
+            "predecessor_effect_id": pipeline_verify_effect_id(world.input, 0),
+            "successor_operation_id": successor_spec.operation_id,
+            "successor_attempt_sha256": VerificationAttempt(
+                world.owner, profile.name, profile.sha256, world.head, 1
+            ).sha256,
+            "successor_effect_id": pipeline_verify_effect_id(world.input, 1),
+            "current_head_sha": world.head,
+            "status": "invalidated",
+        }
+
+    def write_invalidation(world: SimpleNamespace, value: dict[str, object]) -> None:
+        world.invalidation_path.parent.mkdir(parents=True, exist_ok=True)
+        world.invalidation_path.write_text(
+            json.dumps(value, sort_keys=True) + "\n", encoding="utf-8"
+        )
+
+    def seed_pending_successor(world: SimpleNamespace) -> None:
+        seed_successor_record(world, "created")
+
+    def seed_verifying_successor(world: SimpleNamespace) -> None:
+        seed_successor_record(world, "verifying")
+
+    def seed_failed_successor(world: SimpleNamespace) -> None:
+        seed_successor_record(world, "failed")
+
+    def seed_complete_successor(world: SimpleNamespace) -> None:
+        seed_successor_record(world, "complete")
+
+    def seed_valid_invalidation(world: SimpleNamespace) -> None:
+        write_invalidation(world, valid_invalidation_record(world))
+
+    def seed_malformed_invalidation(world: SimpleNamespace) -> None:
+        world.invalidation_path.parent.mkdir(parents=True, exist_ok=True)
+        world.invalidation_path.write_text(
+            "{malformed invalidation bytes", encoding="utf-8"
+        )
+
+    def seed_symlinked_invalidation(world: SimpleNamespace) -> None:
+        world.invalidation_path.parent.mkdir(parents=True, exist_ok=True)
+        world.invalidation_path.symlink_to(
+            world.invalidation_path.parent / "missing-invalidation.json"
+        )
+
+    def seed_conflicting_invalidation(world: SimpleNamespace) -> None:
+        seed_successor_record(world, "created")
+        write_invalidation(
+            world,
+            {
+                **valid_invalidation_record(world),
+                "successor_operation_id": "forged-successor",
+            },
+        )
+
+    def seed_drifted_invalidation(world: SimpleNamespace) -> None:
+        seed_successor_record(world, "created")
+        write_invalidation(
+            world,
+            {
+                **valid_invalidation_record(world),
+                "predecessor_attempt_sha256": "0" * 64,
+            },
+        )
+
+    orphan_cases = (
+        ("pending-successor", seed_pending_successor),
+        ("verifying-successor", seed_verifying_successor),
+        ("failed-successor", seed_failed_successor),
+        ("complete-successor", seed_complete_successor),
+        ("receipted-successor", seed_successor_receipt),
+        ("valid-invalidation", seed_valid_invalidation),
+        ("malformed-invalidation", seed_malformed_invalidation),
+        ("symlinked-invalidation", seed_symlinked_invalidation),
+        ("conflicting-invalidation", seed_conflicting_invalidation),
+        ("drifted-invalidation", seed_drifted_invalidation),
+    )
+    for orphan_case, seed_orphan_evidence in orphan_cases:
+        orphan = orphan_world(orphan_case)
+        seed_orphan_evidence(orphan)
+        successor_spec = orphan.successor_identity[0]
+
+        def successor_state() -> object:
+            try:
+                return orphan.store.read(
+                    orphan.owner, successor_spec.operation_id
+                ).state
+            except StoreError:
+                return None
+
+        def invalidation_bytes() -> object:
+            if orphan.invalidation_path.is_symlink():
+                return "symlink"
+            if not orphan.invalidation_path.is_file():
+                return None
+            return orphan.invalidation_path.read_bytes()
+
+        successor_before = successor_state()
+        invalidation_before = invalidation_bytes()
+        adopted = orphan.worker.adopt_invalidated_verification_successor()
+        predecessor_still_absent = False
+        try:
+            orphan.store.read(orphan.owner, orphan.spec0.operation_id)
+        except StoreError:
+            predecessor_still_absent = True
+        check(
+            f"orphaned predecessor ({orphan_case}) latches exactly one typed "
+            "attention with no adoption, no binding, and no mutation",
+            adopted is False
+            and len(orphan.worker.attention_calls) == 1
+            and orphan.worker.bind_calls == []
+            and predecessor_still_absent
+            and successor_state() == successor_before
+            and invalidation_bytes() == invalidation_before,
+        )
+
+    fresh = orphan_world("fresh-empty")
+    check(
+        "a truly empty attempt identity space stays the only fresh-run "
+        "classification",
+        fresh.worker.adopt_invalidated_verification_successor() is True
+        and fresh.worker.attention_calls == []
+        and fresh.worker.bind_calls == [],
+    )
+
 print("verification authority matrix: ok")
