@@ -466,7 +466,7 @@ class RuntimeSessionLaunchMixin:
                 )
         prompt = self._read_prompt(prompt_path)
         driver = self._driver(request.spec.route)
-        argv, deferred_initial_input = initial_provider_argv(
+        argv, _deferred_initial_input = initial_provider_argv(
             driver,
             request,
             callback_path=callback_path,
@@ -628,9 +628,7 @@ class RuntimeSessionLaunchMixin:
                 runtime_home=request.runtime_home,
                 research_request_sha256=request.research_request_sha256,
                 callback_wake=request.callback_wake,
-                initial_input_pointer=(
-                    prompt_path if deferred_initial_input else None
-                ),
+                initial_input_pointer=prompt_path,
             )
         except Exception as exc:
             self._abort_prepared_surface(

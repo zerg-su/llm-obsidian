@@ -15,6 +15,7 @@ import threading
 import time
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 
@@ -92,6 +93,13 @@ from harness.runtime_worker_loop import RuntimeWorkerLoopMixin
 from harness.runtime_worker_execution import RuntimeWorkerExecution
 from harness.store import OperationStore
 from harness.supervisor import OperationSupervisor
+from harness.workflows.research import (
+    ResearchContext,
+    ResearchOperationRequest,
+    ResearchRequest,
+    advance_research,
+    start_research,
+)
 
 
 SURFACE = "11111111-1111-1111-1111-111111111111"
@@ -1595,6 +1603,8 @@ with tempfile.TemporaryDirectory(prefix="research-parent-shebang.") as raw:
     check(
         "parent pins env shebang interpreter for the protected worker",
         launch_value["runtime_interpreter"] == str(node.resolve())
+        and loaded_launch["initial_input_pointer"]
+        == (cwd / "prompt.md").resolve()
         and launch_value["argv"]
         == [str(codex), "--strict-config", "bounded research"]
         and protected_argv
@@ -1723,6 +1733,300 @@ with tempfile.TemporaryDirectory(prefix="research-parent-shebang.") as raw:
     )
 
 
+with tempfile.TemporaryDirectory(prefix="research-one-shot-cleanup.") as raw:
+    root = Path(raw).resolve()
+    fetch_cwd = root / "fetch"
+    synth_cwd = root / "synth"
+    fetch_context = fetch_cwd / "context" / "packet"
+    fetch_context.mkdir(parents=True)
+    synth_cwd.mkdir()
+    query = "bounded one-shot cleanup authority"
+    (fetch_context / "question.bin").write_text(query, encoding="utf-8")
+    (fetch_context / "manifest.json").write_text(
+        '{"schema_version":1}\n', encoding="utf-8"
+    )
+    fetch_prompt = "fetch once through provider argv\n"
+    (fetch_cwd / "fetch-prompt.md").write_text(
+        fetch_prompt, encoding="utf-8"
+    )
+    (synth_cwd / "synth-prompt.md").write_text(
+        "synthesize without another fetch\n", encoding="utf-8"
+    )
+    fetch_home = root / "fetch-home"
+    synth_home = root / "synth-home"
+    fetch_home.mkdir(mode=0o700)
+    synth_home.mkdir(mode=0o700)
+    provider = root / "one-shot-provider.py"
+    provider.write_text("raise SystemExit('provider not prepared')\n", encoding="utf-8")
+
+    class OneShotDriver:
+        def command(
+            self,
+            route: RuntimeRoute,
+            *,
+            resume: str = "",
+            callback_pointer: Path | None = None,
+            product_root: Path | None = None,
+            session_root: Path | None = None,
+        ) -> tuple[str, ...]:
+            del route, resume, callback_pointer, product_root, session_root
+            return (str(Path(sys.executable).resolve()), str(provider))
+
+    class OneShotResearchCmux:
+        def __init__(self) -> None:
+            self.sent: list[tuple[str, str]] = []
+            self.keys: list[tuple[str, str]] = []
+
+        def send(self, surface_id: str, text: str) -> None:
+            self.sent.append((surface_id, text))
+
+        def send_key(self, surface_id: str, key: str) -> None:
+            self.keys.append((surface_id, key))
+
+        def resume_checkpoint(self, _surface_id: str, _runtime: str) -> str:
+            return "research-one-shot"
+
+    class ProvenDeadProcess:
+        @staticmethod
+        def process_status(_process_group: int, _identity: str) -> str:
+            return "dead"
+
+        @staticmethod
+        def pid_status(_pid: int, _identity: str) -> str:
+            return "dead"
+
+    store = OperationStore(root / "store")
+    route = RuntimeRoute(
+        "codex", "gpt-5.6-sol", "high", "research-safe", "f" * 64
+    )
+    launch_process = ParentRecordingProcess()
+    launch_cmux = FakeCmux([])
+    manager = RuntimeSessionManager(
+        store,
+        launch_cmux,
+        launch_process,
+        {"codex": OneShotDriver()},
+        preflight=lambda _route, _callback_dir: CapabilityReport(
+            route, True, ("provider:profile-valid",)
+        ),
+    )
+    research_request = ResearchOperationRequest(
+        policy=ResearchRequest(
+            operation_id="research-one-shot",
+            query_pointer="context/packet/question.bin",
+            context_manifest="context/packet/manifest.json",
+        ),
+        owner_id="owner-research-one-shot",
+        route=route,
+        context=ResearchContext(
+            manifest="context/packet/manifest.json",
+            request_sha256=hashlib.sha256(query.encode()).hexdigest(),
+        ),
+    )
+
+    class OneShotResearchRuntime:
+        def __init__(self) -> None:
+            self.synth_starts: list[RuntimeSessionRequest] = []
+
+        def start(
+            self,
+            session_request: RuntimeSessionRequest,
+            *,
+            on_surface_opened: object = None,
+        ) -> object:
+            del on_surface_opened
+            if session_request.callback_mode == "research-fetch":
+                return manager.start(session_request)
+            self.synth_starts.append(session_request)
+            record = store.create(
+                session_request.spec,
+                lane_id=session_request.lane_id,
+                run_id=session_request.run_id,
+            )
+            supervisor = OperationSupervisor(
+                store, record.spec.owner_id, record.spec.operation_id
+            )
+            for state in ("preflight", "starting", "running", "awaiting-callback"):
+                supervisor.transition(state)
+            return SimpleNamespace(record=supervisor.read(), checkpoint="")
+
+        def request_exit(self, owner_id: str, operation_id: str) -> object:
+            return manager.request_exit(owner_id, operation_id)
+
+        def cleanup(self, owner_id: str, operation_id: str) -> object:
+            return manager.cleanup(owner_id, operation_id)
+
+    runtime = OneShotResearchRuntime()
+    started = start_research(
+        research_request,
+        runtime,
+        store,
+        origin_surface=ORIGIN,
+        fetch_cwd=fetch_cwd,
+        fetch_runtime_home=fetch_home,
+        callback_wake="advance one-shot research",
+    )
+    assert launch_process.launch is not None
+    source = "# Source\n\nOne bounded public source.\n"
+    provider.write_text(
+        "import hashlib,json,pathlib,sys,time\n"
+        "root=pathlib.Path.cwd()\n"
+        f"assert sys.argv[-1] == {fetch_prompt!r}\n"
+        f"source={source!r}\n"
+        "(root/'sources').mkdir()\n"
+        "(root/'sources'/'one.md').write_text(source,encoding='utf-8')\n"
+        f"artifact={{'schema_version':2,'run_id':{started.fetch.run_id!r},"
+        f"'request_sha256':{research_request.context.request_sha256!r},"
+        "'fetched_at':'2026-08-17T00:00:00Z','sources':[{'url':"
+        "'https://example.com/one-shot','title':'One shot','content_path':"
+        "'sources/one.md','content_sha256':hashlib.sha256(source.encode()).hexdigest(),"
+        "'source_class':'official'}],'fetch_errors':[]}\n"
+        "(root/'artifact.json').write_text(json.dumps(artifact,sort_keys=True),"
+        "encoding='utf-8')\n"
+        "(root/'provider-invocations.txt').write_text('argv-once\\n',encoding='utf-8')\n"
+        "time.sleep(0.2)\n",
+        encoding="utf-8",
+    )
+    worker_cmux = OneShotResearchCmux()
+    prepared_fetch = store.read(
+        started.fetch.spec.owner_id, started.fetch.spec.operation_id
+    )
+    store.save(
+        replace(
+            prepared_fetch,
+            state="starting",
+            revision=prepared_fetch.revision + 1,
+            pending_effect="start-provider",
+            effect_outcome=EffectOutcome.PENDING,
+        ),
+        expected_revision=prepared_fetch.revision,
+    )
+    worker_results: list[int] = []
+    worker_failures: list[BaseException] = []
+
+    def run_one_shot_worker() -> None:
+        try:
+            worker_results.append(
+                run_runtime_worker(
+                    launch_process.launch.spec_path,
+                    poll_seconds=0.02,
+                    checkpoint_probe=worker_cmux.resume_checkpoint,
+                    cmux_adapter=worker_cmux,
+                    sleeper=time.sleep,
+                    wake_source=ArtifactWakeSource(
+                        launch_process.launch.spec_path.parent
+                    ),
+                )
+            )
+        except BaseException as exc:  # noqa: BLE001 - surface worker failures
+            worker_failures.append(exc)
+
+    worker_thread = threading.Thread(target=run_one_shot_worker)
+    worker_thread.start()
+    ready_deadline = time.monotonic() + 2
+    while (
+        not launch_process.launch.ready_path.is_file()
+        and time.monotonic() < ready_deadline
+    ):
+        time.sleep(0.01)
+    assert launch_process.launch.ready_path.is_file()
+    ready = json.loads(
+        launch_process.launch.ready_path.read_text(encoding="utf-8")
+    )
+    fetch_supervisor = OperationSupervisor(
+        store,
+        started.fetch.spec.owner_id,
+        started.fetch.spec.operation_id,
+    )
+    fetch_supervisor.bind_resources(
+        OwnedResources(
+            surface_id=SURFACE,
+            process_group=ready["process_group"],
+            supervisor_pid=ready["supervisor_pid"],
+            process_identity=ready["process_identity"],
+            supervisor_identity=ready["supervisor_identity"],
+        )
+    )
+    committed_fetch = fetch_supervisor.read()
+    store.save(
+        replace(
+            committed_fetch,
+            state="awaiting-callback",
+            revision=committed_fetch.revision + 1,
+            pending_effect="",
+            effect_outcome=EffectOutcome.SUCCEEDED,
+        ),
+        expected_revision=committed_fetch.revision,
+    )
+    worker_thread.join(timeout=5)
+    if worker_failures:
+        raise worker_failures[0]
+    assert not worker_thread.is_alive()
+    worker_rc = worker_results[0]
+    post_worker = store.read(
+        started.fetch.spec.owner_id, started.fetch.spec.operation_id
+    )
+    check(
+        "argv one-shot research accepts its real callback",
+        worker_rc == 0
+        and post_worker.state == "finalizing"
+        and post_worker.accepted_callback_kind == "research",
+        (
+            worker_rc,
+            post_worker,
+            json.loads(
+                launch_process.launch.exit_path.read_text(encoding="utf-8")
+            ),
+        ),
+    )
+    manager.process = ProvenDeadProcess()
+    launch_cmux.surface_status = "missing"
+    advanced = advance_research(
+        research_request,
+        runtime,
+        store,
+        origin_surface=ORIGIN,
+        fetch_cwd=fetch_cwd,
+        synth_cwd=synth_cwd,
+        synth_runtime_home=synth_home,
+        callback_wake="finish one-shot research",
+    )
+    generation_root = (
+        launch_process.launch.spec_path.parent
+        / "provider-events"
+        / "generation-1"
+    )
+    provider_events = [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in sorted((generation_root / "events").glob("*.json"))
+    ]
+    accepted_fetch = store.read(
+        started.fetch.spec.owner_id, started.fetch.spec.operation_id
+    )
+    check(
+        "argv one-shot research closes exact resources and starts synthesis",
+        worker_rc == 0
+        and [event["kind"] for event in provider_events]
+        == [
+            "provider-started",
+            "input-accepted",
+            "result-published",
+            "process-exited",
+            "resource-closed",
+        ]
+        and provider_events[2]["result_sha256"]
+        == accepted_fetch.accepted_callback_sha256
+        and accepted_fetch.state == "complete"
+        and accepted_fetch.resources == OwnedResources()
+        and advanced.stage == "synth"
+        and advanced.synth is not None
+        and len(runtime.synth_starts) == 1
+        and (fetch_cwd / "provider-invocations.txt").read_text(encoding="utf-8")
+        == "argv-once\n"
+        and worker_cmux.sent == [(ORIGIN, "advance one-shot research")]
+        and worker_cmux.keys == [(ORIGIN, "Enter")],
+        (worker_rc, provider_events, accepted_fetch, advanced, worker_cmux.sent),
+    )
 with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
     root = Path(raw)
     cwd = root / "worktree"

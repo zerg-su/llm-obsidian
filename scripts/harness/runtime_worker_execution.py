@@ -269,6 +269,18 @@ class RuntimeWorkerExecution(
             raw_input = initial_input.read_bytes()
             if not raw_input or len(raw_input) > MAX_PROMPT_BYTES:
                 raise RuntimeWorkerError("initial provider input is invalid")
+            if self.spec["callback_mode"] in {"research-fetch", "research-synth"}:
+                stream = self._create_provider_stream(
+                    generation=self.initial_generation,
+                    input_sha256=hashlib.sha256(raw_input).hexdigest(),
+                )
+                stream.start()
+                if stream.reserve_input().action != "send":
+                    raise RuntimeWorkerError(
+                        "initial provider input was not durably reserved"
+                    )
+                stream.accept_input()
+                return True
             input_text = raw_input.decode("utf-8")
             delivery_text = interactive_provider_input(
                 self.spec["runtime"], initial_input, input_text
