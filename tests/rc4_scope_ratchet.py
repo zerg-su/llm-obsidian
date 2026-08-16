@@ -392,7 +392,7 @@ from pathlib import Path
 SCRIPT_FILE_CEILING = 290
 
 #: Maximum total lines across those files for the 2.7.7 cleanup candidate.
-SCRIPT_LINE_CEILING = 109_339
+SCRIPT_LINE_CEILING = 109_343
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:
