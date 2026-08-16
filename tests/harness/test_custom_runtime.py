@@ -155,7 +155,15 @@ with tempfile.TemporaryDirectory(prefix="custom-runtime.") as raw:
     subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=worktree, check=True)
     subprocess.run(["git", "config", "user.name", "Custom Runtime"], cwd=worktree, check=True)
     (worktree / "product.txt").write_text("ready\n", encoding="utf-8")
-    subprocess.run(["git", "add", "product.txt"], cwd=worktree, check=True)
+    # Runtime transport is repository-ignored exactly as in the product
+    # checkout (`.git/info/exclude` there), so cleanliness observation sees
+    # only real product dirt.
+    (worktree / ".gitignore").write_text(
+        ".task-*\n..task-*\n.provider-*\n.atomic-*\n"
+        ".null-change-retry\n.review-*\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", "product.txt", ".gitignore"], cwd=worktree, check=True)
     subprocess.run(["git", "commit", "-m", "fixture"], cwd=worktree, check=True, capture_output=True)
     head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=worktree, text=True, capture_output=True, check=True).stdout.strip()
     plan = vault / "wiki" / "plans" / "approved.md"

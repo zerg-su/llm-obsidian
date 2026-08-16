@@ -16,6 +16,7 @@ from .runtime_worker import (
     _current_callback_receipt_sha256,
     _envelope,
     _normalize_fetch_errors_at_provider_boundary,
+    _pipeline_verify_identity,
     _research_input_provenance,
     _review_resolution_handoff_ready,
     _submit_failure_requires_attention,
@@ -28,6 +29,108 @@ from .verification import (
     VerificationAuthorityError,
 )
 from .verification_attempt import MAX_SAME_HEAD_ATTEMPT_INDEX
+
+
+def _verification_candidate_is_current(cwd: Path, expected_head_sha: str) -> bool:
+    """Re-observe the exact current HEAD and full tree cleanliness.
+
+    Verification authority is consumed (controller linking, summary
+    acceptance, review drive) only against a fresh observation: the exact
+    expected HEAD with zero tracked or untracked dirt.  An unavailable
+    observation is never currency.
+    """
+
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=cwd,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if head.returncode or head.stdout.strip() != expected_head_sha:
+        return False
+    status = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=cwd,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return status.returncode == 0 and not status.stdout.strip()
+
+
+def _review_resolution_drift_in_flight(worker: object) -> bool:
+    """One durable review-resolution notification owns candidate drift.
+
+    While the executor resolves review findings, the resolved commit and its
+    interim tree legitimately move past the receipted HEAD; that drift is
+    owned end-to-end by the existing resolution machinery
+    (`_resolved_head_verification_ready` and the summary refresh path), so
+    the stale-authority consumers must not latch attention over it.
+    """
+
+    notify_path = (
+        worker.spec_path.parent / "pipeline-review-resolution-notify.json"
+    )
+    if notify_path.is_symlink() or not notify_path.is_file():
+        return False
+    try:
+        notified = json.loads(notify_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return isinstance(notified, dict) and bool(
+        re.fullmatch(
+            "[0-9a-f]{40,64}", str(notified.get("reviewed_head_sha") or "")
+        )
+    )
+
+
+def _orphaned_predecessor_lineage(worker: object) -> bool:
+    """Read-only census of one bounded attempt lineage.
+
+    A missing bound-attempt record classifies as a fresh run only when the
+    entire deterministic identity space is empty: no successor record and no
+    receipt, response, or invalidation trace for either bounded identity.
+    Any surviving trace proves the predecessor record was lost rather than
+    never created, so the lineage is orphaned and must stay typed attention
+    instead of minting a replacement attempt.
+    """
+
+    try:
+        worker.store.read(
+            worker.spec["owner_id"], worker.verification_spec.operation_id
+        )
+    except StoreError:
+        pass
+    else:
+        return False
+    verification_root = worker.spec_path.parent / "pipeline-verification"
+    evidence_roots = [verification_root / worker.verification_spec.operation_id]
+    attempt_index = worker.verification_attempt.attempt_index
+    if attempt_index < MAX_SAME_HEAD_ATTEMPT_INDEX:
+        successor_spec, _successor_lane, _successor_run = _pipeline_verify_identity(
+            worker.operation.spec,
+            definition_sha256=worker.pipeline.definition_sha256,
+            input_sha256=worker.verification_input_sha256,
+            profile=worker.profile.name,
+            attempt_index=attempt_index + 1,
+        )
+        try:
+            worker.store.read(worker.spec["owner_id"], successor_spec.operation_id)
+        except StoreError:
+            pass
+        else:
+            return True
+        evidence_roots.append(verification_root / successor_spec.operation_id)
+    return any(
+        trace.is_symlink() or trace.exists()
+        for evidence_root in evidence_roots
+        for trace in (
+            evidence_root / "invalidation.json",
+            evidence_root / "receipt.json",
+            evidence_root / "response-receipt.json",
+        )
+    )
 
 
 class RuntimeWorkerVerificationMixin:
@@ -150,7 +253,13 @@ class RuntimeWorkerVerificationMixin:
             )
         if current_receipts:
             recovered = current_receipts[0]
-            if recovered != linked:
+            if recovered != linked and (
+                recovered["status"] == "failed"
+                or _verification_candidate_is_current(
+                    self.spec["cwd"], str(recovered["head_sha"])
+                )
+                or _review_resolution_drift_in_flight(self)
+            ):
                 self.link_verification_receipt(recovered)
             return recovered
         return linked
@@ -903,7 +1012,13 @@ class RuntimeWorkerVerificationMixin:
 
         stale = self.invalidated_verification_attempt()
         if stale is None:
-            return True
+            if not _orphaned_predecessor_lineage(self):
+                return True
+            self.summary_attention(
+                "pipeline-verification-orphaned-lineage",
+                AttentionReason.ATTENTION_REQUIRED,
+            )
+            return False
         if not self.product_tree_is_clean():
             self.summary_attention(
                 "pipeline-verification-dirty-tree",
@@ -983,6 +1098,7 @@ class RuntimeWorkerVerificationMixin:
         if pending and pending != self.verification_effect_id:
             self.summary_attention("pipeline-verification-effect-uncertain")
             return
+        ran_effect = False
         resume_pending = bool(pending) and existing is None
         if pending and existing is not None:
             self.store.resolve_effect(
@@ -1068,7 +1184,13 @@ class RuntimeWorkerVerificationMixin:
                 persisted = json.loads(
                     self.verification_receipt_path.read_text(encoding="utf-8")
                 )
-                self.link_verification_receipt(persisted)
+                # The receipt stays immutable evidence for its own exact
+                # HEAD; it becomes linked authority only for the exact clean
+                # current candidate.
+                if _verification_candidate_is_current(
+                    self.spec["cwd"], str(persisted["head_sha"])
+                ) or _review_resolution_drift_in_flight(self):
+                    self.link_verification_receipt(persisted)
 
             supervisor.effect(
                 self.verification_effect_id,
@@ -1076,6 +1198,7 @@ class RuntimeWorkerVerificationMixin:
                 persist_result=persist_verification,
                 resume_pending=resume_pending,
             )
+            ran_effect = True
             existing = self.verification_receipt()
         if existing is None:
             raise RuntimeWorkerError("pipeline verification produced no receipt")
@@ -1094,3 +1217,17 @@ class RuntimeWorkerVerificationMixin:
             supervisor.transition("finalizing")
             supervisor.transition("exiting")
             supervisor.transition("complete")
+        if (
+            ran_effect
+            and not _verification_candidate_is_current(
+                self.spec["cwd"], str(existing["head_sha"])
+            )
+            and not _review_resolution_drift_in_flight(self)
+        ):
+            # A clean commit or dirt landed after the in-effect observation:
+            # the receipt survives as immutable evidence for its own HEAD but
+            # is never consumed as current authority.
+            self.summary_attention(
+                "pipeline-verification-stale-authority",
+                AttentionReason.CONTRACT_DRIFT,
+            )

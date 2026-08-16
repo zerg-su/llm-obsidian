@@ -15,6 +15,10 @@ from .runtime_worker import (
     _review_resolution_handoff_ready,
 )
 from . import runtime_callback_io
+from .runtime_worker_verification import (
+    _review_resolution_drift_in_flight,
+    _verification_candidate_is_current,
+)
 from .review_continuation_recovery import (
     RecoveryDecision,
     RecoveryDisposition,
@@ -419,6 +423,11 @@ class RuntimeWorkerReviewBridgeMixin:
             # the changed-HEAD launch until the summary pipeline binds it,
             # never launching unverified.
             return False
+        return self._current_head_verification_ready(current_head)
+
+    def _current_head_verification_ready(self, current_head: str) -> bool:
+        """Drive the code-owned verification/rebind path for one exact HEAD."""
+
         if self.verification_head != current_head:
             self.verification_head = current_head
             self._bind_verification_attempt(0)
@@ -436,6 +445,47 @@ class RuntimeWorkerReviewBridgeMixin:
             and isinstance(evidence[0], dict)
             and evidence[0].get("head_sha") == current_head
         )
+
+    def _review_drive_candidate_is_current(self) -> bool:
+        """Reject current-HEAD drift or dirt immediately before review launch.
+
+        Stale verification authority stays immutable evidence for its own
+        HEAD: a launch after a clean commit or over a dirty tree re-enters
+        the existing code-owned verification/rebind path instead of
+        releasing a provider effect on it.
+        """
+
+        bound_head = getattr(self, "verification_head", None)
+        if getattr(self, "profile", None) is None or not bound_head:
+            # Without a bound verification contract there is no receipt whose
+            # currency could drift; the existing gates own that launch.
+            return True
+        if not any(
+            step.primitive_id == "verify"
+            for step in self.pipeline.definition.steps
+        ):
+            return True
+        if _verification_candidate_is_current(self.spec["cwd"], bound_head):
+            return True
+        if _review_resolution_drift_in_flight(self):
+            # A durable review resolution owns this drift; the resolved-head
+            # gate above already bound the launch to its exact-HEAD receipt.
+            return True
+        head_result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=self.spec["cwd"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        current_head = head_result.stdout.strip()
+        if head_result.returncode or not re.fullmatch(
+            "[0-9a-f]{40,64}", current_head
+        ):
+            raise RuntimeWorkerError("pipeline product HEAD is unavailable")
+        if not self._current_head_verification_ready(current_head):
+            return False
+        return _verification_candidate_is_current(self.spec["cwd"], current_head)
 
     def _review_continuation_snapshot(self) -> RecoverySnapshot:
         return observe_review_continuation(self)
@@ -534,6 +584,8 @@ class RuntimeWorkerReviewBridgeMixin:
 
     def drive_review(self) -> bool:
         if not self._resolved_head_verification_ready():
+            return False
+        if not self._review_drive_candidate_is_current():
             return False
         input_sha256 = self.review_drive_sha256()
         _atomic_json(

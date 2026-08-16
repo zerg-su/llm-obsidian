@@ -24,6 +24,10 @@ from .artifact_repair import (
     CorrectionNotificationUncertain,
 )
 from .contracts import CanonicalContractTemplate, ContractFamily
+from .runtime_worker_verification import (
+    _review_resolution_drift_in_flight,
+    _verification_candidate_is_current,
+)
 from .verification_attempt import verification_input_sha256
 from .fresh_artifact_repair import (
     FreshArtifactRepair,
@@ -414,6 +418,16 @@ class RuntimeWorkerSummaryMixin:
             ):
                 self.summary_attention(
                     "pipeline-verification-head-drift",
+                    AttentionReason.CONTRACT_DRIFT,
+                )
+                return None, True
+            if not _verification_candidate_is_current(
+                self.spec["cwd"], str(existing["head_sha"])
+            ) and not _review_resolution_drift_in_flight(self):
+                # The receipt stays immutable evidence for its own exact
+                # HEAD; a moved or dirty candidate can never consume it.
+                self.summary_attention(
+                    "pipeline-verification-stale-authority",
                     AttentionReason.CONTRACT_DRIFT,
                 )
                 return None, True

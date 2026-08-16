@@ -676,7 +676,15 @@ def build_corridor_world(
     git(worktree, "config", "user.email", "corridor@example.invalid")
     git(worktree, "config", "user.name", "Corridor World")
     (worktree / "product.txt").write_text("ready\n", encoding="utf-8")
-    git(worktree, "add", "product.txt")
+    # Runtime transport is repository-ignored exactly as in the product
+    # checkout (`.git/info/exclude` there), so cleanliness observation sees
+    # only real product dirt.
+    (worktree / ".gitignore").write_text(
+        ".task-*\n..task-*\n.provider-*\n.atomic-*\n"
+        ".null-change-retry\n.review-*\n",
+        encoding="utf-8",
+    )
+    git(worktree, "add", "product.txt", ".gitignore")
     git(worktree, "commit", "-m", "ready")
 
     plan = vault / "wiki" / "plans" / "approved.md"
