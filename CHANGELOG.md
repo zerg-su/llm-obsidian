@@ -10,6 +10,38 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.7.8] - 2026-08-17
+
+Bounded stability candidate; not tagged, published, installed, or live-tested.
+It closes the two follow-ups exposed by the 2.7.7 protected-research and
+custom-pipeline runs without adding a lifecycle owner or replay path.
+
+### Fixed
+
+- Argv-delivered one-shot protected research now records input acceptance and
+  the accepted result on the existing provider-event stream. The exact prompt
+  pointer remains digest authority, cleanup reaches `resource-closed`, and
+  synthesis starts without a second prompt, provider send, or network fetch.
+- Executor `mechanism-failure` escalation is suppressed only when the frozen
+  custom pipeline proves the exact predecessor callback was accepted, its
+  child is complete and resource-free with no pending effect or callback
+  outbox, and the exact legal successor request and child already exist. Every
+  missing, malformed, stale, foreign, or ambiguous fact keeps the ordinary
+  fail-closed escalation path.
+
+### Governance
+
+- The target repository's unchanged 27-file active-authority contour remains
+  exactly 15,603 lines with zero writable authorities and zero incident
+  literals. The previously diagnosed 15,663 contour belongs to the separate
+  `llm-obsidian-swarm` integration commit `71f0b27c`; its 60-line liveness
+  repair is absent from target base `379e772c` and is neither ported nor used
+  as target headroom.
+- `runtime_session_launch.py` is 1,155 lines, within its existing 1,157-line
+  hotspot ceiling. The live scripts ratchet moves by the exact measured
+  300-line implementation cost to 290 files / 109,643 lines with no
+  speculative headroom.
+
 ## [2.7.7] - 2026-08-16
 
 Stability release for long-running built-in and custom Harness pipelines. It

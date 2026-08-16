@@ -16,6 +16,39 @@
 внутренними контрольными точками и вошли в следующие публичные релизы; тегов и
 пакетов с этими номерами не выпускалось.
 
+## [2.7.8] — 2026-08-17
+
+Ограниченный stability-кандидат; без тега, публикации, установки и
+live-проверки. Он закрывает два follow-up, обнаруженных запусками protected
+research и custom pipeline в 2.7.7, не добавляя нового владельца lifecycle или
+пути replay.
+
+### Исправлено
+
+- One-shot protected research с prompt в argv теперь фиксирует принятие input
+  и принятого результата в существующем provider-event stream. Точный prompt
+  pointer остаётся digest-authority, cleanup доходит до `resource-closed`, а
+  synthesis запускается без второго prompt, provider-send или сетевого fetch.
+- Executor-эскалация `mechanism-failure` подавляется только когда замороженный
+  custom pipeline доказывает принятие точного callback предшественника, его
+  complete и resource-free child без pending effect и callback outbox, а также
+  наличие точного допустимого successor request и child. Любой отсутствующий,
+  malformed, stale, foreign или неоднозначный факт сохраняет обычный
+  fail-closed путь эскалации.
+
+### Управление
+
+- Неизменный target-контур active authority из 27 файлов остаётся ровно
+  15 603 строки, без writable authorities и incident literals. Ранее
+  диагностированный контур 15 663 относится только к отдельному integration
+  commit `71f0b27c` репозитория `llm-obsidian-swarm`: его 60-строчный liveness
+  repair отсутствует в target base `379e772c`, не переносится и не создаёт
+  запас для target.
+- `runtime_session_launch.py` занимает 1 155 строк при существующем потолке
+  hotspot 1 157. Live scripts ratchet сдвигается на точно измеренную стоимость
+  реализации в 300 строк к 290 файлам / 109 643 строкам без спекулятивного
+  запаса.
+
 ## [2.7.7] — 2026-08-16
 
 Ограниченный кандидат actual-provider-generation cleanup; без тега,
