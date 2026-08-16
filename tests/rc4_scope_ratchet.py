@@ -381,6 +381,13 @@ The 2.7.7 provider-generation closure binds ready ownership and cleanup to the
 exact provider generation admitted at start. No production module is added;
 the ceiling moves by the measured 59-line production cost to the exact
 290-file / 109,339-line candidate with no speculative headroom.
+
+The 2.7.8 bounded stability patch restores argv-delivered one-shot research
+event authority and adds an identity-exact stale custom-escalation proof at the
+existing ingress. The behavior-preserving proof split keeps every new function
+below the hard branch limit. No production module is added; the ceiling moves
+by the exact measured 300-line cost to the 290-file / 109,643-line candidate
+with no speculative headroom.
 """
 
 from __future__ import annotations
@@ -388,11 +395,11 @@ from __future__ import annotations
 from pathlib import Path
 
 
-#: Maximum tracked Python files under ``scripts/`` for the 2.7.7 candidate.
+#: Maximum tracked Python files under ``scripts/`` for the 2.7.8 candidate.
 SCRIPT_FILE_CEILING = 290
 
-#: Maximum total lines across those files for the 2.7.7 cleanup candidate.
-SCRIPT_LINE_CEILING = 109_343
+#: Maximum total lines across those files for the 2.7.8 stability candidate.
+SCRIPT_LINE_CEILING = 109_643
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:
@@ -411,13 +418,13 @@ def assert_within_ceilings(scripts_dir: Path) -> tuple[int, int]:
     files, lines = measure(scripts_dir)
     if files > SCRIPT_FILE_CEILING:
         raise AssertionError(
-            f"scripts/ holds {files} Python files, above the 2.7.7 ceiling "
+            f"scripts/ holds {files} Python files, above the 2.7.8 ceiling "
             f"{SCRIPT_FILE_CEILING}; justify and raise the ceiling in the same "
             "commit as the growth"
         )
     if lines > SCRIPT_LINE_CEILING:
         raise AssertionError(
-            f"scripts/ holds {lines} lines, above the 2.7.7 ceiling "
+            f"scripts/ holds {lines} lines, above the 2.7.8 ceiling "
             f"{SCRIPT_LINE_CEILING}; justify and raise the ceiling in the same "
             "commit as the growth"
         )
