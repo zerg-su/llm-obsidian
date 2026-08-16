@@ -3483,7 +3483,29 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
     process.status_value = "alive"
     process.supervisor_status_value = "alive"
 
+    def write_cleanup_ready(
+        cleanup_manager: RuntimeSessionManager,
+        cleanup_record: object,
+        *,
+        provider_generation: int = 1,
+    ) -> None:
+        resources = cleanup_record.resources
+        cleanup_manager._write_json(
+            cleanup_manager._state_root(cleanup_record) / "ready.json",
+            {
+                "schema_version": 1,
+                "status": "ready",
+                "pid": resources.process_group,
+                "process_group": resources.process_group,
+                "supervisor_pid": resources.supervisor_pid,
+                "process_identity": resources.process_identity,
+                "supervisor_identity": resources.supervisor_identity,
+                "provider_generation": provider_generation,
+            },
+        )
+
     terminal_record = store.read("owner-1", "runtime-1")
+    write_cleanup_ready(manager, terminal_record)
     terminal_stream = RuntimeProviderEventStream.create(
         manager._state_root(terminal_record) / "provider-events",
         owner_id="owner-1",
@@ -3651,6 +3673,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         )
     )
     workspace_record = workspace_store.read("owner-1", "runtime-workspace")
+    write_cleanup_ready(workspace_manager, workspace_record)
     workspace_stream = RuntimeProviderEventStream.create(
         workspace_manager._state_root(workspace_record) / "provider-events",
         owner_id="owner-1",
@@ -3736,6 +3759,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
             workspace_surface_sha,
         )
     )
+    write_cleanup_ready(workspace_manager, workspace_surface_started.record)
     workspace_surface_stream = RuntimeProviderEventStream.create(
         workspace_manager._state_root(workspace_surface_started.record)
         / "provider-events",
@@ -5529,6 +5553,7 @@ def _initial_start_worker(
     before_join: Callable[[SurfaceLaunch], None] | None = None,
     workspace_id: str = WORKSPACE,
     inject_wake_source: bool = True,
+    callback_generation: int = 1,
 ) -> tuple[int | None, SurfaceLaunch, OperationStore, Path]:
     product_root = root / f"{name}-product"
     product_root.mkdir()
@@ -5597,6 +5622,14 @@ def _initial_start_worker(
         runtime="claude",
         initial_input_pointer=prompt_path,
     )
+    if callback_generation != 1:
+        callback_target_path = launch.spec_path.parent / "callback-target.json"
+        callback_target = json.loads(
+            callback_target_path.read_text(encoding="utf-8")
+        )
+        assert callback_target["generation"] == 1
+        callback_target["generation"] = callback_generation
+        ProcessAdapter._write_json(callback_target_path, callback_target)
     ProcessAdapter._write_json(
         launch.spec_path.parent / "session.json",
         {
@@ -5649,14 +5682,20 @@ def _initial_start_worker(
     return (outcome[0] if outcome else None), launch, store, callback
 
 
-def _initial_start_delivery(launch: SurfaceLaunch) -> tuple[list[str], dict]:
-    generation = launch.spec_path.parent / "provider-events" / "generation-1"
+def _initial_start_delivery(
+    launch: SurfaceLaunch, *, generation: int = 1
+) -> tuple[list[str], dict]:
+    generation_root = (
+        launch.spec_path.parent
+        / "provider-events"
+        / f"generation-{generation}"
+    )
     kinds = [
         json.loads(path.read_text(encoding="utf-8"))["kind"]
-        for path in sorted((generation / "events").glob("*.json"))
+        for path in sorted((generation_root / "events").glob("*.json"))
     ]
     state = json.loads(
-        (generation / "delivery" / "delivery-state.json").read_text(
+        (generation_root / "delivery" / "delivery-state.json").read_text(
             encoding="utf-8"
         )
     )
@@ -5729,6 +5768,37 @@ def check_worker_accepts_acknowledged_initial_start() -> None:
             "an acknowledged initial start sends exactly one prompt and Enter",
             len(cmux.sent) == 1 and cmux.submit_count == 1 and code == 0,
             (cmux.sent, cmux.submit_count, code),
+        )
+
+
+def check_worker_ready_binds_retargeted_initial_provider_generation() -> None:
+    """The ready owner is the callback generation read before provider start."""
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        cmux = InitialStartWorkerCmux(
+            [STUCK_CLAUDE_SCREEN, ACTIVE_CLAUDE_SCREEN]
+        )
+        code, launch, _store, _callback = _initial_start_worker(
+            root,
+            "retargeted-initial-generation",
+            cmux,
+            route_profile="reviewer-callback",
+            callback_generation=2,
+        )
+        ready = json.loads(launch.ready_path.read_text(encoding="utf-8"))
+        kinds, delivery = _initial_start_delivery(launch, generation=2)
+        generation_one = (
+            launch.spec_path.parent / "provider-events" / "generation-1"
+        )
+        check(
+            "review startup binds ready ownership to retargeted generation 2",
+            code == 0
+            and ready["provider_generation"] == 2
+            and not generation_one.exists()
+            and kinds[:2] == ["provider-started", "input-accepted"]
+            and delivery["send_status"] == "accepted",
+            (code, ready, generation_one.exists(), kinds, delivery),
         )
 
 
@@ -6216,6 +6286,7 @@ _INITIAL_START_FIXTURES = (
     check_initial_start_observes_within_budget,
     check_worker_contains_unconfirmed_initial_start,
     check_worker_accepts_acknowledged_initial_start,
+    check_worker_ready_binds_retargeted_initial_provider_generation,
     check_worker_degrades_invalid_optional_wake_identity,
     check_worker_handshakes_before_semantic_initial_ack,
     check_worker_recovers_one_swallowed_initial_enter,

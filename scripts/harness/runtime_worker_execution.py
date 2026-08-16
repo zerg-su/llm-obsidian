@@ -283,7 +283,7 @@ class RuntimeWorkerExecution(
                     "initial provider editor did not become ready"
                 )
             stream = self._create_provider_stream(
-                generation=self._initial_generation(),
+                generation=self.initial_generation,
                 input_sha256=hashlib.sha256(delivery_bytes).hexdigest(),
             )
             stream.start()
@@ -557,6 +557,7 @@ class RuntimeWorkerExecution(
                 "supervisor_pid": os.getpid(),
                 "process_identity": self.handle.process_identity,
                 "supervisor_identity": self.supervisor_identity,
+                "provider_generation": self.initial_generation,
             },
         )
         start_committed = (

@@ -377,11 +377,10 @@ Its Sol implementation review findings were applied in one bounded patch:
 the flow now consumes the durable receipt named by the admission through the
 real VerificationAuthority ingress and requires the admission for
 verify-owning dispatch contracts (F275.RECEIPT_ADMISSION_NOT_CONSUMED), and
-The 2.7.6 provider-start closure moves the exact admission into the real
-runtime start-effect owner and distinguishes unresolved nonempty contracts
-from recordless, legacy-empty, and resolved no-verify outcomes. No production
-module is added; the ceiling moves by the measured 17-line production cost to
-the exact 290-file / 109,280-line candidate with no speculative headroom.
+The 2.7.7 provider-generation closure binds ready ownership and cleanup to the
+exact provider generation admitted at start. No production module is added;
+the ceiling moves by the measured 59-line production cost to the exact
+290-file / 109,339-line candidate with no speculative headroom.
 """
 
 from __future__ import annotations
@@ -389,11 +388,11 @@ from __future__ import annotations
 from pathlib import Path
 
 
-#: Maximum tracked Python files under ``scripts/`` for the 2.7.6 candidate.
+#: Maximum tracked Python files under ``scripts/`` for the 2.7.7 candidate.
 SCRIPT_FILE_CEILING = 290
 
-#: Maximum total lines across those files for the 2.7.6 admission candidate.
-SCRIPT_LINE_CEILING = 109_280
+#: Maximum total lines across those files for the 2.7.7 cleanup candidate.
+SCRIPT_LINE_CEILING = 109_339
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:
@@ -412,13 +411,13 @@ def assert_within_ceilings(scripts_dir: Path) -> tuple[int, int]:
     files, lines = measure(scripts_dir)
     if files > SCRIPT_FILE_CEILING:
         raise AssertionError(
-            f"scripts/ holds {files} Python files, above the 2.7.6 ceiling "
+            f"scripts/ holds {files} Python files, above the 2.7.7 ceiling "
             f"{SCRIPT_FILE_CEILING}; justify and raise the ceiling in the same "
             "commit as the growth"
         )
     if lines > SCRIPT_LINE_CEILING:
         raise AssertionError(
-            f"scripts/ holds {lines} lines, above the 2.7.6 ceiling "
+            f"scripts/ holds {lines} lines, above the 2.7.7 ceiling "
             f"{SCRIPT_LINE_CEILING}; justify and raise the ceiling in the same "
             "commit as the growth"
         )

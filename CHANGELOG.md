@@ -10,6 +10,27 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.7.7] - 2026-08-16
+
+Bounded actual-provider-generation cleanup candidate; not tagged, published,
+installed, or live-accepted. Builds only on the preserved 2.7.6 candidate.
+
+### Fixed
+
+- Successful initial and replacement ready handshakes now carry the positive
+  provider generation read before that exact provider process starts. Cleanup
+  validates the complete ready/process/supervisor identity and closes only the
+  named generation, so a reviewer retargeted from placeholder generation 1 to
+  generation 2 before initial input can finalize with only generation-2
+  provider events. Missing, malformed, symlinked, stale, identity-drifted, or
+  attention-latched authority remains fail-closed without a fabricated close
+  receipt.
+
+### Governance
+
+- The live scripts scope ratchet moves by the exact measured 59-line
+  production cost to 290 files / 109,339 lines with no speculative headroom.
+
 ## [2.7.6] - 2026-08-16
 
 Bounded provider-start-admission candidate; not tagged, published, installed,

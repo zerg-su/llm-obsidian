@@ -16,6 +16,28 @@
 внутренними контрольными точками и вошли в следующие публичные релизы; тегов и
 пакетов с этими номерами не выпускалось.
 
+## [2.7.7] — 2026-08-16
+
+Ограниченный кандидат actual-provider-generation cleanup; без тега,
+публикации, установки и live-приёмки. Строится только на сохранённом
+кандидате 2.7.6.
+
+### Исправлено
+
+- Успешные initial и replacement ready-handshake теперь несут положительное
+  поколение provider, прочитанное до запуска соответствующего точного
+  provider-процесса. Cleanup проверяет полную identity ready/process/supervisor
+  и закрывает только названное поколение, поэтому reviewer, перенаправленный с
+  placeholder generation 1 на generation 2 до initial input, финализируется,
+  даже если существуют только provider events поколения 2. Отсутствующая,
+  malformed, symlinked, stale, identity-drifted или attention-latched authority
+  остаётся fail-closed без сфабрикованного close receipt.
+
+### Управление
+
+- Live scripts scope ratchet сдвигается на точно измеренную production-цену в
+  59 строк к 290 файлам / 109 339 строкам без запаса.
+
 ## [2.7.6] — 2026-08-16
 
 Ограниченный кандидат provider-start-admission; без тега, публикации,

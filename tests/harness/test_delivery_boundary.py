@@ -570,6 +570,7 @@ with tempfile.TemporaryDirectory(prefix="delivery-boundary.") as raw:
         case: str,
         *,
         target_generation: int,
+        provider_generation: int = 1,
     ) -> tuple[
         RuntimeSessionManager,
         OperationSupervisor,
@@ -631,6 +632,19 @@ with tempfile.TemporaryDirectory(prefix="delivery-boundary.") as raw:
                 "callback_pointer": f"callbacks/{case}.json",
             },
         )
+        case_manager._write_json(
+            case_manager._state_root(case_record) / "ready.json",
+            {
+                "schema_version": 1,
+                "status": "ready",
+                "pid": 223,
+                "process_group": 223,
+                "supervisor_pid": 224,
+                "process_identity": "a" * 64,
+                "supervisor_identity": "b" * 64,
+                "provider_generation": provider_generation,
+            },
+        )
         return case_manager, case_supervisor, case_spec
 
     def accepted_case_callback(
@@ -684,6 +698,106 @@ with tempfile.TemporaryDirectory(prefix="delivery-boundary.") as raw:
         assert stream.reserve_input().action == "send"
         assert stream.accept_input().action == "wait"
         return stream
+
+    for invalid_case, invalid_generation in (
+        ("missing-ready-generation", None),
+        ("invalid-ready-generation", "1"),
+    ):
+        invalid_manager, invalid_supervisor, invalid_spec = (
+            prepare_modern_cleanup_case(
+                invalid_case,
+                target_generation=1,
+            )
+        )
+        invalid_sha256 = accepted_case_callback(
+            invalid_manager,
+            invalid_spec,
+            invalid_case,
+        )
+        invalid_stream = case_stream(
+            invalid_manager,
+            invalid_spec,
+            invalid_case,
+            generation=1,
+        )
+        assert invalid_stream.result(invalid_sha256).action == "close"
+        invalid_ready_path = (
+            invalid_manager._state_root(invalid_supervisor.read()) / "ready.json"
+        )
+        invalid_ready = json.loads(invalid_ready_path.read_text(encoding="utf-8"))
+        if invalid_generation is None:
+            invalid_ready.pop("provider_generation")
+        else:
+            invalid_ready["provider_generation"] = invalid_generation
+        invalid_manager._write_json(invalid_ready_path, invalid_ready)
+        invalid_manager.request_exit(
+            invalid_spec.owner_id,
+            invalid_spec.operation_id,
+        )
+        assert invalid_stream.process_exited(0).action == "close"
+        invalid_cleanup = invalid_manager.cleanup(
+            invalid_spec.owner_id,
+            invalid_spec.operation_id,
+        )
+        invalid_receipt = (
+            invalid_manager._state_root(invalid_cleanup.record)
+            / "provider-events"
+            / "resource-closed.json"
+        )
+        check(
+            f"{invalid_case} fails closed without close authority",
+            invalid_cleanup.record.state == "attention-required"
+            and invalid_cleanup.record.resources.surface_id
+            == f"{invalid_case}-surface"
+            and not invalid_receipt.exists(),
+        )
+
+    ready_drift_manager, ready_drift_supervisor, ready_drift_spec = (
+        prepare_modern_cleanup_case(
+            "ready-identity-drift",
+            target_generation=1,
+        )
+    )
+    ready_drift_sha256 = accepted_case_callback(
+        ready_drift_manager,
+        ready_drift_spec,
+        "ready-identity-drift",
+    )
+    ready_drift_stream = case_stream(
+        ready_drift_manager,
+        ready_drift_spec,
+        "ready-identity-drift",
+        generation=1,
+    )
+    assert ready_drift_stream.result(ready_drift_sha256).action == "close"
+    ready_drift_path = (
+        ready_drift_manager._state_root(ready_drift_supervisor.read())
+        / "ready.json"
+    )
+    ready_drift = json.loads(ready_drift_path.read_text(encoding="utf-8"))
+    ready_drift["process_identity"] = "d" * 64
+    ready_drift_manager._write_json(ready_drift_path, ready_drift)
+    ready_drift_manager.request_exit(
+        ready_drift_spec.owner_id,
+        ready_drift_spec.operation_id,
+    )
+    assert ready_drift_stream.process_exited(0).action == "close"
+    ready_drift_cleanup = ready_drift_manager.cleanup(
+        ready_drift_spec.owner_id,
+        ready_drift_spec.operation_id,
+    )
+    ready_drift_receipt = (
+        ready_drift_manager._state_root(ready_drift_cleanup.record)
+        / "provider-events"
+        / "resource-closed.json"
+    )
+    check(
+        "ready identity drift fails closed without close authority",
+        ready_drift_cleanup.record.state == "attention-required"
+        and ready_drift_cleanup.record.resources.surface_id
+        == "ready-identity-drift-surface"
+        and not ready_drift_receipt.exists(),
+    )
 
     duplicate_manager, duplicate_supervisor, duplicate_spec = (
         prepare_modern_cleanup_case(
@@ -881,25 +995,20 @@ with tempfile.TemporaryDirectory(prefix="delivery-boundary.") as raw:
 
     authority_manager, authority_supervisor, authority_spec = (
         prepare_modern_cleanup_case(
-            "root-generation-authority",
+            "actual-provider-generation-authority",
             target_generation=2,
+            provider_generation=2,
         )
     )
     authority_sha256 = accepted_case_callback(
         authority_manager,
         authority_spec,
-        "root-generation-authority",
-    )
-    authority_root = case_stream(
-        authority_manager,
-        authority_spec,
-        "root-generation-authority",
-        generation=1,
+        "actual-provider-generation-authority",
     )
     authority_stream = case_stream(
         authority_manager,
         authority_spec,
-        "root-generation-authority",
+        "actual-provider-generation-authority",
         generation=2,
     )
     assert authority_stream.result(authority_sha256).action == "close"
@@ -927,10 +1036,15 @@ with tempfile.TemporaryDirectory(prefix="delivery-boundary.") as raw:
         authority_spec.operation_id,
     )
     check(
-        "valid later callback generation completes while closure binds the immutable root",
+        "generation-2-only review startup closes against ready-bound provider authority",
         authority_cleanup.record.state == "complete"
         and not authority_cleanup.record.resources.surface_id
-        and authority_payload.get("identity", {}).get("generation") == 1
+        and authority_payload.get("identity", {}).get("generation") == 2
+        and not (
+            authority_manager._state_root(authority_cleanup.record)
+            / "provider-events"
+            / "generation-1"
+        ).exists()
         and authority_replay.action == "terminal",
     )
 

@@ -438,6 +438,7 @@ class RuntimeWorkerLoopMixin:
     ) -> None:
         restarted: ProcessHandle | None = None
         try:
+            provider_generation = self._initial_generation()
             resume_command = provider_resume_argv(
                 self.provider_command,
                 str(self.spec["runtime"]),
@@ -465,7 +466,7 @@ class RuntimeWorkerLoopMixin:
             self.provider_exited = False
             self.exit_code = 0
             self.exit_containment_failed = False
-            self.write_ready()
+            self.write_ready(provider_generation)
             command_sha256 = hashlib.sha256(
                 json.dumps(resume_command, separators=(",", ":")).encode()
             ).hexdigest()
@@ -506,7 +507,7 @@ class RuntimeWorkerLoopMixin:
                 AttentionReason.ATTENTION_REQUIRED,
             )
 
-    def write_ready(self) -> None:
+    def write_ready(self, provider_generation: int) -> None:
         _atomic_json(
             self.ready,
             {
@@ -517,6 +518,7 @@ class RuntimeWorkerLoopMixin:
                 "supervisor_pid": os.getpid(),
                 "process_identity": self.handle.process_identity,
                 "supervisor_identity": self.supervisor_identity,
+                "provider_generation": provider_generation,
             },
         )
 

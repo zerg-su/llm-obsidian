@@ -39,8 +39,6 @@ from .supervisor import OperationSupervisor
 class RuntimeSessionCleanupMixin:
     """Own observation, exit requests, and exact cleanup effects."""
 
-    _ROOT_PROVIDER_GENERATION = 1
-
     _SUPERSEDED_REVIEW_RECEIPT_KEYS = frozenset(
         {
             "schema_version",
@@ -358,10 +356,15 @@ class RuntimeSessionCleanupMixin:
             # the complete new provider/resource identity. Cleanup remains
             # possible, but no typed close receipt is fabricated for them.
             return "legacy"
-        # Resource closure authority is the immutable provider root generation
-        # minted at session start; a later callback-target generation may carry
-        # the result but never substitutes as resource ownership.
-        root_stream = self._root_provider_stream(record, workspace_id)
+        provider_generation = self._ready_provider_generation(record)
+        if provider_generation is None:
+            return "attention"
+        # Resource closure authority is the exact provider generation bound to
+        # the ready process identity. A later callback-target generation may
+        # carry the result but never substitutes as resource ownership.
+        root_stream = self._root_provider_stream(
+            record, workspace_id, provider_generation
+        )
         if root_stream is None:
             return "attention"
         selected = self._exact_result_stream(
@@ -384,7 +387,7 @@ class RuntimeSessionCleanupMixin:
             owner_id=record.spec.owner_id,
             operation_id=record.spec.operation_id,
             run_id=record.run_id,
-            generation=self._ROOT_PROVIDER_GENERATION,
+            generation=provider_generation,
             provider_session_id=record.run_id,
             process_identity=resources.process_identity,
             supervisor_identity=resources.supervisor_identity,
@@ -700,17 +703,70 @@ class RuntimeSessionCleanupMixin:
             process_status="dead",
             surface_status="missing",
         )
+
+    def _ready_provider_generation(
+        self,
+        record: OperationRecord,
+    ) -> int | None:
+        """Read one exact generation from the identity-bound ready handshake."""
+
+        authority_path = self.store.root
+        for component in (
+            "owners",
+            record.spec.owner_id,
+            "runtime",
+            record.spec.operation_id,
+        ):
+            authority_path = authority_path / component
+            if authority_path.is_symlink() or not authority_path.is_dir():
+                return None
+        ready_path = authority_path / "ready.json"
+        try:
+            ready, _raw = self._bounded_regular_json(
+                ready_path, label="provider ready authority"
+            )
+        except RuntimeSessionError:
+            return None
+        resources = record.resources
+        generation = ready.get("provider_generation")
+        if (
+            set(ready)
+            != {
+                "schema_version",
+                "status",
+                "pid",
+                "process_group",
+                "supervisor_pid",
+                "process_identity",
+                "supervisor_identity",
+                "provider_generation",
+            }
+            or ready.get("schema_version") != 1
+            or ready.get("status") != "ready"
+            or ready.get("pid") != resources.process_group
+            or ready.get("process_group") != resources.process_group
+            or ready.get("supervisor_pid") != resources.supervisor_pid
+            or ready.get("process_identity") != resources.process_identity
+            or ready.get("supervisor_identity")
+            != resources.supervisor_identity
+            or type(generation) is not int
+            or generation < 1
+        ):
+            return None
+        return generation
+
     def _root_provider_stream(
         self,
         record: OperationRecord,
         workspace_id: str,
+        provider_generation: int,
     ) -> RuntimeProviderEventStream | None:
-        """Bind resource closure to the immutable provider root generation."""
+        """Bind resource closure to the ready-owned provider generation."""
 
         state_root = self._state_root(record)
         provider_root = state_root / "provider-events"
         root_directory = (
-            provider_root / f"generation-{self._ROOT_PROVIDER_GENERATION}"
+            provider_root / f"generation-{provider_generation}"
         )
         # Every path component from the trusted store root down to the
         # closure authority directories is validated without following
@@ -724,7 +780,7 @@ class RuntimeSessionCleanupMixin:
             "runtime",
             record.spec.operation_id,
             "provider-events",
-            f"generation-{self._ROOT_PROVIDER_GENERATION}",
+            f"generation-{provider_generation}",
         ):
             authority_path = authority_path / component
             if authority_path.is_symlink() or not authority_path.is_dir():
@@ -735,7 +791,7 @@ class RuntimeSessionCleanupMixin:
                 return None
         try:
             stream = RuntimeProviderEventStream.rehydrate(
-                provider_root, self._ROOT_PROVIDER_GENERATION
+                provider_root, provider_generation
             )
         except RuntimeProviderEventError:
             return None
@@ -744,7 +800,7 @@ class RuntimeSessionCleanupMixin:
             identity.owner_id != record.spec.owner_id
             or identity.operation_id != record.spec.operation_id
             or identity.run_id != record.run_id
-            or identity.generation != self._ROOT_PROVIDER_GENERATION
+            or identity.generation != provider_generation
             or identity.process_identity != record.resources.process_identity
             or identity.workspace_id != workspace_id
             or identity.surface_id != record.resources.surface_id
