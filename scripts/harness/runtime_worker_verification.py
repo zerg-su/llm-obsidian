@@ -279,12 +279,7 @@ class RuntimeWorkerVerificationMixin:
             )
         if current_receipts:
             recovered = current_receipts[0]
-            if recovered != linked and (
-                recovered["status"] == "failed"
-                or _verification_candidate_is_current(
-                    self.spec["cwd"], str(recovered["head_sha"])
-                )
-            ):
+            if recovered != linked:
                 self.link_verification_receipt(recovered)
             return recovered
         return linked
@@ -361,12 +356,35 @@ class RuntimeWorkerVerificationMixin:
             raise RuntimeWorkerError("verification response receipt is invalid")
         return True
 
-    def link_verification_receipt(self, receipt: dict[str, object]) -> None:
+    def link_verification_receipt(self, receipt: dict[str, object]) -> bool:
+        """Admit the durable controller link by exact receipt/HEAD identity.
+
+        A completed receipt becomes linked authority only while its exact
+        HEAD is the clean current candidate, re-observed immediately before
+        the durable write and once more after it; a post-write mismatch
+        retracts the link.  A prior candidate observation is therefore never
+        carried into the publication: a clean commit landing after any
+        earlier read leaves zero durable stale authority.  A failed receipt
+        is failure evidence for the existing attention/resubmit machinery,
+        not authority, and stays linkable regardless of currency.
+        """
+
         if self.verification_controller_receipt_path.is_symlink():
             raise RuntimeWorkerError(
                 "pipeline verification controller receipt is invalid"
             )
+        admit_by_identity = receipt["status"] != "failed"
+        if admit_by_identity and not _verification_candidate_is_current(
+            self.spec["cwd"], str(receipt["head_sha"])
+        ):
+            return False
         _atomic_json(self.verification_controller_receipt_path, receipt)
+        if admit_by_identity and not _verification_candidate_is_current(
+            self.spec["cwd"], str(receipt["head_sha"])
+        ):
+            self.verification_controller_receipt_path.unlink(missing_ok=True)
+            return False
+        return True
 
     def failed_verification_count(self) -> int:
         count = 0
@@ -1210,12 +1228,9 @@ class RuntimeWorkerVerificationMixin:
                     self.verification_receipt_path.read_text(encoding="utf-8")
                 )
                 # The receipt stays immutable evidence for its own exact
-                # HEAD; it becomes linked authority only for the exact clean
-                # current candidate.
-                if _verification_candidate_is_current(
-                    self.spec["cwd"], str(persisted["head_sha"])
-                ):
-                    self.link_verification_receipt(persisted)
+                # HEAD; the controller link admits it as authority only by
+                # exact-current-candidate identity at its own boundary.
+                self.link_verification_receipt(persisted)
 
             supervisor.effect(
                 self.verification_effect_id,

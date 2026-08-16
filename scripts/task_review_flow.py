@@ -26,6 +26,9 @@ from harness.pre_model_reviewer_retirement import (
 )
 from harness.review_finalization import StructuralPivotPending
 from harness.review_cleanup_recovery import accepted_callback_cleanup_is_complete, recover_interrupted_review_attempt
+from harness.runtime_worker_verification import (
+    _verification_candidate_is_current,
+)
 from harness.runtime_sessions import RuntimeSessionManager
 from harness.store import OperationStore, StoreError
 from harness.workflows.review import (
@@ -205,6 +208,71 @@ def _start_review(
         context_manifest=context_manifest,
         run=run,
     )
+
+def _admitted_review_launch(
+    runtime_root: Path,
+    worktree: Path,
+    task_id: str,
+    context: ReviewContext,
+) -> None:
+    """Verify the pipeline's launch admission against the actual context.
+
+    The pipeline drive publishes the exact verification receipt/HEAD pair it
+    admitted; the exact-HEAD flow reserves and launches only while the actual
+    review context binds exactly the admitted HEAD and that HEAD is still the
+    clean current candidate.  Any identity, HEAD, or clean-state mismatch
+    fails closed before reservation or provider effect, and a malformed or
+    symlinked admission is never treated as absent.  Absence keeps launches
+    without a pipeline verification owner on their existing gates.
+    """
+
+    admission_path = runtime_root / "review-launch-admission.json"
+    if admission_path.is_symlink():
+        raise TaskReviewError("review launch admission is invalid")
+    if not admission_path.is_file():
+        return
+    admission = _read_json(admission_path, "review launch admission")
+    expected_keys = {
+        "schema_version",
+        "operation_id",
+        "verification_operation_id",
+        "verification_lane_id",
+        "verification_run_id",
+        "receipt_sha256",
+        "head_sha",
+        "status",
+    }
+    if (
+        not isinstance(admission, dict)
+        or set(admission) != expected_keys
+        or admission.get("schema_version") != 1
+        or admission.get("status") != "admitted"
+        or admission.get("operation_id") != task_id
+        or not all(
+            isinstance(admission[key], str) and admission[key]
+            for key in (
+                "verification_operation_id",
+                "verification_lane_id",
+                "verification_run_id",
+            )
+        )
+        or not re.fullmatch(
+            "[0-9a-f]{64}", str(admission.get("receipt_sha256") or "")
+        )
+        or not re.fullmatch(
+            "[0-9a-f]{40,64}", str(admission.get("head_sha") or "")
+        )
+    ):
+        raise TaskReviewError("review launch admission is invalid")
+    if admission["head_sha"] != context.head_sha:
+        raise TaskReviewError("review launch admission targets another HEAD")
+    if not _verification_candidate_is_current(
+        worktree, str(admission["head_sha"])
+    ):
+        raise TaskReviewError(
+            "review launch admission is stale for the current candidate"
+        )
+
 
 def _exact_head_attempt_enabled(meta: Mapping[str, Any]) -> bool:
     """Select the protocol only from the normalized additive v4 policy.
@@ -1032,6 +1100,7 @@ def _run_exact_head_review(
                     )
         else:
             reserved_attempt_id = prior_attempt.identity.attempt_id
+    _admitted_review_launch(runtime_root, worktree, task_id, context)
     reservation = _reserve_or_reviewing(
         lambda: reserve_exact_head_attempt(
             meta,

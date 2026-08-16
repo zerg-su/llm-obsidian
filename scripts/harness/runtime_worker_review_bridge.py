@@ -567,6 +567,69 @@ class RuntimeWorkerReviewBridgeMixin:
             == head_result.stdout.strip()
         )
 
+    def _publish_review_launch_admission(self) -> bool:
+        """Hand the launch the exact durable receipt/HEAD pair, not a boolean.
+
+        The drive's earlier currency observations are never carried into the
+        launch: immediately before releasing it, the durable verification
+        receipt is re-read and its exact HEAD re-observed as the clean
+        current candidate, and only that admitted pair — published where the
+        exact-HEAD runner verifies it against the actual review context — can
+        admit a provider effect.  Any receipt, HEAD, or clean-state mismatch
+        refuses the launch with zero effect and leaves prior evidence
+        untouched.  A drive without a bound verification contract keeps its
+        existing gates and any previously admitted pair.
+        """
+
+        bound_head = getattr(self, "verification_head", "")
+        if getattr(self, "profile", None) is None or not bound_head:
+            return True
+        if not any(
+            step.primitive_id == "verify"
+            for step in self.pipeline.definition.steps
+        ):
+            return True
+        receipt = self.verification_receipt()
+        if (
+            receipt is None
+            or receipt.get("status") != "complete"
+            or receipt.get("head_sha") != bound_head
+        ):
+            return False
+        if not _verification_candidate_is_current(
+            self.spec["cwd"], str(receipt["head_sha"])
+        ):
+            return False
+        receipt_sha256 = hashlib.sha256(
+            json.dumps(receipt, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        admission_path = (
+            self.trusted_vault
+            / ".vault-meta"
+            / "harness"
+            / "review-runtime"
+            / self.spec["operation_id"]
+            / "review-launch-admission.json"
+        )
+        if admission_path.is_symlink():
+            raise RuntimeWorkerError("review launch admission is invalid")
+        admission_path.parent.mkdir(parents=True, exist_ok=True)
+        admission_path.parent.chmod(0o700)
+        _atomic_json(
+            admission_path,
+            {
+                "schema_version": 1,
+                "operation_id": self.spec["operation_id"],
+                "verification_operation_id": str(receipt["operation_id"]),
+                "verification_lane_id": str(receipt["lane_id"]),
+                "verification_run_id": str(receipt["run_id"]),
+                "receipt_sha256": receipt_sha256,
+                "head_sha": str(receipt["head_sha"]),
+                "status": "admitted",
+            },
+        )
+        return True
+
     def _review_drive_started_marker(self, input_sha256: str) -> None:
         _atomic_json(
             self.marker_path,
@@ -583,6 +646,8 @@ class RuntimeWorkerReviewBridgeMixin:
         if not self._resolved_head_verification_ready():
             return False
         if not self._review_drive_candidate_is_current():
+            return False
+        if not self._publish_review_launch_admission():
             return False
         input_sha256 = self.review_drive_sha256()
         _atomic_json(

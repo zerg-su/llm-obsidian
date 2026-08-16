@@ -954,4 +954,147 @@ for mode, expected_lanes in (("simple", 1), ("deep", 2), ("full", 4)):
                     and runtime.started == expected_lanes,
                 )
 
+# 2.7.5 F274.POST_CHECK_LAUNCH_RACE: the exact-HEAD flow verifies the
+# pipeline's launch admission — the exact verification receipt/HEAD pair —
+# against the actual review context before reservation or provider effect.
+# Any HEAD, identity, clean-state, or launch-input mismatch fails closed;
+# a malformed or symlinked admission is never treated as absent.
+import subprocess  # noqa: E402
+
+from task_review_flow import _admitted_review_launch  # noqa: E402
+from task_review_shared import TaskReviewError  # noqa: E402
+
+with tempfile.TemporaryDirectory(prefix="launch-admission.") as raw:
+    base = Path(raw)
+    worktree = base / "product"
+    worktree.mkdir()
+    for argv in (
+        ("init", "-b", "main"),
+        ("config", "user.email", "admission@example.invalid"),
+        ("config", "user.name", "Admission World"),
+    ):
+        subprocess.run(
+            ["git", "-C", str(worktree), *argv], check=True, capture_output=True
+        )
+
+    def land_commit(name: str) -> str:
+        (worktree / "product.txt").write_text(name + "\n", encoding="utf-8")
+        subprocess.run(
+            ["git", "-C", str(worktree), "add", "product.txt"],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(worktree), "commit", "-m", name],
+            check=True,
+            capture_output=True,
+        )
+        return subprocess.run(
+            ["git", "-C", str(worktree), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+    head_b = land_commit("base")
+    runtime_root = base / "review-runtime"
+    runtime_root.mkdir()
+    admission_path = runtime_root / "review-launch-admission.json"
+    task_id = "admission-task"
+    exact_admission = {
+        "schema_version": 1,
+        "operation_id": task_id,
+        "verification_operation_id": "verify-op",
+        "verification_lane_id": "verify-lane",
+        "verification_run_id": "verify-run",
+        "receipt_sha256": "a" * 64,
+        "head_sha": head_b,
+        "status": "admitted",
+    }
+
+    def write_admission(value: object) -> None:
+        if admission_path.is_symlink() or admission_path.exists():
+            admission_path.unlink()
+        if isinstance(value, str):
+            admission_path.write_text(value, encoding="utf-8")
+        else:
+            admission_path.write_text(
+                json.dumps(value, sort_keys=True) + "\n", encoding="utf-8"
+            )
+
+    def context_at(head: str) -> ReviewContext:
+        return ReviewContext(
+            manifest="packets/review/manifest.json",
+            head_sha=head,
+            verification_profile="scoped",
+            verification_profile_sha256="8" * 64,
+            purpose="implementation",
+            boundary_input_sha256="",
+        )
+
+    def admission_verdict(head: str) -> str:
+        try:
+            _admitted_review_launch(
+                runtime_root, worktree, task_id, context_at(head)
+            )
+        except TaskReviewError as exc:
+            return str(exc)
+        return "admitted"
+
+    check(
+        "a missing launch admission keeps existing gates",
+        admission_verdict(head_b) == "admitted",
+    )
+    write_admission(exact_admission)
+    check(
+        "the exact admitted receipt/HEAD pair admits the clean launch",
+        admission_verdict(head_b) == "admitted",
+    )
+    check(
+        "a context bound to another HEAD is refused before reservation",
+        "another HEAD" in admission_verdict("c" * 40),
+    )
+    head_c = land_commit("moved")
+    check(
+        "a clean commit after the admission refuses the stale pair",
+        "stale" in admission_verdict(head_b)
+        and "another HEAD" in admission_verdict(head_c),
+    )
+    write_admission({**exact_admission, "head_sha": head_c})
+    check(
+        "an admission rebound to the exact current head admits again",
+        admission_verdict(head_c) == "admitted",
+    )
+    (worktree / "junk.txt").write_text("dirt\n", encoding="utf-8")
+    check(
+        "same-HEAD dirt refuses the admitted launch",
+        "stale" in admission_verdict(head_c),
+    )
+    (worktree / "junk.txt").unlink()
+    admission_rows = (
+        ("foreign task", {**exact_admission, "operation_id": "foreign"}),
+        ("drifted schema", {**exact_admission, "schema_version": 2}),
+        ("unadmitted status", {**exact_admission, "status": "pending"}),
+        ("short receipt digest", {**exact_admission, "receipt_sha256": "a" * 63}),
+        ("empty lane identity", {**exact_admission, "verification_lane_id": ""}),
+        (
+            "extra launch input",
+            {**exact_admission, "verified": True},
+        ),
+        ("malformed bytes", "{malformed admission"),
+    )
+    for admission_case, admission_value in admission_rows:
+        write_admission(admission_value)
+        check(
+            f"a {admission_case} launch admission fails closed, never absent",
+            "invalid" in admission_verdict(head_b)
+            or "unavailable" in admission_verdict(head_b),
+        )
+    admission_path.unlink()
+    admission_path.symlink_to(runtime_root / "missing-admission.json")
+    check(
+        "a symlinked launch admission fails closed",
+        "invalid" in admission_verdict(head_b),
+    )
+
 print("\nAll task review flow unit tests passed.")
