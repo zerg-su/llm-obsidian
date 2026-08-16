@@ -323,7 +323,9 @@ class RuntimeSessionCheckpointMixin:
                 "process_identity",
                 "supervisor_pid",
                 "supervisor_identity",
+                "provider_generation",
             }
+            or ready.get("schema_version") != 1
             or ready.get("status") != "ready"
             or ready.get("pid") != resources.process_group
             or ready.get("process_group") != resources.process_group
@@ -332,6 +334,8 @@ class RuntimeSessionCheckpointMixin:
             or ready.get("supervisor_pid") != resources.supervisor_pid
             or ready.get("supervisor_identity")
             != resources.supervisor_identity
+            or type(ready.get("provider_generation")) is not int
+            or ready["provider_generation"] < 1
             or resources.process_group == resources.supervisor_pid
         ):
             raise RuntimeSessionError(

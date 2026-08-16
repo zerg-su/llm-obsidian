@@ -631,6 +631,39 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
         assert stream.accept_input().action == "wait"
         return stream
 
+    def write_provider_ready(
+        operation_id: str,
+        *,
+        provider_generation: int = 1,
+    ) -> None:
+        record = store.read("owner-cli", operation_id)
+        ready_path = (
+            store.root
+            / "owners"
+            / "owner-cli"
+            / "runtime"
+            / operation_id
+            / "ready.json"
+        )
+        ready_path.parent.mkdir(parents=True, exist_ok=True)
+        ready_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "status": "ready",
+                    "pid": record.resources.process_group,
+                    "process_group": record.resources.process_group,
+                    "supervisor_pid": record.resources.supervisor_pid,
+                    "process_identity": record.resources.process_identity,
+                    "supervisor_identity": record.resources.supervisor_identity,
+                    "provider_generation": provider_generation,
+                },
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
     def publish_provider_result(
         operation_id: str,
         payload_sha256: str,
@@ -784,15 +817,6 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
                     f"Product worktree (read-only): `{product.resolve()}`.",
                 ],
             },
-            "ready.json": {
-                "schema_version": 1,
-                "status": "ready",
-                "pid": 42,
-                "process_group": 42,
-                "process_identity": "a" * 64,
-                "supervisor_pid": 43,
-                "supervisor_identity": "b" * 64,
-            },
             "checkpoint.json": {
                 "schema_version": 1,
                 "operation_id": operation_id,
@@ -808,6 +832,7 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
                 json.dumps(value, sort_keys=True) + "\n",
                 encoding="utf-8",
             )
+        write_provider_ready(operation_id)
         write_callback_target(operation_id)
         return workspace_id, window_id
 
@@ -1284,6 +1309,7 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
     write_workspace_session("op-modern-cancel-cli")
     write_callback_target("op-modern-cancel-cli")
     create_provider_stream("op-modern-cancel-cli")
+    write_provider_ready("op-modern-cancel-cli")
     modern_cancel_process = ExitAfterProbeProcess("alive")
     modern_cancel_cmux = FakeCmux("alive")
     modern_cancel_rc, _modern_cancel_output = run_cli_in_process(
@@ -1618,6 +1644,7 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
         "op-accepted-unknown-cli",
         accepted_payload_sha256,
     )
+    write_provider_ready("op-accepted-unknown-cli")
     write_callback_target("op-accepted-unknown-cli", generation=2)
     accepted_process = FakeProcess(
         "unknown",

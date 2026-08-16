@@ -1392,17 +1392,18 @@ with tempfile.TemporaryDirectory(prefix="review-cleanup-product-binding.") as ra
             "checkpoint": "review-cleanup-checkpoint",
         },
     )
+    cleanup_ready = {
+        "schema_version": 1,
+        "status": "ready",
+        "pid": 123,
+        "process_group": 123,
+        "process_identity": PROCESS_IDENTITY,
+        "supervisor_pid": 124,
+        "supervisor_identity": SUPERVISOR_IDENTITY,
+        "provider_generation": 1,
+    }
     cleanup_manager._write_json(
-        cleanup_state_root / "ready.json",
-        {
-            "schema_version": 1,
-            "status": "ready",
-            "pid": 123,
-            "process_group": 123,
-            "process_identity": PROCESS_IDENTITY,
-            "supervisor_pid": 124,
-            "supervisor_identity": SUPERVISOR_IDENTITY,
-        },
+        cleanup_state_root / "ready.json", cleanup_ready
     )
     cleanup_ownership = cleanup_manager.prove_durable_cleanup_ownership(
         "review-cleanup-owner",
@@ -1417,6 +1418,42 @@ with tempfile.TemporaryDirectory(prefix="review-cleanup-product-binding.") as ra
         and cleanup_cmux.closed_workspaces == [],
         cleanup_ownership,
     )
+    for label, mutate_ready in (
+        (
+            "missing provider generation",
+            lambda value: value.pop("provider_generation"),
+        ),
+        (
+            "malformed provider generation",
+            lambda value: value.update(provider_generation="1"),
+        ),
+        (
+            "non-positive provider generation",
+            lambda value: value.update(provider_generation=0),
+        ),
+        (
+            "boolean provider generation",
+            lambda value: value.update(provider_generation=True),
+        ),
+        (
+            "identity-inconsistent ready authority",
+            lambda value: value.update(process_identity="f" * 64),
+        ),
+    ):
+        tampered_ready = dict(cleanup_ready)
+        mutate_ready(tampered_ready)
+        cleanup_manager._write_json(
+            cleanup_state_root / "ready.json", tampered_ready
+        )
+        try:
+            cleanup_manager.prove_durable_cleanup_ownership(
+                "review-cleanup-owner",
+                "review-cleanup-parent",
+            )
+        except RuntimeSessionError:
+            check(f"durable cleanup rejects {label}", True)
+        else:
+            check(f"durable cleanup rejects {label}", False)
 
 
 with tempfile.TemporaryDirectory(prefix="research-home-boundary.") as raw:

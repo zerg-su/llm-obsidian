@@ -528,6 +528,23 @@ with tempfile.TemporaryDirectory(prefix="superseded-review-cleanup.") as raw:
     assert old_stream.start().action == "wait"
     assert old_stream.reserve_input().action == "send"
     assert old_stream.accept_input().action == "wait"
+    (session.parent / "ready.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "status": "ready",
+                "pid": 401,
+                "process_group": 401,
+                "supervisor_pid": 402,
+                "process_identity": "4" * 64,
+                "supervisor_identity": "5" * 64,
+                "provider_generation": 1,
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     authorization = {
         "schema_version": 1,
         "operation_id": "review-boundary-old-1",
