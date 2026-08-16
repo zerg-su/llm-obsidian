@@ -321,7 +321,7 @@ is added; the file ceiling is unchanged and the line ceiling moves by the
 measured 78-line cost to the exact 290-file / 108,636-line candidate with no
 speculative headroom.
 
-The accepted 2.7.3 Sol review round then hardened the same handoff: the
+The first 2.7.3 Sol review round then hardened the same handoff: the
 receiptless invalidation classifier became identity-exact and symlink-safe
 (derived spec/lane/run, released resources, no dangling or unsafe receipt
 path), the handoff and the replacement's receipt issuance became gated on an
@@ -331,6 +331,23 @@ binds the predecessor and successor attempt/effect digests.  The correction
 adds 45 measured lines in the same verification owner and no production
 module; the ceilings move to the exact 290-file / 108,681-line candidate with
 no speculative headroom.
+
+The 2.7.4 exact verification closure then closed the two authority gaps the
+terminal 2.7.3 Sol review proved as immutable findings: a missing attempt-0
+predecessor record with surviving successor or invalidation evidence was
+classified as a fresh run (F273.MISSING_PREDECESSOR_FAIL_OPEN), and a clean
+commit racing the final HEAD observation could still link, consume, and
+review-release stale verification authority
+(F273.EXACT_HEAD_ACCEPTANCE_RACE). The repair is one read-only orphan
+lineage census plus one cohesive current-candidate predicate re-checked
+immediately before controller linking, summary consumption, and review
+drive, all inside the existing verification owner
+(``harness/runtime_worker_verification.py``, 137 lines) plus its two seam
+consumers (``harness/runtime_worker_summary.py``, 14 lines;
+``harness/runtime_worker_review_bridge.py``, 52 lines). No production module
+is added; the file ceiling is unchanged and the line ceiling moves by the
+measured 203-line cost to the exact 290-file / 108,884-line candidate with
+no speculative headroom.
 """
 
 from __future__ import annotations
@@ -338,11 +355,11 @@ from __future__ import annotations
 from pathlib import Path
 
 
-#: Maximum tracked Python files under ``scripts/`` for the 2.7.3 candidate.
+#: Maximum tracked Python files under ``scripts/`` for the 2.7.4 candidate.
 SCRIPT_FILE_CEILING = 290
 
-#: Maximum total lines across those files for the 2.7.3 handoff candidate.
-SCRIPT_LINE_CEILING = 108_681
+#: Maximum total lines across those files for the 2.7.4 closure candidate.
+SCRIPT_LINE_CEILING = 108_884
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:
@@ -361,13 +378,13 @@ def assert_within_ceilings(scripts_dir: Path) -> tuple[int, int]:
     files, lines = measure(scripts_dir)
     if files > SCRIPT_FILE_CEILING:
         raise AssertionError(
-            f"scripts/ holds {files} Python files, above the 2.7.3 ceiling "
+            f"scripts/ holds {files} Python files, above the 2.7.4 ceiling "
             f"{SCRIPT_FILE_CEILING}; justify and raise the ceiling in the same "
             "commit as the growth"
         )
     if lines > SCRIPT_LINE_CEILING:
         raise AssertionError(
-            f"scripts/ holds {lines} lines, above the 2.7.3 ceiling "
+            f"scripts/ holds {lines} lines, above the 2.7.4 ceiling "
             f"{SCRIPT_LINE_CEILING}; justify and raise the ceiling in the same "
             "commit as the growth"
         )

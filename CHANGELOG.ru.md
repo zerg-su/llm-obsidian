@@ -16,6 +16,53 @@
 внутренними контрольными точками и вошли в следующие публичные релизы; тегов и
 пакетов с этими номерами не выпускалось.
 
+## [2.7.4] — 2026-08-16
+
+Ограниченный кандидат exact-verification-closure; без тега, публикации и
+live-приёмки. Строится на сохранённом объединённом кандидате 2.7.1 + 2.7.2 +
+rejected-but-useful 2.7.3 и закрывает два material findings терминального
+2.7.3 review.
+
+### Исправлено
+
+- Verification owner теперь выполняет один read-only census детерминированных
+  identity attempt-0, attempt-1, receipt и invalidation, прежде чем
+  классифицировать отсутствующую запись attempt-0 предшественника как fresh
+  run. Любая сохранившаяся запись преемника или след
+  receipt/response/invalidation доказывает, что предшественник был потерян, а
+  не «никогда не создавался»: осиротевшая lineage фиксирует один
+  типизированный attention `pipeline-verification-orphaned-lineage` без
+  чеканки новой попытки, probe-эффекта, мутации store, привязки receipt,
+  снятия attention и review-эффекта; повторные wake идемпотентны. Только
+  действительно пустое пространство identity попыток остаётся fresh-run
+  классификацией (F273.MISSING_PREDECESSOR_FAIL_OPEN).
+- Verification authority потребляется только против свежего наблюдения
+  точного текущего HEAD с полностью чистым tracked-и-untracked деревом,
+  перепроверяемого непосредственно перед привязкой controller receipt
+  (включая link recovery), потреблением summary/снятием attention и запуском
+  review. Receipt остаётся неизменяемым свидетельством своего собственного
+  точного HEAD и никогда не переписывается; если чистый commit опережает
+  любую из этих границ — или дерево грязное/ненаблюдаемое — устаревшая
+  authority не привязывается и не потребляется, review/provider-эффект не
+  запускается, а продолжение уходит в существующий rebind-путь или один
+  типизированный attention `pipeline-verification-stale-authority`. Drift,
+  принадлежащий durable review-resolution notification, сохраняет свою
+  существующую resolution-механику; точный чистый same-HEAD receipt
+  сохраняет обычный exactly-once путь (F273.EXACT_HEAD_ACCEPTANCE_RACE)
+  (`docs/acceptance/v2.7.4-exact-verification-closure.md`).
+
+### Управление
+
+- RC1 active-authority contour перебазирован на точно измеренные 15305 LOC
+  (неизменный манифест из 27 файлов, ноль writable authorities, ноль
+  incident literals), hotspot verification owner переходит ровно на его
+  измеренные 1233 строки, а live scripts scope ratchet сдвигается на
+  измеренную стоимость закрытия в 203 строки к точному кандидату
+  290 файлов / 108 884 строки без спекулятивного запаса. Формулировки 2.7.3,
+  подразумевавшие review-approval, исправлены: findings его первого review
+  round были применены, а его обновлённый терминальный review остаётся
+  неизменяемым свидетельством проблемы.
+
 ## [2.7.3] — 2026-08-16
 
 Ограниченный кандидат восстановления invalidated-verification handoff; без
@@ -42,7 +89,9 @@
 - Changed-HEAD review-resolution gate применяет тот же invalidated-attempt
   handoff перед запуском verification, поэтому его перепривязанная identity
   попытки больше не может вернуться в recovery-тупик.
-- После принятого Sol review round: receiptless invalidation-классификатор
+- После первого Sol review round (findings применены; обновлённый
+  терминальный review позже сообщил ещё два material findings, закрытые в
+  2.7.4): receiptless invalidation-классификатор
   identity-exact и symlink-safe — производные spec, lane, run, освобождённые
   resources и собственный установленный успешный effect обязаны совпадать, а
   висячий symlink receipt — свидетельство подделки, а не отсутствия; handoff

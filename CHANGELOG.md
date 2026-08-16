@@ -10,6 +10,50 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.7.4] - 2026-08-16
+
+Bounded exact-verification-closure candidate; not tagged, published, or
+live-accepted. Builds on the preserved combined 2.7.1 + 2.7.2 +
+rejected-but-useful 2.7.3 candidate and closes the two material findings of
+the terminal 2.7.3 review.
+
+### Fixed
+
+- The verification owner now runs one read-only census of the deterministic
+  attempt-0, attempt-1, receipt, and invalidation identities before
+  classifying a missing attempt-0 predecessor record as a fresh run. Any
+  surviving successor record or receipt/response/invalidation trace proves
+  the predecessor was lost rather than never created: the orphaned lineage
+  latches one typed `pipeline-verification-orphaned-lineage` attention with
+  zero minting, probe effect, store mutation, receipt linking, attention
+  clearance, or review effect, and repeated wakes stay idempotent. A truly
+  empty attempt identity space remains the only fresh-run classification
+  (F273.MISSING_PREDECESSOR_FAIL_OPEN).
+- Verification authority is consumed only against a fresh exact-current-HEAD
+  observation with a fully clean tracked-and-untracked tree, re-checked
+  immediately before controller receipt linking (including link recovery),
+  summary consumption/attention clearance, and review drive. A receipt stays
+  immutable evidence for its own exact HEAD and is never rewritten; when a
+  clean commit races past any of those boundaries — or the tree is dirty or
+  unobservable — stale authority is never linked or consumed, no review or
+  provider effect launches, and the continuation halts to the existing
+  rebind path or one typed `pipeline-verification-stale-authority`
+  attention. Drift owned by a durable review-resolution notification keeps
+  its existing resolution machinery; an exact clean same-HEAD receipt keeps
+  the ordinary exactly-once path (F273.EXACT_HEAD_ACCEPTANCE_RACE)
+  (`docs/acceptance/v2.7.4-exact-verification-closure.md`).
+
+### Governance
+
+- The RC1 active-authority contour is rebaselined at the exact measured
+  15305 LOC (unchanged 27-file manifest, zero writable authorities, zero
+  incident literals), the verification owner hotspot moves to exactly its
+  measured 1233 lines, and the live scripts scope ratchet moves by the
+  measured 203-line closure cost to the exact 290-file / 108,884-line
+  candidate with no speculative headroom. 2.7.3 wording that implied review
+  approval is corrected: its first review round's findings were applied, and
+  its refreshed terminal review remains immutable problem evidence.
+
 ## [2.7.3] - 2026-08-16
 
 Bounded invalidated-verification handoff candidate; not tagged, published, or
@@ -34,7 +78,9 @@ live-accepted. Builds on the preserved combined 2.7.1 + 2.7.2 candidate.
 - The changed-HEAD review-resolution gate adopts the same invalidated-attempt
   handoff before launching verification, so its rebound attempt identity can
   never re-enter the recovery dead end.
-- After its accepted Sol review round: the receiptless invalidation
+- After its first Sol review round (findings applied; the refreshed
+  terminal review later reported two further material findings, closed by
+  2.7.4): the receiptless invalidation
   classifier is identity-exact and symlink-safe — the derived spec, lane,
   run, released resources, and own settled succeeded effect must all match,
   and a dangling receipt symlink is tamper evidence, not absence; the handoff
