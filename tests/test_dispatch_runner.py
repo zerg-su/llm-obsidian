@@ -1738,6 +1738,33 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         )
         == 1,
     )
+    verification_controls = (
+        ".task-verification.json",
+        ".task-verification-response.json",
+        ".task-verification-contract.json",
+    )
+    for relative in verification_controls:
+        (worktree / relative).write_text("{}\n", encoding="utf-8")
+    verification_status = subprocess.run(
+        ["git", "status", "--porcelain", "--", *verification_controls],
+        cwd=worktree,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    installed_excludes = exclude_path.read_text(encoding="utf-8").splitlines()
+    check(
+        "runner keeps verification control artifacts out of product cleanliness",
+        verification_status.returncode == 0
+        and not verification_status.stdout.strip()
+        and all(
+            installed_excludes.count(relative) == 1
+            for relative in verification_controls
+        ),
+        verification_status.stderr or verification_status.stdout,
+    )
+    for relative in verification_controls:
+        (worktree / relative).unlink()
     detected = subprocess.run(
         [str(ROOT / "scripts" / "current-session-id.sh")],
         cwd=worktree,

@@ -57,7 +57,12 @@ COMPLETION_PASS_LIMITS = {"attention": 2, "autonomous": 3}
 SUMMARY_TYPES = {"session", "decision", "runbook", "incident", "service-update", "repo-touch"}
 RUN_STATES = {"preparing", "launched", "failed"}
 COORDINATOR_ACTION = "return-to-idle-without-polling"
-TASK_LOCAL_GIT_EXCLUDES = (".task-origin-session",)
+TASK_LOCAL_GIT_EXCLUDES = (
+    ".task-origin-session",
+    ".task-verification.json",
+    ".task-verification-response.json",
+    ".task-verification-contract.json",
+)
 
 
 def resolve_base_commit(target_repo: Path, base_ref: str) -> str:

@@ -13,8 +13,9 @@ packages were published for them.
 ## [2.7.8] - 2026-08-17
 
 Bounded stability candidate; not tagged, published, installed, or live-tested.
-It closes the two follow-ups exposed by the 2.7.7 protected-research and
-custom-pipeline runs without adding a lifecycle owner or replay path.
+It closes the protected-research and custom-pipeline follow-ups exposed by the
+2.7.7 runs plus the verification-control cleanliness defect exposed while
+qualifying this candidate, without adding a lifecycle owner or replay path.
 
 ### Fixed
 
@@ -28,6 +29,11 @@ custom-pipeline runs without adding a lifecycle owner or replay path.
   outbox, and the exact legal successor request and child already exist. Every
   missing, malformed, stale, foreign, or ambiguous fact keeps the ordinary
   fail-closed escalation path.
+- Dispatch now installs exact local Git exclusions for the three
+  `.task-verification*.json` control artifacts. An authorized same-HEAD retry
+  can therefore enforce strict tracked-and-untracked product cleanliness
+  without classifying its own packet, response, or decision contract as
+  product drift; real untracked product files remain visible and fail closed.
 
 ### Governance
 
@@ -39,7 +45,7 @@ custom-pipeline runs without adding a lifecycle owner or replay path.
   as target headroom.
 - `runtime_session_launch.py` is 1,155 lines, within its existing 1,157-line
   hotspot ceiling. The live scripts ratchet moves by the exact measured
-  300-line implementation cost to 290 files / 109,643 lines with no
+  305-line implementation cost to 290 files / 109,648 lines with no
   speculative headroom.
 
 ## [2.7.7] - 2026-08-16

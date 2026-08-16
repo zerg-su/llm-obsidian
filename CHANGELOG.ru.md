@@ -19,9 +19,10 @@
 ## [2.7.8] — 2026-08-17
 
 Ограниченный stability-кандидат; без тега, публикации, установки и
-live-проверки. Он закрывает два follow-up, обнаруженных запусками protected
-research и custom pipeline в 2.7.7, не добавляя нового владельца lifecycle или
-пути replay.
+live-проверки. Он закрывает follow-up protected research и custom pipeline,
+обнаруженные запусками 2.7.7, а также дефект cleanliness verification-control,
+выявленный при проверке этого кандидата, не добавляя нового владельца lifecycle
+или пути replay.
 
 ### Исправлено
 
@@ -35,6 +36,11 @@ research и custom pipeline в 2.7.7, не добавляя нового вла�
   наличие точного допустимого successor request и child. Любой отсутствующий,
   malformed, stale, foreign или неоднозначный факт сохраняет обычный
   fail-closed путь эскалации.
+- Dispatch теперь устанавливает точные локальные Git-exclude для трёх
+  control-артефактов `.task-verification*.json`. Авторизованный same-HEAD retry
+  сохраняет строгую проверку tracked и untracked product cleanliness, но не
+  принимает собственные packet, response и decision contract за product drift;
+  реальные untracked product-файлы остаются видимыми и fail-closed.
 
 ### Управление
 
@@ -46,7 +52,7 @@ research и custom pipeline в 2.7.7, не добавляя нового вла�
   запас для target.
 - `runtime_session_launch.py` занимает 1 155 строк при существующем потолке
   hotspot 1 157. Live scripts ratchet сдвигается на точно измеренную стоимость
-  реализации в 300 строк к 290 файлам / 109 643 строкам без спекулятивного
+  реализации в 305 строк к 290 файлам / 109 648 строкам без спекулятивного
   запаса.
 
 ## [2.7.7] — 2026-08-16

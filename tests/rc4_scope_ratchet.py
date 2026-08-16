@@ -385,9 +385,12 @@ the ceiling moves by the measured 59-line production cost to the exact
 The 2.7.8 bounded stability patch restores argv-delivered one-shot research
 event authority and adds an identity-exact stale custom-escalation proof at the
 existing ingress. The behavior-preserving proof split keeps every new function
-below the hard branch limit. No production module is added; the ceiling moves
-by the exact measured 300-line cost to the 290-file / 109,643-line candidate
-with no speculative headroom.
+below the hard branch limit. Its release-dogfood repair also adds the exact three
+verification-control exclusions to the existing dispatch-owned local Git
+contract, so same-HEAD retries do not classify their own transport as product
+drift. No production module is added; the ceiling moves by the exact measured
+305-line cost to the 290-file / 109,648-line candidate with no speculative
+headroom.
 """
 
 from __future__ import annotations
@@ -399,7 +402,7 @@ from pathlib import Path
 SCRIPT_FILE_CEILING = 290
 
 #: Maximum total lines across those files for the 2.7.8 stability candidate.
-SCRIPT_LINE_CEILING = 109_643
+SCRIPT_LINE_CEILING = 109_648
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:
