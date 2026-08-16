@@ -913,6 +913,19 @@ class LifecycleWorld:
         )
         stream = self.stream()
         stream.start()
+        _atomic_json(
+            self.runtime_root / "ready.json",
+            {
+                "schema_version": 1,
+                "status": "ready",
+                "pid": 4101,
+                "process_group": 4101,
+                "supervisor_pid": 4102,
+                "process_identity": PROCESS_IDENTITY,
+                "supervisor_identity": SUPERVISOR_IDENTITY,
+                "provider_generation": 1,
+            },
+        )
         decision = stream.reserve_input()
         if decision.action != "send":
             raise RuntimeError("real delivery reducer did not reserve input")
