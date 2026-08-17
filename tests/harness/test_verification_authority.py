@@ -21,6 +21,7 @@ from harness.contracts import (  # noqa: E402
     VerificationEvidence,
     to_dict,
 )
+from harness import artifact_repair  # noqa: E402
 from harness.dashboard_receipts import verification_receipt_status  # noqa: E402
 from harness.runtime_worker_contracts import RuntimeWorkerError  # noqa: E402
 from harness.runtime_worker_verification import (  # noqa: E402
@@ -1333,5 +1334,70 @@ with tempfile.TemporaryDirectory(prefix="verification-authority.") as raw:
         and control_link.receipt_path.read_bytes()
         == control_link.receipt_bytes,
     )
+
+gap_builder = getattr(
+    artifact_repair, "build_verification_gap_escalation", None
+)
+gap_authorizer = getattr(
+    artifact_repair, "verification_gap_resolution_authorizes", None
+)
+gap_receipt_sha256 = "a" * 64
+gap_commands = ("scoped-1",)
+gap_session = "coordinator-session"
+gap_escalation = None
+gap_resolution = None
+if callable(gap_builder):
+    gap_escalation = gap_builder(
+        attempt,
+        child_spec.operation_id,
+        failed_receipt_sha256=gap_receipt_sha256,
+        command_ids=gap_commands,
+        origin_session=gap_session,
+    )
+    gap_resolution = artifact_repair.resolve_verification_escalation(
+        gap_escalation,
+        decision="continue-unrelated-baseline-gap",
+        evidence_note=(
+            "The isolated failure is a proven unrelated baseline gap."
+        ),
+    )
+gap_authorized = (
+    callable(gap_authorizer)
+    and isinstance(gap_resolution, dict)
+    and gap_resolution.get("decision") == "authorize-review-with-gap"
+    and gap_resolution.get("action") == "continue-unrelated-baseline-gap"
+    and gap_authorizer(
+        gap_resolution,
+        attempt,
+        child_spec.operation_id,
+        failed_receipt_sha256=gap_receipt_sha256,
+        command_ids=gap_commands,
+        origin_session=gap_session,
+    )
+)
+gap_tampering_refused = False
+if gap_authorized:
+    gap_tampering_refused = all(
+        not gap_authorizer(
+            gap_resolution,
+            attempt,
+            child_spec.operation_id,
+            failed_receipt_sha256=receipt_sha,
+            command_ids=commands,
+            origin_session=session,
+        )
+        for receipt_sha, commands, session in (
+            ("b" * 64, gap_commands, gap_session),
+            (gap_receipt_sha256, ("scoped-2",), gap_session),
+            (gap_receipt_sha256, gap_commands, "foreign-session"),
+        )
+    )
+check(
+    "an unrelated-baseline disposition is typed, failed-receipt-bound, and drift-refusing",
+    "continue-unrelated-baseline-gap"
+    in artifact_repair.VERIFICATION_PUBLIC_DECISIONS
+    and gap_authorized
+    and gap_tampering_refused,
+)
 
 print("verification authority matrix: ok")

@@ -66,7 +66,6 @@ check(
 
 for latch in (
     "",
-    "callback-invalid",
     "wiki-summary-invalid",
     "callback-wake-effect-uncertain",
     "pipeline-verification-effect-uncertain",
@@ -81,6 +80,20 @@ for latch in (
         and refused_latch.receipt is None,
         refused_latch,
     )
+
+callback_invalid = classify_review_continuation(
+    replace(callback, attention_status="callback-invalid")
+)
+check(
+    "an exact accepted callback crosses only the post-accept callback-invalid latch",
+    callback_invalid.disposition
+    is RecoveryDisposition.ACCEPTED_CALLBACK_INGEST
+    and callback_invalid.reason is RecoveryReason.ELIGIBLE
+    and callback_invalid.receipt is not None
+    and callback_invalid.receipt.identity.callback_id
+    == callback.accepted_callbacks[0].callback_id,
+    callback_invalid,
+)
 
 def refused(label: str, snapshot: RecoverySnapshot, reason: RecoveryReason) -> None:
     decision = classify_review_continuation(snapshot)

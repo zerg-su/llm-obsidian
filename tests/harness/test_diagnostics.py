@@ -14,7 +14,14 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from harness.contracts import OperationSpec, RuntimeRoute
 from harness.diagnostics import observe
+from harness.pipeline_builtins import compiled_builtin
+from harness.runtime_worker import _pipeline_verify_identity
 from harness.store import OperationStore
+from harness.verification_attempt import (
+    VerificationAttempt,
+    pipeline_verify_effect_id,
+    verification_input_sha256,
+)
 
 
 def check(label: str, condition: bool) -> None:
@@ -413,6 +420,116 @@ with tempfile.TemporaryDirectory(prefix="harness-diagnostics.") as raw:
         and (unrelated, "operation-attention-unclassified") in signals
         and packet["model_required"] is True
         and packet["status"] == "needs-model",
+    )
+
+    superseded_owner = "superseded-verification-diagnostic"
+    compiled = compiled_builtin("engineering/change")
+    root_spec = OperationSpec(
+        superseded_owner,
+        "superseded-verification-key",
+        "dispatch",
+        superseded_owner,
+        RuntimeRoute(
+            "codex", "gpt-5.6-sol", "high", "executor", "e" * 64
+        ),
+        "packets/task.json",
+        "scoped",
+        contract_sha256=compiled.definition_sha256,
+    )
+    parent = store.create(
+        root_spec,
+        lane_id="superseded-root-lane",
+        run_id="superseded-root-run",
+    )
+    for state in ("preflight", "starting", "running"):
+        store.transition(superseded_owner, superseded_owner, state)
+    head_sha = "9" * 40
+    profile_sha256 = "7" * 64
+    input_sha256 = verification_input_sha256(
+        compiled.definition_sha256, head_sha, profile_sha256, 1
+    )
+    predecessor, predecessor_lane, predecessor_run = _pipeline_verify_identity(
+        parent.spec,
+        definition_sha256=compiled.definition_sha256,
+        input_sha256=input_sha256,
+        profile="scoped",
+        attempt_index=0,
+    )
+    successor, successor_lane, successor_run = _pipeline_verify_identity(
+        parent.spec,
+        definition_sha256=compiled.definition_sha256,
+        input_sha256=input_sha256,
+        profile="scoped",
+        attempt_index=1,
+    )
+    store.create(
+        predecessor,
+        lane_id=predecessor_lane,
+        run_id=predecessor_run,
+    )
+    store.create(successor, lane_id=successor_lane, run_id=successor_run)
+    for operation_id in (predecessor.operation_id, successor.operation_id):
+        for state in ("preflight", "starting", "running", "verifying"):
+            store.transition(superseded_owner, operation_id, state)
+    store.transition(
+        superseded_owner,
+        predecessor.operation_id,
+        "attention-required",
+        reason="attention-required",
+    )
+    for state in ("finalizing", "exiting", "complete"):
+        store.transition(superseded_owner, successor.operation_id, state)
+    predecessor_attempt = VerificationAttempt(
+        superseded_owner, "scoped", profile_sha256, head_sha, 0
+    )
+    successor_attempt = predecessor_attempt.same_head_retry()
+    invalidation_path = (
+        store_root
+        / "owners"
+        / superseded_owner
+        / "runtime"
+        / superseded_owner
+        / "pipeline-verification"
+        / predecessor.operation_id
+        / "invalidation.json"
+    )
+    invalidation_path.parent.mkdir(parents=True, exist_ok=True)
+    invalidation = {
+        "schema_version": 1,
+        "operation_id": predecessor.operation_id,
+        "parent_operation_id": superseded_owner,
+        "predecessor_attempt_sha256": predecessor_attempt.sha256,
+        "predecessor_effect_id": pipeline_verify_effect_id(input_sha256, 0),
+        "successor_operation_id": successor.operation_id,
+        "successor_attempt_sha256": successor_attempt.sha256,
+        "successor_effect_id": pipeline_verify_effect_id(input_sha256, 1),
+        "current_head_sha": head_sha,
+        "status": "invalidated",
+    }
+    invalidation_path.write_text(
+        json.dumps(invalidation, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    superseded_packet = observe(store_root, superseded_owner)
+    invalidation_path.write_text(
+        json.dumps(
+            {**invalidation, "successor_attempt_sha256": "0" * 64},
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    drifted_packet = observe(store_root, superseded_owner)
+    check(
+        "only an exact completed verification successor suppresses predecessor attention",
+        not any(
+            signal["operation_id"] == predecessor.operation_id
+            for signal in superseded_packet["signals"]
+        )
+        and any(
+            signal["operation_id"] == predecessor.operation_id
+            and signal["code"] == "operation-attention-unclassified"
+            for signal in drifted_packet["signals"]
+        ),
     )
 
 print("harness diagnostics tests passed")

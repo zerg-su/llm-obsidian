@@ -4346,6 +4346,111 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         ),
     )
 
+    summary_currency_task = "bcbcbcbc-bcbc-4cbc-8cbc-bcbcbcbcbcbc"
+    stale_summary = {
+        **valid_v4_summary,
+        "body": "Verification is still pending.",
+    }
+    refreshed_body = "Exact-HEAD verification completed before review."
+    refresh_observed = threading.Event()
+    refresh_threads: list[threading.Thread] = []
+    reviewed_bodies: list[str] = []
+
+    def refresh_after_verification(
+        _vault: Path, worktree: Path, state: Path, _profile_sha: str
+    ) -> None:
+        def refresh() -> None:
+            notify = state / "pipeline-summary-refresh-notify.json"
+            deadline = time.monotonic() + 2.0
+            while not notify.is_file() and time.monotonic() < deadline:
+                time.sleep(0.005)
+            if not notify.is_file():
+                return
+            current = read_json_eventually(worktree / ".task-summary.json")
+            write_json(
+                worktree / ".task-summary.json",
+                {**current, "body": refreshed_body},
+            )
+            refresh_observed.set()
+
+        thread = threading.Thread(target=refresh)
+        refresh_threads.append(thread)
+        thread.start()
+
+    def approve_refreshed_summary(vault: Path, worktree: Path) -> None:
+        summary_path = worktree / ".task-summary.json"
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        reviewed_bodies.append(str(summary.get("body") or ""))
+        meta = json.loads(
+            (worktree / ".task-meta.json").read_text(encoding="utf-8")
+        )
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=worktree,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.strip()
+        ReviewGateController.skip(
+            vault
+            / ".vault-meta"
+            / "harness"
+            / "review-data"
+            / summary_currency_task
+            / summary_currency_task,
+            dispatch_operation_id=summary_currency_task,
+            owner_id=summary_currency_task,
+            preset=ReviewPreset.from_flags(no_review=True),
+            context=ReviewContext(
+                "packets/task/manifest.json",
+                head,
+                "scoped",
+                meta["review_policy"]["verification_profile_sha256"],
+                hashlib.sha256(summary_path.read_bytes()).hexdigest(),
+            ),
+            product_root=worktree,
+        )
+
+    (
+        summary_currency_store,
+        _summary_currency_cmux,
+        summary_currency_state,
+        summary_currency_rc,
+    ) = run_case(
+        root,
+        summary_currency_task,
+        stale_summary,
+        pipeline_name="engineering/change",
+        verification_runner=pass_verification,
+        review_state="missing",
+        review_launcher=approve_refreshed_summary,
+        before_start=refresh_after_verification,
+        task_version=4,
+    )
+    for thread in refresh_threads:
+        thread.join(timeout=3)
+    summary_currency_record = summary_currency_store.read(
+        "owner-1", summary_currency_task
+    )
+    refresh_marker = (
+        summary_currency_state / "pipeline-summary-refresh-notify.json"
+    )
+    check(
+        "review consumes only a canonical summary refreshed after exact-HEAD verification",
+        summary_currency_rc == 0
+        and refresh_observed.is_set()
+        and refresh_marker.is_file()
+        and reviewed_bodies == [refreshed_body]
+        and summary_currency_record.state == "finalizing"
+        and summary_currency_record.accepted_callback_kind == "wiki-summary",
+        (
+            summary_currency_rc,
+            refresh_observed.is_set(),
+            reviewed_bodies,
+            summary_currency_record,
+        ),
+    )
+
     fix_task = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
     fix_store, fix_cmux, fix_state, fix_rc = run_case(
         root,

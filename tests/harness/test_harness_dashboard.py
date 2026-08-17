@@ -1959,6 +1959,107 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-missing-current-verif
         ),
     )
 
+with tempfile.TemporaryDirectory(prefix="harness-dashboard-superseded-verify.") as raw:
+    store_root = Path(raw) / "harness"
+    store = OperationStore(store_root)
+    compiled = compiled_builtin("engineering/change")
+    _create(
+        store,
+        DISPATCH,
+        "dispatch",
+        lane_id="lane-primary",
+        contract_sha256=compiled.definition_sha256,
+    )
+    _advance(store, DISPATCH, "preflight", "starting", "running")
+    runtime = store_root / "owners" / OWNER / "runtime" / DISPATCH
+    predecessor = _verification_receipt(
+        store,
+        DISPATCH,
+        runtime,
+        compiled.definition_sha256,
+        status="failed",
+        head_char="b",
+        attempt_index=0,
+    )
+    successor = _verification_receipt(
+        store,
+        DISPATCH,
+        runtime,
+        compiled.definition_sha256,
+        head_char="b",
+        attempt_index=1,
+    )
+    for operation_id in (predecessor, successor):
+        _advance(
+            store,
+            operation_id,
+            "preflight",
+            "starting",
+            "running",
+            "verifying",
+        )
+    store.transition(
+        OWNER,
+        predecessor,
+        "attention-required",
+        reason=AttentionReason.ATTENTION_REQUIRED,
+    )
+    _advance(store, successor, "finalizing", "exiting", "complete")
+    head_sha = "b" * 40
+    input_sha256 = verification_input_sha256(
+        compiled.definition_sha256, head_sha, "7" * 64, 1
+    )
+    predecessor_attempt = VerificationAttempt(
+        DISPATCH, "scoped", "7" * 64, head_sha, 0
+    )
+    successor_attempt = predecessor_attempt.same_head_retry()
+    invalidation_path = (
+        runtime
+        / "pipeline-verification"
+        / predecessor
+        / "invalidation.json"
+    )
+    invalidation = {
+        "schema_version": 1,
+        "operation_id": predecessor,
+        "parent_operation_id": DISPATCH,
+        "predecessor_attempt_sha256": predecessor_attempt.sha256,
+        "predecessor_effect_id": pipeline_verify_effect_id(input_sha256, 0),
+        "successor_operation_id": successor,
+        "successor_attempt_sha256": successor_attempt.sha256,
+        "successor_effect_id": pipeline_verify_effect_id(input_sha256, 1),
+        "current_head_sha": head_sha,
+        "status": "invalidated",
+    }
+    invalidation_path.write_text(
+        json.dumps(invalidation, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    _write_gate(store, "reviewing", subject=DISPATCH, head_sha=head_sha)
+    exact = project(store_root, OWNER, inventory=LiveInventory({}))
+    exact_verify = next(
+        step for step in exact.programs[0].steps if step.step_id == "verify"
+    )
+    invalidation_path.write_text(
+        json.dumps(
+            {**invalidation, "successor_operation_id": "foreign-successor"},
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    drifted = project(store_root, OWNER, inventory=LiveInventory({}))
+    drifted_verify = next(
+        step for step in drifted.programs[0].steps if step.step_id == "verify"
+    )
+    regression_check(
+        "dashboard selects only the exact successful verification successor",
+        exact_verify.status == "complete"
+        and {child.operation_id for child in exact_verify.children}
+        == {successor}
+        and predecessor
+        in {child.operation_id for child in drifted_verify.children},
+    )
+
 with tempfile.TemporaryDirectory(prefix="harness-dashboard-terminal-truth.") as raw:
     for terminal in ("failed", "cancelled"):
         store_root = Path(raw) / terminal / "harness"
