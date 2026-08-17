@@ -41,6 +41,15 @@ RESERVATION_FIELDS = frozenset({
     "schema_version", "family", "attempt_id", "template_sha256",
     "invalid_sha256", "attempt", "correction_id",
 })
+VERIFICATION_MECHANISM_FLAKE_DECISIONS = (
+    "retry-mechanism-flake",
+    "stop",
+    "repair-repository-mechanism",
+)
+VERIFICATION_BASELINE_GAP_DECISIONS = (
+    "continue-unrelated-baseline-gap",
+    "stop",
+)
 VERIFICATION_PUBLIC_DECISIONS = (
     "retry-mechanism-flake",
     "continue-unrelated-baseline-gap",
@@ -361,9 +370,14 @@ def resolve_verification_escalation(
         or not IDENTIFIER.fullmatch(str(escalation.get("verification_operation_id") or ""))
         or not GIT_OID.fullmatch(str(escalation.get("exact_head_sha") or ""))
         or not SHA256.fullmatch(str(escalation.get("failed_attempt_sha256") or ""))
-        or decision not in VERIFICATION_PUBLIC_DECISIONS
-        or (is_retry and decision == "continue-unrelated-baseline-gap")
-        or (is_gap and decision not in {"continue-unrelated-baseline-gap", "stop"})
+        or (
+            is_retry
+            and decision not in VERIFICATION_MECHANISM_FLAKE_DECISIONS
+        )
+        or (
+            is_gap
+            and decision not in VERIFICATION_BASELINE_GAP_DECISIONS
+        )
         or not note
         or len(note) > 1000
     ):
@@ -1098,6 +1112,8 @@ class ContractArtifactOwner:
 
 __all__ = (
     "ArtifactObservation", "ArtifactRepairError", "ArtifactRepairResult",
+    "VERIFICATION_BASELINE_GAP_DECISIONS",
+    "VERIFICATION_MECHANISM_FLAKE_DECISIONS",
     "VERIFICATION_PUBLIC_DECISIONS",
     "ContractArtifactOwner",
     "CorrectionBudgetExhausted",

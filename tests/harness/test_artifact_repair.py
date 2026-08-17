@@ -20,6 +20,8 @@ from harness.artifact_repair import (  # noqa: E402
     ContractArtifactOwner,
     MAX_ARTIFACT_BYTES,
     VERIFICATION_PUBLIC_DECISIONS,
+    VERIFICATION_BASELINE_GAP_DECISIONS,
+    VERIFICATION_MECHANISM_FLAKE_DECISIONS,
     build_verification_escalation,
     observe_stable_artifact,
     publish_pipeline_step_contract,
@@ -468,6 +470,17 @@ check(
         "repair-repository-mechanism",
     ),
     VERIFICATION_PUBLIC_DECISIONS,
+)
+check(
+    "each verification escalation kind advertises only executable decisions",
+    VERIFICATION_MECHANISM_FLAKE_DECISIONS
+    == ("retry-mechanism-flake", "stop", "repair-repository-mechanism")
+    and VERIFICATION_BASELINE_GAP_DECISIONS
+    == ("continue-unrelated-baseline-gap", "stop"),
+    (
+        VERIFICATION_MECHANISM_FLAKE_DECISIONS,
+        VERIFICATION_BASELINE_GAP_DECISIONS,
+    ),
 )
 for public_decision, private_decision in (
     ("retry-mechanism-flake", "authorize-attempt-1"),

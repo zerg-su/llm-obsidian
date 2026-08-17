@@ -44,6 +44,13 @@ def integration_base() -> str:
     """
 
     candidates = ["main"]
+    remote_main = subprocess.run(
+        ["git", "show-ref", "--verify", "--quiet", "refs/remotes/origin/main"],
+        cwd=ROOT,
+        check=False,
+    )
+    if remote_main.returncode == 0:
+        candidates.append("origin/main")
     tracked = subprocess.run(
         ["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
         cwd=ROOT,

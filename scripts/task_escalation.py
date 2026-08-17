@@ -29,7 +29,8 @@ from task_escalation_records import (
 from task_plan_authority import PlanAuthorityError, record_plan_amendment
 from harness.adapters.cmux import run_cmux
 from harness.artifact_repair import (
-    VERIFICATION_PUBLIC_DECISIONS,
+    VERIFICATION_BASELINE_GAP_DECISIONS,
+    VERIFICATION_MECHANISM_FLAKE_DECISIONS,
     build_verification_escalation,
     build_verification_gap_escalation,
     resolve_verification_escalation,
@@ -175,7 +176,7 @@ def raise_escalation(
                     die("verification escalation contract identity changed", 3)
                 marker["verification_escalation"] = contract
                 marker["allowed_decisions"] = list(
-                    VERIFICATION_PUBLIC_DECISIONS
+                    VERIFICATION_MECHANISM_FLAKE_DECISIONS
                 )
             except VerificationAttemptError as exc:
                 die(f"verification escalation authority is invalid: {exc}", 3)
@@ -219,9 +220,9 @@ def raise_escalation(
                 origin_session=str(meta.get("origin_session") or ""),
             )
             marker["verification_escalation"] = contract
-            marker["allowed_decisions"] = [
-                "continue-unrelated-baseline-gap", "stop"
-            ]
+            marker["allowed_decisions"] = list(
+                VERIFICATION_BASELINE_GAP_DECISIONS
+            )
         except VerificationAttemptError as exc:
             die(f"verification gap authority is invalid: {exc}", 3)
     marker_path = worktree / ".task-needs-attention.json"

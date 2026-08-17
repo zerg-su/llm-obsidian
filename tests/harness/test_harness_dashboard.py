@@ -30,7 +30,7 @@ from harness.cli import main as cli_main
 from harness.callbacks import CallbackBroker
 from harness import dashboard_receipts, verification as harness_verification
 from harness.adapters.cmux import CmuxAdapter, Surface, SurfaceWorkspaceIndex
-from harness.contracts import AttentionReason, CallbackEnvelope, OperationSpec, OwnedResources, RuntimeRoute, VerificationEvidence, to_dict
+from harness.contracts import AttentionReason, CallbackEnvelope, EffectOutcome, OperationSpec, OwnedResources, RuntimeRoute, VerificationEvidence, to_dict
 from harness.dashboard_projection import (
     ACTIVE,
     ATTENTION,
@@ -2004,11 +2004,14 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-superseded-verify.") 
         "attention-required",
         reason=AttentionReason.ATTENTION_REQUIRED,
     )
-    _advance(store, successor, "finalizing", "exiting", "complete")
     head_sha = "b" * 40
     input_sha256 = verification_input_sha256(
         compiled.definition_sha256, head_sha, "7" * 64, 1
     )
+    successor_effect_id = pipeline_verify_effect_id(input_sha256, 1)
+    store.begin_effect(OWNER, successor, successor_effect_id)
+    store.resolve_effect(OWNER, successor, EffectOutcome.SUCCEEDED)
+    _advance(store, successor, "finalizing", "exiting", "complete")
     predecessor_attempt = VerificationAttempt(
         DISPATCH, "scoped", "7" * 64, head_sha, 0
     )
@@ -2040,6 +2043,16 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-superseded-verify.") 
     exact_verify = next(
         step for step in exact.programs[0].steps if step.step_id == "verify"
     )
+    successor_receipt_path = (
+        runtime / "pipeline-verification" / successor / "receipt.json"
+    )
+    successor_receipt_bytes = successor_receipt_path.read_bytes()
+    successor_receipt_path.unlink()
+    receiptless = project(store_root, OWNER, inventory=LiveInventory({}))
+    receiptless_verify = next(
+        step for step in receiptless.programs[0].steps if step.step_id == "verify"
+    )
+    successor_receipt_path.write_bytes(successor_receipt_bytes)
     invalidation_path.write_text(
         json.dumps(
             {**invalidation, "successor_operation_id": "foreign-successor"},
@@ -2057,6 +2070,8 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-superseded-verify.") 
         exact_verify.status == "complete"
         and {child.operation_id for child in exact_verify.children}
         == {successor}
+        and predecessor
+        in {child.operation_id for child in receiptless_verify.children}
         and predecessor
         in {child.operation_id for child in drifted_verify.children},
     )

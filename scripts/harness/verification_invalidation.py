@@ -8,6 +8,7 @@ from typing import Iterable
 
 from .contracts import OperationRecord
 from .store import OperationStore
+from .verification import VerificationAuthority, VerificationAuthorityError
 from .verification_attempt import (
     VerificationAttempt,
     pipeline_verify_effect_id,
@@ -121,6 +122,34 @@ def superseded_verification_ids(
             != pipeline_verify_effect_id(input_sha256, 0)
             or value.get("successor_effect_id")
             != pipeline_verify_effect_id(input_sha256, 1)
+        ):
+            continue
+        receipt_path = runtime / successor.spec.operation_id / "receipt.json"
+        try:
+            authority = VerificationAuthority.load(
+                receipt_path,
+                store=store,
+                parent=parent,
+                runtime_root=runtime.parent,
+                expected_definition_sha256=predecessor.spec.contract_sha256,
+                expected_profile=predecessor.spec.verification_profile,
+                expected_profile_sha256=profile_sha256,
+                expected_head_sha=head_sha,
+                allowed_statuses=("complete",),
+                child_states=("complete",),
+                require_released=True,
+                require_effect_succeeded=True,
+            )
+        except VerificationAuthorityError:
+            continue
+        if (
+            authority.attempt != attempt1
+            or authority.effect_id != value["successor_effect_id"]
+            or authority.command_ids
+            != tuple(
+                f"{authority.profile}-{index + 1}"
+                for index in range(len(authority.command_ids))
+            )
         ):
             continue
         superseded.add(predecessor_id)

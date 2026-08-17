@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 import tempfile
@@ -12,11 +13,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from harness.contracts import OperationSpec, RuntimeRoute
+from harness.contracts import EffectOutcome, OperationSpec, RuntimeRoute
 from harness.diagnostics import observe
 from harness.pipeline_builtins import compiled_builtin
 from harness.runtime_worker import _pipeline_verify_identity
 from harness.store import OperationStore
+from harness.verification import VerificationAuthority, VerificationEvidence
 from harness.verification_attempt import (
     VerificationAttempt,
     pipeline_verify_effect_id,
@@ -477,6 +479,15 @@ with tempfile.TemporaryDirectory(prefix="harness-diagnostics.") as raw:
         "attention-required",
         reason="attention-required",
     )
+    successor_effect_id = pipeline_verify_effect_id(input_sha256, 1)
+    store.begin_effect(
+        superseded_owner, successor.operation_id, successor_effect_id
+    )
+    store.resolve_effect(
+        superseded_owner,
+        successor.operation_id,
+        EffectOutcome.SUCCEEDED,
+    )
     for state in ("finalizing", "exiting", "complete"):
         store.transition(superseded_owner, successor.operation_id, state)
     predecessor_attempt = VerificationAttempt(
@@ -510,7 +521,74 @@ with tempfile.TemporaryDirectory(prefix="harness-diagnostics.") as raw:
     invalidation_path.write_text(
         json.dumps(invalidation, sort_keys=True) + "\n", encoding="utf-8"
     )
+    receiptless_packet = observe(store_root, superseded_owner)
+    verification_runtime = invalidation_path.parents[2]
+    output_path = verification_runtime / "successor-output.log"
+    output_path.write_bytes(b"ok\n")
+    authority = VerificationAuthority.issue(
+        store=store,
+        parent=store.read(superseded_owner, superseded_owner),
+        runtime_root=verification_runtime,
+        definition_sha256=compiled.definition_sha256,
+        input_sha256=input_sha256,
+        profile="scoped",
+        profile_sha256=profile_sha256,
+        attempt=successor_attempt,
+        evidence=(
+            VerificationEvidence(
+                "scoped",
+                profile_sha256,
+                head_sha,
+                "scoped-1",
+                ".",
+                0,
+                "1",
+                "2",
+                "successor-output.log",
+                hashlib.sha256(b"ok\n").hexdigest(),
+                3,
+                2,
+            ),
+        ),
+        expected_command_ids=("scoped-1",),
+    )
+    successor_receipt = (
+        verification_runtime
+        / "pipeline-verification"
+        / successor.operation_id
+        / "receipt.json"
+    )
+    successor_receipt.parent.mkdir(parents=True, exist_ok=True)
+    successor_receipt.write_text(
+        json.dumps(authority.to_dict(), sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
     superseded_packet = observe(store_root, superseded_owner)
+    successor_receipt_bytes = successor_receipt.read_bytes()
+    successor_receipt.write_text("{malformed receipt", encoding="utf-8")
+    malformed_receipt_packet = observe(store_root, superseded_owner)
+    successor_receipt.unlink()
+    successor_receipt.symlink_to(successor_receipt.parent / "missing.json")
+    symlinked_receipt_packet = observe(store_root, superseded_owner)
+    successor_receipt.unlink()
+    successor_receipt.write_bytes(successor_receipt_bytes)
+    successor_record_path = (
+        store_root
+        / "owners"
+        / superseded_owner
+        / "operations"
+        / f"{successor.operation_id}.json"
+    )
+    successor_record_bytes = successor_record_path.read_bytes()
+    effectless_record = json.loads(successor_record_bytes)
+    effectless_record["effect_id"] = ""
+    effectless_record["effect_outcome"] = "none"
+    successor_record_path.write_text(
+        json.dumps(effectless_record, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    effectless_packet = observe(store_root, superseded_owner)
+    successor_record_path.write_bytes(successor_record_bytes)
     invalidation_path.write_text(
         json.dumps(
             {**invalidation, "successor_attempt_sha256": "0" * 64},
@@ -522,9 +600,24 @@ with tempfile.TemporaryDirectory(prefix="harness-diagnostics.") as raw:
     drifted_packet = observe(store_root, superseded_owner)
     check(
         "only an exact completed verification successor suppresses predecessor attention",
-        not any(
+        any(
+            signal["operation_id"] == predecessor.operation_id
+            for signal in receiptless_packet["signals"]
+        )
+        and not any(
             signal["operation_id"] == predecessor.operation_id
             for signal in superseded_packet["signals"]
+        )
+        and all(
+            any(
+                signal["operation_id"] == predecessor.operation_id
+                for signal in packet["signals"]
+            )
+            for packet in (
+                malformed_receipt_packet,
+                symlinked_receipt_packet,
+                effectless_packet,
+            )
         )
         and any(
             signal["operation_id"] == predecessor.operation_id

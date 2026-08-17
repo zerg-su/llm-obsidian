@@ -10,6 +10,16 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.8.1] - 2026-08-17
+
+### Fixed
+
+- Lifecycle continuation now proves superseded verification through an exact
+  immutable successful receipt, preserves failed baseline-gap evidence through
+  typed restart and provider admission, and publishes only decisions executable
+  for the exact escalation kind. The live scripts ratchet moves to the measured
+  294-file / 111,430-line candidate with zero headroom.
+
 ## [2.8.0] - 2026-08-17
 
 Architecture Workflow v1: architectural intent becomes accepted project

@@ -2,12 +2,12 @@
   "schema_version": 1,
   "hotspots": {
     "file-lines:scripts/harness/artifact_repair.py": {
-      "max_value": 1012,
-      "owner": "inherited v2.6.7 RC5 Harness repair authority",
-      "evidence": "approved-base full-gate rebaseline; artifact repair behavior remains covered by tests/harness/test_artifact_repair.py and tests/harness/test_fresh_artifact_repair.py"
+      "max_value": 1134,
+      "owner": "v2.8.1 typed verification escalation authority",
+      "evidence": "exact per-kind mechanism-flake and baseline-gap decision sets, typed resolution derivation, and cross-kind refusal in tests/harness/test_artifact_repair.py plus the durable restart corridor in tests/harness/test_runtime_task_summary.py"
     },
     "file-lines:scripts/harness/dashboard_projection.py": {
-      "max_value": 1025,
+      "max_value": 1030,
       "owner": "v2.6.7 RC6.7 durable engineering/fix phase timing",
       "evidence": "identity-bound active and completed phase timing projection in tests/harness/test_harness_dashboard.py"
     },
@@ -17,12 +17,12 @@
       "evidence": "accepted review-child interval validation and complete fail-closed matrix in tests/harness/test_harness_dashboard.py"
     },
     "file-lines:scripts/harness/runtime_worker_review_bridge.py": {
-      "max_value": 1146,
+      "max_value": 1298,
       "owner": "v2.7.5 durable exact consumer admission",
       "evidence": "inherited rc3 review corridor repairs plus the 2.7.5 exact receipt/HEAD launch admission published at the drive boundary instead of a carried boolean; post-check clean-commit launch injection and exact-pair control in tests/harness/test_runtime_task_summary.py; the F275 findings patch binds the published pair to its durable receipt pointer"
     },
     "file-lines:scripts/harness/runtime_worker_verification.py": {
-      "max_value": 1276,
+      "max_value": 1358,
       "owner": "v2.7.5 durable exact consumer admission",
       "evidence": "code-owned invalidated-attempt classification and exact-current-HEAD successor handoff plus the 2.7.4 read-only orphan predecessor census and current-candidate authority-consumption predicate, and the 2.7.5 controller-link admission that re-observes the exact receipt HEAD at the durable write and retracts a post-write mismatch; exact live ordering, repeated-wake, crash re-entry, exhaustion, orphan-lineage, and clean-commit race matrices in tests/harness/test_runtime_task_summary.py with identity/authority and post-check publication pins in tests/harness/test_verification_authority.py"
     },
@@ -37,9 +37,9 @@
       "evidence": "exact same-HEAD implementer-summary follow-up admission and fail-closed context-drift coverage in tests/harness/test_exact_head_review_attempt.py; begin_attempt threads the exact-candidate launch admission to the provider-start boundary (tests/harness/test_exact_head_review_attempt.py)"
     },
     "file-lines:scripts/task_review_flow.py": {
-      "max_value": 1442,
-      "owner": "v2.7.6 provider-start admission",
-      "evidence": "manifest-proven summary-only drift, predecessor-bound reservation, accepted predecessor-callback rollover after a zero-effect launch failure, active replay, and unchanged-summary idempotency coverage in tests/harness/test_exact_head_review_attempt.py, plus the exact receipt/HEAD launch-admission gate and the four-way recordless, legacy-empty, resolved, and unresolved contract matrix in tests/harness/test_task_review_flow_units.py; unresolved nonempty contracts fail closed and exact admission is consumed again at the provider-start owner"
+      "max_value": 1527,
+      "owner": "v2.8.1 failed-receipt-bound review admission",
+      "evidence": "the existing exact receipt/HEAD provider-start gate now validates admitted-with-gap against the immutable failed receipt and durable escalation chain; exact restart, summary refresh, single launch, and consumer admission are covered by tests/harness/test_runtime_task_summary.py"
     },
     "function-branches:scripts/harness/workflows/review_gate_attempt.py:recover_late_started_attempt": {
       "max_value": 80,
@@ -55,6 +55,11 @@
       "max_value": 77,
       "owner": "v2.6.7 RC6.4 reviewed-summary identity boundary",
       "evidence": "terminal approval requires exact HEAD and summary digest, with unchanged, ambiguous, changed-HEAD, and replay regressions in tests/harness/test_exact_head_review_attempt.py"
+    },
+    "function-branches:scripts/task_review_flow.py:_admitted_review_launch": {
+      "max_value": 77,
+      "owner": "v2.8.1 failed-receipt-bound review admission",
+      "evidence": "verified and admitted-with-gap paths share the exact provider-start consumer; immutable receipt, escalation-chain, HEAD, identity, summary-refresh, replay, and drift cases are covered by tests/harness/test_task_review_flow_units.py and tests/harness/test_runtime_task_summary.py"
     },
     "function-lines:scripts/harness/workflows/review_gate_attempt.py:_initialize_attempt": {
       "max_value": 325,
@@ -78,7 +83,7 @@
       "operation-uuid": 27,
       "operator-local-path": 2
     },
-    "final_max_production_loc": 15768,
+    "final_max_production_loc": 15770,
     "final_production_file_count": 27,
     "final_max_writable_authorities": 0,
     "final_max_incident_literals": 0,

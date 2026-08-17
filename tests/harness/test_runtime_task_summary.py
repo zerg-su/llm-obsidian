@@ -62,6 +62,7 @@ from harness.supervisor import OperationSupervisor
 from harness.verification import load_profiles
 from approved_plan_snapshot import bind_approved_plan_snapshot
 from harness.artifact_repair import (  # noqa: E402
+    build_verification_gap_escalation,
     build_verification_escalation,
     publish_pipeline_step_contract,
     resolve_verification_escalation,
@@ -157,6 +158,7 @@ from task_escalation_records import (
     append_resolution,
     load_attention,
 )
+from task_review_flow import TaskReviewError, _admitted_review_launch
 
 
 ORIGIN = "11111111-1111-1111-1111-111111111111"
@@ -2158,6 +2160,7 @@ def run_case(
     phase_callback_publication_barrier_step: str = "",
     wake_source: object | None = None,
     monotonic_clock: Callable[[], float] | None = None,
+    restart_after_attention: bool = False,
 ) -> tuple[
     OperationStore, FakeCmux, Path, int
 ]:
@@ -2799,6 +2802,29 @@ def run_case(
     # at the fixture's 0.02s poll cadence needs headroom a 1s production
     # poll never does.
     thread.join(timeout=12 if wake_source is not None else 8)
+    if (
+        restart_after_attention
+        and store.read("owner-1", operation_id).state
+        == "attention-required"
+    ):
+        paused = store.read("owner-1", operation_id)
+        store.transition(
+            "owner-1",
+            operation_id,
+            paused.resume_state or "awaiting-callback",
+        )
+        result.append(
+            run_worker(
+                launch.spec_path,
+                poll_seconds=0.02,
+                checkpoint_probe=lambda _surface, _runtime: "checkpoint-1",
+                cmux_adapter=cmux,
+                review_launcher=review_launcher,
+                verification_runner=verification_runner,
+                wake_source=wake_source or FallbackWakeSource(),
+                monotonic_clock=monotonic_clock,
+            )
+        )
     if original_inspect_task_summary is not None:
         RuntimeWorkerExecution.inspect_task_summary = (
             original_inspect_task_summary
@@ -2834,7 +2860,7 @@ def run_case(
             is True,
             phase_callback_publication_evidence,
         )
-    return store, cmux, launch.spec_path.parent, result[0]
+    return store, cmux, launch.spec_path.parent, result[-1]
 
 
 def assert_orphaned_predecessor_lineage_stays_attention(root: Path) -> None:
@@ -5815,6 +5841,295 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
             commands_before_resubmission,
             failed_cmux.sent,
         ),
+    )
+
+    gap_task = "ccdddddd-dddd-4ddd-8ddd-dddddddddddd"
+    gap_authorized = threading.Event()
+    gap_launches: list[dict[str, object]] = []
+    gap_threads: list[threading.Thread] = []
+
+    def authorize_baseline_gap(
+        _vault: Path,
+        worktree: Path,
+        state: Path,
+        _profile_sha: str,
+    ) -> None:
+        def authorize() -> None:
+            packet = read_json_eventually(
+                worktree / ".task-verification.json", timeout=3
+            )
+            failed_receipt = json.loads(
+                Path(str(packet["receipt_pointer"])).read_text(
+                    encoding="utf-8"
+                )
+            )
+            receipt_sha256 = hashlib.sha256(
+                json.dumps(
+                    failed_receipt,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode()
+            ).hexdigest()
+            command_ids = tuple(
+                str(row["command_id"]) for row in packet["evidence"]
+            )
+            attempt = VerificationAttempt.from_dict(
+                packet["verification_attempt"]
+            )
+            escalation = build_verification_gap_escalation(
+                attempt,
+                str(packet["verification_operation_id"]),
+                failed_receipt_sha256=receipt_sha256,
+                command_ids=command_ids,
+                origin_session="coordinator-session",
+            )
+            raised = append_raise(
+                worktree,
+                {
+                    "version": 1,
+                    "id": f"baseline-gap-{gap_task[:8]}",
+                    "status": "pending",
+                    "task_name": "baseline gap continuation runtime",
+                    "category": "pipeline-decision",
+                    "reason": "isolated unrelated baseline verification gap",
+                    "question": "Continue review with the preserved failed receipt?",
+                    "worktree": str(worktree.resolve()),
+                    "task_surface": CHILD,
+                    "raised_at": "2026-08-17T12:00:00Z",
+                    "verification_escalation": escalation,
+                    "allowed_decisions": [
+                        "continue-unrelated-baseline-gap",
+                        "stop",
+                    ],
+                },
+            )
+            resolution = resolve_verification_escalation(
+                escalation,
+                decision="continue-unrelated-baseline-gap",
+                evidence_note=(
+                    "The exact failed command is an unrelated baseline gap."
+                ),
+            )
+            resolved = append_resolution(
+                worktree,
+                "continue-unrelated-baseline-gap",
+                verification_resolution=resolution,
+                resolved_at="2026-08-17T12:01:00Z",
+            )
+            replayed = append_resolution(
+                worktree,
+                "continue-unrelated-baseline-gap",
+                verification_resolution=resolution,
+                resolved_at="2026-08-17T12:01:00Z",
+            )
+            refresh = read_json_eventually(
+                state / "pipeline-summary-refresh-notify.json", timeout=3
+            )
+            current = json.loads(
+                (worktree / ".task-summary.json").read_text(encoding="utf-8")
+            )
+            current["body"] = (
+                str(current["body"])
+                + "\n\nExact failed receipt preserved as an admitted baseline gap."
+            )
+            write_json(worktree / ".task-summary.json", current)
+            if (
+                raised.record_type != "raise"
+                or resolved.record_id != replayed.record_id
+                or refresh.get("status") not in {"sent", "accepted"}
+            ):
+                raise AssertionError("gap authority chain did not replay exactly")
+            gap_authorized.set()
+
+        thread = threading.Thread(target=authorize)
+        gap_threads.append(thread)
+        thread.start()
+
+    def consume_and_approve_gap(vault: Path, worktree: Path) -> None:
+        meta = json.loads(
+            (worktree / ".task-meta.json").read_text(encoding="utf-8")
+        )
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=worktree,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.strip()
+        review_runtime = (
+            vault
+            / ".vault-meta"
+            / "harness"
+            / "review-runtime"
+            / gap_task
+        )
+        context = ReviewContext(
+            "packets/task/manifest.json",
+            head,
+            "scoped",
+            meta["review_policy"]["verification_profile_sha256"],
+        )
+        _admitted_review_launch(
+            meta, vault, review_runtime, worktree, gap_task, context
+        )
+        admission = json.loads(
+            (review_runtime / "review-launch-admission.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        gap_launches.append(admission)
+        gate = (
+            vault
+            / ".vault-meta"
+            / "harness"
+            / "review-data"
+            / gap_task
+            / gap_task
+        )
+        (gate / "review-gate.json").unlink(missing_ok=True)
+        ReviewGateController.skip(
+            gate,
+            dispatch_operation_id=gap_task,
+            owner_id=gap_task,
+            preset=ReviewPreset.from_flags(no_review=True),
+            context=context,
+            product_root=worktree,
+        )
+
+    gap_store, _gap_cmux, gap_state, gap_rc = run_case(
+        root,
+        gap_task,
+        valid_v4_summary,
+        review_state="missing",
+        pipeline_name="engineering/change",
+        verification_runner=fail_verification,
+        before_start=authorize_baseline_gap,
+        review_launcher=consume_and_approve_gap,
+        restart_after_attention=True,
+        task_version=4,
+    )
+    for thread in gap_threads:
+        thread.join(timeout=1)
+    gap_parent = gap_store.read("owner-1", gap_task)
+    gap_receipt = json.loads(
+        next(
+            (gap_state / "pipeline-verification").glob("*/receipt.json")
+        ).read_text(encoding="utf-8")
+    )
+    gap_authority = json.loads(
+        (gap_state / "pipeline-verification-gap-authority.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    gap_refresh_path = gap_state / "pipeline-summary-refresh-notify.json"
+    if not gap_refresh_path.is_file():
+        raise AssertionError(
+            (
+                "baseline gap restart did not reach summary refresh",
+                gap_rc,
+                gap_parent,
+                sorted(path.name for path in gap_state.iterdir()),
+                load_attention(root / f"worktree-{gap_task}"),
+            )
+        )
+    gap_refresh = json.loads(gap_refresh_path.read_text(encoding="utf-8"))
+    check(
+        "failed receipt, durable decision, restart-safe summary refresh, and "
+        "provider admission form one baseline-gap continuation",
+        gap_rc == 0
+        and gap_authorized.is_set()
+        and gap_parent.state == "finalizing"
+        and gap_receipt["status"] == "failed"
+        and gap_authority["failed_receipt_sha256"]
+        == hashlib.sha256(
+            json.dumps(
+                gap_receipt, sort_keys=True, separators=(",", ":")
+            ).encode()
+        ).hexdigest()
+        and gap_refresh["status"] == "accepted"
+        and len(gap_launches) == 1
+        and gap_launches[0]["status"] == "admitted-with-gap"
+        and gap_launches[0]["decision_record_id"]
+        == gap_authority["decision_record_id"],
+        (gap_parent, gap_receipt, gap_authority, gap_refresh, gap_launches),
+    )
+    gap_worktree = root / f"worktree-{gap_task}"
+    gap_vault = root / f"vault-{gap_task}"
+    gap_meta = json.loads(
+        (gap_worktree / ".task-meta.json").read_text(encoding="utf-8")
+    )
+    gap_runtime = (
+        gap_vault
+        / ".vault-meta"
+        / "harness"
+        / "review-runtime"
+        / gap_task
+    )
+    gap_admission_path = gap_runtime / "review-launch-admission.json"
+    exact_gap_admission = json.loads(
+        gap_admission_path.read_text(encoding="utf-8")
+    )
+    gap_context = ReviewContext(
+        "packets/task/manifest.json",
+        str(gap_receipt["head_sha"]),
+        "scoped",
+        gap_meta["review_policy"]["verification_profile_sha256"],
+    )
+
+    def gap_consumer_refuses() -> bool:
+        try:
+            _admitted_review_launch(
+                gap_meta,
+                gap_vault,
+                gap_runtime,
+                gap_worktree,
+                gap_task,
+                gap_context,
+            )
+        except TaskReviewError:
+            return True
+        return False
+
+    admission_drift_refused = []
+    for field, value in (
+        ("receipt_sha256", "0" * 64),
+        ("verification_run_id", "foreign-run"),
+        ("decision_record_sha256", "0" * 64),
+        ("head_sha", "0" * 40),
+    ):
+        write_json(gap_admission_path, {**exact_gap_admission, field: value})
+        admission_drift_refused.append(gap_consumer_refuses())
+    gap_authority_path = gap_state / "pipeline-verification-gap-authority.json"
+    authority_drift_refused = []
+    for field, value in (
+        ("command_ids", ["scoped-2"]),
+        ("origin_session", "foreign-session"),
+    ):
+        drifted_authority = {**gap_authority, field: value}
+        write_json(gap_authority_path, drifted_authority)
+        write_json(
+            gap_admission_path,
+            {
+                **exact_gap_admission,
+                "gap_authority_sha256": hashlib.sha256(
+                    json.dumps(
+                        drifted_authority,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode()
+                ).hexdigest(),
+            },
+        )
+        authority_drift_refused.append(gap_consumer_refuses())
+    write_json(gap_authority_path, gap_authority)
+    write_json(gap_admission_path, exact_gap_admission)
+    check(
+        "baseline-gap provider admission rejects receipt, HEAD, decision, "
+        "identity, command, and session drift without replay",
+        all(admission_drift_refused)
+        and all(authority_drift_refused)
+        and len(gap_launches) == 1,
+        (admission_drift_refused, authority_drift_refused, gap_launches),
     )
 
     def same_head_authorizer(

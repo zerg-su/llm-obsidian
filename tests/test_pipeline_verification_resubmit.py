@@ -203,7 +203,6 @@ with tempfile.TemporaryDirectory(prefix="verification-resubmit.") as raw:
         or raised.payload.get("allowed_decisions")
         != [
             "retry-mechanism-flake",
-            "continue-unrelated-baseline-gap",
             "stop",
             "repair-repository-mechanism",
         ]

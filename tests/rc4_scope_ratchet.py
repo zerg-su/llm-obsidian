@@ -391,6 +391,13 @@ contract, so same-HEAD retries do not classify their own transport as product
 drift. No production module is added; the ceiling moves by the exact measured
 305-line cost to the 290-file / 109,648-line candidate with no speculative
 headroom.
+
+The 2.8.1 lifecycle continuation repair adds the one cohesive read-only
+``verification_invalidation.py`` classifier and hardens existing verification,
+summary-refresh, escalation, diagnostics, dashboard, and review-admission
+owners. The integrated correction moves the live scripts ratchet by exactly one
+file and the measured 712 lines to the 294-file / 111,430-line candidate with
+zero speculative headroom.
 """
 
 from __future__ import annotations
@@ -398,21 +405,21 @@ from __future__ import annotations
 from pathlib import Path
 
 
-#: Maximum tracked Python files under ``scripts/`` for the 2.7.8 candidate.
+#: Maximum tracked Python files under ``scripts/`` for the 2.8.1 candidate.
 #: Architecture Workflow v1 adds exactly the three production scripts its
 #: approved plan names: ``architecture_paths.py`` (the confined path/collision
 #: validator both carriers call), ``architecture_workflow_pressure.py`` and
 #: ``architecture_workflow_audit.py`` (the release-owned behavioral evidence
 #: runner and validator, kept out of the frozen legacy eval framework). The
 #: file ceiling therefore moves by exactly three.
-SCRIPT_FILE_CEILING = 293
+SCRIPT_FILE_CEILING = 294
 
-#: Maximum total lines across those files for the 2.7.8 stability candidate.
+#: Maximum total lines across those files for the 2.8.1 lifecycle candidate.
 #: The line ceiling moves to the measured candidate with zero headroom: those
 #: three modules plus the shared artifact-contract wiring in the existing
 #: carriers, the RC4 governing-source catalogue projection, and the registered
 #: review fix-delta evidence exclusion.
-SCRIPT_LINE_CEILING = 110_718
+SCRIPT_LINE_CEILING = 111_430
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

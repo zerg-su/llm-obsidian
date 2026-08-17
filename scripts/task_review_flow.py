@@ -502,6 +502,8 @@ def _admitted_review_launch(
             or gap.get("failed_attempt_sha256") != authority.attempt.sha256
             or gap.get("failed_receipt_sha256") != authority.receipt_sha256
             or gap.get("command_ids") != list(authority.command_ids)
+            or gap.get("origin_session")
+            != str(meta.get("origin_session") or "")
             or decision is None
             or decision.record_type != "resolution"
             or decision.record_id != admission.get("decision_record_id")
