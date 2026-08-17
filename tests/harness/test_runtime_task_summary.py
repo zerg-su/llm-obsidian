@@ -2152,6 +2152,7 @@ def run_case(
     task_version: int = 3,
     bind_runtime_resources: bool = False,
     typed_review: bool = False,
+    await_final_callback: bool = False,
     atomic_publication_barrier: bool = False,
     phase_callback_publication_barrier_step: str = "",
     wake_source: object | None = None,
@@ -2459,7 +2460,12 @@ def run_case(
             "  if iteration==0 or not (root/'.null-change-retry').is_file():\n"
             "    subprocess.run(['git','commit','--allow-empty','-m',f'provider pass {iteration + 1}'],cwd=root,text=True,capture_output=True,check=True)\n"
             "  publish_summary(summary,sys.argv[6] if iteration and len(sys.argv)>6 else sys.argv[2])\n"
-            "time.sleep(0.3)\n",
+            "if (root/'.provider-await-final-callback').is_file():\n"
+            "  for _ in range(2000):\n"
+            "    if (state/'callback-receipt.json').is_file(): break\n"
+            "    time.sleep(0.01)\n"
+            "  else: raise SystemExit(6)\n"
+            "else: time.sleep(0.3)\n",
             encoding="utf-8",
         )
     elif pipeline_name == "engineering/fix":
@@ -2590,6 +2596,14 @@ def run_case(
         # bounded retry completes with an intentionally empty change set.
         (worktree / ".null-change-retry").write_text(
             "null-change\n", encoding="utf-8"
+        )
+    if await_final_callback:
+        if pipeline_name != "engineering/fix" or not fix_retry_passes:
+            raise AssertionError(
+                "final callback wait requires the retry fixture"
+            )
+        (worktree / ".provider-await-final-callback").write_text(
+            "await\n", encoding="utf-8"
         )
     if before_start is not None:
         before_start(
@@ -4842,6 +4856,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         verification_runner=fail_once_verification,
         bind_runtime_resources=True,
         typed_review=True,
+        await_final_callback=True,
     )
     retry_parent = retry_store.read("owner-1", retry_task)
     retry_receipts = list(
