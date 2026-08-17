@@ -5396,12 +5396,10 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
     autonomous_limit_parent = autonomous_limit_store.read(
         "owner-1", autonomous_limit_task
     )
-    terminal_exhausted = json.loads(
-        (
-            autonomous_limit_state
-            / "pipeline-fix"
-            / "terminal-exhausted.json"
-        ).read_text(encoding="utf-8")
+    terminal_exhausted = read_json_eventually(
+        autonomous_limit_state
+        / "pipeline-fix"
+        / "terminal-exhausted.json"
     )
     check(
         "autonomous fix policy fails terminally after three total passes",
