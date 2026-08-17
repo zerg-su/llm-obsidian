@@ -1705,6 +1705,7 @@ def assert_invalidated_verification_hands_off_to_exact_head_replacement(
             and invalidation.get("schema_version") == 1
             and invalidation.get("operation_id") == facts["stale_b0"]
             and invalidation.get("parent_operation_id") == task
+            and invalidation.get("profile_sha256") == profile.sha256
             and invalidation.get("predecessor_attempt_sha256")
             == predecessor_attempt.sha256
             and invalidation.get("predecessor_effect_id")
@@ -2366,7 +2367,12 @@ def run_case(
             "root=pathlib.Path.cwd()\n"
             "summary=pathlib.Path(sys.argv[1])\n"
             "publish_summary(summary,sys.argv[2])\n"
-            "if (root/'.task-pipeline/results/pass-0/reproduce.json').is_file(): time.sleep(0.5)\n"
+            "if (root/'.provider-prelaunched-reproduce').is_file():\n"
+            "  request=root/'.task-pipeline-step-request.json'\n"
+            "  for _ in range(500):\n"
+            "    if request.is_file() and json.loads(request.read_text(encoding='utf-8')).get('step_id')!='reproduce': break\n"
+            "    time.sleep(0.01)\n"
+            "  else: raise SystemExit(3)\n"
             "state=pathlib.Path(sys.argv[4])\n"
             "callback_barrier=sys.argv[5] if len(sys.argv)>7 else ''\n"
             "callback_barrier_step=sys.argv[6] if len(sys.argv)>7 else ''\n"
@@ -2933,6 +2939,7 @@ def assert_orphaned_predecessor_lineage_stays_attention(root: Path) -> None:
             "schema_version": 1,
             "operation_id": spec_b0.operation_id,
             "parent_operation_id": task,
+            "profile_sha256": profile_sha,
             "predecessor_attempt_sha256": VerificationAttempt(
                 task, "scoped", profile_sha, head_b, 0
             ).sha256,
@@ -4638,6 +4645,9 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
             request=request,
             contract_template_pointer=str(owner.sidecar_path),
             operation_id=round_.spec.operation_id,
+        )
+        (worktree / ".provider-prelaunched-reproduce").write_text(
+            "ready\n", encoding="utf-8"
         )
 
     (

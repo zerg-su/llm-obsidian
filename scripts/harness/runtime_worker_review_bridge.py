@@ -337,6 +337,7 @@ class RuntimeWorkerReviewBridgeMixin:
 
     def review_drive_sha256(self) -> str:
         digest = hashlib.sha256()
+        digest.update(str(getattr(self, "digest", "")).encode())
         gate_state = self.review.gate_root / "review-gate.json"
         if gate_state.is_file():
             if gate_state.is_symlink():
@@ -367,6 +368,104 @@ class RuntimeWorkerReviewBridgeMixin:
                 digest.update(callback.relative_to(callback_root).as_posix().encode())
                 digest.update(callback.read_bytes())
         return digest.hexdigest()
+
+    def wait_for_summary_refresh_after_verification(
+        self, verification: dict[str, object]
+    ) -> bool:
+        """Hold initial review until v4 summary changes after verification."""
+
+        receipt_path = self.verification_receipt_path
+        if receipt_path.is_symlink() or not receipt_path.is_file():
+            raise RuntimeWorkerError(
+                "verification summary binding receipt is unavailable"
+            )
+        receipt_sha256 = hashlib.sha256(receipt_path.read_bytes()).hexdigest()
+        verification_operation_id = str(
+            verification.get("operation_id") or ""
+        )
+        gap_authority = getattr(self, "verification_gap_authority", None)
+        if (
+            verification.get("status")
+            != ("failed" if gap_authority is not None else "complete")
+            or not re.fullmatch(
+                "[A-Za-z0-9][A-Za-z0-9._:-]{0,127}",
+                verification_operation_id,
+            )
+            or not re.fullmatch("[0-9a-f]{64}", receipt_sha256)
+            or not re.fullmatch("[0-9a-f]{40,64}", self.verification_head)
+        ):
+            raise RuntimeWorkerError(
+                "verification summary binding is invalid"
+            )
+        notify_path = self.spec_path.parent / "pipeline-summary-refresh-notify.json"
+        identity = {
+            "schema_version": 1,
+            "purpose": "post-verification",
+            "operation_id": self.spec["operation_id"],
+            "approved_head_sha": self.verification_head,
+            "verification_operation_id": verification_operation_id,
+            "verification_receipt_sha256": receipt_sha256,
+            "verification_gap_authority_sha256": (
+                hashlib.sha256(
+                    json.dumps(
+                        gap_authority,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode()
+                ).hexdigest()
+                if isinstance(gap_authority, dict)
+                else ""
+            ),
+        }
+        if notify_path.is_file():
+            if notify_path.is_symlink():
+                raise RuntimeWorkerError(
+                    "summary refresh notification cannot be a symlink"
+                )
+            existing = json.loads(notify_path.read_text(encoding="utf-8"))
+            if all(existing.get(key) == value for key, value in identity.items()):
+                initial = str(existing.get("summary_sha256") or "")
+                refreshed = str(existing.get("refreshed_summary_sha256") or "")
+                if (
+                    not re.fullmatch("[0-9a-f]{64}", initial)
+                    or existing.get("status") not in {"sent", "accepted"}
+                ):
+                    raise RuntimeWorkerError(
+                        "summary refresh notification is invalid"
+                    )
+                if existing.get("status") == "accepted":
+                    if refreshed != self.digest:
+                        raise RuntimeWorkerError(
+                            "accepted summary refresh identity drifted"
+                        )
+                    return False
+                if self.digest == initial:
+                    return True
+                _atomic_json(
+                    notify_path,
+                    {
+                        **identity,
+                        "summary_sha256": initial,
+                        "refreshed_summary_sha256": self.digest,
+                        "status": "accepted",
+                    },
+                )
+                return False
+        marker = {
+            **identity,
+            "summary_sha256": self.digest,
+            "refreshed_summary_sha256": "",
+        }
+        _atomic_json(notify_path, {**marker, "status": "pending"})
+        message = (
+            "Exact-HEAD verification completed. Refresh .task-summary.json "
+            "before review so its body and outcome evidence cover verified HEAD "
+            f"{self.verification_head}; preserve all code-owned fields."
+        )
+        self.cmux_adapter.send(self.spec["surface_id"], message)
+        self.cmux_adapter.send_key(self.spec["surface_id"], "Enter")
+        _atomic_json(notify_path, {**marker, "status": "sent"})
+        return True
 
     def _resolved_head_verification_ready(self) -> bool:
         """Gate every bounded review launch on the resolved exact-HEAD receipt.
@@ -590,9 +689,11 @@ class RuntimeWorkerReviewBridgeMixin:
         ):
             return True
         receipt = self.verification_receipt()
+        gap_authority = getattr(self, "verification_gap_authority", None)
+        expected_status = "failed" if gap_authority is not None else "complete"
         if (
             receipt is None
-            or receipt.get("status") != "complete"
+            or receipt.get("status") != expected_status
             or receipt.get("head_sha") != bound_head
         ):
             return False
@@ -621,9 +722,7 @@ class RuntimeWorkerReviewBridgeMixin:
             raise RuntimeWorkerError("review launch admission is invalid")
         admission_path.parent.mkdir(parents=True, exist_ok=True)
         admission_path.parent.chmod(0o700)
-        _atomic_json(
-            admission_path,
-            {
+        admission = {
                 "schema_version": 1,
                 "operation_id": self.spec["operation_id"],
                 "verification_operation_id": str(receipt["operation_id"]),
@@ -632,9 +731,36 @@ class RuntimeWorkerReviewBridgeMixin:
                 "receipt_sha256": receipt_sha256,
                 "receipt_pointer": str(receipt_pointer),
                 "head_sha": str(receipt["head_sha"]),
-                "status": "admitted",
-            },
-        )
+                "status": (
+                    "admitted-with-gap"
+                    if gap_authority is not None
+                    else "admitted"
+                ),
+            }
+        if gap_authority is not None:
+            gap_path = (
+                self.spec_path.parent
+                / "pipeline-verification-gap-authority.json"
+            ).resolve()
+            admission.update(
+                {
+                    "gap_authority_pointer": str(gap_path),
+                    "gap_authority_sha256": hashlib.sha256(
+                        json.dumps(
+                            gap_authority,
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        ).encode()
+                    ).hexdigest(),
+                    "decision_record_id": gap_authority[
+                        "decision_record_id"
+                    ],
+                    "decision_record_sha256": gap_authority[
+                        "decision_record_sha256"
+                    ],
+                }
+            )
+        _atomic_json(admission_path, admission)
         return True
 
     def _review_drive_started_marker(self, input_sha256: str) -> None:

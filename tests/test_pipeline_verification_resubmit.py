@@ -201,7 +201,12 @@ with tempfile.TemporaryDirectory(prefix="verification-resubmit.") as raw:
     if (
         raised is None
         or raised.payload.get("allowed_decisions")
-        != ["retry-mechanism-flake", "stop", "repair-repository-mechanism"]
+        != [
+            "retry-mechanism-flake",
+            "continue-unrelated-baseline-gap",
+            "stop",
+            "repair-repository-mechanism",
+        ]
         or not relayed
         or "--decision retry-mechanism-flake" not in relayed[-1]
     ):

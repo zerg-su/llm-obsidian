@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
@@ -30,6 +31,7 @@ from harness.adapters.cmux import run_cmux
 from harness.artifact_repair import (
     VERIFICATION_PUBLIC_DECISIONS,
     build_verification_escalation,
+    build_verification_gap_escalation,
     resolve_verification_escalation,
 )
 from harness.verification_attempt import (
@@ -127,6 +129,7 @@ def raise_escalation(
     question: str,
     *,
     verification_mechanism_flake: bool = False,
+    verification_baseline_gap: bool = False,
 ) -> int:
     meta, _ = load_unattended(worktree)
     coordinator = read_surface(worktree, meta, "wiki_surface", ".wiki-cmux-surface")
@@ -146,6 +149,10 @@ def raise_escalation(
     }
     if verification_mechanism_flake and category != "mechanism-failure":
         die("verification mechanism flake requires category mechanism-failure")
+    if verification_baseline_gap and category != "pipeline-decision":
+        die("verification baseline gap requires category pipeline-decision")
+    if verification_mechanism_flake and verification_baseline_gap:
+        die("verification escalation kind is ambiguous")
     if category == "mechanism-failure":
         marker["coordinator_policy"] = MECHANISM_REPAIR_POLICY
         packet_path = worktree / ".task-verification.json"
@@ -172,6 +179,51 @@ def raise_escalation(
                 )
             except VerificationAttemptError as exc:
                 die(f"verification escalation authority is invalid: {exc}", 3)
+    if verification_baseline_gap:
+        packet_path = worktree / ".task-verification.json"
+        if packet_path.is_symlink() or not packet_path.is_file():
+            die("verification attention packet is unavailable", 3)
+        try:
+            packet = read_json(packet_path)
+            attempt = VerificationAttempt.from_dict(
+                packet.get("verification_attempt")
+            )
+            receipt_path = Path(str(packet.get("receipt_pointer") or ""))
+            if (
+                not receipt_path.is_absolute()
+                or receipt_path.is_symlink()
+                or not receipt_path.is_file()
+            ):
+                die("verification failed receipt is unavailable", 3)
+            receipt = read_json(receipt_path)
+            failed_receipt_sha256 = hashlib.sha256(
+                json.dumps(
+                    receipt, sort_keys=True, separators=(",", ":")
+                ).encode()
+            ).hexdigest()
+            evidence = packet.get("evidence")
+            if not isinstance(evidence, list):
+                die("verification command evidence is invalid", 3)
+            command_ids = tuple(
+                str(row.get("command_id") or "")
+                for row in evidence
+                if isinstance(row, dict)
+            )
+            if len(command_ids) != len(evidence):
+                die("verification command evidence is invalid", 3)
+            contract = build_verification_gap_escalation(
+                attempt,
+                str(packet.get("verification_operation_id") or ""),
+                failed_receipt_sha256=failed_receipt_sha256,
+                command_ids=command_ids,
+                origin_session=str(meta.get("origin_session") or ""),
+            )
+            marker["verification_escalation"] = contract
+            marker["allowed_decisions"] = [
+                "continue-unrelated-baseline-gap", "stop"
+            ]
+        except VerificationAttemptError as exc:
+            die(f"verification gap authority is invalid: {exc}", 3)
     marker_path = worktree / ".task-needs-attention.json"
     try:
         raised = append_raise(worktree, marker)
@@ -187,9 +239,16 @@ def raise_escalation(
         )
     else:
         action = "Coordinator decision required. "
+    typed_kind = (
+        marker.get("verification_escalation", {}).get("kind")
+        if isinstance(marker.get("verification_escalation"), dict)
+        else ""
+    )
     decision_token = (
         "retry-mechanism-flake"
-        if "verification_escalation" in marker
+        if typed_kind == "same-head-verification-retry"
+        else "continue-unrelated-baseline-gap"
+        if typed_kind == "unrelated-baseline-verification-gap"
         else "<decision>"
     )
     body = (
@@ -369,6 +428,11 @@ def main() -> int:
         action="store_true",
         help="bind this mechanism-failure raise to the published verification contract",
     )
+    raised.add_argument(
+        "--verification-baseline-gap",
+        action="store_true",
+        help="bind a pipeline decision to the exact failed verification receipt",
+    )
     resolved = sub.add_parser("resolve")
     resolved.add_argument("--worktree", default=".")
     resolved.add_argument(
@@ -392,6 +456,7 @@ def main() -> int:
             args.reason,
             args.question,
             verification_mechanism_flake=args.verification_mechanism_flake,
+            verification_baseline_gap=args.verification_baseline_gap,
         )
     if args.command == "resolve":
         return resolve_escalation(worktree, args.decision)

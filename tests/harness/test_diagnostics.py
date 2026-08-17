@@ -498,6 +498,7 @@ with tempfile.TemporaryDirectory(prefix="harness-diagnostics.") as raw:
         "schema_version": 1,
         "operation_id": predecessor.operation_id,
         "parent_operation_id": superseded_owner,
+        "profile_sha256": profile_sha256,
         "predecessor_attempt_sha256": predecessor_attempt.sha256,
         "predecessor_effect_id": pipeline_verify_effect_id(input_sha256, 0),
         "successor_operation_id": successor.operation_id,

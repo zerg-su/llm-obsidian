@@ -41,7 +41,12 @@ RESERVATION_FIELDS = frozenset({
     "schema_version", "family", "attempt_id", "template_sha256",
     "invalid_sha256", "attempt", "correction_id",
 })
-VERIFICATION_PUBLIC_DECISIONS = ("retry-mechanism-flake", "stop", "repair-repository-mechanism")
+VERIFICATION_PUBLIC_DECISIONS = (
+    "retry-mechanism-flake",
+    "continue-unrelated-baseline-gap",
+    "stop",
+    "repair-repository-mechanism",
+)
 
 
 class ArtifactRepairError(RuntimeError):
@@ -270,24 +275,86 @@ def build_verification_escalation(
     }
 
 
+def build_verification_gap_escalation(
+    failed_attempt: VerificationAttempt,
+    verification_operation_id: str,
+    *,
+    failed_receipt_sha256: str,
+    command_ids: tuple[str, ...],
+    origin_session: str,
+) -> dict[str, object]:
+    """Bind a baseline-gap decision to exact failed verification evidence."""
+
+    if (
+        not isinstance(verification_operation_id, str)
+        or not IDENTIFIER.fullmatch(verification_operation_id)
+        or not SHA256.fullmatch(str(failed_receipt_sha256))
+        or not isinstance(command_ids, tuple)
+        or not command_ids
+        or any(not IDENTIFIER.fullmatch(str(item)) for item in command_ids)
+        or len(set(command_ids)) != len(command_ids)
+        or not IDENTIFIER.fullmatch(str(origin_session))
+    ):
+        raise VerificationAttemptError("verification gap identity is invalid")
+    return {
+        "schema_version": 1,
+        "kind": "unrelated-baseline-verification-gap",
+        "category": "pipeline-decision",
+        "operation_id": failed_attempt.parent_operation_id,
+        "verification_operation_id": verification_operation_id,
+        "exact_head_sha": failed_attempt.exact_head_sha,
+        "failed_attempt_sha256": failed_attempt.sha256,
+        "failed_receipt_sha256": failed_receipt_sha256,
+        "command_ids": list(command_ids),
+        "origin_session": origin_session,
+        "decision": "request-baseline-gap-disposition",
+        "action": "",
+        "evidence_note": "",
+    }
+
+
 def resolve_verification_escalation(
     escalation: object, *, decision: str, evidence_note: str
 ) -> dict[str, object]:
     """Translate the exact public decision into the one private typed action."""
 
-    expected = {
+    retry_expected = {
         "schema_version", "kind", "category", "operation_id",
         "verification_operation_id", "exact_head_sha", "failed_attempt_sha256",
         "decision", "action", "evidence_note",
     }
     note = " ".join(str(evidence_note).split()).strip()
+    gap_expected = retry_expected | {
+        "failed_receipt_sha256", "command_ids", "origin_session",
+    }
+    is_gap = (
+        isinstance(escalation, dict)
+        and set(escalation) == gap_expected
+        and escalation.get("kind") == "unrelated-baseline-verification-gap"
+        and escalation.get("category") == "pipeline-decision"
+        and escalation.get("decision") == "request-baseline-gap-disposition"
+        and SHA256.fullmatch(str(escalation.get("failed_receipt_sha256") or ""))
+        and isinstance(escalation.get("command_ids"), list)
+        and bool(escalation.get("command_ids"))
+        and all(
+            IDENTIFIER.fullmatch(str(item))
+            for item in escalation.get("command_ids", [])
+        )
+        and len(set(escalation.get("command_ids", [])))
+        == len(escalation.get("command_ids", []))
+        and IDENTIFIER.fullmatch(str(escalation.get("origin_session") or ""))
+    )
+    is_retry = (
+        isinstance(escalation, dict)
+        and set(escalation) == retry_expected
+        and escalation.get("kind") == "same-head-verification-retry"
+        and escalation.get("category") == "mechanism-failure"
+        and escalation.get("decision") == "request-attempt-1"
+    )
     if (
         not isinstance(escalation, dict)
-        or set(escalation) != expected
+        or not (is_retry or is_gap)
         or escalation.get("schema_version") != 1
-        or escalation.get("kind") != "same-head-verification-retry"
-        or escalation.get("category") != "mechanism-failure"
-        or escalation.get("decision") != "request-attempt-1"
         or escalation.get("action") != ""
         or escalation.get("evidence_note") != ""
         or not IDENTIFIER.fullmatch(str(escalation.get("operation_id") or ""))
@@ -295,13 +362,21 @@ def resolve_verification_escalation(
         or not GIT_OID.fullmatch(str(escalation.get("exact_head_sha") or ""))
         or not SHA256.fullmatch(str(escalation.get("failed_attempt_sha256") or ""))
         or decision not in VERIFICATION_PUBLIC_DECISIONS
+        or (is_retry and decision == "continue-unrelated-baseline-gap")
+        or (is_gap and decision not in {"continue-unrelated-baseline-gap", "stop"})
         or not note
         or len(note) > 1000
     ):
         raise VerificationAttemptError("verification escalation resolution is invalid")
     return {
         **escalation,
-        "decision": "authorize-attempt-1" if decision == "retry-mechanism-flake" else "do-not-authorize",
+        "decision": (
+            "authorize-attempt-1"
+            if decision == "retry-mechanism-flake"
+            else "authorize-review-with-gap"
+            if decision == "continue-unrelated-baseline-gap"
+            else "do-not-authorize"
+        ),
         "action": decision,
         "evidence_note": note,
     }
@@ -320,6 +395,36 @@ def verification_resolution_authorizes(
         expected = resolve_verification_escalation(
             build_verification_escalation(failed_attempt, verification_operation_id),
             decision="retry-mechanism-flake",
+            evidence_note=str(resolution.get("evidence_note") or ""),
+        )
+    except VerificationAttemptError:
+        return False
+    return resolution == expected
+
+
+def verification_gap_resolution_authorizes(
+    resolution: object,
+    failed_attempt: VerificationAttempt,
+    verification_operation_id: str,
+    *,
+    failed_receipt_sha256: str,
+    command_ids: tuple[str, ...],
+    origin_session: str,
+) -> bool:
+    """Accept only the exact coordinator grant for the bound failed receipt."""
+
+    if not isinstance(resolution, dict):
+        return False
+    try:
+        expected = resolve_verification_escalation(
+            build_verification_gap_escalation(
+                failed_attempt,
+                verification_operation_id,
+                failed_receipt_sha256=failed_receipt_sha256,
+                command_ids=command_ids,
+                origin_session=origin_session,
+            ),
+            decision="continue-unrelated-baseline-gap",
             evidence_note=str(resolution.get("evidence_note") or ""),
         )
     except VerificationAttemptError:
@@ -999,6 +1104,7 @@ __all__ = (
     "CorrectionNotificationUncertain",
     "CorrectionReservation",
     "build_verification_escalation",
+    "build_verification_gap_escalation",
     "observe_stable_artifact",
     "pipeline_step_contract_template",
     "publish_pipeline_step_contract",
@@ -1008,4 +1114,5 @@ __all__ = (
     "resolve_verification_escalation",
     "verification_escalation_contract_template",
     "verification_resolution_authorizes",
+    "verification_gap_resolution_authorizes",
 )

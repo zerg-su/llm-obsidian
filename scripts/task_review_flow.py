@@ -45,6 +45,11 @@ from harness.verification import (
     compose_commands,
     load_profiles,
 )
+from harness.artifact_repair import verification_gap_resolution_authorizes
+from task_escalation_records import (
+    EscalationRecordError,
+    load_latest as load_latest_escalation,
+)
 from harness.runtime_sessions import RuntimeSessionManager
 from harness.store import OperationStore, StoreError
 from harness.workflows.review import (
@@ -352,11 +357,19 @@ def _admitted_review_launch(
         "head_sha",
         "status",
     }
+    gap_keys = expected_keys | {
+        "gap_authority_pointer",
+        "gap_authority_sha256",
+        "decision_record_id",
+        "decision_record_sha256",
+    }
+    gap_admission = admission.get("status") == "admitted-with-gap"
     if (
         not isinstance(admission, dict)
-        or set(admission) != expected_keys
+        or set(admission) != (gap_keys if gap_admission else expected_keys)
         or admission.get("schema_version") != 1
-        or admission.get("status") != "admitted"
+        or admission.get("status")
+        not in {"admitted", "admitted-with-gap"}
         or admission.get("operation_id") != task_id
         or not all(
             isinstance(admission[key], str) and admission[key]
@@ -428,7 +441,8 @@ def _admitted_review_launch(
     ).hexdigest()
     if (
         receipt_sha256 != admission["receipt_sha256"]
-        or receipt.get("status") != "complete"
+        or receipt.get("status")
+        != ("failed" if gap_admission else "complete")
         or receipt.get("operation_id")
         != admission["verification_operation_id"]
         or receipt.get("lane_id") != admission["verification_lane_id"]
@@ -439,6 +453,75 @@ def _admitted_review_launch(
         raise TaskReviewError(
             "review launch admission disagrees with its durable receipt"
         )
+    if gap_admission:
+        gap_path = Path(str(admission.get("gap_authority_pointer") or ""))
+        expected_gap_path = (
+            receipt_path.parent.parent.parent
+            / "pipeline-verification-gap-authority.json"
+        ).resolve()
+        try:
+            if (
+                not gap_path.is_absolute()
+                or gap_path != gap_path.resolve()
+                or gap_path != expected_gap_path
+                or gap_path.is_symlink()
+                or not gap_path.is_file()
+            ):
+                raise OSError("gap authority path is invalid")
+            gap = _read_json(gap_path, "verification gap authority")
+            decision = load_latest_escalation(worktree)
+        except (OSError, EscalationRecordError) as exc:
+            raise TaskReviewError(
+                "verification gap authority is invalid"
+            ) from exc
+        gap_sha256 = hashlib.sha256(
+            json.dumps(gap, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        if (
+            gap_sha256 != admission.get("gap_authority_sha256")
+            or not isinstance(gap, dict)
+            or set(gap)
+            != {
+                "schema_version",
+                "operation_id",
+                "verification_operation_id",
+                "failed_head_sha",
+                "failed_attempt_sha256",
+                "failed_receipt_sha256",
+                "command_ids",
+                "origin_session",
+                "decision_record_id",
+                "decision_record_sha256",
+                "status",
+            }
+            or gap.get("schema_version") != 1
+            or gap.get("status") != "review-admitted-with-gap"
+            or gap.get("operation_id") != task_id
+            or gap.get("verification_operation_id") != authority.operation_id
+            or gap.get("failed_head_sha") != authority.head_sha
+            or gap.get("failed_attempt_sha256") != authority.attempt.sha256
+            or gap.get("failed_receipt_sha256") != authority.receipt_sha256
+            or gap.get("command_ids") != list(authority.command_ids)
+            or decision is None
+            or decision.record_type != "resolution"
+            or decision.record_id != admission.get("decision_record_id")
+            or decision.sha256 != admission.get("decision_record_sha256")
+            or decision.record_id != gap.get("decision_record_id")
+            or decision.sha256 != gap.get("decision_record_sha256")
+            or decision.payload.get("status") != "resolved"
+            or decision.payload.get("category") != "pipeline-decision"
+            or decision.payload.get("decision")
+            != "continue-unrelated-baseline-gap"
+            or not verification_gap_resolution_authorizes(
+                decision.payload.get("verification_resolution"),
+                authority.attempt,
+                authority.operation_id,
+                failed_receipt_sha256=authority.receipt_sha256,
+                command_ids=authority.command_ids,
+                origin_session=str(meta.get("origin_session") or ""),
+            )
+        ):
+            raise TaskReviewError("verification gap authority is invalid")
     if admission["head_sha"] != context.head_sha:
         raise TaskReviewError("review launch admission targets another HEAD")
     if not _verification_candidate_is_current(

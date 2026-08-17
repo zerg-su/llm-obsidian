@@ -26,6 +26,7 @@ from .pipelines import CompiledPipeline, reconcile_pipeline
 from .state_machine import TERMINAL
 from .status_segment import CONTROLLER_KINDS, LiveInventory
 from .store import OperationStore, StoreError
+from .verification_invalidation import superseded_verification_ids
 from .dashboard_receipts import (
     absolute_path_is_safe,
     fix_phase_timing,
@@ -684,6 +685,10 @@ def _program(
         observed_at=observed_at,
         current_ids=_current_review_ids(gate, tree),
         dropped=dropped,
+    )
+    superseded = superseded_verification_ids(store, record, members)
+    direct = tuple(
+        child for child in direct if child.operation_id not in superseded
     )
     by_step, loose = _bind_children(direct, compiled)
     if compiled is None:

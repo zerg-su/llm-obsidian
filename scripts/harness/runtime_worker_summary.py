@@ -120,6 +120,7 @@ class SummaryPipelineState:
     steps: tuple[object, ...]
     verify_step: object | None
     existing_verification: dict[str, object] | None
+    verification_gap_authority: dict[str, object] | None = None
 
 
 class RuntimeWorkerSummaryMixin:
@@ -342,6 +343,8 @@ class RuntimeWorkerSummaryMixin:
                 else self.accept_fix_retry_resubmission(previous)
             )
         if previous["head_sha"] == self.verification_head:
+            if self.accept_verification_gap_disposition(previous):
+                return True
             failed_attempt = self.verification_attempt_from_receipt(previous)
             allow_changed_head = (
                 self.changed_head_resubmit_count()
@@ -386,6 +389,10 @@ class RuntimeWorkerSummaryMixin:
         self, verify_step: object | None
     ) -> tuple[dict[str, object] | None, bool]:
         existing = self.verification_receipt() if verify_step is not None else None
+        if existing is not None and getattr(
+            self, "verification_gap_authority", None
+        ) is not None:
+            return existing, False
         if existing is not None:
             self.run_verification()
             existing = self.verification_receipt()
@@ -486,7 +493,14 @@ class RuntimeWorkerSummaryMixin:
         existing, halted = self.resolve_current_verification(verify_step)
         if halted:
             return None
-        return SummaryPipelineState(summary, marker, steps, verify_step, existing)
+        return SummaryPipelineState(
+            summary,
+            marker,
+            steps,
+            verify_step,
+            existing,
+            getattr(self, "verification_gap_authority", None),
+        )
 
     def advance_review_boundary(
         self, state: SummaryPipelineState, verification_complete: bool
@@ -494,6 +508,17 @@ class RuntimeWorkerSummaryMixin:
         if not verification_complete:
             return False
         gate_state = self.review_gate_state()
+        if (
+            state.verify_step is not None
+            and state.summary.get("schema_version") == 2
+            and self.review.status == "missing"
+            and gate_state.get("status") in {None, "", "missing"}
+            and state.existing_verification is not None
+            and self.wait_for_summary_refresh_after_verification(
+                state.existing_verification
+            )
+        ):
+            return True
         awaiting_resolution = gate_state.get("awaiting_resolution")
         notification_evidence = gate_state.get("review_notification_evidence")
         raw_attempt = gate_state.get("attempt")
@@ -571,7 +596,10 @@ class RuntimeWorkerSummaryMixin:
     def advance_compiled_pipeline(self, state: SummaryPipelineState) -> bool:
         verification_complete = state.verify_step is None or (
             state.existing_verification is not None
-            and state.existing_verification["status"] == "complete"
+            and (
+                state.existing_verification["status"] == "complete"
+                or state.verification_gap_authority is not None
+            )
         )
         if self.advance_review_boundary(state, verification_complete):
             return False
@@ -593,7 +621,10 @@ class RuntimeWorkerSummaryMixin:
                     if state.existing_verification is None
                     else (
                         "complete"
-                        if state.existing_verification["status"] == "complete"
+                        if (
+                            state.existing_verification["status"] == "complete"
+                            or state.verification_gap_authority is not None
+                        )
                         else "attention"
                     )
                 )

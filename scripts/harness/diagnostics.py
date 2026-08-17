@@ -10,6 +10,7 @@ from typing import Any
 from .state_machine import TERMINAL
 from .review_continuation_recovery import RecoveryReceipt
 from .store import OperationStore, StoreError
+from .verification_invalidation import superseded_verification_ids
 
 
 MAX_SIGNALS = 8
@@ -356,10 +357,20 @@ def observe(store_root: Path | str, owner_id: str) -> dict[str, Any]:
     explained_operations = {
         str(signal.get("operation_id") or "") for signal in signals
     }
+    root = next(
+        (record for record in records if record.spec.operation_id == owner_id),
+        None,
+    )
+    superseded = (
+        superseded_verification_ids(store, root, records)
+        if root is not None
+        else frozenset()
+    )
     for record in records:
         if (
             record.state != "attention-required"
             or record.spec.operation_id in explained_operations
+            or record.spec.operation_id in superseded
         ):
             continue
         reason = (

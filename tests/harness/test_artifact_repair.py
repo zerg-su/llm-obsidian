@@ -461,7 +461,12 @@ flake_escalation = build_verification_escalation(flake_attempt, "verify-operatio
 check(
     "the typed constructor owns the exact public verification decisions",
     VERIFICATION_PUBLIC_DECISIONS
-    == ("retry-mechanism-flake", "stop", "repair-repository-mechanism"),
+    == (
+        "retry-mechanism-flake",
+        "continue-unrelated-baseline-gap",
+        "stop",
+        "repair-repository-mechanism",
+    ),
     VERIFICATION_PUBLIC_DECISIONS,
 )
 for public_decision, private_decision in (

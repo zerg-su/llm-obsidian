@@ -5,6 +5,7 @@ from __future__ import annotations
 MODEL_JSON_BOUNDARIES = ("verification-escalation",)
 from .artifact_repair import (
     publish_verification_escalation,
+    verification_gap_resolution_authorizes,
     verification_resolution_authorizes,
 )
 from .runtime_worker import *
@@ -690,6 +691,80 @@ class RuntimeWorkerVerificationMixin:
             raise RuntimeWorkerError("verification attention packet is too large")
         return (packet, hashlib.sha256(encoded).hexdigest())
 
+    def accept_verification_gap_disposition(
+        self, failed: dict[str, object]
+    ) -> bool:
+        """Consume one exact coordinator grant without changing failed truth."""
+
+        try:
+            decision_record = load_latest_escalation(self.spec["cwd"])
+        except EscalationRecordError as exc:
+            raise RuntimeWorkerError(
+                "verification baseline-gap decision is invalid"
+            ) from exc
+        if decision_record is None or decision_record.record_type != "resolution":
+            return False
+        payload = decision_record.payload
+        evidence = failed.get("evidence")
+        if not isinstance(evidence, list) or not evidence:
+            raise RuntimeWorkerError("verification baseline-gap evidence is invalid")
+        command_ids = tuple(
+            str(row.get("command_id") or "")
+            for row in evidence
+            if isinstance(row, dict)
+        )
+        if len(command_ids) != len(evidence):
+            raise RuntimeWorkerError("verification baseline-gap evidence is invalid")
+        failed_receipt_sha256 = hashlib.sha256(
+            json.dumps(
+                failed, sort_keys=True, separators=(",", ":")
+            ).encode()
+        ).hexdigest()
+        meta_path = self.spec["cwd"] / ".task-meta.json"
+        if meta_path.is_symlink():
+            raise RuntimeWorkerError("task metadata cannot be a symlink")
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RuntimeWorkerError("task metadata is invalid") from exc
+        origin_session = str(meta.get("origin_session") or "")
+        attempt = self.verification_attempt_from_receipt(failed)
+        if (
+            payload.get("status") != "resolved"
+            or payload.get("category") != "pipeline-decision"
+            or payload.get("decision") != "continue-unrelated-baseline-gap"
+            or Path(str(payload.get("worktree") or "")).expanduser().resolve()
+            != self.spec["cwd"]
+            or not verification_gap_resolution_authorizes(
+                payload.get("verification_resolution"),
+                attempt,
+                str(failed.get("operation_id") or ""),
+                failed_receipt_sha256=failed_receipt_sha256,
+                command_ids=command_ids,
+                origin_session=origin_session,
+            )
+        ):
+            return False
+        authority = {
+            "schema_version": 1,
+            "operation_id": self.spec["operation_id"],
+            "verification_operation_id": failed["operation_id"],
+            "failed_head_sha": failed["head_sha"],
+            "failed_attempt_sha256": attempt.sha256,
+            "failed_receipt_sha256": failed_receipt_sha256,
+            "command_ids": list(command_ids),
+            "origin_session": origin_session,
+            "decision_record_id": decision_record.record_id,
+            "decision_record_sha256": decision_record.sha256,
+            "status": "review-admitted-with-gap",
+        }
+        self.write_immutable_json(
+            self.spec_path.parent / "pipeline-verification-gap-authority.json",
+            authority,
+        )
+        self.verification_gap_authority = authority
+        return True
+
     def notify_verification_attention(
         self,
         receipt: dict[str, object],
@@ -752,9 +827,15 @@ class RuntimeWorkerVerificationMixin:
             "mechanism-failure", "--verification-mechanism-flake", "--reason",
             "Isolated rerun established a verification mechanism flake.", "--question",
             "Authorize one exact same-HEAD verification retry?"))
+        baseline_raise = shlex.join((
+            "python3", str(self.trusted_vault / "scripts" / "task_escalation.py"),
+            "raise", "--worktree", str(self.spec["cwd"]), "--category",
+            "pipeline-decision", "--verification-baseline-gap", "--reason",
+            "Isolated evidence established an unrelated baseline verification gap.",
+            "--question", "Admit review with the exact failed receipt preserved?"))
         self.cmux_adapter.send(
             self.spec["surface_id"],
-            f"Typed pipeline verification attention is ready in .task-verification.json. For changed-HEAD fix-and-resubmit, commit the fix and run `python3 {self.trusted_vault}/scripts/pipeline-verification-resubmit.py --worktree {self.spec['cwd']}`. If isolated evidence establishes a mechanism flake, run this exact typed raise command: `{verification_raise}`. A same-HEAD retry happens only through the coordinator's exact public decision `retry-mechanism-flake`; that resolution publishes the identity-bound response automatically, so run no resubmit command for it. Do not create an empty commit, launch review, or invoke reap.",
+            f"Typed pipeline verification attention is ready in .task-verification.json. For changed-HEAD fix-and-resubmit, commit the fix and run `python3 {self.trusted_vault}/scripts/pipeline-verification-resubmit.py --worktree {self.spec['cwd']}`. If isolated evidence establishes a mechanism flake, run this exact typed raise command: `{verification_raise}`. If it instead proves an unrelated baseline gap, run: `{baseline_raise}`. A same-HEAD retry or gap admission happens only through its exact coordinator decision. Do not create an empty commit, launch review, or invoke reap.",
         )
         self.cmux_adapter.send_key(self.spec["surface_id"], "Enter")
         _atomic_json(
@@ -1093,6 +1174,7 @@ class RuntimeWorkerVerificationMixin:
                 "schema_version": 1,
                 "operation_id": stale_operation_id,
                 "parent_operation_id": self.spec["operation_id"],
+                "profile_sha256": self.verification_attempt.profile_sha256,
                 "predecessor_attempt_sha256": predecessor_attempt_sha256,
                 "predecessor_effect_id": predecessor_effect_id,
                 "successor_operation_id": self.verification_spec.operation_id,

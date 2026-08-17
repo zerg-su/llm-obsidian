@@ -2023,6 +2023,7 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-superseded-verify.") 
         "schema_version": 1,
         "operation_id": predecessor,
         "parent_operation_id": DISPATCH,
+        "profile_sha256": "7" * 64,
         "predecessor_attempt_sha256": predecessor_attempt.sha256,
         "predecessor_effect_id": pipeline_verify_effect_id(input_sha256, 0),
         "successor_operation_id": successor,

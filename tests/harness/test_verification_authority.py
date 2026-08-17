@@ -919,6 +919,7 @@ with tempfile.TemporaryDirectory(prefix="verification-authority.") as raw:
             "schema_version": 1,
             "operation_id": world.spec0.operation_id,
             "parent_operation_id": world.owner,
+            "profile_sha256": profile.sha256,
             "predecessor_attempt_sha256": VerificationAttempt(
                 world.owner, profile.name, profile.sha256, world.head, 0
             ).sha256,
