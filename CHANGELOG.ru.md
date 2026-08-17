@@ -27,15 +27,16 @@ live-проверки. Он закрывает follow-up protected research и c
 ### Исправлено
 
 - One-shot protected research с prompt в argv теперь фиксирует принятие input
-  и принятого результата в существующем provider-event stream. Точный prompt
-  pointer остаётся digest-authority, cleanup доходит до `resource-closed`, а
+  и принятого результата в существующем provider-event stream. Для принятия
+  input байты prompt pointer теперь обязаны совпадать с точным prompt,
+  сохранённым в research argv; drift переходит в существующий attention-контур
+  без события `input-accepted`. Cleanup доходит до `resource-closed`, а
   synthesis запускается без второго prompt, provider-send или сетевого fetch.
-- Executor-эскалация `mechanism-failure` подавляется только когда замороженный
-  custom pipeline доказывает принятие точного callback предшественника, его
-  complete и resource-free child без pending effect и callback outbox, а также
-  наличие точного допустимого successor request и child. Любой отсутствующий,
-  malformed, stale, foreign или неоднозначный факт сохраняет обычный
-  fail-closed путь эскалации.
+- Любая untyped executor-эскалация сохраняет обычный fail-closed путь.
+  State-only подавление stale post-self-heal удалено: raise не несёт identity
+  operation, run или visit предшественника и successor.
+  `v278-suppress-stale-post-self-heal-escalation` отложен до отдельного
+  одобренного контракта точной identity входящего raise.
 - Dispatch теперь устанавливает точные локальные Git-exclude для трёх
   control-артефактов `.task-verification*.json`. Авторизованный same-HEAD retry
   сохраняет строгую проверку tracked и untracked product cleanliness, но не
@@ -51,9 +52,9 @@ live-проверки. Он закрывает follow-up protected research и c
   repair отсутствует в target base `379e772c`, не переносится и не создаёт
   запас для target.
 - `runtime_session_launch.py` занимает 1 155 строк при существующем потолке
-  hotspot 1 157. Live scripts ratchet сдвигается на точно измеренную стоимость
-  реализации в 305 строк к 290 файлам / 109 648 строкам без спекулятивного
-  запаса.
+  hotspot 1 157. После удаления неоднозначного suppression-механизма и
+  добавления argv-binding точный кандидат содержит 290 файлов / 109 370 строк:
+  на 278 меньше неизменного потолка 109 648 и без расширения этого потолка.
 
 ## [2.7.7] — 2026-08-16
 

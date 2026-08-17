@@ -270,6 +270,17 @@ class RuntimeWorkerExecution(
             if not raw_input or len(raw_input) > MAX_PROMPT_BYTES:
                 raise RuntimeWorkerError("initial provider input is invalid")
             if self.spec["callback_mode"] in {"research-fetch", "research-synth"}:
+                failure_reason = "research-argv-prompt-drift"
+                try:
+                    argv_input = self.spec["argv"][-1].encode("utf-8")
+                except (IndexError, UnicodeEncodeError) as exc:
+                    raise RuntimeWorkerError(
+                        "persisted research argv input is invalid"
+                    ) from exc
+                if raw_input != argv_input:
+                    raise RuntimeWorkerError(
+                        "research prompt pointer drifted from persisted argv"
+                    )
                 stream = self._create_provider_stream(
                     generation=self.initial_generation,
                     input_sha256=hashlib.sha256(raw_input).hexdigest(),

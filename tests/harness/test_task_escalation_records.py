@@ -815,179 +815,35 @@ def stale_custom_fixture(root: Path, name: str) -> SimpleNamespace:
     )
 
 
-classify_stale = getattr(
-    task_escalation_cli,
-    "_classify_stale_post_self_heal",
-    lambda *_args, **_kwargs: None,
-)
-
 with tempfile.TemporaryDirectory(prefix="task-escalation-stale-self-heal.") as raw:
     root = Path(raw)
     positive = stale_custom_fixture(root, "positive")
-    classified = classify_stale(
-        positive.worktree, positive.meta, "mechanism-failure"
-    )
-    check(
-        "exact accepted custom predecessor and minted successor are stale escalation proof",
-        isinstance(classified, dict)
-        and classified.get("status") == "suppressed-stale-post-self-heal"
-        and classified.get("operation_id") == positive.previous_operation_id
-        and classified.get("successor_operation_id")
-        == positive.successor_operation_id,
-    )
-
-    matrix: list[tuple[str, object]] = []
-
-    callback_missing = stale_custom_fixture(root, "callback-missing")
-    child = callback_missing.store.read(
-        callback_missing.meta["task_id"], callback_missing.previous_operation_id
-    )
-    callback_missing.store.save(
-        replace(
-            child,
-            revision=child.revision + 1,
-            accepted_callback_id="",
-            accepted_callback_kind="",
-            accepted_callback_sha256="",
-        ),
-        expected_revision=child.revision,
-    )
-    matrix.append(("callback not accepted", callback_missing))
-
-    nonterminal = stale_custom_fixture(root, "nonterminal")
-    child = nonterminal.store.read(
-        nonterminal.meta["task_id"], nonterminal.previous_operation_id
-    )
-    nonterminal.store.save(
-        replace(child, state="finalizing", revision=child.revision + 1),
-        expected_revision=child.revision,
-    )
-    matrix.append(("child nonterminal", nonterminal))
-
-    retained_resource = stale_custom_fixture(root, "retained-resource")
-    child = retained_resource.store.read(
-        retained_resource.meta["task_id"], retained_resource.previous_operation_id
-    )
-    retained_resource.store.save(
-        replace(
-            child,
-            resources=OwnedResources(surface_id="retained-surface"),
-            revision=child.revision + 1,
-        ),
-        expected_revision=child.revision,
-    )
-    matrix.append(("child retains a resource", retained_resource))
-
-    retained_effect = stale_custom_fixture(root, "retained-effect")
-    child = retained_effect.store.read(
-        retained_effect.meta["task_id"], retained_effect.previous_operation_id
-    )
-    retained_effect.store.save(
-        replace(
-            child,
-            pending_effect="cleanup",
-            effect_id="cleanup",
-            effect_outcome=EffectOutcome.PENDING,
-            revision=child.revision + 1,
-        ),
-        expected_revision=child.revision,
-    )
-    matrix.append(("child retains an effect", retained_effect))
-
-    outbox = stale_custom_fixture(root, "outbox")
-    write_json(outbox.worktree / ".task-pipeline-step-callback.json", {})
-    matrix.append(("callback outbox exists", outbox))
-
-    missing_request = stale_custom_fixture(root, "missing-request")
-    (missing_request.worktree / ".task-pipeline-step-request.json").unlink()
-    matrix.append(("successor request absent", missing_request))
-
-    malformed_request = stale_custom_fixture(root, "malformed-request")
-    (malformed_request.worktree / ".task-pipeline-step-request.json").write_text(
-        "not json\n", encoding="utf-8"
-    )
-    matrix.append(("successor request malformed", malformed_request))
-
-    stale_request = stale_custom_fixture(root, "stale-request")
-    stale_value = dict(stale_request.request)
-    stale_value["visit"] = 0
-    write_json(stale_request.worktree / ".task-pipeline-step-request.json", stale_value)
-    matrix.append(("successor request stale", stale_request))
-
-    foreign_request = stale_custom_fixture(root, "foreign-request")
-    foreign_value = dict(foreign_request.request)
-    foreign_value["parent_operation_id"] = "foreign-parent"
-    write_json(
-        foreign_request.worktree / ".task-pipeline-step-request.json", foreign_value
-    )
-    matrix.append(("successor request foreign", foreign_request))
-
-    wrong_successor = stale_custom_fixture(root, "wrong-successor")
-    wrong_value = dict(wrong_successor.request)
-    wrong_value["input_sha256"] = "e" * 64
-    write_json(
-        wrong_successor.worktree / ".task-pipeline-step-request.json", wrong_value
-    )
-    matrix.append(("successor request is not exact", wrong_successor))
-
-    run_mismatch = stale_custom_fixture(root, "run-mismatch")
-    run_value = dict(run_mismatch.request)
-    run_value["run_id"] = "foreign-run"
-    write_json(run_mismatch.worktree / ".task-pipeline-step-request.json", run_value)
-    matrix.append(("successor run mismatches", run_mismatch))
-
-    owner_mismatch = stale_custom_fixture(root, "owner-mismatch")
-    owner_mismatch.meta["task_id"] = "foreign-owner"
-    write_json(owner_mismatch.worktree / ".task-meta.json", owner_mismatch.meta)
-    matrix.append(("owner mismatches", owner_mismatch))
-
-    unreadable_store = stale_custom_fixture(root, "unreadable-store")
-    unreadable_store.meta["vault_root"] = str((root / "missing-vault").resolve())
-    matrix.append(("store unreadable", unreadable_store))
-
-    noncustom = stale_custom_fixture(root, "noncustom")
-    noncustom.meta["pipeline_policy"] = {
-        "name": "engineering/change",
-        "definition_sha256": noncustom.meta["pipeline_policy"][
-            "definition_sha256"
-        ],
-    }
-    matrix.append(("pipeline is not custom", noncustom))
-
-    for label, fixture in matrix:
-        check(
-            f"{label} preserves fail-closed escalation",
-            classify_stale(
-                fixture.worktree, fixture.meta, "mechanism-failure"
-            )
-            is None,
-        )
-    check(
-        "non-mechanism category preserves fail-closed escalation",
-        classify_stale(positive.worktree, positive.meta, "scope") is None,
-    )
-
     with patch.object(
         task_escalation_cli,
         "load_unattended",
         return_value=(positive.meta, {}),
-    ), patch.object(task_escalation_cli, "append_raise") as append_mock, patch.object(
+    ), patch.object(
+        task_escalation_cli, "read_surface", return_value="coordinator-surface"
+    ), patch.object(
         task_escalation_cli, "notify"
     ) as notify_mock, patch.object(task_escalation_cli, "send") as send_mock:
-        suppressed_rc = task_escalation_cli.raise_escalation(
+        raised_rc = task_escalation_cli.raise_escalation(
             positive.worktree,
             "mechanism-failure",
             "delayed stale executor raise",
             "classify the repository-owned mechanism",
         )
+    raised = load_latest(positive.worktree)
     check(
-        "proven stale raise has zero escalation, pointer, or notification effects",
-        suppressed_rc == 0
-        and append_mock.call_count == 0
-        and notify_mock.call_count == 0
-        and send_mock.call_count == 0
-        and not (positive.worktree / ".task-needs-attention.json").exists()
-        and not (positive.worktree / ".task-escalation-records").exists(),
+        "every untyped raise remains an ordinary fail-closed escalation",
+        raised_rc == 0
+        and raised is not None
+        and raised.payload["status"] == "pending"
+        and raised.payload["category"] == "mechanism-failure"
+        and notify_mock.call_count == 1
+        and send_mock.call_count == 1
+        and (positive.worktree / ".task-needs-attention.json").is_file()
+        and (positive.worktree / ".task-escalation-records").is_dir(),
     )
 
 

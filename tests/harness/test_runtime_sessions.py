@@ -6112,6 +6112,152 @@ def check_worker_accepts_acknowledged_initial_start() -> None:
         )
 
 
+def check_research_worker_rejects_mutated_argv_prompt_pointer() -> None:
+    """A research pointer mutation cannot authorize different argv bytes."""
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp).resolve()
+        cwd = root / "research"
+        cwd.mkdir()
+        runtime_home = root / "runtime-home"
+        runtime_home.mkdir(mode=0o700)
+        prompt = cwd / "prompt.md"
+        original = b"persisted research argv prompt\n"
+        prompt.write_bytes(original)
+        callback = cwd / "artifact.json"
+        observed_argv = cwd / "provider-argv.bin"
+        provider = root / "provider.py"
+        provider.write_text(
+            "import hashlib,json,pathlib,sys,time\n"
+            "source='# Source\\n\\nOne source.\\n'\n"
+            "pathlib.Path('sources').mkdir()\n"
+            "pathlib.Path('sources/one.md').write_text(source,encoding='utf-8')\n"
+            "artifact={'schema_version':2,'run_id':'research-argv-race-run',"
+            "'request_sha256':'" + "d" * 64 + "','fetched_at':"
+            "'2026-08-17T00:00:00Z','sources':[{'url':'https://example.com/one',"
+            "'title':'One','content_path':'sources/one.md','content_sha256':"
+            "hashlib.sha256(source.encode()).hexdigest(),'source_class':'official'}],"
+            "'fetch_errors':[]}\n"
+            "pathlib.Path('artifact.json').write_text(json.dumps(artifact),encoding='utf-8')\n"
+            "pathlib.Path('provider-argv.bin').write_bytes(sys.argv[-1].encode())\n"
+            "time.sleep(0.2)\n",
+            encoding="utf-8",
+        )
+        owner = "owner-research-argv-race"
+        operation_id = "research-argv-race"
+        run_id = "research-argv-race-run"
+        store = OperationStore(root / "store")
+        spec = OperationSpec(
+            operation_id,
+            "research-argv-race-key",
+            "runtime-lifecycle",
+            owner,
+            RuntimeRoute(
+                "codex", "gpt-5.6-sol", "high", "research-safe", "f" * 64
+            ),
+            "packets/research.json",
+            "scoped",
+        )
+        store.create(spec, lane_id="research", run_id=run_id)
+        store.transition(owner, operation_id, "preflight")
+        store.transition(owner, operation_id, "starting")
+        store.begin_effect(owner, operation_id, "start-provider")
+        launch = ProcessAdapter().prepare_surface_launch(
+            argv=(
+                str(Path(sys.executable).resolve()),
+                str(provider),
+                original.decode(),
+            ),
+            cwd=cwd,
+            state_root=root / "state",
+            worker=ROOT / "scripts" / "harness-runtime-worker.py",
+            callback_pointer=callback,
+            store_root=store.root,
+            owner_id=owner,
+            operation_id=operation_id,
+            run_id=run_id,
+            surface_id=SURFACE,
+            runtime="codex",
+            callback_mode="research-fetch",
+            origin_surface=ORIGIN,
+            runtime_home=runtime_home,
+            research_request_sha256="d" * 64,
+            callback_wake="contain changed research prompt",
+            initial_input_pointer=prompt,
+        )
+        ProcessAdapter._write_json(
+            launch.spec_path.parent / "session.json",
+            {
+                "schema_version": 1,
+                "operation_id": operation_id,
+                "run_id": run_id,
+                "workspace_id": WORKSPACE,
+            },
+        )
+        outcome: list[int] = []
+        failures: list[BaseException] = []
+
+        def drive() -> None:
+            try:
+                outcome.append(
+                    run_runtime_worker(
+                        launch.spec_path,
+                        poll_seconds=0.02,
+                        checkpoint_probe=lambda _surface, _runtime: "",
+                        cmux_adapter=OneShotResearchCmux(),
+                        sleeper=time.sleep,
+                        wake_source=ArtifactWakeSource(launch.spec_path.parent),
+                    )
+                )
+            except BaseException as exc:  # noqa: BLE001 - expose worker failure
+                failures.append(exc)
+
+        thread = threading.Thread(target=drive)
+        thread.start()
+        deadline = time.monotonic() + 2
+        while (
+            (not launch.ready_path.is_file() or not observed_argv.is_file())
+            and time.monotonic() < deadline
+        ):
+            time.sleep(0.01)
+        assert launch.ready_path.is_file() and observed_argv.is_file(), (
+            launch.ready_path.is_file(),
+            observed_argv.is_file(),
+        )
+        prompt.write_bytes(b"mutated prompt pointer bytes\n")
+        starting = store.read(owner, operation_id)
+        store.save(
+            replace(
+                starting,
+                state="awaiting-callback",
+                revision=starting.revision + 1,
+                pending_effect="",
+                effect_outcome=EffectOutcome.SUCCEEDED,
+            ),
+            expected_revision=starting.revision,
+        )
+        thread.join(timeout=5)
+        if failures:
+            raise failures[0]
+        assert not thread.is_alive(), "research mutation worker did not settle"
+        generation = launch.spec_path.parent / "provider-events" / "generation-1"
+        kinds = [
+            json.loads(path.read_text(encoding="utf-8"))["kind"]
+            for path in sorted((generation / "events").glob("*.json"))
+        ]
+        exit_record = json.loads(launch.exit_path.read_text(encoding="utf-8"))
+        record = store.read(owner, operation_id)
+        check(
+            "research argv prompt drift enters attention without input acceptance",
+            outcome == [2]
+            and observed_argv.read_bytes() == original
+            and record.state == "attention-required"
+            and "input-accepted" not in kinds
+            and exit_record["status"] == "input-unconfirmed",
+            (outcome, observed_argv.read_bytes(), record.state, kinds, exit_record),
+        )
+
+
 def check_worker_ready_binds_retargeted_initial_provider_generation() -> None:
     """The ready owner is the callback generation read before provider start."""
 
@@ -6627,6 +6773,7 @@ _INITIAL_START_FIXTURES = (
     check_initial_start_observes_within_budget,
     check_worker_contains_unconfirmed_initial_start,
     check_worker_accepts_acknowledged_initial_start,
+    check_research_worker_rejects_mutated_argv_prompt_pointer,
     check_worker_ready_binds_retargeted_initial_provider_generation,
     check_worker_degrades_invalid_optional_wake_identity,
     check_worker_handshakes_before_semantic_initial_ack,

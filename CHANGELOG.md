@@ -20,15 +20,16 @@ qualifying this candidate, without adding a lifecycle owner or replay path.
 ### Fixed
 
 - Argv-delivered one-shot protected research now records input acceptance and
-  the accepted result on the existing provider-event stream. The exact prompt
-  pointer remains digest authority, cleanup reaches `resource-closed`, and
-  synthesis starts without a second prompt, provider send, or network fetch.
-- Executor `mechanism-failure` escalation is suppressed only when the frozen
-  custom pipeline proves the exact predecessor callback was accepted, its
-  child is complete and resource-free with no pending effect or callback
-  outbox, and the exact legal successor request and child already exist. Every
-  missing, malformed, stale, foreign, or ambiguous fact keeps the ordinary
-  fail-closed escalation path.
+  the accepted result on the existing provider-event stream. Input acceptance
+  now requires the prompt pointer bytes to match the exact prompt persisted in
+  the research argv; drift enters existing attention containment without an
+  `input-accepted` event. Cleanup reaches `resource-closed`, and synthesis
+  starts without a second prompt, provider send, or network fetch.
+- Untyped executor raises always retain the ordinary fail-closed escalation
+  path. State-only stale post-self-heal suppression was removed because the
+  raise carries no predecessor/successor operation, run, or visit identity;
+  `v278-suppress-stale-post-self-heal-escalation` is deferred until a separate
+  exact incoming-raise identity contract is approved.
 - Dispatch now installs exact local Git exclusions for the three
   `.task-verification*.json` control artifacts. An authorized same-HEAD retry
   can therefore enforce strict tracked-and-untracked product cleanliness
@@ -44,9 +45,9 @@ qualifying this candidate, without adding a lifecycle owner or replay path.
   repair is absent from target base `379e772c` and is neither ported nor used
   as target headroom.
 - `runtime_session_launch.py` is 1,155 lines, within its existing 1,157-line
-  hotspot ceiling. The live scripts ratchet moves by the exact measured
-  305-line implementation cost to 290 files / 109,648 lines with no
-  speculative headroom.
+  hotspot ceiling. Removing the ambiguous suppression machinery while adding
+  the argv binding leaves the exact candidate at 290 files / 109,370 lines,
+  278 below the unchanged 109,648-line ceiling and without a ceiling increase.
 
 ## [2.7.7] - 2026-08-16
 
