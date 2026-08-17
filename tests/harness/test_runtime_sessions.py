@@ -6765,6 +6765,167 @@ def check_worker_crash_after_enter_stays_replay_free() -> None:
         )
 
 
+def check_structural_pivot_child_callback_closes_parent_runtime() -> None:
+    """A structural pivot owns runtime while its review-round owns result."""
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        owner = "structural-pivot-owner"
+        parent_id = "structural-pivot-parent"
+        child_id = "structural-pivot-round"
+        parent_run = "structural-pivot-parent-run"
+        child_run = "structural-pivot-round-run"
+        lane = "structural-pivot-lane"
+        route = RuntimeRoute(
+            "claude",
+            "fable",
+            "high",
+            "reviewer-callback",
+            "f" * 64,
+        )
+        store = OperationStore(root / "store")
+        parent_spec = OperationSpec(
+            parent_id,
+            "structural-pivot-parent-key",
+            "structural-pivot",
+            owner,
+            route,
+            "structural-pivots/packet.json",
+            "scoped",
+        )
+        child_spec = OperationSpec(
+            child_id,
+            "structural-pivot-round-key",
+            "review-round",
+            owner,
+            route,
+            "structural-pivots/packet.json",
+            "scoped",
+            parent_operation_id=parent_id,
+            root_operation_id=parent_id,
+        )
+        store.create(parent_spec, lane_id=lane, run_id=parent_run)
+        store.transition(owner, parent_id, "preflight")
+        store.transition(owner, parent_id, "starting")
+        OperationSupervisor(store, owner, parent_id).bind_resources(
+            OwnedResources(
+                surface_id=SURFACE,
+                process_group=123,
+                supervisor_pid=124,
+                process_identity=PROCESS_IDENTITY,
+                supervisor_identity=SUPERVISOR_IDENTITY,
+            )
+        )
+        for state in ("running", "awaiting-callback"):
+            store.transition(owner, parent_id, state)
+        store.create(child_spec, lane_id=lane, run_id=child_run)
+        for state in ("preflight", "starting", "running", "awaiting-callback"):
+            store.transition(owner, child_id, state)
+
+        payload = {
+            "schema_version": 1,
+            "parent_session_operation_id": parent_id,
+            "verdict": "changes-requested",
+            "findings": [],
+        }
+        payload_sha256 = hashlib.sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        CallbackBroker(store, owner).accept(
+            CallbackEnvelope(
+                "structural-pivot-callback",
+                child_id,
+                child_run,
+                "review",
+                payload,
+                payload_sha256,
+            ),
+            deadline_operation_id=parent_id,
+        )
+        for state in ("finalizing", "exiting", "complete"):
+            store.transition(owner, child_id, state)
+        for state in ("finalizing", "exiting"):
+            store.transition(owner, parent_id, state)
+
+        events: list[str] = []
+        cmux = FakeCmux(events)
+        cmux.surface_status = "missing"
+        process = FakeProcess(events)
+        process.status_value = "dead"
+        process.supervisor_status_value = "dead"
+        manager = RuntimeSessionManager(
+            store,
+            cmux,
+            process,
+            preflight=lambda route, callback: CapabilityReport(route, True, ()),
+        )
+        parent = store.read(owner, parent_id)
+        runtime_root = manager._state_root(parent)
+        for name, value in {
+            "session.json": {
+                "schema_version": 1,
+                "operation_id": parent_id,
+                "run_id": parent_run,
+                "workspace_id": WORKSPACE,
+                "cwd": str(root),
+            },
+            "callback-target.json": {
+                "schema_version": 1,
+                "generation": 1,
+                "operation_id": child_id,
+                "run_id": child_run,
+                "callback_pointer": "callbacks/.review-callback.json",
+            },
+            "exit.json": {
+                "schema_version": 1,
+                "status": "exited",
+                "exit_code": 0,
+            },
+        }.items():
+            manager._write_json(runtime_root / name, value)
+        write_cleanup_ready(manager, parent)
+        stream = RuntimeProviderEventStream.create(
+            runtime_root / "provider-events",
+            owner_id=owner,
+            operation_id=parent_id,
+            run_id=parent_run,
+            generation=1,
+            process_identity=PROCESS_IDENTITY,
+            workspace_id=WORKSPACE,
+            surface_id=SURFACE,
+            input_sha256="9" * 64,
+        )
+        stream.start()
+        stream.reserve_input()
+        stream.accept_input()
+        stream.result(payload_sha256)
+        stream.process_exited(0)
+
+        cleaned = manager.cleanup(owner, parent_id)
+        kinds = [
+            json.loads(path.read_text(encoding="utf-8"))["kind"]
+            for path in sorted(
+                (runtime_root / "provider-events/generation-1/events").glob(
+                    "*.json"
+                )
+            )
+        ]
+        check(
+            "structural pivot cleanup trusts its exact accepted review-round",
+            cleaned.record.state == "complete"
+            and cleaned.record.resources == OwnedResources()
+            and kinds
+            == [
+                "provider-started",
+                "input-accepted",
+                "result-published",
+                "process-exited",
+                "resource-closed",
+            ],
+            (cleaned, kinds),
+        )
+
+
 _INITIAL_START_FIXTURES = (
     check_initial_start_rejects_false_repaint,
     check_initial_start_accepts_normal_claude,
@@ -6783,6 +6944,7 @@ _INITIAL_START_FIXTURES = (
     check_late_ready_review_recovery_is_exact_and_replay_free,
     check_worker_handles_recognized_post_submit_prompt,
     check_worker_crash_after_enter_stays_replay_free,
+    check_structural_pivot_child_callback_closes_parent_runtime,
 )
 
 _initial_start_failures: list[str] = []

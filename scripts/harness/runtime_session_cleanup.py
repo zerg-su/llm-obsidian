@@ -36,6 +36,9 @@ from .store import StoreError
 from .supervisor import OperationSupervisor
 
 
+_DELEGATED_CALLBACK_PARENT_KINDS = REVIEW_PARENT_KINDS | {"structural-pivot"}
+
+
 class RuntimeSessionCleanupMixin:
     """Own observation, exit requests, and exact cleanup effects."""
 
@@ -333,7 +336,7 @@ class RuntimeSessionCleanupMixin:
                 or (
                     target_operation_id != record.spec.operation_id
                     and (
-                        record.spec.kind not in REVIEW_PARENT_KINDS
+                        record.spec.kind not in _DELEGATED_CALLBACK_PARENT_KINDS
                         or callback_record.spec.kind != "review-round"
                         or callback_record.spec.parent_operation_id
                         != record.spec.operation_id
