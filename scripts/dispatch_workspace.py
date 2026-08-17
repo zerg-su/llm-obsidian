@@ -75,19 +75,27 @@ def observer_command(vault_root: Path, request_id: str) -> list[str]:
 
 
 def ensure_task_git_excludes(worktree: Path) -> None:
-    """Keep dispatch-owned runtime bindings out of product Git status."""
+    """Keep root task bindings out of only this worktree's Git status."""
 
-    raw_path = run_command(
-        ["git", "rev-parse", "--git-path", "info/exclude"],
+    run_command(
+        ["git", "config", "extensions.worktreeConfig", "true"],
         cwd=worktree,
-        label="task Git exclude path",
+        label="task Git worktree config",
+    )
+    raw_git_dir = run_command(
+        ["git", "rev-parse", "--absolute-git-dir"],
+        cwd=worktree,
+        label="task Git directory",
     ).stdout.strip()
-    if not raw_path:
-        raise DispatchError("task Git exclude path is empty")
-    exclude = Path(raw_path)
-    if not exclude.is_absolute():
-        exclude = worktree / exclude
-    if exclude.is_symlink() or (exclude.exists() and not exclude.is_file()):
+    if not raw_git_dir:
+        raise DispatchError("task Git directory is empty")
+    git_dir = Path(raw_git_dir)
+    exclude = git_dir / "info" / "task-exclude"
+    if (
+        exclude.parent.is_symlink()
+        or exclude.is_symlink()
+        or (exclude.exists() and not exclude.is_file())
+    ):
         raise DispatchError("task Git exclude path is not a regular file")
     exclude.parent.mkdir(parents=True, exist_ok=True)
     with exclude.open("a+", encoding="utf-8") as handle:
@@ -108,6 +116,17 @@ def ensure_task_git_excludes(worktree: Path) -> None:
             handle.flush()
             os.fsync(handle.fileno())
         fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    run_command(
+        [
+            "git",
+            "config",
+            "--worktree",
+            "core.excludesFile",
+            str(exclude),
+        ],
+        cwd=worktree,
+        label="task Git exclude config",
+    )
 
 
 def create_worktree(request: dict[str, Any]) -> None:

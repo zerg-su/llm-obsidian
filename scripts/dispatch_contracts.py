@@ -58,10 +58,10 @@ SUMMARY_TYPES = {"session", "decision", "runbook", "incident", "service-update",
 RUN_STATES = {"preparing", "launched", "failed"}
 COORDINATOR_ACTION = "return-to-idle-without-polling"
 TASK_LOCAL_GIT_EXCLUDES = (
-    ".task-origin-session",
-    ".task-verification.json",
-    ".task-verification-response.json",
-    ".task-verification-contract.json",
+    "/.task-origin-session",
+    "/.task-verification.json",
+    "/.task-verification-response.json",
+    "/.task-verification-contract.json",
 )
 
 
@@ -99,25 +99,6 @@ DEFAULT_DISPATCH = {
     "watchdog_warn_after_seconds": 900,
     "watchdog_alert_after_seconds": 1200,
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

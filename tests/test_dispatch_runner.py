@@ -146,6 +146,16 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     (target / "README.md").write_text("fixture\n", encoding="utf-8")
     git("add", "README.md", cwd=target)
     git("commit", "-m", "init", cwd=target)
+    common_exclude_path = Path(
+        git("rev-parse", "--git-path", "info/exclude", cwd=target)
+    )
+    if not common_exclude_path.is_absolute():
+        common_exclude_path = target / common_exclude_path
+    common_exclude_path.write_text(
+        common_exclude_path.read_text(encoding="utf-8")
+        + "existing-common-ignore\n",
+        encoding="utf-8",
+    )
 
     request_id = str(uuid.uuid4())
     raw_request = {
@@ -1722,21 +1732,27 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         origin_ignored.stderr,
     )
     exclude_result = subprocess.run(
-        ["git", "rev-parse", "--git-path", "info/exclude"],
+        ["git", "config", "--worktree", "--path", "--get", "core.excludesFile"],
         cwd=worktree,
         text=True,
         capture_output=True,
-        check=True,
+        check=False,
     )
-    exclude_path = Path(exclude_result.stdout.strip())
-    if not exclude_path.is_absolute():
-        exclude_path = worktree / exclude_path
+    exclude_path = (
+        Path(exclude_result.stdout.strip())
+        if exclude_result.returncode == 0
+        else None
+    )
+    installed_excludes = (
+        exclude_path.read_text(encoding="utf-8").splitlines()
+        if exclude_path is not None and exclude_path.is_file()
+        else []
+    )
     check(
-        "runner installs the task origin exclusion once across replay",
-        exclude_path.read_text(encoding="utf-8").splitlines().count(
-            ".task-origin-session"
-        )
-        == 1,
+        "runner installs one root-exact worktree-local task origin exclusion",
+        exclude_result.returncode == 0
+        and installed_excludes.count("/.task-origin-session") == 1,
+        exclude_result.stderr or str(installed_excludes),
     )
     verification_controls = (
         ".task-verification.json",
@@ -1752,19 +1768,77 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         capture_output=True,
         check=False,
     )
-    installed_excludes = exclude_path.read_text(encoding="utf-8").splitlines()
     check(
         "runner keeps verification control artifacts out of product cleanliness",
         verification_status.returncode == 0
         and not verification_status.stdout.strip()
         and all(
-            installed_excludes.count(relative) == 1
+            installed_excludes.count(f"/{relative}") == 1
             for relative in verification_controls
         ),
         verification_status.stderr or verification_status.stdout,
     )
+    nested = worktree / "nested"
+    nested.mkdir()
+    sibling_worktree = Path(request["target_repo"])
+    for relative in verification_controls:
+        (nested / relative).write_text("{}\n", encoding="utf-8")
+        (sibling_worktree / relative).write_text("{}\n", encoding="utf-8")
+    nested_status = subprocess.run(
+        ["git", "status", "--porcelain", "--untracked-files=all", "--", "nested"],
+        cwd=worktree,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    sibling_status = subprocess.run(
+        [
+            "git",
+            "status",
+            "--porcelain",
+            "--untracked-files=all",
+            "--",
+            *verification_controls,
+        ],
+        cwd=sibling_worktree,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    common_excludes = common_exclude_path.read_text(
+        encoding="utf-8"
+    ).splitlines()
+    check(
+        "task exclusions stay root-exact and invisible to sibling worktrees",
+        nested_status.returncode == 0
+        and all(
+            f"?? nested/{relative}" in nested_status.stdout
+            for relative in verification_controls
+        )
+        and sibling_status.returncode == 0
+        and all(
+            f"?? {relative}" in sibling_status.stdout
+            for relative in verification_controls
+        )
+        and "existing-common-ignore" in common_excludes
+        and all(
+            relative not in common_excludes
+            and f"/{relative}" not in common_excludes
+            for relative in verification_controls
+        ),
+        repr(
+            {
+                "nested": nested_status.stdout,
+                "sibling": sibling_status.stdout,
+                "common": common_excludes,
+            }
+        ),
+    )
     for relative in verification_controls:
         (worktree / relative).unlink()
+        (nested / relative).unlink()
+        (sibling_worktree / relative).unlink()
+    nested.rmdir()
     detected = subprocess.run(
         [str(ROOT / "scripts" / "current-session-id.sh")],
         cwd=worktree,
