@@ -14,8 +14,9 @@ packages were published for them.
 
 Bounded stability candidate; not tagged, published, installed, or live-tested.
 It closes the protected-research and custom-pipeline follow-ups exposed by the
-2.7.7 runs plus the verification-control cleanliness defect exposed while
-qualifying this candidate, without adding a lifecycle owner or replay path.
+2.7.7 runs, the verification-control cleanliness defect, and the
+structural-pivot cleanup gap exposed while qualifying this candidate, without
+adding a lifecycle owner or replay path.
 
 ### Fixed
 
@@ -35,6 +36,11 @@ qualifying this candidate, without adding a lifecycle owner or replay path.
   can therefore enforce strict tracked-and-untracked product cleanliness
   without classifying its own packet, response, or decision contract as
   product drift; real untracked product files remain visible and fail closed.
+- Structural-pivot cleanup now admits its delegated `review-round` result only
+  through the existing exact child kind, parent, lane, run, generation,
+  callback-digest, provider, and resource checks. The already accepted pivot
+  can reach `resource-closed` without replaying a provider, review, or
+  callback; every identity mismatch remains fail-closed.
 
 ### Governance
 
@@ -46,8 +52,9 @@ qualifying this candidate, without adding a lifecycle owner or replay path.
   as target headroom.
 - `runtime_session_launch.py` is 1,155 lines, within its existing 1,157-line
   hotspot ceiling. Removing the ambiguous suppression machinery while adding
-  the argv binding leaves the exact candidate at 290 files / 109,370 lines,
-  278 below the unchanged 109,648-line ceiling and without a ceiling increase.
+  the argv binding and structural-pivot cleanup leave the exact candidate at
+  290 files / 109,373 lines, 275 below the unchanged 109,648-line ceiling and
+  without a ceiling increase.
 
 ## [2.7.7] - 2026-08-16
 

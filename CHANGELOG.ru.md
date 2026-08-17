@@ -20,9 +20,9 @@
 
 Ограниченный stability-кандидат; без тега, публикации, установки и
 live-проверки. Он закрывает follow-up protected research и custom pipeline,
-обнаруженные запусками 2.7.7, а также дефект cleanliness verification-control,
-выявленный при проверке этого кандидата, не добавляя нового владельца lifecycle
-или пути replay.
+обнаруженные запусками 2.7.7, дефект cleanliness verification-control и пробел
+cleanup structural pivot, выявленные при проверке этого кандидата, не добавляя
+нового владельца lifecycle или пути replay.
 
 ### Исправлено
 
@@ -42,6 +42,11 @@ live-проверки. Он закрывает follow-up protected research и c
   сохраняет строгую проверку tracked и untracked product cleanliness, но не
   принимает собственные packet, response и decision contract за product drift;
   реальные untracked product-файлы остаются видимыми и fail-closed.
+- Cleanup structural pivot теперь принимает делегированный результат
+  `review-round` только через существующие точные проверки child kind, parent,
+  lane, run, generation, callback digest, provider и resource. Уже принятый
+  pivot доходит до `resource-closed` без replay provider, review или callback;
+  любое расхождение identity остаётся fail-closed.
 
 ### Управление
 
@@ -53,8 +58,9 @@ live-проверки. Он закрывает follow-up protected research и c
   запас для target.
 - `runtime_session_launch.py` занимает 1 155 строк при существующем потолке
   hotspot 1 157. После удаления неоднозначного suppression-механизма и
-  добавления argv-binding точный кандидат содержит 290 файлов / 109 370 строк:
-  на 278 меньше неизменного потолка 109 648 и без расширения этого потолка.
+  добавления argv-binding и cleanup structural pivot точный кандидат содержит
+  290 файлов / 109 373 строки: на 275 меньше неизменного потолка 109 648 и без
+  расширения этого потолка.
 
 ## [2.7.7] — 2026-08-16
 
