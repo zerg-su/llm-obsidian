@@ -214,6 +214,80 @@ check(
     "/Users/"
     not in json.dumps(live_evidence, ensure_ascii=False),
 )
+# A release that ships a new skill has to edit exactly one line of CLAUDE.md.
+# That line is the skill catalogue, not one of the engineering principles the
+# frozen RC4 denominator scores, so the projection canonicalizes it and the
+# recorded prompt/pin bytes stay reproducible.  Everything else stays frozen.
+catalogue_sources = dict(canonical_sources)
+catalogue_sources["CLAUDE.md"] = b"\n".join(
+    b"**Skills:** `/catalogue-probe`, `/second-catalogue-probe`"
+    if line.startswith(b"**Skills:** ")
+    else line
+    for line in canonical_sources["CLAUDE.md"].split(b"\n")
+)
+if catalogue_sources["CLAUDE.md"] == canonical_sources["CLAUDE.md"]:
+    raise AssertionError("catalogue fixture did not change the skill inventory")
+module.validate_aggregate_sources(catalogue_sources)
+check(
+    "RC4 projection canonicalizes a shipped skill-catalogue change",
+    all(
+        module.prompt_for(case, source_snapshot=catalogue_sources)
+        == module.prompt_for(case, source_snapshot=canonical_sources)
+        for case in cases
+    ),
+)
+principle_drift = dict(canonical_sources)
+principle_drift["CLAUDE.md"] = (
+    canonical_sources["CLAUDE.md"] + b"\nUnreviewed authority expansion.\n"
+)
+try:
+    module.validate_aggregate_sources(principle_drift)
+except module.RunnerError:
+    pass
+else:
+    raise AssertionError("non-catalogue CLAUDE.md drift was accepted")
+check("RC4 projection still rejects non-catalogue CLAUDE.md drift", True)
+
+live_evidence_path = (
+    ROOT
+    / "docs"
+    / "acceptance"
+    / "evidence"
+    / "v2.6.6"
+    / "rc4-engineering-discipline-live.json"
+)
+live_evidence = json.loads(live_evidence_path.read_text(encoding="utf-8"))
+check(
+    "RC4 live evidence binds the exact successful coordinator execution",
+    live_evidence["schema_version"] == 2
+    and live_evidence["type"] == "rc4-engineering-discipline-live-evidence"
+    and live_evidence["evidence_id"]
+    == "RC4-E8-agent-discipline-and-skill-quality"
+    and live_evidence["execution"]["product_head_sha"]
+    == "338ceec30c72c5afd34c78042a8b57a02fcdd99c"
+    and live_evidence["execution"]["command_log_event_id"]
+    == "b202717fa61ba4a358d39a0269ba8cdfd404bff08dfc179c6ec2a0cf5296793d"
+    and live_evidence["receipt"]["summary"]
+    == {"total": 4, "passed": 4, "failed": 0},
+)
+# The two working directories must stay distinguishable, but published evidence
+# no longer carries operator-local absolute paths (rc4-live-evidence-embeds-
+# operator-paths), so the distinction is asserted on the stable placeholders.
+check(
+    "RC4 live evidence distinguishes command-log and execution working directories",
+    live_evidence["command_capture"]["command_event"]["cwd"]
+    == "<coordinator-vault>"
+    and live_evidence["execution"]["cwd"] == "<task-worktree>"
+    and live_evidence["command_capture"]["exec_workdir"]
+    == live_evidence["execution"]["cwd"]
+    and live_evidence["command_capture"]["command_event"]["cwd"]
+    != live_evidence["execution"]["cwd"],
+)
+check(
+    "RC4 live evidence publishes no operator-local path",
+    "/Users/"
+    not in json.dumps(live_evidence, ensure_ascii=False),
+)
 expected_equivalence = {
     "rc4.ambiguity": (
         "d6f2b0d7069e729111f1f4b88ffd2a1ec5c296bbcd163b33e7a4e0fa607b85e3",

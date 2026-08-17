@@ -10,6 +10,82 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [Unreleased]
+
+### Fixed
+
+- The frozen RC4 engineering-discipline denominator pins the exact bytes of
+  `AGENTS.md` and `CLAUDE.md`, which made the skill catalogue inside
+  `CLAUDE.md` frozen too: any release shipping a new skill broke a historical
+  denominator, and the only alternatives were rewriting recorded acceptance
+  evidence or leaving the manual stale. `normalized_governing_source` now
+  canonicalizes exactly that catalogue line, so historical pins and prompt
+  digests stay byte-identical while the manual stays current; a regression
+  proves a shipped catalogue change is accepted and any other `CLAUDE.md`
+  drift still fails closed. Scripts ratchet moves to 290 files / 109,677 lines.
+
+## [2.8.0] - 2026-08-17
+
+Architecture Workflow v1: architectural intent becomes accepted project
+knowledge and then an executable Work Item DAG. Details: [docs/releases/v2.8.0.md](docs/releases/v2.8.0.md).
+
+### Added
+
+- `architecture` carrier: owns the Design Frontier and whole-system project
+  knowledge (vision, architecture, bounded design, spec, contract) under one
+  shared artifact contract, with one explicit handoff to a carrier and the
+  returned artifact collected into project context.
+- `decompose` carrier: builds the `<Project> Work Graph` and its Work Items from
+  accepted knowledge through MAP, ACCEPT and authorized MATERIALIZE, proves
+  bidirectional traceability, and derives waves and the Planning Frontier from
+  `depends_on` plus real concurrency constraints. File paths and TDD stay below
+  the Work Item boundary.
+- `docs/skill-references/architecture-artifacts.md`: the single artifact contract
+  both carriers read completely — roles, placement under
+  `wiki/projects/<project>/`, title-plus-address identity, revisions, report-only
+  freshness, lifecycle, and the durable-consumption invariant.
+- `scripts/architecture_paths.py`: bounded path validator owning the grammar, the
+  `NFC(title).casefold()` collision key checked against the whole link namespace
+  including aliases, role-to-folder mapping, symlink rejection on every component
+  from the wiki root through the selected role directory, and canonical
+  destination equality.
+- `implementation-plan` accepts a Work Item input, verifying per-class upstream
+  authority, total current pins and recovery/projection consistency before any
+  file or TDD planning, and emitting the canonical Upstream Gap otherwise.
+- `scripts/architecture_workflow_pressure.py` and
+  `scripts/architecture_workflow_audit.py`: release-owned behavioral evidence
+  machinery with per-case fresh-session provenance and fail-closed credential
+  sanitization of the complete record.
+
+### Fixed
+
+- The frozen RC4 engineering-discipline denominator no longer breaks when a
+  release ships a new skill. It pins the exact bytes of `AGENTS.md` and
+  `CLAUDE.md` because the recorded v2.6.6 prompts must stay reproducible, but
+  the skill catalogue inside `CLAUDE.md` is an index rather than one of the
+  principles under test. `normalized_governing_source` now canonicalizes only
+  that catalogue line, so the historical pins and prompt digests stay
+  byte-identical while the manual stays current; a regression proves a shipped
+  catalogue change is accepted and that any other `CLAUDE.md` drift still fails
+  closed. Historical evidence is untouched. Scripts ratchet moves to the measured candidate 293 files / 110,718 lines.
+- The bounded review resolution fix delta now uses one registered git command
+  (`review_resolution.fix_delta_command`) that excludes committed
+  `docs/acceptance/evidence/` bytes, so acceptance evidence can never crowd a
+  small product fix out of the 1 MiB transport cap; the cap still applies to
+  product paths and an evidence-only resolution stays an empty, rejected
+  delta. Both resolution bundle computations and the review program's
+  independent digest verification bind the same command. The scripts scope ratchet is stated once for this release below.
+
+### Changed
+
+- Architecture Workflow v1 advances the scope ratchet by its exact measured
+  production cost to 293 files / 110,718 lines with zero headroom:
+  the 252-line `scripts/architecture_paths.py` validator, 276-line
+  `scripts/architecture_workflow_audit.py` composition, and 780-line
+  `scripts/architecture_workflow_pressure.py` adapter are release-owned while
+  the shared engineering-eval runner remains byte-identical to the reconciled
+  main base after its separately owned 29-line catalogue projection.
+
 ## [2.7.8] - 2026-08-17
 
 Bounded stability candidate; not tagged, published, installed, or live-tested.

@@ -83,6 +83,28 @@ RC4_SOURCE_BRANDING_ALIASES = {
         ),
     ),
 }
+# The frozen RC4 denominator binds the exact prompt bytes recorded in
+# docs/acceptance/evidence/v2.6.6/, so a governing source may not drift.  The
+# skill catalogue inside CLAUDE.md is an index, not one of the engineering
+# discipline principles the eval scores, yet every release that ships a new
+# skill has to edit that one line.  Canonicalizing the catalogue line to its
+# frozen value keeps the historical prompts and pins byte-identical while the
+# manual stays current; every other byte of the source is still frozen, which
+# the non-catalogue drift regression proves.
+RC4_SOURCE_CATALOGUE_LINES = {
+    "CLAUDE.md": (
+        b"**Skills:** ",
+        b"**Skills:** `/wiki`, `/wiki-ingest`, `/wiki-query`, `/wiki-lint`, "
+        b"`/wiki-fold`, `/save`, `/save-plan`, `/close`, `/research`, "
+        b"`/unsafe-research` (explicit request only), `/canvas`, `/daily`, "
+        b"`/journal`, `/agenda`, `/backlog`, `/find-session`, `/draft`, "
+        b"`/distill-runbook`, `/learn`, `/defuddle`, `/clarify`, "
+        b"`/improve-skills` (explicit request only), `/dispatch`, `/split` "
+        b"(explicit request only), `/review`, `/reap`, `/debug`, `/tdd`, "
+        b"`/design`, `/prototype`, `/resolve-conflict`, `/vault-repair` "
+        b"(+ reference: obsidian-markdown, obsidian-bases)",
+    ),
+}
 APP_SERVER_EPERM = (
     "failed to initialize in-process app-server client: "
     "Operation not permitted (os error 1)"
@@ -105,6 +127,13 @@ def normalized_governing_source(relative: str, raw: bytes) -> bytes:
     """Project registered fork branding onto the canonical contract bytes."""
 
     normalized = raw
+    catalogue = RC4_SOURCE_CATALOGUE_LINES.get(relative)
+    if catalogue is not None:
+        prefix, frozen = catalogue
+        normalized = b"\n".join(
+            frozen if line.startswith(prefix) else line
+            for line in normalized.split(b"\n")
+        )
     for alias, canonical in RC4_SOURCE_BRANDING_ALIASES.get(relative, ()):
         normalized = normalized.replace(alias, canonical)
     return normalized
