@@ -21,7 +21,11 @@ packages were published for them.
   preserves failed baseline-gap evidence through typed restart and provider
   admission, and publishes only decisions executable for the exact escalation
   kind. The live scripts ratchet moves to the measured 294-file / 111,430-line
-  candidate with zero headroom.
+  candidate with zero headroom. By explicit user decision, the 26-line
+  active-authority increase preserves only the bounded ancestor-resolution and
+  verification continuation recovery; the unchanged 27-file contour is pinned
+  to its measured 15,796 LOC with zero writable authorities, zero incident
+  literals, and no growth allowance.
 
 ## [2.8.0] - 2026-08-17
 
