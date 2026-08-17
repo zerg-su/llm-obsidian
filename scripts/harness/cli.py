@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from time import time
@@ -594,25 +595,50 @@ def _review_findings_transport_required(
     """Distinguish an undelivered finding packet from a completed handoff."""
 
     resolution_path = worktree / ".task-review-resolution.json"
-    current_head = ""
-    if resolution_path.is_file() and not resolution_path.is_symlink():
-        try:
-            resolution = json.loads(resolution_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            resolution = None
-        if isinstance(resolution, dict):
-            candidate = resolution.get("resolved_head_sha")
-            if isinstance(candidate, str) and candidate:
-                try:
-                    current_head = _review_worktree_head(worktree)
-                except (OSError, ValueError):
-                    current_head = ""
-    return not _review_resolution_handoff_ready(
+    if not resolution_path.is_file() or resolution_path.is_symlink():
+        return True
+    try:
+        resolution = json.loads(resolution_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return True
+    candidate = (
+        resolution.get("resolved_head_sha")
+        if isinstance(resolution, dict)
+        else None
+    )
+    if not isinstance(candidate, str) or not candidate:
+        return True
+    if not _review_resolution_handoff_ready(
         worktree=worktree,
         operation_id=operation_id,
         gate_state=gate_state,
-        current_head=current_head,
-    )
+        current_head=candidate,
+    ):
+        return True
+    try:
+        current_head = _review_worktree_head(worktree)
+    except (OSError, ValueError):
+        return True
+    if current_head == candidate:
+        return False
+    try:
+        clean = subprocess.run(
+            ["git", "status", "--porcelain=v1", "--untracked-files=normal"],
+            cwd=worktree,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        ancestor = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", candidate, current_head],
+            cwd=worktree,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    except OSError:
+        return True
+    return clean.returncode != 0 or bool(clean.stdout) or ancestor.returncode != 0
 
 
 def _publish_recovered_review_resolution(

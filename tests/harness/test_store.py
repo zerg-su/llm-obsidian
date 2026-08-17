@@ -34,6 +34,7 @@ import harness.cli as harness_cli
 from harness.cli import main as harness_cli_main
 from harness.runtime_provider_events import RuntimeProviderEventStream
 from harness.store import OperationStore, StoreError
+from review_resolution import review_transport_identity_sha256
 
 
 def check(label: str, value: bool) -> None:
@@ -2280,6 +2281,254 @@ with tempfile.TemporaryDirectory(prefix="review-resolution-recovery.") as raw:
     finally:
         harness_cli._review_resolution_handoff_ready = original_handoff_ready
     check(
-        "completed resolution handoff advances instead of redelivering findings",
-        not transport_required,
+        "handoff validator cannot bypass missing resolution evidence",
+        transport_required,
     )
+
+
+with tempfile.TemporaryDirectory(prefix="review-resolution-descendant.") as raw:
+    descendant_root = Path(raw).resolve()
+    descendant_vault = descendant_root / "vault"
+    descendant_store_root = descendant_vault / ".vault-meta/harness"
+    descendant_owner = "review-resolution-descendant-owner"
+    descendant_operation = "review-resolution-descendant-operation"
+    descendant_worktree = descendant_root / "product"
+    descendant_worktree.mkdir(parents=True)
+
+    def descendant_git(*args: str) -> str:
+        return subprocess.run(
+            ["git", *args],
+            cwd=descendant_worktree,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.strip()
+
+    descendant_git("init", "--quiet")
+    descendant_git("config", "user.name", "Review Recovery Test")
+    descendant_git("config", "user.email", "review-recovery@example.invalid")
+    (descendant_worktree / ".gitignore").write_text(
+        ".task-review-resolution.json\n", encoding="utf-8"
+    )
+    (descendant_worktree / "product.txt").write_text(
+        "reviewed\n", encoding="utf-8"
+    )
+    descendant_git("add", ".gitignore", "product.txt")
+    descendant_git("commit", "--quiet", "-m", "reviewed")
+    descendant_reviewed_head = descendant_git("rev-parse", "HEAD")
+    (descendant_worktree / "product.txt").write_text(
+        "resolved\n", encoding="utf-8"
+    )
+    descendant_git("add", "product.txt")
+    descendant_git("commit", "--quiet", "-m", "resolve findings")
+    descendant_resolved_head = descendant_git("rev-parse", "HEAD")
+
+    descendant_review_operation = "review-operation-descendant"
+    descendant_callbacks = [
+        {
+            "axis": "openai-holistic",
+            "round_operation_id": "round-operation-descendant",
+            "round_run_id": "round-run-descendant",
+            "callback_id": "callback-descendant",
+            "callback_sha256": "c" * 64,
+        }
+    ]
+    descendant_identity = review_transport_identity_sha256(
+        descendant_review_operation, descendant_callbacks
+    )
+    descendant_evidence = {
+        "openai-holistic": {
+            "reviewed_head_sha": descendant_reviewed_head,
+            "material_finding_ids": ["F-descendant"],
+            "review_operation_id": descendant_review_operation,
+            **descendant_callbacks[0],
+        }
+    }
+    descendant_gate = {
+        "schema_version": 1,
+        "status": "changes-requested",
+        "execution_protocol": "exact-head-attempt-v1",
+        "active_review_operation_id": descendant_review_operation,
+        "attempt": {
+            "status": "terminal",
+            "terminal": {"result": "changes-requested"},
+        },
+        "review_notification_evidence": descendant_evidence,
+    }
+    valid_descendant_resolution = {
+        "schema_version": 1,
+        "operation_id": descendant_operation,
+        "review_identity_sha256": descendant_identity,
+        "reviewed_head_sha": descendant_reviewed_head,
+        "resolved_head_sha": descendant_resolved_head,
+        "resolutions": [
+            {
+                "finding_id": "F-descendant",
+                "disposition": "applied",
+                "rationale": "The bounded correction is committed.",
+                "follow_up": "",
+            }
+        ],
+    }
+    descendant_resolution_path = (
+        descendant_worktree / ".task-review-resolution.json"
+    )
+
+    def write_descendant_resolution(value: object) -> None:
+        descendant_resolution_path.write_text(
+            json.dumps(value) + "\n", encoding="utf-8"
+        )
+
+    write_descendant_resolution(valid_descendant_resolution)
+    (descendant_worktree / "product.txt").write_text(
+        "clean descendant\n", encoding="utf-8"
+    )
+    descendant_git("add", "product.txt")
+    descendant_git("commit", "--quiet", "-m", "clean descendant")
+    descendant_current_head = descendant_git("rev-parse", "HEAD")
+    check(
+        "crash restart preserves a completed resolution handoff on an ancestor",
+        descendant_current_head != descendant_resolved_head
+        and not harness_cli._review_findings_transport_required(
+            worktree=descendant_worktree,
+            operation_id=descendant_operation,
+            gate_state=descendant_gate,
+        ),
+    )
+
+    descendant_runtime_root = (
+        descendant_store_root
+        / "owners"
+        / descendant_owner
+        / "runtime"
+        / descendant_operation
+    )
+    descendant_runtime_root.mkdir(parents=True)
+    (descendant_runtime_root / "session.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "operation_id": descendant_operation,
+                "cwd": str(descendant_worktree),
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    descendant_gate_root = (
+        descendant_store_root
+        / "review-data"
+        / descendant_operation
+        / descendant_operation
+    )
+    descendant_gate_root.mkdir(parents=True)
+    (descendant_gate_root / "review-gate.json").write_text(
+        json.dumps(descendant_gate) + "\n", encoding="utf-8"
+    )
+
+    class DescendantRecoveryLoader:
+        def exec_module(self, _module: object) -> None:
+            return None
+
+    descendant_recovery_module = type(
+        "DescendantRecoveryModule",
+        (),
+        {
+            "run_task_review": staticmethod(
+                lambda *_args, **_kwargs: {"status": "changes-requested"}
+            )
+        },
+    )()
+    descendant_transport_calls: list[dict[str, object]] = []
+    with (
+        patch.object(
+            harness_cli,
+            "_publish_recovered_review_resolution",
+            side_effect=lambda **kwargs: descendant_transport_calls.append(
+                kwargs
+            ),
+        ),
+        patch.object(
+            harness_cli.importlib.util,
+            "spec_from_file_location",
+            return_value=type(
+                "DescendantRecoverySpec",
+                (),
+                {"loader": DescendantRecoveryLoader()},
+            )(),
+        ),
+        patch.object(
+            harness_cli.importlib.util,
+            "module_from_spec",
+            return_value=descendant_recovery_module,
+        ),
+    ):
+        descendant_recovery_status = (
+            harness_cli._recover_finalizing_review_if_present(
+                OperationStore(descendant_store_root),
+                descendant_owner,
+                descendant_operation,
+                runtime_manager=object(),
+                cmux_adapter=FakeCmux("alive"),
+            )
+        )
+    check(
+        "crash restart does not republish completed findings transport",
+        descendant_recovery_status == "changes-requested"
+        and descendant_transport_calls == [],
+    )
+
+    unrelated_tree = descendant_git("rev-parse", "HEAD^{tree}")
+    unrelated_head = subprocess.run(
+        ["git", "commit-tree", unrelated_tree],
+        cwd=descendant_worktree,
+        input="unrelated resolution\n",
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout.strip()
+    refusal_cases: list[tuple[str, object]] = []
+    unrelated_resolution = dict(valid_descendant_resolution)
+    unrelated_resolution["resolved_head_sha"] = unrelated_head
+    refusal_cases.append(("non-ancestor", unrelated_resolution))
+    refusal_cases.append(("malformed", "{malformed"))
+    identity_drift = dict(valid_descendant_resolution)
+    identity_drift["review_identity_sha256"] = "f" * 64
+    refusal_cases.append(("identity-drifted", identity_drift))
+
+    descendant_resolution_path.unlink()
+    check(
+        "resolution ancestor recovery refuses missing evidence",
+        harness_cli._review_findings_transport_required(
+            worktree=descendant_worktree,
+            operation_id=descendant_operation,
+            gate_state=descendant_gate,
+        ),
+    )
+    symlink_target = descendant_root / "resolution-target.json"
+    symlink_target.write_text(
+        json.dumps(valid_descendant_resolution) + "\n", encoding="utf-8"
+    )
+    descendant_resolution_path.symlink_to(symlink_target)
+    check(
+        "resolution ancestor recovery refuses symlinked evidence",
+        harness_cli._review_findings_transport_required(
+            worktree=descendant_worktree,
+            operation_id=descendant_operation,
+            gate_state=descendant_gate,
+        ),
+    )
+    descendant_resolution_path.unlink()
+    for label, value in refusal_cases:
+        if label == "malformed":
+            descendant_resolution_path.write_text(str(value), encoding="utf-8")
+        else:
+            write_descendant_resolution(value)
+        check(
+            f"resolution ancestor recovery refuses {label} evidence",
+            harness_cli._review_findings_transport_required(
+                worktree=descendant_worktree,
+                operation_id=descendant_operation,
+                gate_state=descendant_gate,
+            ),
+        )
