@@ -2430,12 +2430,20 @@ with tempfile.TemporaryDirectory(prefix="review-resolution-descendant.") as raw:
         def exec_module(self, _module: object) -> None:
             return None
 
+    descendant_review_runner_calls: list[tuple[object, ...]] = []
+
+    def reject_descendant_review_runner(
+        *args: object, **_kwargs: object
+    ) -> dict[str, object]:
+        descendant_review_runner_calls.append(args)
+        raise AssertionError("ancestor handoff must not invoke run_task_review")
+
     descendant_recovery_module = type(
         "DescendantRecoveryModule",
         (),
         {
             "run_task_review": staticmethod(
-                lambda *_args, **_kwargs: {"status": "changes-requested"}
+                reject_descendant_review_runner
             )
         },
     )()
@@ -2473,9 +2481,10 @@ with tempfile.TemporaryDirectory(prefix="review-resolution-descendant.") as raw:
             )
         )
     check(
-        "crash restart does not republish completed findings transport",
+        "crash restart stops before review drive or findings transport",
         descendant_recovery_status == "changes-requested"
-        and descendant_transport_calls == [],
+        and descendant_transport_calls == []
+        and descendant_review_runner_calls == [],
     )
 
     unrelated_tree = descendant_git("rev-parse", "HEAD^{tree}")
@@ -2495,6 +2504,22 @@ with tempfile.TemporaryDirectory(prefix="review-resolution-descendant.") as raw:
     identity_drift = dict(valid_descendant_resolution)
     identity_drift["review_identity_sha256"] = "f" * 64
     refusal_cases.append(("identity-drifted", identity_drift))
+
+    write_descendant_resolution(valid_descendant_resolution)
+    (descendant_worktree / "product.txt").write_text(
+        "dirty descendant\n", encoding="utf-8"
+    )
+    check(
+        "resolution ancestor recovery refuses dirty descendant evidence",
+        harness_cli._review_findings_transport_required(
+            worktree=descendant_worktree,
+            operation_id=descendant_operation,
+            gate_state=descendant_gate,
+        ),
+    )
+    (descendant_worktree / "product.txt").write_text(
+        "clean descendant\n", encoding="utf-8"
+    )
 
     descendant_resolution_path.unlink()
     check(

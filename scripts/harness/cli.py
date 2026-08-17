@@ -523,26 +523,26 @@ def _recover_finalizing_review_if_present(
     if (
         recovery_kind == "accepted-exact-callbacks"
         and gate.get("status") == "changes-requested"
-        and _review_findings_transport_required(
+    ):
+        if _review_findings_transport_required(
             worktree=worktree,
             operation_id=operation_id,
             gate_state=gate,
-        )
-    ):
-        try:
-            _publish_recovered_review_resolution(
-                store_root=store_root,
-                owner=owner,
-                operation_id=operation_id,
-                worktree=worktree,
-                gate_path=gate_path,
-                gate_state=gate,
-                cmux_adapter=cmux_adapter,
-            )
-        except Exception as exc:
-            raise RuntimeSessionError(
-                "dispatch review resolution transport recovery failed"
-            ) from exc
+        ):
+            try:
+                _publish_recovered_review_resolution(
+                    store_root=store_root,
+                    owner=owner,
+                    operation_id=operation_id,
+                    worktree=worktree,
+                    gate_path=gate_path,
+                    gate_state=gate,
+                    cmux_adapter=cmux_adapter,
+                )
+            except Exception as exc:
+                raise RuntimeSessionError(
+                    "dispatch review resolution transport recovery failed"
+                ) from exc
         return "changes-requested"
     runner_path = Path(__file__).resolve().parents[1] / "task-review-runner.py"
     module_spec = importlib.util.spec_from_file_location(
