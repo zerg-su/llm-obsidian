@@ -558,6 +558,10 @@ REFRESHED_SUMMARY_BODY = (
     "The corridor evidence is established.\n\n"
     "Resolved the material review finding at the final HEAD."
 )
+VERIFIED_SUMMARY_BODY = (
+    "The corridor evidence is established.\n\n"
+    "Exact-HEAD verification completed before initial review."
+)
 
 
 def corridor_autopilot(
@@ -611,12 +615,17 @@ def corridor_autopilot(
             world.resolve_findings(commit_message="resolve corridor finding")
         elif (
             refresh_marker.is_file()
-            and json.loads(world.summary_path.read_text(encoding="utf-8")).get(
-                "body"
-            )
-            != REFRESHED_SUMMARY_BODY
+            and (refresh := json.loads(
+                refresh_marker.read_text(encoding="utf-8")
+            )).get("status") == "sent"
+            and refresh.get("summary_sha256")
+            == hashlib.sha256(world.summary_path.read_bytes()).hexdigest()
         ):
-            world.publish_summary(REFRESHED_SUMMARY_BODY)
+            world.publish_summary(
+                VERIFIED_SUMMARY_BODY
+                if refresh.get("purpose") == "post-verification"
+                else REFRESHED_SUMMARY_BODY
+            )
         elif (
             isinstance(attempt, dict)
             and attempt.get("status") == "awaiting-callback"

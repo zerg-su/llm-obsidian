@@ -417,6 +417,7 @@ class RuntimeWorkerReviewBridgeMixin:
                 else ""
             ),
         }
+        marker: dict[str, object] | None = None
         if notify_path.is_file():
             if notify_path.is_symlink():
                 raise RuntimeWorkerError(
@@ -428,7 +429,8 @@ class RuntimeWorkerReviewBridgeMixin:
                 refreshed = str(existing.get("refreshed_summary_sha256") or "")
                 if (
                     not re.fullmatch("[0-9a-f]{64}", initial)
-                    or existing.get("status") not in {"sent", "accepted"}
+                    or existing.get("status")
+                    not in {"pending", "sent", "accepted"}
                 ):
                     raise RuntimeWorkerError(
                         "summary refresh notification is invalid"
@@ -439,31 +441,55 @@ class RuntimeWorkerReviewBridgeMixin:
                             "accepted summary refresh identity drifted"
                         )
                     return False
-                if self.digest == initial:
+                if existing.get("status") == "sent" and self.digest == initial:
                     return True
-                _atomic_json(
-                    notify_path,
-                    {
-                        **identity,
-                        "summary_sha256": initial,
-                        "refreshed_summary_sha256": self.digest,
-                        "status": "accepted",
-                    },
-                )
-                return False
-        marker = {
-            **identity,
-            "summary_sha256": self.digest,
-            "refreshed_summary_sha256": "",
-        }
-        _atomic_json(notify_path, {**marker, "status": "pending"})
+                if existing.get("status") == "sent":
+                    _atomic_json(
+                        notify_path,
+                        {
+                            **identity,
+                            "summary_sha256": initial,
+                            "refreshed_summary_sha256": self.digest,
+                            "status": "accepted",
+                        },
+                    )
+                    return False
+                marker = {
+                    **identity,
+                    "summary_sha256": initial,
+                    "refreshed_summary_sha256": "",
+                }
+        if marker is None:
+            marker = {
+                **identity,
+                "summary_sha256": self.digest,
+                "refreshed_summary_sha256": "",
+            }
+            _atomic_json(notify_path, {**marker, "status": "pending"})
         message = (
             "Exact-HEAD verification completed. Refresh .task-summary.json "
             "before review so its body and outcome evidence cover verified HEAD "
             f"{self.verification_head}; preserve all code-owned fields."
         )
-        self.cmux_adapter.send(self.spec["surface_id"], message)
-        self.cmux_adapter.send_key(self.spec["surface_id"], "Enter")
+        wake_id = hashlib.sha256(
+            json.dumps(marker, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        wake_spec = {
+            "origin_surface": self.spec["surface_id"],
+            "callback_wake": message,
+        }
+        wake_root = self.spec_path.parent / "summary-refresh-wake"
+        wake_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if not runtime_callback_io.publish_callback_wake(
+            wake_spec,
+            wake_root,
+            wake_id,
+            self.cmux_adapter,
+            resume_uncertain=runtime_callback_io.wake_resume_once(self, wake_id),
+        ):
+            raise RuntimeWorkerError(
+                "summary refresh notification effect is uncertain"
+            )
         _atomic_json(notify_path, {**marker, "status": "sent"})
         return True
 

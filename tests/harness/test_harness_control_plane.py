@@ -385,6 +385,7 @@ from lifecycle_simulator_world import (  # noqa: E402
     ORIGIN_SURFACE,
     REFRESHED_SUMMARY_BODY,
     TASK_SURFACE,
+    VERIFIED_SUMMARY_BODY,
     build_corridor_world,
     passing_verification_runner,
 )
@@ -409,6 +410,25 @@ with tempfile.TemporaryDirectory(prefix="golden-corridor.") as raw:
     corridor_trace: list[str] = []
 
     def reviewer_and_executor_turns(world) -> None:
+        # Executor turn 1: bind the implementer summary to exact-HEAD
+        # verification before the first review context is constructed.
+        refresh_path = (
+            world.state_root / "pipeline-summary-refresh-notify.json"
+        )
+        world.await_condition(
+            "verified summary is requested before initial review",
+            lambda: refresh_path.is_file()
+            and json.loads(refresh_path.read_text(encoding="utf-8")).get(
+                "purpose"
+            )
+            == "post-verification"
+            and json.loads(refresh_path.read_text(encoding="utf-8")).get(
+                "status"
+            )
+            == "sent",
+        )
+        world.publish_summary(VERIFIED_SUMMARY_BODY)
+        corridor_trace.append("verified-summary-refreshed")
         # Reviewer turn 1: material changes-requested on the first attempt.
         world.await_condition(
             "first review round is awaiting its callback",
@@ -434,9 +454,15 @@ with tempfile.TemporaryDirectory(prefix="golden-corridor.") as raw:
         # Executor turn 3: refreshed summary for the resolved HEAD.
         world.await_condition(
             "refreshed summary is requested after resolution",
-            lambda: (
-                world.state_root / "pipeline-summary-refresh-notify.json"
-            ).is_file(),
+            lambda: refresh_path.is_file()
+            and json.loads(refresh_path.read_text(encoding="utf-8")).get(
+                "approved_head_sha"
+            )
+            == world.head()
+            and json.loads(refresh_path.read_text(encoding="utf-8")).get(
+                "status"
+            )
+            == "sent",
         )
         world.publish_summary(REFRESHED_SUMMARY_BODY)
         corridor_trace.append("summary-refreshed")
