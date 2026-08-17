@@ -12,6 +12,7 @@ from typing import Mapping
 from review_resolution import (
     MAX_FIX_DELTA_TOTAL_BYTES,
     ResolutionError,
+    fix_delta_command,
     validate_resolution_evidence,
 )
 
@@ -245,12 +246,7 @@ def _fix_delta_sha256(root: Path, reviewed_head: str, resolved_head: str) -> str
                 "git",
                 "-C",
                 str(root),
-                "diff",
-                "--binary",
-                "--no-ext-diff",
-                reviewed_head,
-                resolved_head,
-                "--",
+                *fix_delta_command(reviewed_head, resolved_head),
             ],
             check=False,
             capture_output=True,

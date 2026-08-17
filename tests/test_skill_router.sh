@@ -46,6 +46,25 @@ run_case() {
   fi
 }
 
+run_case_without() {
+  local name="$1"
+  local prompt="$2"
+  local forbidden="$3"
+  local required="${4:-}"
+
+  local output
+  output=$(printf '%s' "{\"prompt\":\"${prompt//\"/\\\"}\"}" | "$ROUTER" 2>/dev/null)
+  if ! printf '%s' "$output" | grep -qF "$forbidden" \
+      && { [[ -z "$required" ]] || printf '%s' "$output" | grep -qF "$required"; }; then
+    pass=$((pass + 1))
+    printf '  OK   %s\n' "$name"
+  else
+    fail=$((fail + 1))
+    failures+=("$name (forbidden '${forbidden}', required '${required}', got: ${output:0:200})")
+    printf '  FAIL %s — wrong carrier set: %s\n' "$name" "${output:0:160}"
+  fi
+}
+
 echo "== positive skill matches =="
 run_case "clarify-grill-EN" 'grill me on this API migration plan'                     'Skill("clarify")'
 run_case "clarify-RU"       'допроси меня перед реализацией этого дизайна'            'Skill("clarify")'
@@ -62,10 +81,16 @@ run_case "debug-EN"         'debug this flaky callback and find the root cause' 
 run_case "debug-RU"         'диагностируй и найди причину падения'                     'Skill("debug")'
 run_case "tdd-EN"           'implement this with TDD'                                  'Skill("tdd")'
 run_case "design-EN"        'produce a system design for the callback broker'          'Skill("design")'
+run_case "architecture-RU"  'спроектируй архитектуру нового Harness'                  'Skill("architecture")'
+run_case "architecture-EN"  'continue the project architecture for Atlas'             'Skill("architecture")'
+run_case "architecture-frontier-RU" 'что осталось решить по архитектуре проекта Atlas?' 'Skill("architecture")'
 run_case "codebase-design-EN" 'refactor this oversized orchestrator into deep module boundaries' 'Skill("codebase-design")'
 run_case "codebase-design-RU" 'разбить монолитный код на глубокие модули'              'Skill("codebase-design")'
 run_case "implementation-plan-EN" 'write an implementation plan with file ownership and consumes produces slices' 'Skill("implementation-plan")'
 run_case "implementation-plan-RU" 'сделай план реализации по файлам и ответственности' 'Skill("implementation-plan")'
+run_case "decompose-RU"     'принятая архитектура Atlas: разбей доставку на Work Items' 'Skill("decompose")'
+run_case "decompose-EN"     'decompose accepted Atlas architecture into work items'     'Skill("decompose")'
+run_case "decompose-map-EN" 'map accepted project specs into a Work Item DAG'           'Skill("decompose")'
 run_case "prototype-EN"     'build a disposable prototype for this parser question'    'Skill("prototype")'
 run_case "conflict-EN"      'resolve the rebase conflict in this worktree'              'Skill("resolve-conflict")'
 run_case "wiki-query-RU"    'что ты знаешь про гибридный поиск'                       'Skill("wiki-query")'
@@ -113,6 +138,11 @@ run_case "fp-tdd-definition" 'what does TDD stand for?'                         
 run_case "fp-prototype-car" 'show me a prototype car design'                           'EMPTY'
 run_case "fp-split-prose" 'split this paragraph into three bullets'                   'EMPTY'
 run_case "fp-split-files" 'split this large CSV file by date'                         'EMPTY'
+run_case_without "fp-architecture-review" 'run an architecture review of project Atlas' 'Skill("architecture")' 'Skill("review")'
+run_case_without "fp-decompose-modules" 'разбей файл на модули'                        'Skill("decompose")'
+run_case_without "fp-decompose-function" 'decompose this function into helpers'         'Skill("decompose")'
+run_case_without "fp-approved-plan-decompose" 'fan out the already approved plan for execution' 'Skill("decompose")'
+run_case "fp-generic-frontier" 'what else should we solve?'                            'EMPTY'
 
 echo "== explicit-only Split metadata =="
 python3 - "$REPO_ROOT/skills/split/SKILL.md" "$REPO_ROOT/skills/split/agents/openai.yaml" <<'PY'

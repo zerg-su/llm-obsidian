@@ -399,6 +399,7 @@ Acceptance heartbeat хранит только stage/status/counters/timestamps.
 
 | Тема | Документ |
 |---|---|
+| Architecture Workflow v1 v2.8.0 | [Release notes v2.8.0](docs/releases/v2.8.0.md) |
 | Terminal dashboard candidate v2.6.7 RC4 | [Release notes v2.6.7 RC4](docs/releases/v2.6.7-rc4.md) |
 | Финальный стабилизационный кандидат v2.6.7 RC3 | [Release notes v2.6.7 RC3](docs/releases/v2.6.7-rc3.md) |
 | Root-scoped наблюдатель Harness в v2.6.7 RC2 | [Release notes v2.6.7 RC2](docs/releases/v2.6.7-rc2.md) |

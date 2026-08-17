@@ -411,10 +411,14 @@ assert "v2.6.6-rc1-real-dogfood.json" in readiness
 assert "RC2.REVIEW_CALLBACK_INGESTION_FINALIZING" in readiness
 assert "authoritative technical candidate is exact clean HEAD\n`126b5fe" not in readiness
 
-release_version = "2.6.7-rc4"
 claude_plugin = json.loads(
     (ROOT / ".claude-plugin/plugin.json").read_text(encoding="utf-8")
 )
+# The packaged Claude build is the authority for the current release version: a
+# hard-pinned literal here only breaks on every bump without ever proving that
+# the shipped surfaces agree, which is what this gate is for.
+release_version = claude_plugin["version"]
+assert re.fullmatch(r"\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?", release_version), release_version
 codex_plugin = json.loads(
     (ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8")
 )
@@ -430,7 +434,7 @@ for relative_path in (
     "CHANGELOG.ru.md",
     "README.md",
     "README.ru.md",
-    "docs/releases/v2.6.7-rc4.md",
+    f"docs/releases/v{release_version}.md",
 ):
     assert release_version in (ROOT / relative_path).read_text(encoding="utf-8")
 

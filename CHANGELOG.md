@@ -10,20 +10,6 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
-## [Unreleased]
-
-### Fixed
-
-- The frozen RC4 engineering-discipline denominator pins the exact bytes of
-  `AGENTS.md` and `CLAUDE.md`, which made the skill catalogue inside
-  `CLAUDE.md` frozen too: any release shipping a new skill broke a historical
-  denominator, and the only alternatives were rewriting recorded acceptance
-  evidence or leaving the manual stale. `normalized_governing_source` now
-  canonicalizes exactly that catalogue line, so historical pins and prompt
-  digests stay byte-identical while the manual stays current; a regression
-  proves a shipped catalogue change is accepted and any other `CLAUDE.md`
-  drift still fails closed. Scripts ratchet moves to 290 files / 109,677 lines.
-
 ## [2.8.0] - 2026-08-17
 
 Architecture Workflow v1: architectural intent becomes accepted project
@@ -58,6 +44,16 @@ knowledge and then an executable Work Item DAG. Details: [docs/releases/v2.8.0.m
   sanitization of the complete record.
 
 ### Fixed
+
+- The frozen RC4 engineering-discipline denominator pins the exact bytes of
+  `AGENTS.md` and `CLAUDE.md`, which made the skill catalogue inside
+  `CLAUDE.md` frozen too: any release shipping a new skill broke a historical
+  denominator, and the only alternatives were rewriting recorded acceptance
+  evidence or leaving the manual stale. `normalized_governing_source` now
+  canonicalizes exactly that catalogue line, so historical pins and prompt
+  digests stay byte-identical while the manual stays current; a regression
+  proves a shipped catalogue change is accepted and any other `CLAUDE.md`
+  drift still fails closed. Scripts ratchet moves to 290 files / 109,677 lines.
 
 - The frozen RC4 engineering-discipline denominator no longer breaks when a
   release ships a new skill. It pins the exact bytes of `AGENTS.md` and

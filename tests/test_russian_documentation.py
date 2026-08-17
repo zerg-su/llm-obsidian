@@ -87,6 +87,33 @@ def skill_names(root: Path = ROOT) -> tuple[str, ...]:
     return tuple(sorted(path.parent.name for path in (root / "skills").glob("*/SKILL.md")))
 
 
+def model_invoked_skill_names(root: Path = ROOT) -> tuple[str, ...]:
+    """Return the skills shipped with model-facing invocation metadata."""
+
+    return tuple(
+        sorted(
+            path.parents[1].name
+            for path in (root / "skills").glob("*/agents/openai.yaml")
+        )
+    )
+
+
+def claude_skill_inventory_failures(
+    body: str, model_invoked: tuple[str, ...]
+) -> list[str]:
+    """Require the canonical CLAUDE inventory to cover shipped model skills."""
+
+    lines = [line for line in body.splitlines() if line.startswith("**Skills:**")]
+    if len(lines) != 1:
+        return ["CLAUDE.md must contain exactly one canonical Skills inventory"]
+    listed = set(re.findall(r"`/([a-z0-9]+(?:-[a-z0-9]+)*)`", lines[0]))
+    return [
+        f"CLAUDE.md Skills inventory missing /{name}"
+        for name in model_invoked
+        if name not in listed
+    ]
+
+
 def markdown_files(root: Path = DOCS) -> tuple[Path, ...]:
     return tuple(sorted(root.rglob("*.md"))) if root.is_dir() else ()
 
@@ -247,6 +274,12 @@ skills_body = skills_page.read_text(encoding="utf-8") if skills_page.is_file() e
 for token in skill_inventory_failures(skills_body, skill_names()):
     failures.append(f"skills inventory missing {token}")
 failures.extend(skill_reference_contract_failures(skills_body, skill_names()))
+failures.extend(
+    claude_skill_inventory_failures(
+        (ROOT / "CLAUDE.md").read_text(encoding="utf-8"),
+        model_invoked_skill_names(),
+    )
+)
 
 for relative in GUIDE_PAGES:
     path = DOCS / relative

@@ -26,6 +26,27 @@ MAX_FOLLOW_UP_CHARS = 500
 MAX_FIX_DELTA_BYTES = 65_536
 MAX_FIX_DELTA_TOTAL_BYTES = 131_072
 MAX_FIX_DELTA_CANONICAL_BYTES = 1_048_576
+# Committed acceptance-evidence bytes are reviewer-readable at the exact HEAD;
+# they are excluded from the bounded resolution fix delta so they can never
+# crowd the product fix out of the transport cap. Product paths keep the cap,
+# and an evidence-only resolution still fails closed as an empty fix delta.
+FIX_DELTA_EXCLUDED_PATHSPECS = (":(exclude)docs/acceptance/evidence",)
+
+
+def fix_delta_command(reviewed_head: str, resolved_head: str) -> tuple[str, ...]:
+    """Return the single registered git argv tail for the resolution fix delta."""
+
+    if not GIT_HEAD.fullmatch(reviewed_head) or not GIT_HEAD.fullmatch(resolved_head):
+        raise ResolutionError("fix delta heads must be exact git object ids")
+    return (
+        "diff",
+        "--binary",
+        "--no-ext-diff",
+        reviewed_head,
+        resolved_head,
+        "--",
+        *FIX_DELTA_EXCLUDED_PATHSPECS,
+    )
 
 
 class ResolutionError(ValueError):

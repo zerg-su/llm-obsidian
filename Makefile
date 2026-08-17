@@ -359,6 +359,12 @@ test-skill-budget:
 test-improve-skills:
 	@echo "=== test_improve_skills.py ==="
 	@python3 tests/test_improve_skills.py
+	@python3 tests/test_architecture_paths.py
+	@python3 tests/test_architecture_artifacts_writer.py
+	@python3 tests/test_architecture_workflow_skills.py
+	@python3 tests/test_architecture_workflow_pressure_runner.py
+	@python3 tests/test_architecture_workflow_audit.py
+	@python3 tests/test_architecture_workflow_structural_pivot.py
 
 test-outcome-contract:
 	@echo "=== test_outcome_contract.py ==="

@@ -10,6 +10,41 @@ architecture returns to `design` or `codebase-design`. Read
 [engineering-quality-contract.md](../../docs/skill-references/engineering-quality-contract.md)
 when module shape or extraction is involved.
 
+## Input and upstream authority gate
+
+Valid input is ONE bounded delivery outcome. The carrier may be one accepted
+Work Item, or the existing approved Outcome Contract + design path. When the
+request contains multiple independent outcomes, stop and return to `decompose`;
+do not hide them in one oversized implementation plan.
+
+For a Work Item input, read
+[the architecture artifact contract](../../docs/skill-references/architecture-artifacts.md)
+completely before planning. Read the durable Work Item and every consumed
+upstream page, then validate all of these before any file/TDD planning:
+
+- the Work Item itself is accepted;
+- project artifacts are accepted; decisions are active or accepted;
+- a superseded artifact or decision is never authoritative;
+- `upstream` and `upstream_pins` form a total well-formed pin mapping;
+- derived freshness is current, never needs-review or stale;
+- no recovery journal affects the project and the Work Graph/WI projection is
+  neither partial nor inconsistent.
+
+Malformed authority, unresolved architecture/spec/contract concerns, or any
+failed check emits the canonical Upstream Gap and stops planning:
+
+- source artifact/decision;
+- why downstream work cannot proceed;
+- affected downstream artifacts/work;
+- required owner/action.
+
+Implementation-plan never resolves the gap. Address the gap to the owning
+`architecture`, `design`, or other upstream carrier; do not re-route the whole
+planning request or answer as it. `implementation-plan` remains the response
+carrier: a failed gate does not transfer the user's planning request; emit the
+gap and stop file/TDD planning. The legacy Outcome Contract + design path below
+remains unchanged; this branch adds no mandatory decompose step.
+
 Write normative plan prose in English unless the user explicitly requests
 another language. This includes the Outcome Contract, goal, evidence
 identifiers, slice definitions, stop rules, and verification instructions.

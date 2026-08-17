@@ -3,7 +3,7 @@ name: save
 metadata:
   version: 1.0.0
 description: >-
-  Save the conversation/insight into the wiki as a structured note: frontmatter, folder, DragonScale address, session provenance; log/hot bookkeeping через scripts/vault-write.py. Smart fast-path: infer type/folder/title, one-line plan, ask only when ambiguous. Triggers: /save, сохрани (это/сессию), зафайли, запиши в вики, добавь в вольт, save this, file this, keep this.
+  Save a conversation or insight as a structured wiki note with provenance and writer-backed log/hot updates. Infer obvious placement; ask only on ambiguity. Triggers: /save, сохрани, зафайли, запиши в вики/вольт, save/file/keep this.
 allowed-tools: Read Write Edit Glob Grep AskUserQuestion Bash
 ---
 

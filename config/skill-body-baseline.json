@@ -9,6 +9,13 @@
       "closure_token_estimate": 520,
       "token_estimate": 520
     },
+    "architecture": {
+      "body_bytes": 4071,
+      "body_lines": 84,
+      "closure_bytes": 4071,
+      "closure_token_estimate": 1018,
+      "token_estimate": 1018
+    },
     "backlog": {
       "body_bytes": 6345,
       "body_lines": 194,
@@ -58,6 +65,13 @@
       "closure_token_estimate": 291,
       "token_estimate": 291
     },
+    "decompose": {
+      "body_bytes": 4991,
+      "body_lines": 109,
+      "closure_bytes": 4991,
+      "closure_token_estimate": 1248,
+      "token_estimate": 1248
+    },
     "defuddle": {
       "body_bytes": 2665,
       "body_lines": 84,
@@ -101,11 +115,11 @@
       "token_estimate": 1687
     },
     "implementation-plan": {
-      "body_bytes": 3112,
-      "body_lines": 54,
-      "closure_bytes": 3112,
-      "closure_token_estimate": 778,
-      "token_estimate": 778
+      "body_bytes": 4846,
+      "body_lines": 89,
+      "closure_bytes": 4846,
+      "closure_token_estimate": 1212,
+      "token_estimate": 1212
     },
     "improve-skills": {
       "body_bytes": 4319,

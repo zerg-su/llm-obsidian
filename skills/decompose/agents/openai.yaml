@@ -1,0 +1,4 @@
+interface:
+  display_name: "Decompose"
+  short_description: "Map accepted project knowledge into a Work Item DAG"
+  default_prompt: "Use $decompose to map accepted project knowledge into bounded Work Items before implementation planning."

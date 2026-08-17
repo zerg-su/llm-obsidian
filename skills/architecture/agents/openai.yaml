@@ -1,0 +1,4 @@
+interface:
+  display_name: "Architecture"
+  short_description: "Orchestrate project knowledge and the design frontier"
+  default_prompt: "Use $architecture to map this project's architecture artifacts and advance its next bounded design concern."

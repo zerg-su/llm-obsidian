@@ -1,14 +1,15 @@
-# Skills: полный inventory версии 2.6.5
+# Skills: полный inventory версии 2.8
 
 Skill — versioned reasoning contract. Claude использует plugin skill `/name`;
 Codex — `$llm-obsidian:name`. Другой agent может прочитать
 `skills/<name>/SKILL.md` вручную. Router даёт hint, но не расширяет разрешения.
 
-## Каталог 35 skills
+## Каталог 38 skills
 
 | Skill и вызов | Когда применять | Вход | Результат и граница | Permission/effect · минимальный пример |
 |---|---|---|---|---|
 | `agenda` · `/agenda` · `$llm-obsidian:agenda` | Собрать незавершённые планы/reminders | Период или текущий месяц | Carry-forward и monthly report; не future planning | Vault write · `/agenda collect` |
+| `architecture` · `/architecture` · `$llm-obsidian:architecture` | Новый/продолжаемый project architecture frontier | Exact project и artifact graph | Следующий bounded design concern и явный handoff; не design reasoning/decomposition | Read-only до отдельного persistence approval · `/architecture Atlas` |
 | `backlog` · `/backlog` · `$llm-obsidian:backlog` | Быстро добавить/list/promote inbox item | Item или режим list/promote | Append-only capture; полноценная заметка идёт через save | Vault append · `/backlog add проверить индекс` |
 | `canvas` · `/canvas` · `$llm-obsidian:canvas` | Явно создать/изменить Obsidian Canvas | Имя canvas и cards/links | Визуальные cards/embeds; manual-only | Явный `.canvas` write · `/canvas create Architecture` |
 | `clarify` · `/clarify` · `$llm-obsidian:clarify` | Неясный outcome перед кодом | Черновое требование | По одному существенному вопросу, без реализации | Conversation-only · `/clarify новый import flow` |
@@ -16,6 +17,7 @@ Codex — `$llm-obsidian:name`. Другой agent может прочитать
 | `codebase-design` · `/codebase-design` · `$llm-obsidian:codebase-design` | Запутанные границы модулей | Модули и design question | Deep module design и test seams | Read-only · `/codebase-design harness callbacks` |
 | `daily` · `/daily` · `$llm-obsidian:daily` | Итог дня по evidence | Дата и доступные session/git facts | EOD status; не план на будущее | Vault write · `/daily` |
 | `debug` · `/debug` · `$llm-obsidian:debug` | Воспроизводимый defect | Symptom, repro, expected behavior | Root cause; fix только если разрешён | Read-only diagnosis · `/debug validation exits 2` |
+| `decompose` · `/decompose` · `$llm-obsidian:decompose` | Разложить accepted project knowledge на delivery outcomes | Accepted artifacts/decisions и constraints | Work Item DAG через MAP/ACCEPT; не file/TDD plan и не split | Read-only до отдельного MATERIALIZE approval · `/decompose Atlas` |
 | `defuddle` · `/defuddle` · `$llm-obsidian:defuddle` | Очистить web page перед ingest | URL страницы | Readable Markdown; не vault write сам по себе | Network read · `/defuddle https://example.com/guide` |
 | `design` · `/design` · `$llm-obsidian:design` | Архитектурные варианты до реализации | Outcome и constraints | Boundaries, alternatives, ADR candidate | Read-only · `/design callback ownership` |
 | `dispatch` · `/dispatch` · `$llm-obsidian:dispatch` | Передать утверждённый plan в worktree | Путь approved plan | Harness task; не выполняет неутверждённый plan | Local worktree/cmux effect · `/dispatch wiki/plans/example.md` |
@@ -48,6 +50,9 @@ Codex — `$llm-obsidian:name`. Другой agent может прочитать
 ## Выбор и комбинации
 
 - Неясная feature: `clarify` → `design` → `implementation-plan` → `tdd`.
+- Новый/развивающийся project: `clarify` → `architecture` → нужные
+  `design`/`research`/`prototype` handoffs → `decompose` → один accepted Work
+  Item → `implementation-plan` → `save-plan` → `dispatch` → `review`.
 - Project documentation: `implementation-plan` → `tdd` → deterministic docs
   gate → `review`; отдельный `document-project` skill в 2.6.3 не поставляется,
   потому что fresh control уже покрывал требуемое поведение.

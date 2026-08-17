@@ -22,6 +22,7 @@ from review_resolution import (
     ReviewResolution,
     ReviewResolutionEvidence,
     build_resolution_evidence,
+    fix_delta_command,
     review_transport_identity_sha256,
     validate_resolution,
     validate_resolution_evidence,
@@ -663,12 +664,7 @@ def _resolution_bundle(
             )
     fix_delta = _git_bytes(
         worktree,
-        "diff",
-        "--binary",
-        "--no-ext-diff",
-        reviewed_head,
-        resolved_head,
-        "--",
+        *fix_delta_command(reviewed_head, resolved_head),
     )
     if not fix_delta or len(fix_delta) > MAX_FIX_DELTA_CANONICAL_BYTES:
         raise TaskReviewError(
@@ -762,12 +758,7 @@ def _recovery_resolution_bundle(
             )
     fix_delta = _git_bytes(
         worktree,
-        "diff",
-        "--binary",
-        "--no-ext-diff",
-        persisted.reviewed_head_sha,
-        resolved_head,
-        "--",
+        *fix_delta_command(persisted.reviewed_head_sha, resolved_head),
     )
     if not fix_delta or len(fix_delta) > MAX_FIX_DELTA_CANONICAL_BYTES:
         raise TaskReviewError(

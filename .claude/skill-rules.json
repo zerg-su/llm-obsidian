@@ -52,6 +52,7 @@
       "patterns": [
         "(?i)(?:^|\\s)/review(?:\\s|$)",
         "(?i)\\b(review|audit)\\b.{0,30}\\b(code|implementation|diff|architecture|security|spec)\\b",
+        "(?i)\\b(architecture|security|spec|code|implementation) review\\b",
         "(?i)\\bcross[- ]?model review\\b",
         "(?i)\\bdeep (code )?review\\b",
         "(?i)\\bревью другой моделью\\b",
@@ -100,6 +101,17 @@
       "hint": "Read-only alternatives and invariants before implementation"
     },
     {
+      "skill": "architecture",
+      "patterns": [
+        "(?i)(?:^|\\s)/architecture(?:\\s|$)",
+        "(?i)^(?!.*\\b(review|audit)\\b).*\\b(project|system|whole[- ]system) architecture\\b",
+        "(?i)^(?!.*\\b(ревью|аудит)\\b).*\\bспроектируй\\b.{0,30}\\bархитектур\\w*\\b.{0,30}\\b(нов\\w*|проект\\w*|систем\\w*)\\b",
+        "(?i)^(?!.*\\b(ревью|аудит)\\b).*\\b(что|какие)\\b.{0,40}\\b(остал\\w*|ещ[её])\\b.{0,30}\\bархитектур\\w*\\b.{0,30}\\b(проект\\w*|систем\\w*)\\b",
+        "(?i)^(?!.*\\b(ревью|аудит)\\b).*\\b(продолжим|продолжи)\\b.{0,20}\\bпроектир\\w*\\b.{0,30}\\b(проект\\w*|систем\\w*)\\b"
+      ],
+      "hint": "Resolve the exact project, map its artifact graph, and advance one bounded Design Frontier concern"
+    },
+    {
       "skill": "codebase-design",
       "patterns": [
         "(?i)\\b(codebase|module) design\\b",
@@ -117,6 +129,17 @@
         "(?i)\\bплан реализац\\w*\\b.{0,50}\\b(файл\\w*|ответственност\\w*|слайс\\w*|интерфейс\\w*|тест\\w*)\\b"
       ],
       "hint": "Read-only file ownership and consumes/produces TDD slices bound to outcome evidence"
+    },
+    {
+      "skill": "decompose",
+      "patterns": [
+        "(?i)(?:^|\\s)/decompose(?:\\s|$)",
+        "(?i)^(?!.*\\b(functions?|helpers?|files?|modules?)\\b).*\\b(decompose|break down)\\b.{0,80}\\b(architecture|project|delivery|work items?|work graph)\\b",
+        "(?i)\\b(map|build|revise)\\b.{0,40}\\b(accepted project|project (spec|contract|architecture))\\b.{0,50}\\b(work item|work graph|delivery)\\b",
+        "(?i)^(?!.*\\b(файл|функц|модул)\\w*\\b).*\\b(принят\\w*\\s+архитектур\\w*|проектн\\w*\\s+(spec|contract))\\b.{0,60}\\b(разбей|декомпозир\\w*|work items?)\\b",
+        "(?i)^(?!.*\\b(файл|функц|модул)\\w*\\b).*\\b(разбей|декомпозир\\w*)\\b.{0,60}\\b(доставк\\w*|work items?|проектн\\w* (архитектур|знани))\\b"
+      ],
+      "hint": "Map accepted project knowledge into a Work Item DAG; ACCEPT is zero-effect and MATERIALIZE needs separate authorization"
     },
     {
       "skill": "prototype",

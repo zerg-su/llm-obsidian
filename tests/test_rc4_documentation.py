@@ -17,13 +17,9 @@ def text(relative: str) -> str:
     return (ROOT / relative).read_text(encoding="utf-8")
 
 
-claude = json.loads(text(".claude-plugin/plugin.json"))
-codex = json.loads(text(".codex-plugin/plugin.json"))
-marketplace = json.loads(text(".claude-plugin/marketplace.json"))
-assert claude["version"] == VERSION
-assert codex["version"] == VERSION
-assert marketplace["metadata"]["version"] == VERSION
-assert marketplace["plugins"][0]["version"] == VERSION
+# The current packaged release moved past RC4; the authoritative
+# current-release packaging gate lives in tests/test_v266_rc1_evidence.py.
+# This contract keeps only the immutable historical RC4 evidence below.
 
 assert "## [2.6.7-rc4] - 2026-08-11" in text("CHANGELOG.md")
 assert "## [2.6.7-rc4] — 2026-08-11" in text("CHANGELOG.ru.md")

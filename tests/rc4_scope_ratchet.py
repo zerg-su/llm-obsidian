@@ -405,14 +405,14 @@ from pathlib import Path
 #: ``architecture_workflow_audit.py`` (the release-owned behavioral evidence
 #: runner and validator, kept out of the frozen legacy eval framework). The
 #: file ceiling therefore moves by exactly three.
-SCRIPT_FILE_CEILING = 290
+SCRIPT_FILE_CEILING = 293
 
 #: Maximum total lines across those files for the 2.7.8 stability candidate.
 #: The line ceiling moves to the measured candidate with zero headroom: those
 #: three modules plus the shared artifact-contract wiring in the existing
 #: carriers, the RC4 governing-source catalogue projection, and the registered
 #: review fix-delta evidence exclusion.
-SCRIPT_LINE_CEILING = 109_677
+SCRIPT_LINE_CEILING = 110_718
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

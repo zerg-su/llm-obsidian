@@ -147,4 +147,95 @@ for label, candidate in invalid_cases:
     else:
         check(label, False)
 
+# --- registered fix-delta evidence exclusion ---
+
+import subprocess  # noqa: E402
+import tempfile  # noqa: E402
+
+from review_resolution import (  # noqa: E402
+    FIX_DELTA_EXCLUDED_PATHSPECS,
+    MAX_FIX_DELTA_CANONICAL_BYTES,
+    fix_delta_command,
+)
+import task_review_resolution_bundle as _bundle_module  # noqa: E402
+from harness import review_program_resolution as _program_module  # noqa: E402
+
+check(
+    "bundle module binds the registered fix delta command",
+    _bundle_module.fix_delta_command is fix_delta_command,
+)
+check(
+    "review program binds the registered fix delta command",
+    _program_module.fix_delta_command is fix_delta_command,
+)
+check(
+    "acceptance evidence is the registered exclusion",
+    FIX_DELTA_EXCLUDED_PATHSPECS == (":(exclude)docs/acceptance/evidence",),
+)
+
+try:
+    fix_delta_command("HEAD", "b" * 40)
+except ResolutionError:
+    check("fix delta command rejects symbolic heads", True)
+else:
+    check("fix delta command rejects symbolic heads", False)
+
+with tempfile.TemporaryDirectory() as raw_root:
+    repo = Path(raw_root) / "repo"
+    repo.mkdir()
+
+    def _git(*args: str) -> bytes:
+        return subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo),
+                "-c",
+                "user.name=test",
+                "-c",
+                "user.email=test@test",
+                *args,
+            ],
+            check=True,
+            capture_output=True,
+        ).stdout
+
+    _git("init", "--quiet")
+    (repo / "scripts").mkdir()
+    (repo / "scripts" / "product.py").write_text("value = 1\n")
+    evidence_dir = repo / "docs" / "acceptance" / "evidence" / "sample"
+    evidence_dir.mkdir(parents=True)
+    (evidence_dir / "record.json").write_text("{}\n")
+    _git("add", "-A")
+    _git("commit", "--quiet", "-m", "base")
+    reviewed_oid = _git("rev-parse", "HEAD").decode().strip()
+
+    (repo / "scripts" / "product.py").write_text("value = 2\n")
+    (evidence_dir / "record.json").write_text(
+        "e" * (MAX_FIX_DELTA_CANONICAL_BYTES + 65_536) + "\n"
+    )
+    _git("add", "-A")
+    _git("commit", "--quiet", "-m", "fix plus oversize evidence")
+    resolved_oid = _git("rev-parse", "HEAD").decode().strip()
+
+    delta = _git(*fix_delta_command(reviewed_oid, resolved_oid))
+    check(
+        "fix delta excludes committed acceptance evidence",
+        b"docs/acceptance/evidence" not in delta,
+    )
+    check("fix delta keeps the product change", b"scripts/product.py" in delta)
+    check(
+        "oversize evidence cannot crowd out the bounded product fix",
+        0 < len(delta) <= MAX_FIX_DELTA_CANONICAL_BYTES,
+    )
+
+    (evidence_dir / "record.json").write_text("evidence-only change\n")
+    _git("add", "-A")
+    _git("commit", "--quiet", "-m", "evidence only")
+    evidence_only_oid = _git("rev-parse", "HEAD").decode().strip()
+    check(
+        "evidence-only resolution yields an empty fix delta",
+        _git(*fix_delta_command(resolved_oid, evidence_only_oid)) == b"",
+    )
+
 print("\nAll review resolution tests passed.")
