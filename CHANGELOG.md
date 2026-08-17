@@ -14,11 +14,14 @@ packages were published for them.
 
 ### Fixed
 
-- Lifecycle continuation now proves superseded verification through an exact
-  immutable successful receipt, preserves failed baseline-gap evidence through
-  typed restart and provider admission, and publishes only decisions executable
-  for the exact escalation kind. The live scripts ratchet moves to the measured
-  294-file / 111,430-line candidate with zero headroom.
+- Lifecycle continuation now ingests an exact accepted nested review callback
+  across the observed post-accept `callback-invalid` boundary without replay,
+  refreshes the canonical task summary after exact-HEAD verification and before
+  review, proves superseded verification through an immutable successful receipt,
+  preserves failed baseline-gap evidence through typed restart and provider
+  admission, and publishes only decisions executable for the exact escalation
+  kind. The live scripts ratchet moves to the measured 294-file / 111,430-line
+  candidate with zero headroom.
 
 ## [2.8.0] - 2026-08-17
 

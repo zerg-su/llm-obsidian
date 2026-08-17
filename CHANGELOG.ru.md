@@ -20,11 +20,14 @@
 
 ### Исправлено
 
-- Продолжение lifecycle теперь подтверждает вытесненную верификацию точным
-  неизменяемым успешным receipt, сохраняет failed evidence baseline-gap через
-  типизированный restart и provider admission и публикует только исполнимые для
-  точного вида escalation решения. Live ratchet scripts сдвинут к измеренному
-  кандидату 294 файла / 111 430 строк с нулевым запасом.
+- Продолжение lifecycle теперь принимает точный вложенный review callback через
+  наблюдавшуюся post-accept границу `callback-invalid` без replay, обновляет
+  канонический task summary после верификации exact HEAD и до review,
+  подтверждает вытесненную верификацию неизменяемым успешным receipt, сохраняет
+  failed evidence baseline-gap через типизированный restart и provider admission
+  и публикует только исполнимые для точного вида escalation решения. Live ratchet
+  scripts сдвинут к измеренному кандидату 294 файла / 111 430 строк с нулевым
+  запасом.
 
 ## [2.8.0] - 2026-08-17
 
