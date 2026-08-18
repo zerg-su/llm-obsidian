@@ -10,7 +10,7 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
-## [2.8.1] - 2026-08-17
+## [2.8.1] - 2026-08-18
 
 ### Fixed
 
