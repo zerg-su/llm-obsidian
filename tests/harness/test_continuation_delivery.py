@@ -164,12 +164,55 @@ with tempfile.TemporaryDirectory(prefix="notification-recovery.") as raw:
     assert pending.keys == ["Enter"]
 print("OK   visible sent notification recovery submits exactly once")
 
+with tempfile.TemporaryDirectory(prefix="notification-historical-claude.") as raw:
+    historical = Path(raw) / "submit-recovery.json"
+    completed = SemanticPort(
+        [
+            f"❯ {PROMPT.splitlines()[0]}\n"
+            "Assistant: completed.\n"
+            "❯ unrelated current draft"
+        ]
+    )
+    assert not recover_visible_notification(
+        completed,
+        surface_id=SURFACE,
+        workspace_id="22222222-2222-2222-2222-222222222222",
+        runtime="claude",
+        message=PROMPT,
+        receipt_path=historical,
+        identity={"operation_id": "historical-claude"},
+    )
+    assert completed.keys == [] and not historical.exists()
+print("OK   Claude transcript anchor cannot submit an unrelated current draft")
+
 
 class CodexSemanticPort(FakePort):
     def agent_status(self, workspace_id: str, runtime: str) -> str:
         assert workspace_id == "22222222-2222-2222-2222-222222222222"
         assert runtime == "codex"
         return "idle"
+
+
+with tempfile.TemporaryDirectory(prefix="notification-historical-codex.") as raw:
+    historical = Path(raw) / "submit-recovery.json"
+    completed = CodexSemanticPort(
+        [
+            f"› {PROMPT.splitlines()[0]}\n"
+            "• Completed the requested work.\n"
+            "›"
+        ]
+    )
+    assert not recover_visible_notification(
+        completed,
+        surface_id=SURFACE,
+        workspace_id="22222222-2222-2222-2222-222222222222",
+        runtime="codex",
+        message=PROMPT,
+        receipt_path=historical,
+        identity={"operation_id": "historical-codex"},
+    )
+    assert completed.keys == [] and not historical.exists()
+print("OK   Codex transcript anchor cannot submit an empty current composer")
 
 
 stale_direct = CodexSemanticPort(

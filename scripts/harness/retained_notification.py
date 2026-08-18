@@ -188,9 +188,8 @@ def recover_visible_notification(
         except Exception:
             return False
         anchor = _prompt_anchor(message)
-        exact_editor = any(
-            anchor and anchor in line for line in _editor_state(runtime, screen)
-        )
+        editor_lines = _editor_state(runtime, screen)
+        exact_editor = bool(editor_lines and anchor and anchor in editor_lines[-1])
         if status not in {"idle", "needs-input"} or not exact_editor:
             return False
         _atomic_json(receipt_path, {**expected, "status": "reserved"})
