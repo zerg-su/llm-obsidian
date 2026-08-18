@@ -399,6 +399,7 @@ Acceptance heartbeat хранит только stage/status/counters/timestamps.
 
 | Тема | Документ |
 |---|---|
+| Семантическая cmux-liveness в v2.8.2 | [Release notes v2.8.2](docs/releases/v2.8.2.md) |
 | Стабилизация lifecycle Harness в v2.8.1 | [Release notes v2.8.1](docs/releases/v2.8.1.md) |
 | Architecture Workflow v1 v2.8.0 | [Release notes v2.8.0](docs/releases/v2.8.0.md) |
 | Terminal dashboard candidate v2.6.7 RC4 | [Release notes v2.6.7 RC4](docs/releases/v2.6.7-rc4.md) |
