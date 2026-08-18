@@ -1,17 +1,32 @@
-"""One resolution-bound verification-profile continuation for task review."""
+"""One resolution-bound verification-profile continuation for task review.
+
+Cohesion decision (recorded, not yet executed): the failed-receipt attention
+transport added here — packet derivation, the exact-byte size bound, the
+create-exclusive file mode, and the ownership refusal — is one seam and will move
+behind a small attention-packet publisher owning exactly those four concerns,
+leaving this module to continuation orchestration (authority resolution, receipt
+issuance, binding, review handoff). The boundary is already proven by the
+registered regression owner
+``tests/harness/test_task_review_authorized_continuation.py``, whose packet
+checks address the publisher through its derivation and publication entry points
+only; nothing outside them inspects packet structure. The extraction is deferred
+because the approved boundary forbids production refactor beyond the authorized
+transport and the scripts ratchet carries zero headroom; it is routed to the
+parent release plan.
+"""
 
 from __future__ import annotations
 
 import copy
 import hashlib
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
 from typing import Any, Callable, Mapping, NoReturn
 
 from harness.context import ContextInput
-from harness.runtime_callback_io import _atomic_json as _atomic_packet_json
 from harness.contracts import (
     DEFAULT_TIME_BUDGET_SECONDS,
     DEFAULT_TOKEN_LIMIT,
@@ -40,6 +55,12 @@ from task_escalation_records import (
 from task_plan_authority import PlanAuthorityError, resolve_plan_authority
 from task_review_identity import _validate_task
 from task_review_resolution_bundle import _bounded_input
+#: ``_atomic_json`` hardens its parent directory to 0700, so it owns only
+#: private runtime artifacts under the harness runtime root. Artifacts that
+#: live in the caller-owned checkout root are published create-exclusively
+#: below instead, which never changes the checkout mode. NOTE: the binding
+#: written by ``_write_once`` is still a checkout-root artifact published
+#: through ``_atomic_json``; narrowing that is routed to the parent plan.
 from task_review_shared import TaskReviewError, _atomic_json
 
 
@@ -288,13 +309,18 @@ def _fail_with_attention_handoff(
             "authorized continuation attention packet is too large"
         )
     packet_path = worktree / ATTENTION_PACKET_NAME
-    if packet_path.is_symlink() or (
-        packet_path.exists() and not packet_path.is_file()
-    ):
+    if packet_path.is_symlink():
         raise AuthorizedContinuationError(
             "authorized continuation attention packet is invalid"
         )
-    if packet_path.is_file():
+    try:
+        descriptor = os.open(
+            packet_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600
+        )
+    except FileExistsError:
+        # The ownership decision and the write are one step, so a packet
+        # published between derivation and publication is refused, never
+        # clobbered.
         try:
             published = json.loads(packet_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
@@ -314,8 +340,19 @@ def _fail_with_attention_handoff(
             raise AuthorizedContinuationError(
                 "authorized continuation attention packet changed"
             )
+    except OSError as exc:
+        raise AuthorizedContinuationError(
+            "authorized continuation attention packet is invalid"
+        ) from exc
     else:
-        _atomic_packet_json(packet_path, packet)
+        try:
+            with os.fdopen(descriptor, "wb") as handle:
+                handle.write(encoded)
+                handle.flush()
+                os.fsync(handle.fileno())
+        except Exception:
+            packet_path.unlink(missing_ok=True)
+            raise
     raise AuthorizedContinuationError(
         "authorized continuation full-profile verification failed; typed "
         f"attention is ready in {packet_path}"

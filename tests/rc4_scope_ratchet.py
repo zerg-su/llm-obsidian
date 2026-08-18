@@ -417,6 +417,13 @@ same failed identity is served from the durable receipt without executing any
 profile command. No file is added, so the live ceiling moves to exactly
 295 files / 112,246 lines with no speculative headroom.
 
+Its second review round adds the exact measured 37 lines to that same owner: the
+attention packet is published create-exclusively so the ownership decision and
+the write are one step rather than a check-then-write, and the recorded cohesion
+decision plus the writer-ownership note make the deferred extraction and the
+remaining checkout-root binding explicit. The live ceiling therefore moves to
+exactly 295 files / 112,301 lines with no speculative headroom.
+
 Its Deep review findings are applied inside that same owner for a net measured
 18 lines: the packet is written by the registered writer for that artifact so
 publication no longer hardens the caller-owned checkout root, the size guard
@@ -447,7 +454,7 @@ SCRIPT_FILE_CEILING = 295
 #: carriers, the RC4 governing-source catalogue projection, the registered
 #: review fix-delta evidence exclusion, and the authorized-continuation
 #: failed-receipt attention handoff with its applied review findings.
-SCRIPT_LINE_CEILING = 112_264
+SCRIPT_LINE_CEILING = 112_301
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

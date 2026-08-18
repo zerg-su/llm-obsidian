@@ -6408,6 +6408,10 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
                     "response": "fix-and-resubmit",
                     "resubmitted_head_sha": resubmitted_head,
                 },
+                publication_barrier=(
+                    response_publication_ready,
+                    response_publication_release,
+                ),
             )
             resubmit_helper_done.set()
 
@@ -6459,48 +6463,50 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
     # publication must therefore be atomic: a concurrent reader observes the
     # complete response or nothing at all, with no sleep ordering the handshake.
     def response_publication_state(path: Path) -> str:
+        """Classify one concurrent observation of the polled response artifact.
+
+        "invalid" covers exactly what the worker rejects: the zero-byte window a
+        truncating writer exposes, and any non-parseable prefix of one."""
+
         try:
             raw = path.read_bytes()
         except FileNotFoundError:
             return "absent"
-        if not raw:
-            return "empty"
         try:
             json.loads(raw)
-        except json.JSONDecodeError:
-            return "partial"
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return "invalid"
         return "complete"
 
-    probe_root = root / "response-publication-probe"
-    probe_root.mkdir(parents=True, exist_ok=True)
-    probe_path = probe_root / ".task-verification-response.json"
-    probe_payload = {"schema_version": 1, "response": "fix-and-resubmit"}
-    probe_path.write_bytes(b"")
-    check(
-        "a zero-byte response publication is detectable as invalid",
-        response_publication_state(probe_path) == "empty",
-    )
-    write_json_atomic(probe_path, probe_payload)
-    observed_states: set[str] = set()
-    probe_stop = threading.Event()
+    # Pin the corridor's own publication, not the helper in isolation: hold the
+    # real respond() publication of .task-verification-response.json just before
+    # its os.replace and observe the artifact the worker actually polls. With a
+    # truncating writer the held window exposes an invalid (zero-byte) file, so
+    # reverting the publisher fails this check deterministically instead of
+    # regressing to an intermittent end-to-end flake.
+    response_publication_ready = threading.Event()
+    response_publication_release = threading.Event()
+    held_response_states: list[str] = []
+    response_probe_threads: list[threading.Thread] = []
+    response_probe_errors: list[BaseException] = []
+    failing_worktree = root / f"worktree-{failing_task}"
 
-    def observe_response_publication() -> None:
-        while not probe_stop.is_set() or not observed_states:
-            observed_states.add(response_publication_state(probe_path))
+    def observe_held_response_publication() -> None:
+        if not response_publication_ready.wait(timeout=20.0):
+            raise AssertionError(
+                "corridor response publication never reached its barrier"
+            )
+        held_response_states.append(
+            response_publication_state(
+                failing_worktree / ".task-verification-response.json"
+            )
+        )
+        response_publication_release.set()
 
-    probe_reader = threading.Thread(target=observe_response_publication)
-    probe_reader.start()
-    try:
-        for _ in range(500):
-            write_json_atomic(probe_path, probe_payload)
-    finally:
-        probe_stop.set()
-        probe_reader.join(timeout=5)
-    check(
-        "atomic response publication is only ever observed complete",
-        observed_states == {"complete"}
-        and not probe_reader.is_alive()
-        and json.loads(probe_path.read_text(encoding="utf-8")) == probe_payload,
+    start_checked_thread(
+        observe_held_response_publication,
+        response_probe_threads,
+        response_probe_errors,
     )
 
     failed_store, failed_cmux, failed_state, failed_rc = run_case(
@@ -6516,6 +6522,18 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         raise AssertionError("resubmission helper did not publish its response")
     for helper in resubmit_helpers:
         helper.join(timeout=1)
+    for probe in response_probe_threads:
+        probe.join(timeout=5)
+    check(
+        "the corridor's held response publication is never observed invalid",
+        not response_probe_errors
+        and held_response_states == ["absent"]
+        and not any(probe.is_alive() for probe in response_probe_threads)
+        and response_publication_state(
+            failing_worktree / ".task-verification-response.json"
+        )
+        == "complete",
+    )
     failed_record = failed_store.read("owner-1", failing_task)
     resubmitted_receipt = read_json_eventually(
         failed_state / "pipeline-step-verify.json"

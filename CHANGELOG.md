@@ -51,9 +51,10 @@ packages were published for them.
   `wiki/meta/daily-pipeline-guide.md`, closing the catalog drift that failed
   `validate-vault.py --summary` inside the full verification profile.
 - That handoff's Deep review findings are applied in the same owner: the
-  worktree packet is written by the registered writer for that artifact, so
-  publishing no longer tightens the caller-owned checkout root from 0755 to
-  0700; the size guard measures the exact bytes that writer emits, so the bound
+  attention packet is no longer written by the directory-hardening writer, so
+  publishing the attention packet no longer tightens the caller-owned checkout
+  root from 0755 to 0700 (the success-path binding written by `_write_once` is a
+  checkout-root artifact that still does; narrowing it is parent-owned); the size guard measures the exact bytes that writer emits, so the bound
   the standard consumer applies to the file is the bound enforced here; an
   attention packet this identity did not derive is refused rather than replaced,
   and a published packet is cleared only by the coordinator decision that
@@ -72,6 +73,17 @@ packages were published for them.
   closed the window is removed, and a deterministic regression pins that an
   atomic publication is only ever observed complete while a zero-byte one is
   still detectable as invalid. No production code changed.
+- The second review round of that handoff is applied in the same owner: the
+  deterministic race regression is rebound to the corridor's own publication
+  through the `publication_barrier` idiom this file already owns, so reverting
+  the publisher now fails a check instead of regressing to an intermittent
+  end-to-end flake; the observer runs through `start_checked_thread` so a probe
+  failure is main-thread evidence; the response-state classifier is collapsed to
+  the three states the assertions actually use; and the attention packet is
+  published create-exclusively (`O_WRONLY|O_CREAT|O_EXCL`) so the
+  refuse-rather-than-replace ownership decision and the write are a single step
+  rather than a check-then-write. Exact measured 37 lines to
+  295 files / 112,301 lines with zero headroom.
 
 ## [2.8.0] - 2026-08-17
 
