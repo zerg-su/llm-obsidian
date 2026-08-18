@@ -46,6 +46,11 @@ def inspect(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
         check=False,
         env={
             "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+            **(
+                {"TMPDIR": os.environ["TMPDIR"]}
+                if "TMPDIR" in os.environ
+                else {}
+            ),
             "REVIEW_INSPECT_INJECTION": "must-not-affect-git",
         },
     )
