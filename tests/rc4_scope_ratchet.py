@@ -396,8 +396,9 @@ The 2.8.1 lifecycle continuation repair adds the one cohesive read-only
 ``verification_invalidation.py`` classifier and hardens existing verification,
 summary-refresh, escalation, diagnostics, dashboard, and review-admission
 owners. The integrated correction moves the live scripts ratchet by exactly one
-file and the measured 712 lines to the 294-file / 111,430-line candidate with
-zero speculative headroom.
+file and the measured 738 lines to the 294-file / 111,456-line candidate with
+zero speculative headroom. The additional 26-line drift predates the isolated
+concurrency repair and is admitted by an explicit coordinator decision.
 """
 
 from __future__ import annotations
@@ -419,7 +420,7 @@ SCRIPT_FILE_CEILING = 294
 #: three modules plus the shared artifact-contract wiring in the existing
 #: carriers, the RC4 governing-source catalogue projection, and the registered
 #: review fix-delta evidence exclusion.
-SCRIPT_LINE_CEILING = 111_430
+SCRIPT_LINE_CEILING = 111_456
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

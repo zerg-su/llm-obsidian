@@ -20,8 +20,10 @@ packages were published for them.
   review, proves superseded verification through an immutable successful receipt,
   preserves failed baseline-gap evidence through typed restart and provider
   admission, and publishes only decisions executable for the exact escalation
-  kind. The live scripts ratchet moves to the measured 294-file / 111,430-line
-  candidate with zero headroom. By explicit user decision, the 26-line
+  kind. The live scripts ratchet moves to the measured 294-file / 111,456-line
+  candidate with zero headroom. By explicit coordinator decision, the separately
+  measured 26-line scripts drift predates this repair and is admitted exactly,
+  with no speculative allowance. By prior explicit user decision, the 26-line
   active-authority increase preserves only the bounded ancestor-resolution and
   verification continuation recovery; the unchanged 27-file contour is pinned
   to its measured 15,796 LOC with zero writable authorities, zero incident

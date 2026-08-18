@@ -6,6 +6,11 @@
       "owner": "v2.8.1 typed verification escalation authority",
       "evidence": "exact per-kind mechanism-flake and baseline-gap decision sets, typed resolution derivation, and cross-kind refusal in tests/harness/test_artifact_repair.py plus the durable restart corridor in tests/harness/test_runtime_task_summary.py"
     },
+    "file-lines:scripts/harness/cli.py": {
+      "max_value": 1004,
+      "owner": "v2.8.1 coordinator-authorized Harness CLI boundary",
+      "evidence": "exact lifecycle status, inspect, resume, reconcile, cancel, close, review recovery, and dashboard entry-point behavior is covered across tests/harness/test_store.py, tests/harness/test_cascade_cancel.py, tests/harness/test_harness_dashboard.py, tests/harness/test_pre_model_reviewer_retirement.py, and tests/harness/test_status_segment.py; the 1004-line ceiling was explicitly authorized for the repair review without weakening the blocker threshold"
+    },
     "file-lines:scripts/harness/dashboard_projection.py": {
       "max_value": 1030,
       "owner": "v2.6.7 RC6.7 durable engineering/fix phase timing",
