@@ -228,6 +228,24 @@ with tempfile.TemporaryDirectory(prefix="notification-coalesced-editor.") as raw
 print("OK   coalesced Claude separator retains current editor recovery")
 
 
+with tempfile.TemporaryDirectory(prefix="notification-coalesced-codex.") as raw:
+    recovery = Path(raw) / "submit-recovery.json"
+    coalesced = CodexNeedsInputPort(
+        [f"{'─' * 120}› {PROMPT.splitlines()[0]}"]
+    )
+    assert not recover_visible_notification(
+        coalesced,
+        surface_id=SURFACE,
+        workspace_id="22222222-2222-2222-2222-222222222222",
+        runtime="codex",
+        message=PROMPT,
+        receipt_path=recovery,
+        identity={"operation_id": "coalesced-codex"},
+    )
+    assert coalesced.keys == [] and not recovery.exists()
+print("OK   Claude separator recovery grants no Codex submission authority")
+
+
 dialog_cases = (
     (
         "claude-recognized",

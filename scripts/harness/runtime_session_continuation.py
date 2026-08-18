@@ -66,7 +66,7 @@ def _editor_state(runtime: str, screen: str) -> tuple[str, ...]:
             continue
         marker_index = line.find(marker)
         prefix = line[:marker_index].strip() if marker_index >= 0 else ""
-        if prefix and set(prefix) <= {"─", "━", "═"}:
+        if runtime == "claude" and prefix and set(prefix) <= {"─", "━", "═"}:
             editor_lines.append(line[marker_index:])
     return tuple(editor_lines)
 
