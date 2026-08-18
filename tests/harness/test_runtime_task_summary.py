@@ -2531,7 +2531,7 @@ def run_case(
             "  if iteration==0 or not (root/'.null-change-retry').is_file():\n"
             "    subprocess.run(['git','commit','--allow-empty','-m',f'provider pass {iteration + 1}'],cwd=root,text=True,capture_output=True,check=True)\n"
             "  publish_summary(summary,sys.argv[6] if iteration and len(sys.argv)>6 else sys.argv[2])\n"
-            "publish_summary(root/'.provider-final-summary-published',json.dumps({'schema_version':1,'iteration':passes-1,'summary_sha256':hashlib.sha256(summary.read_bytes()).hexdigest()},sort_keys=True)+'\\n')\n"
+            "publish_summary(state/'pipeline-fix'/'provider-final-summary-published.json',json.dumps({'schema_version':1,'iteration':passes-1,'summary_sha256':hashlib.sha256(summary.read_bytes()).hexdigest()},sort_keys=True)+'\\n')\n"
             "if (root/'.provider-await-final-callback').is_file():\n"
             "  for _ in range(2000):\n"
             "    if (state/'callback-receipt.json').is_file(): break\n"
@@ -2539,7 +2539,7 @@ def run_case(
             "  else: raise SystemExit(6)\n"
             "else:\n"
             "  for _ in range(2000):\n"
-            "    if (root/'.provider-terminal-observed').is_file(): break\n"
+            "    if (state/'pipeline-fix'/'provider-terminal-observed').is_file(): break\n"
             "    time.sleep(0.01)\n"
             "  else: raise SystemExit(7)\n",
             encoding="utf-8",
@@ -2909,8 +2909,11 @@ def run_case(
         deadline = time.monotonic() + join_timeout
         while True:
             current = store.read("owner-1", operation_id)
+            final_publication_matches = False
             final_publication_path = (
-                worktree / ".provider-final-summary-published"
+                launch.spec_path.parent
+                / "pipeline-fix"
+                / "provider-final-summary-published.json"
             )
             if final_publication_path.is_file():
                 final_publication = json.loads(
@@ -2931,7 +2934,40 @@ def run_case(
                     raise AssertionError(
                         "final provider publication identity changed"
                     )
-                (worktree / ".provider-terminal-observed").write_text(
+                final_publication_matches = True
+            verification_receipts = [
+                json.loads(path.read_text(encoding="utf-8"))
+                for path in (
+                    launch.spec_path.parent / "pipeline-verification"
+                ).glob("*/receipt.json")
+            ]
+            if fix_retry_null_change:
+                attention = load_attention(worktree)
+                exact_final_outcome = (
+                    current.state == "attention-required"
+                    and current.attention_reason
+                    == AttentionReason.ATTENTION_REQUIRED
+                    and isinstance(attention, dict)
+                    and attention.get("category") == "pipeline-decision"
+                    and attention.get("status") == "pending"
+                    and attention.get("iteration") == fix_retry_passes - 1
+                    and attention.get("allowed_decisions")
+                    == ["stop", "retry-with-scope"]
+                )
+            else:
+                exact_final_outcome = (
+                    len(verification_receipts) == fix_retry_passes
+                    and all(
+                        receipt.get("status") == "failed"
+                        for receipt in verification_receipts
+                    )
+                )
+            if final_publication_matches and exact_final_outcome:
+                (
+                    launch.spec_path.parent
+                    / "pipeline-fix"
+                    / "provider-terminal-observed"
+                ).write_text(
                     f"pass-{fix_retry_passes - 1}\n", encoding="utf-8"
                 )
             if not thread.is_alive():
