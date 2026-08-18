@@ -6358,8 +6358,6 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         _profile_sha: str,
     ) -> None:
         def respond() -> None:
-            import time
-
             packet_path = worktree / ".task-verification.json"
             packet = read_json_eventually(packet_path, timeout=3)
             (worktree / "product.txt").write_text(
@@ -6391,14 +6389,13 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
                 / failing_task
                 / "review-gate.json"
             ).unlink(missing_ok=True)
-            time.sleep(0.12)
             commands_before_resubmission.append(failing_commands[0])
             packet_sha256 = hashlib.sha256(
                 json.dumps(
                     packet, sort_keys=True, separators=(",", ":")
                 ).encode()
             ).hexdigest()
-            write_json(
+            write_json_atomic(
                 worktree / ".task-verification-response.json",
                 {
                     "schema_version": 1,
@@ -6453,6 +6450,58 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
             ),
             product_root=worktree,
         )
+
+    # The worker polls .task-verification-response.json while this fixture
+    # publishes it. A non-atomic publication truncates the file to zero bytes
+    # first, and the real consumer rejects an empty read as an invalid response
+    # ("not raw" in accept_verification_resubmission), which the dispatch then
+    # records as callback-invalid with no second verification attempt. The
+    # publication must therefore be atomic: a concurrent reader observes the
+    # complete response or nothing at all, with no sleep ordering the handshake.
+    def response_publication_state(path: Path) -> str:
+        try:
+            raw = path.read_bytes()
+        except FileNotFoundError:
+            return "absent"
+        if not raw:
+            return "empty"
+        try:
+            json.loads(raw)
+        except json.JSONDecodeError:
+            return "partial"
+        return "complete"
+
+    probe_root = root / "response-publication-probe"
+    probe_root.mkdir(parents=True, exist_ok=True)
+    probe_path = probe_root / ".task-verification-response.json"
+    probe_payload = {"schema_version": 1, "response": "fix-and-resubmit"}
+    probe_path.write_bytes(b"")
+    check(
+        "a zero-byte response publication is detectable as invalid",
+        response_publication_state(probe_path) == "empty",
+    )
+    write_json_atomic(probe_path, probe_payload)
+    observed_states: set[str] = set()
+    probe_stop = threading.Event()
+
+    def observe_response_publication() -> None:
+        while not probe_stop.is_set() or not observed_states:
+            observed_states.add(response_publication_state(probe_path))
+
+    probe_reader = threading.Thread(target=observe_response_publication)
+    probe_reader.start()
+    try:
+        for _ in range(500):
+            write_json_atomic(probe_path, probe_payload)
+    finally:
+        probe_stop.set()
+        probe_reader.join(timeout=5)
+    check(
+        "atomic response publication is only ever observed complete",
+        observed_states == {"complete"}
+        and not probe_reader.is_alive()
+        and json.loads(probe_path.read_text(encoding="utf-8")) == probe_payload,
+    )
 
     failed_store, failed_cmux, failed_state, failed_rc = run_case(
         root,
@@ -7274,7 +7323,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
                     packet, sort_keys=True, separators=(",", ":")
                 ).encode()
             ).hexdigest()
-            write_json(
+            write_json_atomic(
                 worktree / ".task-verification-response.json",
                 {
                     "schema_version": 1,

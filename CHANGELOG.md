@@ -60,6 +60,18 @@ packages were published for them.
   resolves it; and the terminal-`failed` choice plus the published packet path
   are stated where the refusal is raised. Net exact measured 18 lines to
   295 files / 112,264 lines with zero headroom.
+- The identity-bound verification resubmission corridors publish
+  `.task-verification-response.json` atomically. The fixture published this
+  shared control artifact with a non-atomic writer while the worker concurrently
+  polls it, so a reader could observe the zero-byte truncation window; the real
+  consumer rejects an empty read as an invalid response and the dispatch records
+  `callback-invalid` with no second verification attempt. Measured directly: the
+  non-atomic writer exposed an invalid state in 10,212 of 16,725 concurrent
+  observations, the atomic writer in 0 of 44,761. Both corridors now use the
+  existing `write_json_atomic` publisher, the 0.12s sleep that narrowed but never
+  closed the window is removed, and a deterministic regression pins that an
+  atomic publication is only ever observed complete while a zero-byte one is
+  still detectable as invalid. No production code changed.
 
 ## [2.8.0] - 2026-08-17
 
