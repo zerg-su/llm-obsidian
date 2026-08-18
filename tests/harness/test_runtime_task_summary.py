@@ -280,15 +280,30 @@ def assert_review_drive_failure_receipts_are_cycle_scoped(root: Path) -> None:
 
 
 class FakeCmux:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        key_observer: Callable[[str, str, str], None] | None = None,
+    ) -> None:
         self.sent: list[tuple[str, str]] = []
         self.keys: list[tuple[str, str]] = []
+        self.key_observer = key_observer
 
     def send(self, surface_id: str, text: str) -> None:
         self.sent.append((surface_id, text))
 
     def send_key(self, surface_id: str, key: str) -> None:
         self.keys.append((surface_id, key))
+        if self.key_observer is not None:
+            message = next(
+                (
+                    text
+                    for target, text in reversed(self.sent)
+                    if target == surface_id
+                ),
+                "",
+            )
+            self.key_observer(surface_id, key, message)
 
 
 @dataclass(frozen=True)
@@ -1998,6 +2013,48 @@ def write_json(path: Path, value: object) -> None:
     path.write_text(json.dumps(value, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def write_json_atomic(
+    path: Path,
+    value: object,
+    *,
+    publication_barrier: tuple[threading.Event, threading.Event] | None = None,
+) -> None:
+    """Publish a live fixture artifact without exposing partial JSON."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, raw = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    temporary = Path(raw)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(value, sort_keys=True) + "\n")
+        if publication_barrier is not None:
+            ready, release = publication_barrier
+            ready.set()
+            if not release.wait(timeout=2.0):
+                raise AssertionError("atomic JSON publication was not released")
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def start_checked_thread(
+    target: Callable[[], None],
+    threads: list[threading.Thread],
+    errors: list[BaseException],
+) -> None:
+    """Start one fixture helper whose failure remains main-thread evidence."""
+
+    def checked() -> None:
+        try:
+            target()
+        except BaseException as exc:
+            errors.append(exc)
+
+    thread = threading.Thread(target=checked)
+    threads.append(thread)
+    thread.start()
+
+
 def canonical_sha256(value: object) -> str:
     return hashlib.sha256(
         json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
@@ -2161,6 +2218,10 @@ def run_case(
     wake_source: object | None = None,
     monotonic_clock: Callable[[], float] | None = None,
     restart_after_attention: bool = False,
+    cmux: FakeCmux | None = None,
+    summary_publication_barrier: (
+        tuple[threading.Event, threading.Event, threading.Event] | None
+    ) = None,
 ) -> tuple[
     OperationStore, FakeCmux, Path, int
 ]:
@@ -2599,7 +2660,7 @@ def run_case(
         task_summary_pointer=summary_path,
         origin_surface=ORIGIN,
     )
-    cmux = FakeCmux()
+    cmux = cmux or FakeCmux()
     if fix_retry_null_change:
         # The retry provider reads this marker and leaves HEAD untouched, so the
         # bounded retry completes with an intentionally empty change set.
@@ -2624,6 +2685,7 @@ def run_case(
     result: list[int] = []
     watcher_observed = threading.Event()
     original_inspect_task_summary = None
+    original_summary_barrier_inspection = None
     phase_callback_watcher_observed = threading.Event()
     original_accept_fix_callback = None
     if atomic_publication_barrier:
@@ -2672,6 +2734,23 @@ def run_case(
 
         RuntimeWorkerExecution.accept_fix_callback = (
             observe_atomic_phase_callback
+        )
+    if summary_publication_barrier is not None:
+        ready, release, observed = summary_publication_barrier
+        original_summary_barrier_inspection = (
+            RuntimeWorkerExecution.inspect_task_summary
+        )
+
+        def observe_summary_publication(
+            worker: RuntimeWorkerExecution,
+        ) -> None:
+            original_summary_barrier_inspection(worker)
+            if ready.is_set() and not observed.is_set():
+                observed.set()
+                release.set()
+
+        RuntimeWorkerExecution.inspect_task_summary = (
+            observe_summary_publication
         )
     thread = threading.Thread(
         target=lambda: result.append(
@@ -2824,6 +2903,10 @@ def run_case(
                 wake_source=wake_source or FallbackWakeSource(),
                 monotonic_clock=monotonic_clock,
             )
+        )
+    if original_summary_barrier_inspection is not None:
+        RuntimeWorkerExecution.inspect_task_summary = (
+            original_summary_barrier_inspection
         )
     if original_inspect_task_summary is not None:
         RuntimeWorkerExecution.inspect_task_summary = (
@@ -4386,29 +4469,38 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
     }
     refreshed_body = "Exact-HEAD verification completed before review."
     refresh_observed = threading.Event()
+    refresh_wake = threading.Event()
+    refresh_publication_ready = threading.Event()
+    refresh_publication_release = threading.Event()
+    refresh_publication_observed = threading.Event()
     refresh_threads: list[threading.Thread] = []
+    refresh_errors: list[BaseException] = []
     reviewed_bodies: list[str] = []
+
+    def observe_refresh_wake(_surface: str, key: str, message: str) -> None:
+        if key == "Enter" and "Exact-HEAD verification completed" in message:
+            refresh_wake.set()
+
+    summary_currency_cmux = FakeCmux(key_observer=observe_refresh_wake)
 
     def refresh_after_verification(
         _vault: Path, worktree: Path, state: Path, _profile_sha: str
     ) -> None:
         def refresh() -> None:
-            notify = state / "pipeline-summary-refresh-notify.json"
-            deadline = time.monotonic() + 2.0
-            while not notify.is_file() and time.monotonic() < deadline:
-                time.sleep(0.005)
-            if not notify.is_file():
-                return
+            if not refresh_wake.wait(timeout=2.0):
+                raise AssertionError("summary refresh wake was not delivered")
             current = read_json_eventually(worktree / ".task-summary.json")
-            write_json(
+            write_json_atomic(
                 worktree / ".task-summary.json",
                 {**current, "body": refreshed_body},
+                publication_barrier=(
+                    refresh_publication_ready,
+                    refresh_publication_release,
+                ),
             )
             refresh_observed.set()
 
-        thread = threading.Thread(target=refresh)
-        refresh_threads.append(thread)
-        thread.start()
+        start_checked_thread(refresh, refresh_threads, refresh_errors)
 
     def approve_refreshed_summary(vault: Path, worktree: Path) -> None:
         summary_path = worktree / ".task-summary.json"
@@ -4459,9 +4551,18 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         review_launcher=approve_refreshed_summary,
         before_start=refresh_after_verification,
         task_version=4,
+        cmux=summary_currency_cmux,
+        summary_publication_barrier=(
+            refresh_publication_ready,
+            refresh_publication_release,
+            refresh_publication_observed,
+        ),
     )
     for thread in refresh_threads:
         thread.join(timeout=3)
+    refresh_threads_stopped = all(
+        not thread.is_alive() for thread in refresh_threads
+    )
     summary_currency_record = summary_currency_store.read(
         "owner-1", summary_currency_task
     )
@@ -4472,6 +4573,9 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         "review consumes only a canonical summary refreshed after exact-HEAD verification",
         summary_currency_rc == 0
         and refresh_observed.is_set()
+        and refresh_publication_observed.is_set()
+        and refresh_threads_stopped
+        and not refresh_errors
         and refresh_marker.is_file()
         and reviewed_bodies == [refreshed_body]
         and summary_currency_record.state == "finalizing"
@@ -4479,6 +4583,9 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         (
             summary_currency_rc,
             refresh_observed.is_set(),
+            refresh_publication_observed.is_set(),
+            refresh_threads_stopped,
+            refresh_errors,
             reviewed_bodies,
             summary_currency_record,
         ),
@@ -5845,13 +5952,23 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
 
     gap_task = "ccdddddd-dddd-4ddd-8ddd-dddddddddddd"
     gap_authorized = threading.Event()
+    gap_refresh_wake = threading.Event()
     gap_launches: list[dict[str, object]] = []
     gap_threads: list[threading.Thread] = []
+    gap_errors: list[BaseException] = []
+
+    def observe_gap_refresh_wake(
+        _surface: str, key: str, message: str
+    ) -> None:
+        if key == "Enter" and "Exact-HEAD verification completed" in message:
+            gap_refresh_wake.set()
+
+    gap_cmux = FakeCmux(key_observer=observe_gap_refresh_wake)
 
     def authorize_baseline_gap(
         _vault: Path,
         worktree: Path,
-        state: Path,
+        _state: Path,
         _profile_sha: str,
     ) -> None:
         def authorize() -> None:
@@ -5922,9 +6039,8 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
                 verification_resolution=resolution,
                 resolved_at="2026-08-17T12:01:00Z",
             )
-            refresh = read_json_eventually(
-                state / "pipeline-summary-refresh-notify.json", timeout=3
-            )
+            if not gap_refresh_wake.wait(timeout=3.0):
+                raise AssertionError("baseline-gap refresh wake was not delivered")
             current = json.loads(
                 (worktree / ".task-summary.json").read_text(encoding="utf-8")
             )
@@ -5932,18 +6048,15 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
                 str(current["body"])
                 + "\n\nExact failed receipt preserved as an admitted baseline gap."
             )
-            write_json(worktree / ".task-summary.json", current)
+            write_json_atomic(worktree / ".task-summary.json", current)
             if (
                 raised.record_type != "raise"
                 or resolved.record_id != replayed.record_id
-                or refresh.get("status") not in {"sent", "accepted"}
             ):
                 raise AssertionError("gap authority chain did not replay exactly")
             gap_authorized.set()
 
-        thread = threading.Thread(target=authorize)
-        gap_threads.append(thread)
-        thread.start()
+        start_checked_thread(authorize, gap_threads, gap_errors)
 
     def consume_and_approve_gap(vault: Path, worktree: Path) -> None:
         meta = json.loads(
@@ -6007,9 +6120,11 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         review_launcher=consume_and_approve_gap,
         restart_after_attention=True,
         task_version=4,
+        cmux=gap_cmux,
     )
     for thread in gap_threads:
         thread.join(timeout=1)
+    gap_threads_stopped = all(not thread.is_alive() for thread in gap_threads)
     gap_parent = gap_store.read("owner-1", gap_task)
     gap_receipt = json.loads(
         next(
@@ -6038,6 +6153,8 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         "provider admission form one baseline-gap continuation",
         gap_rc == 0
         and gap_authorized.is_set()
+        and gap_threads_stopped
+        and not gap_errors
         and gap_parent.state == "finalizing"
         and gap_receipt["status"] == "failed"
         and gap_authority["failed_receipt_sha256"]
@@ -6051,7 +6168,15 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         and gap_launches[0]["status"] == "admitted-with-gap"
         and gap_launches[0]["decision_record_id"]
         == gap_authority["decision_record_id"],
-        (gap_parent, gap_receipt, gap_authority, gap_refresh, gap_launches),
+        (
+            gap_parent,
+            gap_receipt,
+            gap_authority,
+            gap_refresh,
+            gap_launches,
+            gap_threads_stopped,
+            gap_errors,
+        ),
     )
     gap_worktree = root / f"worktree-{gap_task}"
     gap_vault = root / f"vault-{gap_task}"
