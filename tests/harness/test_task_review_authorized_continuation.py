@@ -106,7 +106,9 @@ with tempfile.TemporaryDirectory(prefix="authorized-review-continuation.") as ra
     ).stdout.strip()
 
     task_id = str(uuid.uuid4())
-    profile = load_profiles(vault / "config/verification-profiles.toml")["full"]
+    profiles = load_profiles(vault / "config/verification-profiles.toml")
+    profile = profiles["full"]
+    scoped_profile = profiles["scoped"]
     outcome_sha256 = "6" * 64
     escalation_id = str(uuid.uuid4())
     decision = (
@@ -155,14 +157,32 @@ with tempfile.TemporaryDirectory(prefix="authorized-review-continuation.") as ra
         record_type="amendment",
         payload={"new_outcome_sha256": outcome_sha256},
     )
-    meta = json.loads((ROOT / ".task-meta.json").read_text(encoding="utf-8"))
-    meta.update(
-        {
-            "task_id": task_id,
-            "worktree": str(worktree),
-            "vault_root": str(vault),
+    topology_payload = {
+        "verification_profile": {
+            "name": "scoped",
+            "sha256": scoped_profile.sha256,
         }
-    )
+    }
+    meta = {
+        "task_id": task_id,
+        "worktree": str(worktree),
+        "vault_root": str(vault),
+        "pipeline_policy": {"definition_sha256": "8" * 64},
+        "review_policy": {
+            "verification_profile": "scoped",
+            "verification_profile_sha256": scoped_profile.sha256,
+        },
+        "review_topology": {
+            "payload": topology_payload,
+            "sha256": hashlib.sha256(
+                json.dumps(
+                    topology_payload,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode()
+            ).hexdigest(),
+        },
+    }
     (worktree / ".task-meta.json").write_text(
         json.dumps(meta, sort_keys=True) + "\n", encoding="utf-8"
     )
