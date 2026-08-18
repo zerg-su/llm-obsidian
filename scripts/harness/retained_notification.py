@@ -12,6 +12,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable, Iterator, Mapping, Protocol
 
+from .prompts import classify
 from .runtime_session_continuation import (
     _editor_digest,
     _editor_state,
@@ -187,10 +188,9 @@ def recover_visible_notification(
             screen = port.read(surface_id)
         except Exception:
             return False
-        anchor = _prompt_anchor(message)
-        editor_lines = _editor_state(runtime, screen)
+        anchor, editor_lines = _prompt_anchor(message), _editor_state(runtime, screen)
         exact_editor = bool(editor_lines and anchor and anchor in editor_lines[-1])
-        if status not in {"idle", "needs-input"} or not exact_editor:
+        if classify(runtime, screen).interactive or status not in {"idle", "needs-input"} or not exact_editor:
             return False
         _atomic_json(receipt_path, {**expected, "status": "reserved"})
         port.send_key(surface_id, "Enter")

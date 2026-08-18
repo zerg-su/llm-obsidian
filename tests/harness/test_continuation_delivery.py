@@ -193,6 +193,70 @@ class CodexSemanticPort(FakePort):
         return "idle"
 
 
+class ClaudeNeedsInputPort(SemanticPort):
+    def agent_status(self, workspace_id: str, runtime: str) -> str:
+        super().agent_status(workspace_id, runtime)
+        return "needs-input"
+
+
+class CodexNeedsInputPort(CodexSemanticPort):
+    def agent_status(self, workspace_id: str, runtime: str) -> str:
+        super().agent_status(workspace_id, runtime)
+        return "needs-input"
+
+
+dialog_cases = (
+    (
+        "claude-recognized",
+        "claude",
+        ClaudeNeedsInputPort,
+        f"❯ {PROMPT.splitlines()[0]}\n"
+        "Accessing workspace: /tmp/review\n"
+        "Quick safety check: Is this a project you created or one you trust?\n"
+        "1. Yes, I trust this\n"
+        "2. No, exit\n"
+        "Enter to confirm",
+    ),
+    (
+        "claude-unknown",
+        "claude",
+        ClaudeNeedsInputPort,
+        f"❯ {PROMPT.splitlines()[0]}\n1. Allow\n2. Deny\nEnter",
+    ),
+    (
+        "codex-recognized",
+        "codex",
+        CodexNeedsInputPort,
+        f"› {PROMPT.splitlines()[0]}\n"
+        "Do you trust the contents of this directory?\n"
+        "1. Yes, continue\n"
+        "2. No, quit\n"
+        "Press enter to continue",
+    ),
+    (
+        "codex-unknown",
+        "codex",
+        CodexNeedsInputPort,
+        f"› {PROMPT.splitlines()[0]}\n1. Allow\n2. Deny\nPress enter",
+    ),
+)
+for case_name, runtime, port_type, screen in dialog_cases:
+    with tempfile.TemporaryDirectory(prefix=f"notification-{case_name}.") as raw:
+        recovery = Path(raw) / "submit-recovery.json"
+        dialog = port_type([screen])
+        assert not recover_visible_notification(
+            dialog,
+            surface_id=SURFACE,
+            workspace_id="22222222-2222-2222-2222-222222222222",
+            runtime=runtime,
+            message=PROMPT,
+            receipt_path=recovery,
+            identity={"operation_id": case_name},
+        )
+        assert dialog.keys == [] and not recovery.exists()
+print("OK   provider dialogs cannot inherit recovery authority from transcript")
+
+
 with tempfile.TemporaryDirectory(prefix="notification-historical-codex.") as raw:
     historical = Path(raw) / "submit-recovery.json"
     completed = CodexSemanticPort(
