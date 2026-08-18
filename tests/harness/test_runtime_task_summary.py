@@ -58,6 +58,7 @@ from harness.review_continuation_recovery import (
 )
 from harness.runtime_callback_io import record_review_drive_failure
 from harness.store import OperationStore
+from harness.state_machine import TERMINAL
 from harness.supervisor import OperationSupervisor
 from harness.verification import load_profiles
 from approved_plan_snapshot import bind_approved_plan_snapshot
@@ -2535,7 +2536,11 @@ def run_case(
             "    if (state/'callback-receipt.json').is_file(): break\n"
             "    time.sleep(0.01)\n"
             "  else: raise SystemExit(6)\n"
-            "else: time.sleep(0.3)\n",
+            "else:\n"
+            "  for _ in range(2000):\n"
+            "    if (root/'.provider-terminal-observed').is_file(): break\n"
+            "    time.sleep(0.01)\n"
+            "  else: raise SystemExit(7)\n",
             encoding="utf-8",
         )
     elif pipeline_name == "engineering/fix":
@@ -2876,11 +2881,40 @@ def run_case(
             product_root=worktree,
         )
     # The join timeout only bounds hang detection; passing workers join the
-    # moment they finish.  The multi-round resolution corridors re-observe
-    # the exact candidate HEAD and tree at every consumption boundary, which
-    # at the fixture's 0.02s poll cadence needs headroom a 1s production
-    # poll never does.
-    thread.join(timeout=12 if wake_source is not None else 8)
+    # moment they finish.  Multi-round resolution and fix-retry corridors
+    # re-observe the exact candidate HEAD and tree at every consumption
+    # boundary, which at the fixture's 0.02s poll cadence needs headroom a
+    # one-pass corridor never does.
+    join_timeout = 12 if wake_source is not None or fix_retry_passes else 8
+    if fix_retry_passes and not await_final_callback:
+        deadline = time.monotonic() + join_timeout
+        while thread.is_alive():
+            current = store.read("owner-1", operation_id)
+            if current.state in TERMINAL or current.state in {
+                "attention-required",
+                "finalizing",
+            }:
+                (worktree / ".provider-terminal-observed").write_text(
+                    f"{current.state}\n", encoding="utf-8"
+                )
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            thread.join(timeout=min(0.05, remaining))
+    else:
+        thread.join(timeout=join_timeout)
+    if thread.is_alive():
+        current = store.read("owner-1", operation_id)
+        raise AssertionError(
+            "runtime worker exceeded the bounded fixture join: "
+            f"operation_id={operation_id} state={current.state} "
+            f"revision={current.revision}"
+        )
+    if not result:
+        raise AssertionError(
+            "runtime worker terminated without a fixture result: "
+            f"operation_id={operation_id}"
+        )
     if (
         restart_after_attention
         and store.read("owner-1", operation_id).state
@@ -4062,6 +4096,344 @@ def assert_post_check_clean_commit_never_launches_review(root: Path) -> None:
         (control_launched, control.launcher_calls, control_admission),
     )
     print("OK   post-check clean commit never launches review")
+
+
+def run_focused_summary_refresh_corridor(root: Path) -> None:
+    """Exercise only the canonical-summary refresh race corridor."""
+
+    task = "bcbcbcbc-bcbc-4cbc-8cbc-bcbcbcbcbcbc"
+    stale_summary = {
+        "schema_version": 2,
+        "type": "session",
+        "title": "Runtime Result",
+        "session": "executor-session",
+        "body": "Verification is still pending.",
+        "outcome_disposition": "achieved",
+        "outcome_evidence_ids": ["runtime-green"],
+        "residual_gap_pointers": [],
+    }
+    refreshed_body = "Exact-HEAD verification completed before review."
+    refresh_observed = threading.Event()
+    refresh_wake = threading.Event()
+    publication_ready = threading.Event()
+    publication_release = threading.Event()
+    publication_observed = threading.Event()
+    helper_threads: list[threading.Thread] = []
+    helper_errors: list[BaseException] = []
+    reviewed_bodies: list[str] = []
+
+    def observe_wake(_surface: str, key: str, message: str) -> None:
+        if key == "Enter" and "Exact-HEAD verification completed" in message:
+            refresh_wake.set()
+
+    cmux = FakeCmux(key_observer=observe_wake)
+
+    def pass_verification(
+        argv: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        if argv == ["git", "rev-parse", "HEAD"]:
+            return subprocess.run(
+                argv,
+                cwd=kwargs["cwd"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+        return subprocess.CompletedProcess(argv, 0, "ok\n", "")
+
+    def refresh_after_verification(
+        _vault: Path, worktree: Path, _state: Path, _profile_sha: str
+    ) -> None:
+        def refresh() -> None:
+            if not refresh_wake.wait(timeout=2.0):
+                raise AssertionError("summary refresh wake was not delivered")
+            current = read_json_eventually(worktree / ".task-summary.json")
+            write_json_atomic(
+                worktree / ".task-summary.json",
+                {**current, "body": refreshed_body},
+                publication_barrier=(publication_ready, publication_release),
+            )
+            refresh_observed.set()
+
+        start_checked_thread(refresh, helper_threads, helper_errors)
+
+    def approve_refreshed_summary(vault: Path, worktree: Path) -> None:
+        summary_path = worktree / ".task-summary.json"
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        reviewed_bodies.append(str(summary.get("body") or ""))
+        meta = json.loads(
+            (worktree / ".task-meta.json").read_text(encoding="utf-8")
+        )
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=worktree,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.strip()
+        ReviewGateController.skip(
+            vault / ".vault-meta" / "harness" / "review-data" / task / task,
+            dispatch_operation_id=task,
+            owner_id=task,
+            preset=ReviewPreset.from_flags(no_review=True),
+            context=ReviewContext(
+                "packets/task/manifest.json",
+                head,
+                "scoped",
+                meta["review_policy"]["verification_profile_sha256"],
+                hashlib.sha256(summary_path.read_bytes()).hexdigest(),
+            ),
+            product_root=worktree,
+        )
+
+    store, _cmux, state, rc = run_case(
+        root,
+        task,
+        stale_summary,
+        pipeline_name="engineering/change",
+        verification_runner=pass_verification,
+        review_state="missing",
+        review_launcher=approve_refreshed_summary,
+        before_start=refresh_after_verification,
+        task_version=4,
+        cmux=cmux,
+        summary_publication_barrier=(
+            publication_ready,
+            publication_release,
+            publication_observed,
+        ),
+    )
+    for thread in helper_threads:
+        thread.join(timeout=3)
+    record = store.read("owner-1", task)
+    marker = state / "pipeline-summary-refresh-notify.json"
+    check(
+        "focused canonical summary refresh is atomic and review-current",
+        rc == 0
+        and refresh_observed.is_set()
+        and publication_observed.is_set()
+        and all(not thread.is_alive() for thread in helper_threads)
+        and not helper_errors
+        and marker.is_file()
+        and reviewed_bodies == [refreshed_body]
+        and record.state == "finalizing"
+        and record.accepted_callback_kind == "wiki-summary",
+        (rc, helper_errors, reviewed_bodies, record),
+    )
+
+
+def run_focused_baseline_gap_corridor(root: Path) -> None:
+    """Exercise only the baseline-gap authority refresh race corridor."""
+
+    task = "ccdddddd-dddd-4ddd-8ddd-dddddddddddd"
+    summary = {
+        "schema_version": 2,
+        "type": "session",
+        "title": "Runtime Result",
+        "session": "executor-session",
+        "body": "The declared runtime evidence is established.",
+        "outcome_disposition": "achieved",
+        "outcome_evidence_ids": ["runtime-green"],
+        "residual_gap_pointers": [],
+    }
+    authorized = threading.Event()
+    refresh_wake = threading.Event()
+    launches: list[dict[str, object]] = []
+    helper_threads: list[threading.Thread] = []
+    helper_errors: list[BaseException] = []
+
+    def fail_verification(
+        argv: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        if argv == ["git", "rev-parse", "HEAD"]:
+            return subprocess.run(
+                argv,
+                cwd=kwargs["cwd"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+        return subprocess.CompletedProcess(argv, 1, "", "failed\n")
+
+    def observe_wake(_surface: str, key: str, message: str) -> None:
+        if key == "Enter" and "Exact-HEAD verification completed" in message:
+            refresh_wake.set()
+
+    cmux = FakeCmux(key_observer=observe_wake)
+
+    def authorize_gap(
+        _vault: Path,
+        worktree: Path,
+        _state: Path,
+        _profile_sha: str,
+    ) -> None:
+        def authorize() -> None:
+            packet = read_json_eventually(
+                worktree / ".task-verification.json", timeout=3
+            )
+            failed_receipt = json.loads(
+                Path(str(packet["receipt_pointer"])).read_text(encoding="utf-8")
+            )
+            receipt_sha256 = canonical_sha256(failed_receipt)
+            command_ids = tuple(
+                str(row["command_id"]) for row in packet["evidence"]
+            )
+            attempt = VerificationAttempt.from_dict(
+                packet["verification_attempt"]
+            )
+            escalation = build_verification_gap_escalation(
+                attempt,
+                str(packet["verification_operation_id"]),
+                failed_receipt_sha256=receipt_sha256,
+                command_ids=command_ids,
+                origin_session="coordinator-session",
+            )
+            raised = append_raise(
+                worktree,
+                {
+                    "version": 1,
+                    "id": f"baseline-gap-{task[:8]}",
+                    "status": "pending",
+                    "task_name": "baseline gap continuation runtime",
+                    "category": "pipeline-decision",
+                    "reason": "isolated unrelated baseline verification gap",
+                    "question": "Continue review with the failed receipt?",
+                    "worktree": str(worktree.resolve()),
+                    "task_surface": CHILD,
+                    "raised_at": "2026-08-17T12:00:00Z",
+                    "verification_escalation": escalation,
+                    "allowed_decisions": [
+                        "continue-unrelated-baseline-gap",
+                        "stop",
+                    ],
+                },
+            )
+            resolution = resolve_verification_escalation(
+                escalation,
+                decision="continue-unrelated-baseline-gap",
+                evidence_note="The failed command is an unrelated baseline gap.",
+            )
+            resolved = append_resolution(
+                worktree,
+                "continue-unrelated-baseline-gap",
+                verification_resolution=resolution,
+                resolved_at="2026-08-17T12:01:00Z",
+            )
+            replayed = append_resolution(
+                worktree,
+                "continue-unrelated-baseline-gap",
+                verification_resolution=resolution,
+                resolved_at="2026-08-17T12:01:00Z",
+            )
+            if not refresh_wake.wait(timeout=3.0):
+                raise AssertionError("baseline-gap refresh wake was not delivered")
+            current = json.loads(
+                (worktree / ".task-summary.json").read_text(encoding="utf-8")
+            )
+            current["body"] = (
+                str(current["body"])
+                + "\n\nExact failed receipt preserved as an admitted baseline gap."
+            )
+            write_json_atomic(worktree / ".task-summary.json", current)
+            if raised.record_type != "raise" or resolved.record_id != replayed.record_id:
+                raise AssertionError("gap authority chain did not replay exactly")
+            authorized.set()
+
+        start_checked_thread(authorize, helper_threads, helper_errors)
+
+    def consume_and_approve(vault: Path, worktree: Path) -> None:
+        meta = json.loads(
+            (worktree / ".task-meta.json").read_text(encoding="utf-8")
+        )
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=worktree,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.strip()
+        runtime = vault / ".vault-meta" / "harness" / "review-runtime" / task
+        context = ReviewContext(
+            "packets/task/manifest.json",
+            head,
+            "scoped",
+            meta["review_policy"]["verification_profile_sha256"],
+        )
+        _admitted_review_launch(meta, vault, runtime, worktree, task, context)
+        launches.append(
+            json.loads(
+                (runtime / "review-launch-admission.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+        )
+        gate = vault / ".vault-meta" / "harness" / "review-data" / task / task
+        (gate / "review-gate.json").unlink(missing_ok=True)
+        ReviewGateController.skip(
+            gate,
+            dispatch_operation_id=task,
+            owner_id=task,
+            preset=ReviewPreset.from_flags(no_review=True),
+            context=context,
+            product_root=worktree,
+        )
+
+    store, _cmux, state, rc = run_case(
+        root,
+        task,
+        summary,
+        review_state="missing",
+        pipeline_name="engineering/change",
+        verification_runner=fail_verification,
+        before_start=authorize_gap,
+        review_launcher=consume_and_approve,
+        restart_after_attention=True,
+        task_version=4,
+        cmux=cmux,
+    )
+    for thread in helper_threads:
+        thread.join(timeout=1)
+    record = store.read("owner-1", task)
+    receipt = json.loads(
+        next((state / "pipeline-verification").glob("*/receipt.json")).read_text(
+            encoding="utf-8"
+        )
+    )
+    authority = json.loads(
+        (state / "pipeline-verification-gap-authority.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    refresh = json.loads(
+        (state / "pipeline-summary-refresh-notify.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    check(
+        "focused baseline-gap authority refresh is exact and replay-safe",
+        rc == 0
+        and authorized.is_set()
+        and all(not thread.is_alive() for thread in helper_threads)
+        and not helper_errors
+        and record.state == "finalizing"
+        and receipt["status"] == "failed"
+        and authority["failed_receipt_sha256"] == canonical_sha256(receipt)
+        and refresh["status"] == "accepted"
+        and len(launches) == 1
+        and launches[0]["status"] == "admitted-with-gap"
+        and launches[0]["decision_record_id"] == authority["decision_record_id"],
+        (rc, record, receipt, authority, refresh, launches, helper_errors),
+    )
+
+
+if sys.argv[1:] == ["--focus-concurrency"]:
+    with tempfile.TemporaryDirectory(prefix="runtime-task-summary-focus.") as raw:
+        focused_root = Path(raw)
+        run_focused_summary_refresh_corridor(focused_root)
+        run_focused_baseline_gap_corridor(focused_root)
+    raise SystemExit(0)
+if sys.argv[1:]:
+    raise SystemExit("usage: test_runtime_task_summary.py [--focus-concurrency]")
 
 
 with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
