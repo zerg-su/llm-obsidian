@@ -107,6 +107,58 @@ check(
     and opened.window_ref == "window:5",
 )
 check("status matches exact UUID", cmux.status(surface) == "alive")
+
+
+def semantic_status(
+    command: list[str], **_kwargs: object
+) -> subprocess.CompletedProcess[str]:
+    calls.append(command)
+    if "list-status" not in command:
+        return subprocess.CompletedProcess(command, 1, "", "unexpected command")
+    return subprocess.CompletedProcess(
+        command,
+        0,
+        "codex=Running icon=bolt.fill color=#4C8DFF\n"
+        "claude_code=Needs input icon=bell.fill color=#4C8DFF\n",
+        "",
+    )
+
+
+semantic = CmuxAdapter(semantic_status)
+check(
+    "semantic status binds the exact workspace and runtime key",
+    semantic.agent_status(workspace, "claude") == "needs-input"
+    and semantic.agent_status(workspace, "codex") == "working"
+    and all(
+        "list-status" in call
+        and call[call.index("--workspace") + 1] == workspace
+        for call in calls[-2:]
+    ),
+)
+
+
+def malformed_semantic_status(
+    command: list[str], **_kwargs: object
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.CompletedProcess(
+        command,
+        0,
+        "claude_code=Idle icon=pause.circle.fill color=#8E8E93\n"
+        "claude_code=Running icon=bolt.fill color=#4C8DFF\n",
+        "",
+    )
+
+
+try:
+    CmuxAdapter(malformed_semantic_status).agent_status(workspace, "claude")
+except CmuxError:
+    duplicate_status_rejected = True
+else:
+    duplicate_status_rejected = False
+check(
+    "duplicate semantic status fails closed",
+    duplicate_status_rejected,
+)
 workspace_opened = cmux.open_workspace(surface, cwd=ROOT)
 check(
     "workspace creation derives exact origin window without surface guessing",

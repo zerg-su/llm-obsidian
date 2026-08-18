@@ -14,6 +14,18 @@ from typing import Callable, Mapping, Sequence
 UUID_RE = re.compile(r"[0-9A-Fa-f]{8}-(?:[0-9A-Fa-f]{4}-){3}[0-9A-Fa-f]{12}\Z")
 CHECKPOINT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 REF_RE = re.compile(r"(surface|workspace|window):[1-9][0-9]*\Z")
+STATUS_LINE_RE = re.compile(
+    r"(?P<key>[a-z][a-z0-9_]{0,63})="
+    r"(?P<value>[A-Za-z][A-Za-z ]{0,31}) "
+    r"icon=[A-Za-z0-9.]+ color=#[0-9A-Fa-f]{6,8}\Z"
+)
+AGENT_STATUS_KEYS = {"claude": "claude_code", "codex": "codex"}
+AGENT_STATUS_VALUES = {
+    "Running": "working",
+    "Working": "working",
+    "Idle": "idle",
+    "Needs input": "needs-input",
+}
 
 
 class CmuxError(RuntimeError):
@@ -428,6 +440,37 @@ class CmuxAdapter:
         if matches[0][0].casefold() != window_id.casefold():
             raise CmuxError("cmux workspace moved outside its exact window")
         return "alive"
+
+    def agent_status(self, workspace_id: str, runtime: str) -> str:
+        """Return one content-free provider state for an exact workspace.
+
+        cmux currently renders ``list-status`` as strict key/value lines even
+        when ``--json`` is requested.  Keep that compatibility quirk inside
+        the adapter and fail closed on duplicate or malformed provider rows.
+        """
+
+        if not UUID_RE.fullmatch(workspace_id):
+            raise CmuxError("workspace must be an exact UUID")
+        key = AGENT_STATUS_KEYS.get(runtime)
+        if key is None:
+            raise CmuxError("agent status runtime must be claude or codex")
+        result = self._run(
+            ["list-status", "--workspace", workspace_id, "--json"]
+        )
+        matches: list[str] = []
+        for raw_line in result.stdout.splitlines():
+            line = raw_line.strip()
+            if not line.startswith(f"{key}="):
+                continue
+            parsed = STATUS_LINE_RE.fullmatch(line)
+            if parsed is None or parsed.group("key") != key:
+                raise CmuxError("cmux agent status row is malformed")
+            matches.append(parsed.group("value"))
+        if len(matches) > 1:
+            raise CmuxError("cmux agent status is ambiguous")
+        if not matches:
+            return "unknown"
+        return AGENT_STATUS_VALUES.get(matches[0], "unknown")
 
     def resume_checkpoint(self, surface_id: str, runtime: str) -> str:
         """Return the exact provider checkpoint bound by cmux to this surface."""

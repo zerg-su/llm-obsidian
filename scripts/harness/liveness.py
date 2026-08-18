@@ -17,6 +17,7 @@ from .contracts import ContractError, ID_RE, SHA256_RE, to_dict
 
 PROCESS_STATES = frozenset({"alive", "dead", "unknown"})
 PROMPT_STATES = frozenset({"interactive", "non-interactive", "unknown"})
+AGENT_STATES = frozenset({"working", "idle", "needs-input", "unknown"})
 ACTIONS = frozenset(
     {
         "observe",
@@ -92,6 +93,7 @@ class LivenessEvidence:
     typed_result_sha256: str = ""
     callback_sha256: str = ""
     receipt_sha256: str = ""
+    agent_status: str = "unknown"
     schema_version: int = 1
 
     def __post_init__(self) -> None:
@@ -104,6 +106,7 @@ class LivenessEvidence:
             or self.operation_revision < 0
             or self.process_status not in PROCESS_STATES
             or self.prompt_state not in PROMPT_STATES
+            or self.agent_status not in AGENT_STATES
             or not isinstance(self.operation_state, str)
             or not ID_RE.fullmatch(self.operation_state)
         ):
@@ -132,6 +135,7 @@ class LivenessState:
     restart_count: int = 0
     callback_submit_binding: str = ""
     callback_submit_status: str = ""
+    agent_status: str = "unknown"
     schema_version: int = 1
 
     @classmethod
@@ -145,6 +149,7 @@ class LivenessState:
             typed_result_sha256=evidence.typed_result_sha256,
             callback_sha256=evidence.callback_sha256,
             receipt_sha256=evidence.receipt_sha256,
+            agent_status=evidence.agent_status,
             stable_result_reads=1 if evidence.typed_result_sha256 else 0,
         )
 
@@ -172,6 +177,7 @@ def _decision(action: str, evidence: LivenessEvidence, state: LivenessState) -> 
             "typed_result_sha256": evidence.typed_result_sha256,
             "callback_sha256": evidence.callback_sha256,
             "receipt_sha256": evidence.receipt_sha256,
+            "agent_status": evidence.agent_status,
             "nudge_count": state.nudge_count,
             "restart_count": state.restart_count,
         },
@@ -194,11 +200,13 @@ def observe_liveness(
 
     if evidence.observed_at < previous.started_at:
         raise ContractError("liveness observation moved backwards")
+    semantic_stall = evidence.agent_status in {"idle", "needs-input"}
     changed = any(
         (
             evidence.operation_revision != previous.operation_revision,
             evidence.operation_state != previous.operation_state,
             bool(evidence.screen_sha256)
+            and not semantic_stall
             and evidence.screen_sha256 != previous.screen_sha256,
             bool(evidence.typed_result_sha256)
             and evidence.typed_result_sha256 != previous.typed_result_sha256,
@@ -226,6 +234,7 @@ def observe_liveness(
         callback_sha256=evidence.callback_sha256 or previous.callback_sha256,
         receipt_sha256=evidence.receipt_sha256 or previous.receipt_sha256,
         stable_result_reads=stable_result_reads,
+        agent_status=evidence.agent_status,
     )
 
     if evidence.receipt_sha256 or evidence.callback_sha256:

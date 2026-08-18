@@ -31,6 +31,10 @@ from .fresh_artifact_repair import (
     FreshRepairInvalid,
     launch_fresh_repair_for_worker,
 )
+from .retained_notification import (
+    RetainedNotificationError,
+    deliver_worker_notification,
+)
 
 
 _REVIEW_REJECTION_FIELDS = frozenset(
@@ -829,18 +833,22 @@ class RuntimeWorkerControlMixin:
             "step_id": step_id,
             "status": "sent",
         }
-        if notify_path.is_file() and (not notify_path.is_symlink()):
-            if json.loads(notify_path.read_text(encoding="utf-8")) != marker:
-                raise RuntimeWorkerError("engineering/fix phase notification changed")
-            return
         message = f"""Typed engineering/fix phase {step_id} is ready in .task-pipeline-step-request.json. Complete only this phase. {prior_context}Write evidence to {request['output_pointer']} and write {request['result_pointer']} as exact JSON with fields {{"schema_version":1,"status":"complete","output_sha256":"<sha256-of-evidence>","head_sha":"<current-git-head>"}}. For the reproduce phase only, status may instead be "cannot-reproduce". Then publish the request-bound callback with pipeline-step-submit.py. Remain in this same session for the next typed request."""
         if len(message.encode()) > 4096:
             raise RuntimeWorkerError(
                 "engineering/fix phase notification exceeds its bound"
             )
-        self.cmux_adapter.send(self.spec["surface_id"], message)
-        self.cmux_adapter.send_key(self.spec["surface_id"], "Enter")
-        self.write_immutable_json(notify_path, marker)
+        try:
+            deliver_worker_notification(
+                self,
+                notify_path=notify_path,
+                marker=marker,
+                message=message,
+            )
+        except RetainedNotificationError as exc:
+            raise RuntimeWorkerError(
+                "engineering/fix phase notification delivery failed"
+            ) from exc
 
     def notify_fix_finalization(self, iteration: int) -> bool:
         notify_path = (
@@ -858,18 +866,21 @@ class RuntimeWorkerControlMixin:
             "iteration": iteration,
             "status": "sent",
         }
-        if notify_path.is_file() and (not notify_path.is_symlink()):
-            if json.loads(notify_path.read_text(encoding="utf-8")) != marker:
-                raise RuntimeWorkerError(
-                    "engineering/fix finalization notification changed"
-                )
-            return False
+        existed = notify_path.is_file() and (not notify_path.is_symlink())
         phase_count = "four" if iteration == 0 else "three retry"
         message = f"All {phase_count} typed engineering/fix phase receipts are accepted. Finish the task in this same session: commit the minimal fix, run the approved scoped verification, and write the canonical .task-summary.json. Do not repeat an accepted phase."
-        self.cmux_adapter.send(self.spec["surface_id"], message)
-        self.cmux_adapter.send_key(self.spec["surface_id"], "Enter")
-        self.write_immutable_json(notify_path, marker)
-        return True
+        try:
+            deliver_worker_notification(
+                self,
+                notify_path=notify_path,
+                marker=marker,
+                message=message,
+            )
+        except RetainedNotificationError as exc:
+            raise RuntimeWorkerError(
+                "engineering/fix finalization notification delivery failed"
+            ) from exc
+        return not existed
 
     def publish_pipeline_decision(
         self,

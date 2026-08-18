@@ -10,6 +10,22 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.8.2] - 2026-08-19
+
+### Fixed
+
+- Harness liveness now consumes strict, exact-workspace cmux semantic status
+  for both Claude (`claude_code`) and Codex (`codex`). Dynamic token/status-line
+  repaint no longer resets the idle clock while the provider reports `Idle` or
+  `Needs input`.
+- Retained-session custom and engineering/fix notifications wait until the
+  provider editor visibly contains the exact prompt before sending `Enter`.
+  A durable, identity-bound recovery may submit an already-visible historical
+  notification once without re-pasting it or replaying accepted model steps.
+- The active lifecycle-authority contour is truthfully rebaselined to the exact
+  28-file / 16,080-LOC candidate, and the live scripts ratchet to the exact
+  296-file / 112,687-line candidate, both with zero speculative headroom.
+
 ## [2.8.1] - 2026-08-18
 
 ### Fixed

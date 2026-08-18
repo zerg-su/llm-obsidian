@@ -34,6 +34,7 @@ from harness.runtime_worker import (
     _submit_failure_requires_attention,
     run as run_worker,
 )
+from harness.runtime_worker_custom import RuntimeWorkerCustomMixin
 from harness.cmux_wake_source import WakeObservation
 from harness.runtime_provider_events import RuntimeProviderEventStream
 from harness.store import OperationStore
@@ -117,6 +118,75 @@ def custom_spec() -> dict[str, object]:
         "human_gates": ["initial-approval"],
         "terminal_outcomes": ["completed", "attention-required"],
     }
+
+
+with tempfile.TemporaryDirectory(prefix="custom-finalization-recovery.") as raw:
+    recovery_root = Path(raw)
+    notification = (
+        recovery_root / "pipeline-custom" / "finalization-notify.json"
+    )
+    write_json(
+        notification,
+        {
+            "schema_version": 1,
+            "operation_id": TASK,
+            "receipt_count": 2,
+            "status": "sent",
+        },
+    )
+
+    class RecoveryCmux:
+        def __init__(self) -> None:
+            self.keys: list[str] = []
+
+        def send(self, _surface: str, _message: str) -> None:
+            raise AssertionError("sent notification must never be re-pasted")
+
+        def read(self, surface: str) -> str:
+            assert surface == SURFACE
+            return (
+                "❯ All 2 custom model-step receipts are accepted. Finish the "
+                "task in this same session, commit the approved result, run only "
+                "task-specific checks not already owned by the harness, and write "
+                "the canonical .task-summary.json. The harness now owns configured "
+                "verification and review."
+            )
+
+        def send_key(self, surface: str, key: str) -> None:
+            assert surface == SURFACE and key == "Enter"
+            self.keys.append(key)
+
+        def agent_status(self, workspace: str, runtime: str) -> str:
+            assert workspace == PROJECT and runtime == "claude"
+            return "idle"
+
+    class RecoveryWorker(RuntimeWorkerCustomMixin):
+        def __init__(self) -> None:
+            self.spec_path = recovery_root / "launch.json"
+            self.spec = {
+                "operation_id": TASK,
+                "surface_id": SURFACE,
+                "runtime": "claude",
+            }
+            self.cmux_adapter = RecoveryCmux()
+
+        def _workspace_id(self) -> str:
+            return PROJECT
+
+    recovery_worker = RecoveryWorker()
+    recovery_worker.notify_custom_finalization(2)
+    recovery_worker.notify_custom_finalization(2)
+    recovered = json.loads(
+        notification.with_name(
+            "finalization-notify-submit-recovery.json"
+        ).read_text(encoding="utf-8")
+    )
+    if recovery_worker.cmux_adapter.keys != ["Enter"] or (
+        recovered.get("status") != "accepted"
+    ):
+        raise AssertionError(
+            "sent custom finalization must recover one visible pending submit"
+        )
 
 
 with tempfile.TemporaryDirectory(prefix="custom-runtime.") as raw:
@@ -338,17 +408,34 @@ with tempfile.TemporaryDirectory(prefix="custom-runtime.") as raw:
         return subprocess.CompletedProcess(argv, 0, "ok\n", "")
 
     result: list[int] = []
+    class NotificationCmux:
+        def __init__(self) -> None:
+            self.message = ""
+
+        def send(self, _surface: str, message: str) -> None:
+            self.message = message
+
+        def read(self, _surface: str) -> str:
+            anchor = next(
+                (
+                    line.strip()
+                    for line in self.message.splitlines()
+                    if line.strip()
+                ),
+                "",
+            )
+            return f"› {anchor}" if anchor else "›"
+
+        def send_key(self, _surface: str, _key: str) -> None:
+            return None
+
     thread = threading.Thread(
         target=lambda: result.append(
             run_worker(
                 launch.spec_path,
                 poll_seconds=0.02,
                 checkpoint_probe=lambda _surface, _runtime: "checkpoint",
-                cmux_adapter=type(
-                    "Cmux",
-                    (),
-                    {"send": lambda *_args: None, "send_key": lambda *_args: None},
-                )(),
+                cmux_adapter=NotificationCmux(),
                 verification_runner=verify,
                 wake_source=FallbackWakeSource(),
             )

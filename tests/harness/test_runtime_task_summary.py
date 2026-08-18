@@ -293,6 +293,21 @@ class FakeCmux:
     def send(self, surface_id: str, text: str) -> None:
         self.sent.append((surface_id, text))
 
+    def read(self, surface_id: str) -> str:
+        message = next(
+            (
+                text
+                for target, text in reversed(self.sent)
+                if target == surface_id
+            ),
+            "",
+        )
+        anchor = next(
+            (line.strip() for line in message.splitlines() if line.strip()),
+            "",
+        )
+        return f"❯ {anchor}\n› {anchor}" if anchor else "❯\n›"
+
     def send_key(self, surface_id: str, key: str) -> None:
         self.keys.append((surface_id, key))
         if self.key_observer is not None:

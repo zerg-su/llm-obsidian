@@ -472,6 +472,15 @@ class RuntimeWorkerLivenessMixin:
                     )
                 except RuntimeWorkerError:
                     callback_sha256 = ""
+            agent_status = "unknown"
+            status_probe = getattr(self.cmux_adapter, "agent_status", None)
+            if status_probe is not None:
+                try:
+                    agent_status = str(
+                        status_probe(self._workspace_id(), self.spec["runtime"])
+                    )
+                except Exception:
+                    agent_status = "unknown"
             decision = self.liveness_controller.observe(
                 LivenessEvidence(
                     observed_at=getattr(self, "wall_clock", time.time)(),
@@ -485,6 +494,7 @@ class RuntimeWorkerLivenessMixin:
                     receipt_sha256=_current_callback_receipt_sha256(
                         self.spec_path.parent
                     ),
+                    agent_status=agent_status,
                 ),
                 (
                     LivenessPolicy.reviewer()

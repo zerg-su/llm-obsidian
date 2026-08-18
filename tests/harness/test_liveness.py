@@ -77,6 +77,49 @@ check(
     decision.action == "observe" and progressed.last_progress_at == 1300,
 )
 
+semantic_idle = replace(
+    progressed,
+    last_progress_at=1300,
+    agent_status="idle",
+)
+decision, repaint_ignored = observe_liveness(
+    semantic_idle,
+    replace(
+        base,
+        observed_at=1901,
+        screen_sha256="c" * 64,
+        agent_status="idle",
+    ),
+    policy,
+)
+check(
+    "semantic idle prevents status-line repaint from resetting liveness",
+    decision.action == "suspected-idle"
+    and repaint_ignored.last_progress_at == 1300
+    and repaint_ignored.screen_sha256 == "c" * 64,
+)
+
+semantic_attention = replace(
+    progressed,
+    last_progress_at=1300,
+    agent_status="needs-input",
+)
+decision, needs_input_repaint = observe_liveness(
+    semantic_attention,
+    replace(
+        base,
+        observed_at=1901,
+        screen_sha256="d" * 64,
+        agent_status="needs-input",
+    ),
+    policy,
+)
+check(
+    "semantic needs-input prevents repaint from hiding a stalled provider",
+    decision.action == "suspected-idle"
+    and needs_input_repaint.last_progress_at == 1300,
+)
+
 idle_evidence = replace(base, observed_at=1901, screen_sha256="b" * 64)
 decision, idle = observe_liveness(progressed, idle_evidence, policy)
 check(

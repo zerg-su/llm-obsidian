@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -14,6 +15,10 @@ from harness.runtime_session_continuation import (  # noqa: E402
     _editor_digest,
     _screen_digest,
     deliver_continuation,
+)
+from harness.retained_notification import (  # noqa: E402
+    recover_visible_notification,
+    send_visible_notification,
 )
 
 
@@ -40,6 +45,13 @@ class FakePort:
     def send_key(self, surface_id: str, key: str) -> None:
         assert surface_id == SURFACE and key == "Enter"
         self.keys.append(key)
+
+
+class SemanticPort(FakePort):
+    def agent_status(self, workspace_id: str, runtime: str) -> str:
+        assert workspace_id == "22222222-2222-2222-2222-222222222222"
+        assert runtime == "claude"
+        return "idle"
 
 
 def run_case(
@@ -92,6 +104,44 @@ def run_case(
         wait=lambda _seconds: None,
     )
     return result, port, retries, stages
+
+
+delayed = FakePort(["❯", f"❯ {PROMPT.splitlines()[0]}"])
+send_visible_notification(
+    delayed,
+    surface_id=SURFACE,
+    runtime="claude",
+    message=PROMPT,
+    observation_limit=2,
+    wait=lambda _seconds: None,
+)
+assert delayed.sent == [PROMPT] and delayed.keys == ["Enter"]
+print("OK   retained notification waits for editor visibility before Enter")
+
+with tempfile.TemporaryDirectory(prefix="notification-recovery.") as raw:
+    recovery = Path(raw) / "submit-recovery.json"
+    pending = SemanticPort([f"❯ {PROMPT.splitlines()[0]}"])
+    assert recover_visible_notification(
+        pending,
+        surface_id=SURFACE,
+        workspace_id="22222222-2222-2222-2222-222222222222",
+        runtime="claude",
+        message=PROMPT,
+        receipt_path=recovery,
+        identity={"operation_id": "notification-op"},
+    )
+    assert pending.keys == ["Enter"]
+    assert recover_visible_notification(
+        pending,
+        surface_id=SURFACE,
+        workspace_id="22222222-2222-2222-2222-222222222222",
+        runtime="claude",
+        message=PROMPT,
+        receipt_path=recovery,
+        identity={"operation_id": "notification-op"},
+    )
+    assert pending.keys == ["Enter"]
+print("OK   visible sent notification recovery submits exactly once")
 
 
 result, port, retries, stages = run_case(

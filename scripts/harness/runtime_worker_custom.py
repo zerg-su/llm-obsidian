@@ -32,6 +32,10 @@ from .review_continuation_recovery import (
     RecoveryReceipt,
 )
 from .state_machine import transition as transition_operation
+from .retained_notification import (
+    RetainedNotificationError,
+    deliver_worker_notification,
+)
 
 
 @contextmanager
@@ -89,6 +93,24 @@ def _prepared_recovery_receipts(root: Path) -> list[tuple[Path, RecoveryReceipt]
 
 class RuntimeWorkerCustomMixin:
 
+    def _deliver_custom_notification(
+        self,
+        notify_path: Path,
+        marker: dict[str, object],
+        message: str,
+    ) -> None:
+        try:
+            deliver_worker_notification(
+                self,
+                notify_path=notify_path,
+                marker=marker,
+                message=message,
+            )
+        except RetainedNotificationError as exc:
+            raise RuntimeWorkerError(
+                "custom notification delivery or recovery failed"
+            ) from exc
+
     def notify_custom_step(self, request: dict[str, object]) -> None:
         operation_id = str(request["operation_id"])
         notify_path = (
@@ -104,19 +126,13 @@ class RuntimeWorkerCustomMixin:
             "visit": int(request["visit"]),
             "status": "sent",
         }
-        if notify_path.is_file() and (not notify_path.is_symlink()):
-            if json.loads(notify_path.read_text(encoding="utf-8")) != marker:
-                raise RuntimeWorkerError("custom step notification changed")
-            return
         allowed = request["allowed_outcomes"]
         if not isinstance(allowed, list):
             raise RuntimeWorkerError("custom step outcomes are unavailable")
         message = f"Typed custom step {request['step_id']} visit {request['visit']} is ready in .task-pipeline-step-request.json. Complete only this registered step, write its exact evidence/result, choose one of these outcomes: {', '.join((str(item) for item in allowed))}; then publish with pipeline-step-submit.py. Remain in this same session for the next harness-owned transition."
         if len(message.encode()) > 4096:
             raise RuntimeWorkerError("custom step notification exceeds its bound")
-        self.cmux_adapter.send(self.spec["surface_id"], message)
-        self.cmux_adapter.send_key(self.spec["surface_id"], "Enter")
-        self.write_immutable_json(notify_path, marker)
+        self._deliver_custom_notification(notify_path, marker, message)
 
     def notify_custom_finalization(self, receipt_count: int) -> None:
         notify_path = (
@@ -128,14 +144,8 @@ class RuntimeWorkerCustomMixin:
             "receipt_count": receipt_count,
             "status": "sent",
         }
-        if notify_path.is_file() and (not notify_path.is_symlink()):
-            if json.loads(notify_path.read_text(encoding="utf-8")) != marker:
-                raise RuntimeWorkerError("custom finalization notification changed")
-            return
         message = f"All {receipt_count} custom model-step receipts are accepted. Finish the task in this same session, commit the approved result, run only task-specific checks not already owned by the harness, and write the canonical .task-summary.json. The harness now owns configured verification and review."
-        self.cmux_adapter.send(self.spec["surface_id"], message)
-        self.cmux_adapter.send_key(self.spec["surface_id"], "Enter")
-        self.write_immutable_json(notify_path, marker)
+        self._deliver_custom_notification(notify_path, marker, message)
 
     def notify_custom_attention(
         self, outcome: str, receipt: CustomStepReceipt | None

@@ -394,6 +394,7 @@ There is no speculative roadmap in this README. The repository describes what is
 
 | Topic | Document |
 |---|---|
+| v2.8.2 semantic cmux liveness | [v2.8.2 release notes](docs/releases/v2.8.2.md) |
 | v2.8.1 Harness lifecycle stabilization | [v2.8.1 release notes](docs/releases/v2.8.1.md) |
 | v2.8.0 Architecture Workflow v1 | [v2.8.0 release notes](docs/releases/v2.8.0.md) |
 | v2.6.7 RC4 terminal dashboard candidate | [v2.6.7 RC4 release notes](docs/releases/v2.6.7-rc4.md) |

@@ -10,6 +10,7 @@
     "scripts/harness/liveness.py",
     "scripts/harness/pre_model_reviewer_retirement.py",
     "scripts/harness/provider_events.py",
+    "scripts/harness/retained_notification.py",
     "scripts/harness/review_finalization.py",
     "scripts/harness/review_input_rollover.py",
     "scripts/harness/runtime_provider_events.py",
