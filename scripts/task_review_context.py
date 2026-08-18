@@ -39,6 +39,9 @@ from task_review_delta_packet import DeltaPacket, build_delta_packet
 from task_escalation_records import EscalationRecordError, load_amendments
 from task_plan_authority import PlanAuthorityError, TaskPlanAuthority, resolve_plan_authority
 from task_review_resolution_bundle import _bounded_input
+from task_review_authorized_continuation import (
+    _authorized_continuation_inputs,
+)
 from task_review_identity import (
     _current_review_is_quiescent,
     _zero_effect_attention_is_quiescent,
@@ -720,6 +723,9 @@ def _context(
         *amendment_inputs,
         *plan_review_inputs,
     ]
+    inputs.extend(
+        _authorized_continuation_inputs(meta, worktree, runtime_root, head)
+    )
     if boundary_input_sha256:
         boundary_path = Path(
             str(meta.get("review_boundary_input_file") or "")

@@ -28,6 +28,15 @@ packages were published for them.
   verification continuation recovery; the unchanged 27-file contour is pinned
   to its measured 15,796 LOC with zero writable authorities, zero incident
   literals, and no growth allowance.
+- A coordinator-authorized `task-review-runner.py authorized-continuation`
+  primitive binds one exact resolved escalation and amended Outcome Contract to
+  a clean successor HEAD, one immutable full-profile verification receipt, and
+  one fresh Deep review continuation without rewriting task metadata or prior
+  records. Its single production owner and registered entry point move the live
+  scripts ratchet by the exact measured 676 lines to 295 files / 112,132 lines
+  with zero speculative headroom. The unchanged 27-file active-authority
+  contour is remeasured exactly at 15,802 LOC with zero writable authorities,
+  zero incident literals, and zero headroom.
 
 ## [2.8.0] - 2026-08-17
 

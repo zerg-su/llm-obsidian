@@ -399,6 +399,15 @@ owners. The integrated correction moves the live scripts ratchet by exactly one
 file and the measured 738 lines to the 294-file / 111,456-line candidate with
 zero speculative headroom. The additional 26-line drift predates the isolated
 concurrency repair and is admitted by an explicit coordinator decision.
+
+The coordinator-authorized full-profile review continuation adds the single
+``task_review_authorized_continuation.py`` owner and its registered
+``task-review-runner.py authorized-continuation`` entry point. The 676 measured
+production lines validate the exact resolution, amended Outcome Contract,
+clean HEAD, frozen full-profile digest, immutable receipt, and fresh review
+admission without rewriting task metadata or predecessor records. The live
+ceiling is therefore pinned to exactly 295 files / 112,132 lines with no
+speculative headroom.
 """
 
 from __future__ import annotations
@@ -413,14 +422,14 @@ from pathlib import Path
 #: ``architecture_workflow_audit.py`` (the release-owned behavioral evidence
 #: runner and validator, kept out of the frozen legacy eval framework). The
 #: file ceiling therefore moves by exactly three.
-SCRIPT_FILE_CEILING = 294
+SCRIPT_FILE_CEILING = 295
 
 #: Maximum total lines across those files for the 2.8.1 lifecycle candidate.
 #: The line ceiling moves to the measured candidate with zero headroom: those
 #: three modules plus the shared artifact-contract wiring in the existing
 #: carriers, the RC4 governing-source catalogue projection, and the registered
 #: review fix-delta evidence exclusion.
-SCRIPT_LINE_CEILING = 111_456
+SCRIPT_LINE_CEILING = 112_132
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

@@ -144,6 +144,9 @@ from task_review_finalizing import (
     _launch_authorized_task_review,
     recover_finalizing_review,
 )
+from task_review_authorized_continuation import (
+    run_authorized_continuation,
+)
 
 
 
@@ -332,6 +335,13 @@ def parser() -> argparse.ArgumentParser:
     sub = result.add_subparsers(dest="command", required=True)
     run = sub.add_parser("run")
     run.add_argument("--worktree", type=Path, required=True)
+    continuation = sub.add_parser("authorized-continuation")
+    continuation.add_argument("--worktree", type=Path, required=True)
+    continuation.add_argument("--authorization-escalation", required=True)
+    continuation.add_argument("--expected-head", required=True)
+    continuation.add_argument("--verification-profile", required=True)
+    continuation.add_argument("--verification-profile-sha256", required=True)
+    continuation.add_argument("--outcome-contract-sha256", required=True)
     current = sub.add_parser("current")
     current.add_argument("--worktree", type=Path, required=True)
     current.add_argument("--deep", action="store_true")
@@ -374,6 +384,19 @@ def main(
         if args.command == "run":
             result = run_task_review(
                 args.worktree, runtime_manager=runtime_manager
+            )
+        elif args.command == "authorized-continuation":
+            result = run_authorized_continuation(
+                args.worktree,
+                authorization_escalation_id=args.authorization_escalation,
+                expected_head=args.expected_head,
+                verification_profile=args.verification_profile,
+                verification_profile_sha256=(
+                    args.verification_profile_sha256
+                ),
+                outcome_contract_sha256=args.outcome_contract_sha256,
+                review_driver=_run_review,
+                runtime_manager=runtime_manager,
             )
         elif args.command == "current":
             if (
