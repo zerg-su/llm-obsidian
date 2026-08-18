@@ -2597,8 +2597,16 @@ def run_case(
             ATOMIC_SUMMARY_PUBLISHER
             + "import json,pathlib,sys,time\n"
             "summary=pathlib.Path(sys.argv[1])\n"
-            "publish_summary(summary,sys.argv[2],sys.argv[3] if len(sys.argv)>3 else '')\n"
-            "time.sleep(0.3)\n",
+            f"publish_summary(summary,sys.argv[2],sys.argv[3] if {atomic_publication_barrier!r} else '')\n"
+            + (
+                "state=pathlib.Path(sys.argv[3])\n"
+                "for _ in range(2000):\n"
+                "  if (state/'callback-receipt.json').is_file(): break\n"
+                "  time.sleep(0.01)\n"
+                "else: raise SystemExit(8)\n"
+                if restart_after_attention
+                else "time.sleep(0.3)\n"
+            ),
             encoding="utf-8",
         )
     summary_path = worktree / ".task-summary.json"
@@ -2611,6 +2619,12 @@ def run_case(
             *(
                 (str(worktree / ".atomic-summary-publication"),)
                 if atomic_publication_barrier
+                else ()
+            ),
+            *(
+                (str(root / f"state-{operation_id}"),)
+                if restart_after_attention
+                and pipeline_name != "engineering/fix"
                 else ()
             ),
             *(
