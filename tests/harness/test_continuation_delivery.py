@@ -5,6 +5,11 @@ from __future__ import annotations
 
 import sys
 import tempfile
+import json
+import multiprocessing
+import os
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 
@@ -17,6 +22,8 @@ from harness.runtime_session_continuation import (  # noqa: E402
     deliver_continuation,
 )
 from harness.retained_notification import (  # noqa: E402
+    RetainedNotificationError,
+    deliver_worker_notification,
     recover_visible_notification,
     send_visible_notification,
 )
@@ -52,6 +59,20 @@ class SemanticPort(FakePort):
         assert workspace_id == "22222222-2222-2222-2222-222222222222"
         assert runtime == "claude"
         return "idle"
+
+
+class FakeWorker:
+    def __init__(self, port: FakePort) -> None:
+        self.cmux_adapter = port
+        self.spec = {"surface_id": SURFACE, "runtime": "codex"}
+
+    def _workspace_id(self) -> str:
+        return "22222222-2222-2222-2222-222222222222"
+
+    @staticmethod
+    def write_immutable_json(path: Path, value: object) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(value), encoding="utf-8")
 
 
 def run_case(
@@ -142,6 +163,214 @@ with tempfile.TemporaryDirectory(prefix="notification-recovery.") as raw:
     )
     assert pending.keys == ["Enter"]
 print("OK   visible sent notification recovery submits exactly once")
+
+
+class CodexSemanticPort(FakePort):
+    def agent_status(self, workspace_id: str, runtime: str) -> str:
+        assert workspace_id == "22222222-2222-2222-2222-222222222222"
+        assert runtime == "codex"
+        return "idle"
+
+
+stale_direct = CodexSemanticPort(
+    ["› [Pasted Content 7 chars]", "› [Pasted Content 7 chars]"]
+)
+try:
+    send_visible_notification(
+        stale_direct,
+        surface_id=SURFACE,
+        runtime="codex",
+        message="This is a different exact notification",
+        observation_limit=1,
+        wait=lambda _seconds: None,
+    )
+except RetainedNotificationError:
+    pass
+else:
+    raise AssertionError("direct stale Codex placeholder authorized Enter")
+assert stale_direct.keys == []
+print("OK   direct delivery rejects a stale Codex placeholder")
+
+
+with tempfile.TemporaryDirectory(prefix="notification-stale-placeholder.") as raw:
+    notify = Path(raw) / "notify.json"
+    stale = CodexSemanticPort(
+        ["› [Pasted Content 7 chars]", "› [Pasted Content 7 chars]"]
+    )
+    try:
+        deliver_worker_notification(
+            FakeWorker(stale),
+            notify_path=notify,
+            marker={"schema_version": 1, "operation_id": "stale"},
+            message="This is a different exact notification",
+        )
+    except RetainedNotificationError:
+        pass
+    else:
+        raise AssertionError("stale Codex placeholder authorized Enter")
+    assert stale.sent == ["This is a different exact notification"]
+    assert stale.keys == [] and not notify.exists()
+print("OK   stale Codex placeholder cannot prove the current notification")
+
+
+with tempfile.TemporaryDirectory(prefix="notification-delayed-paste.") as raw:
+    notify = Path(raw) / "notify.json"
+    port = CodexSemanticPort(["› old", "› old"])
+    worker = FakeWorker(port)
+    marker = {"schema_version": 1, "operation_id": "delayed"}
+    try:
+        deliver_worker_notification(
+            worker,
+            notify_path=notify,
+            marker=marker,
+            message=PROMPT,
+        )
+    except RetainedNotificationError:
+        pass
+    else:
+        raise AssertionError("late paste unexpectedly completed immediately")
+    assert port.sent == [PROMPT] and port.keys == []
+    port.screens = ["› # Harness-owned review verification"]
+    deliver_worker_notification(
+        worker,
+        notify_path=notify,
+        marker=marker,
+        message=PROMPT,
+    )
+    assert port.sent == [PROMPT] and port.keys == ["Enter"] and notify.is_file()
+print("OK   delayed paste resumes without a second paste")
+
+
+class CrashAfterPastePort(CodexSemanticPort):
+    def send(self, surface_id: str, text: str) -> None:
+        super().send(surface_id, text)
+        raise RuntimeError("crash after paste")
+
+
+with tempfile.TemporaryDirectory(prefix="notification-paste-crash.") as raw:
+    notify = Path(raw) / "notify.json"
+    port = CrashAfterPastePort(["› old"])
+    worker = FakeWorker(port)
+    marker = {"schema_version": 1, "operation_id": "paste-crash"}
+    try:
+        deliver_worker_notification(
+            worker, notify_path=notify, marker=marker, message=PROMPT
+        )
+    except RuntimeError as exc:
+        assert str(exc) == "crash after paste"
+    else:
+        raise AssertionError("paste crash did not interrupt delivery")
+    try:
+        deliver_worker_notification(
+            worker, notify_path=notify, marker=marker, message=PROMPT
+        )
+    except RetainedNotificationError:
+        pass
+    else:
+        raise AssertionError("uncertain paste was replayed")
+    assert port.sent == [PROMPT] and port.keys == [] and not notify.exists()
+print("OK   paste crash stays fail-closed without a second paste")
+
+
+class CrashAfterNotificationEnterPort(CodexSemanticPort):
+    def send_key(self, surface_id: str, key: str) -> None:
+        super().send_key(surface_id, key)
+        raise RuntimeError("crash after notification Enter")
+
+
+with tempfile.TemporaryDirectory(prefix="notification-enter-crash.") as raw:
+    notify = Path(raw) / "notify.json"
+    port = CrashAfterNotificationEnterPort(
+        ["› old", "› # Harness-owned review verification"]
+    )
+    worker = FakeWorker(port)
+    marker = {"schema_version": 1, "operation_id": "enter-crash"}
+    try:
+        deliver_worker_notification(
+            worker, notify_path=notify, marker=marker, message=PROMPT
+        )
+    except RuntimeError as exc:
+        assert str(exc) == "crash after notification Enter"
+    else:
+        raise AssertionError("Enter crash did not interrupt delivery")
+    try:
+        deliver_worker_notification(
+            worker, notify_path=notify, marker=marker, message=PROMPT
+        )
+    except RetainedNotificationError:
+        pass
+    else:
+        raise AssertionError("uncertain Enter was replayed")
+    assert port.sent == [PROMPT] and port.keys == ["Enter"] and not notify.exists()
+print("OK   Enter crash stays fail-closed without a second key")
+
+
+with tempfile.TemporaryDirectory(prefix="notification-concurrent-recovery.") as raw:
+    recovery = Path(raw) / "submit-recovery.json"
+    port = SemanticPort([f"❯ {PROMPT.splitlines()[0]}"] * 2)
+    start = threading.Barrier(2)
+
+    def concurrent_recovery() -> bool:
+        start.wait()
+        return recover_visible_notification(
+            port,
+            surface_id=SURFACE,
+            workspace_id="22222222-2222-2222-2222-222222222222",
+            runtime="claude",
+            message=PROMPT,
+            receipt_path=recovery,
+            identity={"operation_id": "concurrent-op"},
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda _index: concurrent_recovery(), range(2)))
+    assert results == [True, True]
+    assert port.keys == ["Enter"]
+    assert json.loads(recovery.read_text(encoding="utf-8"))["status"] == "accepted"
+print("OK   concurrent recovery linearizes one Enter")
+
+
+with tempfile.TemporaryDirectory(prefix="notification-process-recovery.") as raw:
+    recovery = Path(raw) / "submit-recovery.json"
+    key_log = Path(raw) / "keys.log"
+    context = multiprocessing.get_context("fork")
+    start = context.Barrier(2)
+
+    def process_recovery() -> None:
+        class ProcessPort:
+            def agent_status(self, workspace_id: str, runtime: str) -> str:
+                return "idle"
+
+            def read(self, surface_id: str) -> str:
+                return f"❯ {PROMPT.splitlines()[0]}"
+
+            def send_key(self, surface_id: str, key: str) -> None:
+                descriptor = os.open(key_log, os.O_CREAT | os.O_APPEND | os.O_WRONLY, 0o600)
+                try:
+                    os.write(descriptor, b"Enter\n")
+                    os.fsync(descriptor)
+                finally:
+                    os.close(descriptor)
+
+        start.wait()
+        assert recover_visible_notification(
+            ProcessPort(),
+            surface_id=SURFACE,
+            workspace_id="22222222-2222-2222-2222-222222222222",
+            runtime="claude",
+            message=PROMPT,
+            receipt_path=recovery,
+            identity={"operation_id": "process-op"},
+        )
+
+    processes = [context.Process(target=process_recovery) for _index in range(2)]
+    for process in processes:
+        process.start()
+    for process in processes:
+        process.join(10)
+        assert process.exitcode == 0
+    assert key_log.read_text(encoding="utf-8").splitlines() == ["Enter"]
+print("OK   cross-process recovery linearizes one Enter")
 
 
 result, port, retries, stages = run_case(

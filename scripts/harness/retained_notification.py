@@ -2,26 +2,37 @@
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
-import re
 import tempfile
+import threading
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Callable, Mapping, Protocol
+from typing import Callable, Iterator, Mapping, Protocol
 
 from .runtime_session_continuation import (
+    _editor_digest,
+    _editor_state,
     _prompt_anchor,
     await_initial_input_visible,
-    classify_continuation_screen,
+    deliver_continuation,
 )
 
 
-SHA256 = re.compile(r"[0-9a-f]{64}\Z")
+DELIVERY_STAGES = frozenset(
+    {"paste-reserved", "transport-accepted", "submit-reserved", "submit-accepted"}
+)
+_PROCESS_NOTIFICATION_LOCK = threading.Lock()
 
 
 class RetainedNotificationError(RuntimeError):
     pass
+
+
+class _NotificationSubmitted(RuntimeError):
+    """Internal control flow after the durable submit acceptance is published."""
 
 
 class NotificationPort(Protocol):
@@ -63,6 +74,44 @@ def _identity_sha256(identity: Mapping[str, object]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+@contextmanager
+def _receipt_lock(receipt_path: Path) -> Iterator[None]:
+    """Serialize one notification effect across threads and worker processes."""
+
+    receipt_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    lock_path = receipt_path.with_name(f".{receipt_path.name}.lock")
+    if lock_path.is_symlink():
+        raise RetainedNotificationError("notification receipt lock is invalid")
+    with _PROCESS_NOTIFICATION_LOCK:
+        descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+            yield
+        finally:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+            os.close(descriptor)
+
+
+def _read_receipt(
+    path: Path, expected: Mapping[str, object]
+) -> dict[str, object] | None:
+    if path.is_symlink():
+        raise RetainedNotificationError(
+            "notification recovery receipt cannot be a symlink"
+        )
+    if not path.is_file():
+        return None
+    try:
+        current = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RetainedNotificationError("notification recovery receipt is invalid") from exc
+    if not isinstance(current, dict) or any(
+        current.get(key) != value for key, value in expected.items()
+    ):
+        raise RetainedNotificationError("notification recovery identity changed")
+    return current
+
+
 def send_visible_notification(
     port: NotificationPort,
     *,
@@ -75,6 +124,7 @@ def send_visible_notification(
 ) -> None:
     """Paste once, prove editor visibility, then submit exactly one Enter."""
 
+    before_screen = port.read(surface_id)
     port.send(surface_id, message)
     kwargs: dict[str, object] = {}
     if wait is not None:
@@ -84,6 +134,7 @@ def send_visible_notification(
         surface_id=surface_id,
         runtime=runtime,
         text=message,
+        before_editor_sha256=_editor_digest(runtime, before_screen),
         observation_limit=observation_limit,
         observation_interval_seconds=observation_interval_seconds,
         **kwargs,
@@ -119,46 +170,115 @@ def recover_visible_notification(
         "identity": dict(identity),
         "identity_sha256": digest,
     }
-    if receipt_path.is_symlink():
-        raise RetainedNotificationError(
-            "notification recovery receipt cannot be a symlink"
-        )
-    if receipt_path.is_file():
-        try:
-            current = json.loads(receipt_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
+    with _receipt_lock(receipt_path):
+        current = _read_receipt(receipt_path, expected)
+        if current is not None:
+            if current.get("status") == "accepted":
+                return True
             raise RetainedNotificationError(
-                "notification recovery receipt is invalid"
-            ) from exc
-        if not isinstance(current, dict) or any(
-            current.get(key) != value for key, value in expected.items()
-        ):
-            raise RetainedNotificationError(
-                "notification recovery identity changed"
+                "notification submit effect is uncertain"
             )
-        if current.get("status") == "accepted":
-            return True
-        raise RetainedNotificationError(
-            "notification submit effect is uncertain"
-        )
 
-    status_probe = getattr(port, "agent_status", None)
-    if status_probe is None:
-        return False
-    try:
-        status = str(status_probe(workspace_id, runtime))
-        screen = port.read(surface_id)
-    except Exception:
-        return False
-    anchor = _prompt_anchor(message)
-    if status not in {"idle", "needs-input"} or (
-        classify_continuation_screen(runtime, screen, anchor) != "input-ready"
-    ):
-        return False
-    _atomic_json(receipt_path, {**expected, "status": "reserved"})
-    port.send_key(surface_id, "Enter")
-    _atomic_json(receipt_path, {**expected, "status": "accepted"})
-    return True
+        status_probe = getattr(port, "agent_status", None)
+        if status_probe is None:
+            return False
+        try:
+            status = str(status_probe(workspace_id, runtime))
+            screen = port.read(surface_id)
+        except Exception:
+            return False
+        anchor = _prompt_anchor(message)
+        exact_editor = any(
+            anchor and anchor in line for line in _editor_state(runtime, screen)
+        )
+        if status not in {"idle", "needs-input"} or not exact_editor:
+            return False
+        _atomic_json(receipt_path, {**expected, "status": "reserved"})
+        port.send_key(surface_id, "Enter")
+        _atomic_json(receipt_path, {**expected, "status": "accepted"})
+        return True
+
+
+def _deliver_new_notification(
+    port: NotificationPort,
+    *,
+    surface_id: str,
+    runtime: str,
+    message: str,
+    receipt_path: Path,
+    identity: Mapping[str, object],
+) -> None:
+    """Run one write-ahead notification delivery under its effect lock."""
+
+    digest = _identity_sha256(identity)
+    expected = {
+        "schema_version": 1,
+        "identity": dict(identity),
+        "identity_sha256": digest,
+    }
+    with _receipt_lock(receipt_path):
+        current = _read_receipt(receipt_path, expected)
+        stage = str(current.get("stage") or "") if current is not None else ""
+        if stage and stage not in DELIVERY_STAGES:
+            raise RetainedNotificationError("notification delivery stage is invalid")
+        if stage == "paste-reserved" or stage == "submit-reserved":
+            raise RetainedNotificationError(
+                "notification delivery effect is uncertain"
+            )
+        if stage == "submit-accepted":
+            return
+
+        def observe_stage(
+            next_stage: str,
+            submit_count: int,
+            pre_screen_sha256: str,
+            pre_editor_sha256: str,
+            paste_screen_sha256: str,
+        ) -> None:
+            if next_stage not in DELIVERY_STAGES:
+                return
+            _atomic_json(
+                receipt_path,
+                {
+                    **expected,
+                    "stage": next_stage,
+                    "submit_count": submit_count,
+                    "pre_screen_sha256": pre_screen_sha256,
+                    "pre_editor_sha256": pre_editor_sha256,
+                    "paste_screen_sha256": paste_screen_sha256,
+                },
+            )
+            if next_stage == "submit-accepted":
+                raise _NotificationSubmitted
+
+        try:
+            result = deliver_continuation(
+                port,
+                surface_id=surface_id,
+                prompt=message,
+                runtime=runtime,
+                artifact_ready=lambda: False,
+                ownership_ready=lambda: True,
+                reserve_retry=lambda: False,
+                observe_stage=observe_stage,
+                send_prompt=current is None,
+                pre_send_screen_sha256=(
+                    str(current.get("pre_screen_sha256") or "") if current else ""
+                ),
+                pre_send_editor_sha256=(
+                    str(current.get("pre_editor_sha256") or "") if current else ""
+                ),
+                observation_limit=40,
+                observation_interval_seconds=0.05,
+            )
+        except _NotificationSubmitted:
+            return
+        settled = _read_receipt(receipt_path, expected)
+        if settled is not None and settled.get("stage") == "submit-accepted":
+            return
+        raise RetainedNotificationError(
+            f"retained notification delivery is incomplete: {result.evidence}"
+        )
 
 
 def deliver_worker_notification(
@@ -213,10 +333,18 @@ def deliver_worker_notification(
     writer = getattr(worker, "write_immutable_json", None)
     if writer is None:
         raise RetainedNotificationError("notification worker writer is unavailable")
-    send_visible_notification(
+    identity = {
+        "operation_id": str(marker.get("operation_id") or ""),
+        "message_sha256": hashlib.sha256(message.encode()).hexdigest(),
+        "notification": notify_path.name,
+    }
+    delivery_path = notify_path.with_name(f"{notify_path.stem}-delivery.json")
+    _deliver_new_notification(
         port,
         surface_id=str(spec["surface_id"]),
         runtime=str(spec["runtime"]),
         message=message,
+        receipt_path=delivery_path,
+        identity=identity,
     )
     writer(notify_path, dict(marker))

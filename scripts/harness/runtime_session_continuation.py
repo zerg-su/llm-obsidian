@@ -237,7 +237,10 @@ def await_initial_input_visible(
             runtime, screen, anchor
         )
         if state == "input-ready":
-            return True
+            if not before_editor_sha256 or (
+                _editor_digest(runtime, screen) != before_editor_sha256
+            ):
+                return True
         if state == "permission":
             return False
         if (

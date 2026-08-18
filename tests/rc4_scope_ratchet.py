@@ -453,9 +453,10 @@ exactly 295 files / 112,382 lines with no speculative headroom.
 
 The 2.8.2 semantic cmux liveness repair adds the single cohesive
 ``retained_notification.py`` transport owner, strict provider-status decoding,
-and bounded liveness/worker integration. The exact measured production cost is
-one file and 305 lines, so the live ceiling is pinned to exactly
-296 files / 112,687 lines with no speculative headroom.
+and bounded liveness/worker integration. The Sol review hardening adds the
+identity-bound write-ahead stages plus thread/process linearization. The exact
+measured production cost is one file and 436 lines, so the live ceiling is
+pinned to exactly 296 files / 112,818 lines with no speculative headroom.
 """
 
 from __future__ import annotations
@@ -478,7 +479,7 @@ SCRIPT_FILE_CEILING = 296
 #: carriers, the RC4 governing-source catalogue projection, the registered
 #: review fix-delta evidence exclusion, and the authorized-continuation
 #: failed-receipt attention handoff with its applied review findings.
-SCRIPT_LINE_CEILING = 112_687
+SCRIPT_LINE_CEILING = 112_818
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:
