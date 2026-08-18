@@ -59,7 +59,16 @@ def _editor_state(runtime: str, screen: str) -> tuple[str, ...]:
     if not marker:
         return ()
     lines = [" ".join(line.strip().split()) for line in screen.splitlines()]
-    return tuple(line for line in lines[-24:] if line.startswith(marker))
+    editor_lines: list[str] = []
+    for line in lines[-24:]:
+        if line.startswith(marker):
+            editor_lines.append(line)
+            continue
+        marker_index = line.find(marker)
+        prefix = line[:marker_index].strip() if marker_index >= 0 else ""
+        if prefix and set(prefix) <= {"─", "━", "═"}:
+            editor_lines.append(line[marker_index:])
+    return tuple(editor_lines)
 
 
 def _editor_digest(runtime: str, screen: str) -> str:

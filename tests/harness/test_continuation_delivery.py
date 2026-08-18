@@ -205,6 +205,29 @@ class CodexNeedsInputPort(CodexSemanticPort):
         return "needs-input"
 
 
+with tempfile.TemporaryDirectory(prefix="notification-coalesced-editor.") as raw:
+    recovery = Path(raw) / "submit-recovery.json"
+    coalesced = ClaudeNeedsInputPort(
+        [
+            f"{'─' * 120}❯ {PROMPT.splitlines()[0]}"
+            "────────────────────────────────────────\n"
+            "  ╭─ task branch · Sonnet · effort medium\n"
+            "  ├─ CTX  8%"
+        ]
+    )
+    assert recover_visible_notification(
+        coalesced,
+        surface_id=SURFACE,
+        workspace_id="22222222-2222-2222-2222-222222222222",
+        runtime="claude",
+        message=PROMPT,
+        receipt_path=recovery,
+        identity={"operation_id": "coalesced-editor"},
+    )
+    assert coalesced.keys == ["Enter"]
+print("OK   coalesced Claude separator retains current editor recovery")
+
+
 dialog_cases = (
     (
         "claude-recognized",

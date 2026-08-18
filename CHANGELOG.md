@@ -23,8 +23,8 @@ packages were published for them.
   A durable, identity-bound recovery may submit an already-visible historical
   notification once without re-pasting it or replaying accepted model steps.
 - The active lifecycle-authority contour is truthfully rebaselined to the exact
-  28-file / 16,080-LOC candidate, and the live scripts ratchet to the exact
-  296-file / 112,687-line candidate, both with zero speculative headroom.
+  28-file / 16,207-LOC candidate, and the live scripts ratchet to the exact
+  296-file / 112,826-line candidate, both with zero speculative headroom.
 
 ## [2.8.1] - 2026-08-18
 

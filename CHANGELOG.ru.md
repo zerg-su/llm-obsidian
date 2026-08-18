@@ -29,7 +29,7 @@
   `Enter`. Durable identity-bound recovery может один раз отправить уже видимый
   исторический prompt без повторной вставки и без replay принятых model steps.
 - Контур active lifecycle authority правдиво перемерен на точный кандидат
-  28 файлов / 16 080 LOC, а live ratchet scripts — на 296 файлов / 112 687
+  28 файлов / 16 207 LOC, а live ratchet scripts — на 296 файлов / 112 826
   строк; оба значения зафиксированы без спекулятивного запаса.
 
 ## [2.8.1] - 2026-08-18
