@@ -2512,6 +2512,8 @@ def run_case(
             "    output=root/row['output_pointer']\n"
             "    output.parent.mkdir(parents=True,exist_ok=True)\n"
             "    output.write_text(f'{iteration}:{expected} evidence\\n',encoding='utf-8')\n"
+            "    if expected=='minimal-fix' and (iteration==0 or not (root/'.null-change-retry').is_file()):\n"
+            "      subprocess.run(['git','commit','--allow-empty','-m',f'provider pass {iteration + 1}'],cwd=root,text=True,capture_output=True,check=True)\n"
             "    head=subprocess.run(['git','rev-parse','HEAD'],cwd=root,text=True,capture_output=True,check=True).stdout.strip()\n"
             "    payload={key:row[key] for key in ('schema_version','parent_operation_id','definition_sha256','step_id','iteration','input_schema','input_sha256','input_head_sha','prior_receipt_sha256','verification_sha256','output_schema')}\n"
             "    payload.update({'output_pointer':row['output_pointer'],'output_sha256':hashlib.sha256(output.read_bytes()).hexdigest(),'head_sha':head,'status':'complete'})\n"
@@ -2528,9 +2530,8 @@ def run_case(
             "    if marker.is_file(): break\n"
             "    time.sleep(0.01)\n"
             "  else: raise SystemExit(5)\n"
-            "  if iteration==0 or not (root/'.null-change-retry').is_file():\n"
-            "    subprocess.run(['git','commit','--allow-empty','-m',f'provider pass {iteration + 1}'],cwd=root,text=True,capture_output=True,check=True)\n"
             "  publish_summary(summary,sys.argv[6] if iteration and len(sys.argv)>6 else sys.argv[2])\n"
+            "  publish_summary(state/'pipeline-fix'/f'provider-pass-{iteration}-summary-published.json',json.dumps({'schema_version':1,'iteration':iteration,'summary_sha256':hashlib.sha256(summary.read_bytes()).hexdigest()},sort_keys=True)+'\\n')\n"
             "publish_summary(state/'pipeline-fix'/'provider-final-summary-published.json',json.dumps({'schema_version':1,'iteration':passes-1,'summary_sha256':hashlib.sha256(summary.read_bytes()).hexdigest()},sort_keys=True)+'\\n')\n"
             "if (root/'.provider-await-final-callback').is_file():\n"
             "  for _ in range(2000):\n"
@@ -2538,7 +2539,7 @@ def run_case(
             "    time.sleep(0.01)\n"
             "  else: raise SystemExit(6)\n"
             "else:\n"
-            "  for _ in range(2000):\n"
+            "  for _ in range(6000):\n"
             "    if (state/'pipeline-fix'/'provider-terminal-observed').is_file(): break\n"
             "    time.sleep(0.01)\n"
             "  else: raise SystemExit(7)\n",
@@ -2772,8 +2773,8 @@ def run_case(
         RuntimeWorkerExecution.inspect_task_summary = (
             observe_summary_publication
         )
-    thread = threading.Thread(
-        target=lambda: result.append(
+    def run_fixture_worker() -> None:
+        result.append(
             run_worker(
                 launch.spec_path,
                 poll_seconds=0.02,
@@ -2785,7 +2786,8 @@ def run_case(
                 monotonic_clock=monotonic_clock,
             )
         )
-    )
+
+    thread = threading.Thread(target=run_fixture_worker)
     thread.start()
     atomic_publication_evidence: dict[str, object] = {}
     phase_callback_publication_evidence: dict[str, object] = {}
@@ -2901,20 +2903,24 @@ def run_case(
     # boundary, which at the fixture's 0.02s poll cadence needs headroom a
     # one-pass corridor never does.
     join_timeout = (
-        max(12, 6 * fix_retry_passes)
+        max(30, 12 * fix_retry_passes)
         if wake_source is not None or fix_retry_passes
         else 8
     )
+    final_publication_path = (
+        launch.spec_path.parent
+        / "pipeline-fix"
+        / "provider-final-summary-published.json"
+    )
+    verification_receipts: list[dict[str, object]] = []
+    final_retry_replacement_count = 0
+    retry_resume_pending = False
+    rearmed_pass_publications: set[int] = set()
     if fix_retry_passes and not await_final_callback:
         deadline = time.monotonic() + join_timeout
         while True:
             current = store.read("owner-1", operation_id)
             final_publication_matches = False
-            final_publication_path = (
-                launch.spec_path.parent
-                / "pipeline-fix"
-                / "provider-final-summary-published.json"
-            )
             if final_publication_path.is_file():
                 final_publication = json.loads(
                     final_publication_path.read_text(encoding="utf-8")
@@ -2935,12 +2941,59 @@ def run_case(
                         "final provider publication identity changed"
                     )
                 final_publication_matches = True
+            pass_publications: dict[int, dict[str, object]] = {}
+            for publication_path in (
+                launch.spec_path.parent / "pipeline-fix"
+            ).glob("provider-pass-*-summary-published.json"):
+                publication = json.loads(
+                    publication_path.read_text(encoding="utf-8")
+                )
+                iteration = publication.get("iteration")
+                if type(iteration) is not int or iteration not in range(
+                    fix_retry_passes
+                ):
+                    raise AssertionError(
+                        "provider pass publication identity changed"
+                    )
+                expected_summary = (
+                    fix_retry_summary
+                    if iteration and fix_retry_summary is not None
+                    else summary
+                )
+                if publication != {
+                    "schema_version": 1,
+                    "iteration": iteration,
+                    "summary_sha256": hashlib.sha256(
+                        json.dumps(expected_summary, sort_keys=True).encode()
+                    ).hexdigest(),
+                }:
+                    raise AssertionError(
+                        "provider pass publication content changed"
+                    )
+                pass_publications[iteration] = publication
             verification_receipts = [
                 json.loads(path.read_text(encoding="utf-8"))
                 for path in (
                     launch.spec_path.parent / "pipeline-verification"
                 ).glob("*/receipt.json")
             ]
+            if (
+                not fix_retry_null_change
+                and bool(
+                    set(pass_publications) - rearmed_pass_publications
+                )
+                and current.state == "attention-required"
+                and current.attention_reason
+                == AttentionReason.ATTENTION_REQUIRED
+            ):
+                store.transition(
+                    "owner-1",
+                    operation_id,
+                    current.resume_state or "awaiting-callback",
+                )
+                current = store.read("owner-1", operation_id)
+                retry_resume_pending = True
+                rearmed_pass_publications.update(pass_publications)
             if fix_retry_null_change:
                 attention = load_attention(worktree)
                 exact_final_outcome = (
@@ -2954,13 +3007,34 @@ def run_case(
                     and attention.get("allowed_decisions")
                     == ["stop", "retry-with-scope"]
                 )
+            elif completion_policy == "autonomous":
+                terminal_path = (
+                    launch.spec_path.parent
+                    / "pipeline-fix"
+                    / "terminal-exhausted.json"
+                )
+                terminal = (
+                    json.loads(terminal_path.read_text(encoding="utf-8"))
+                    if terminal_path.is_file()
+                    else None
+                )
+                exact_final_outcome = (
+                    current.state == "failed"
+                    and isinstance(terminal, dict)
+                    and terminal.get("schema_version") == 1
+                    and terminal.get("operation_id") == operation_id
+                    and terminal.get("completion_policy") == "autonomous"
+                    and terminal.get("total_pass_limit")
+                    == total_pass_limit
+                    and terminal.get("completed_passes")
+                    == fix_retry_passes
+                    and terminal.get("status") == "retry-exhausted"
+                )
             else:
                 exact_final_outcome = (
-                    len(verification_receipts) == fix_retry_passes
-                    and all(
-                        receipt.get("status") == "failed"
-                        for receipt in verification_receipts
-                    )
+                    current.state == "attention-required"
+                    and current.attention_reason
+                    == AttentionReason.RETRY_EXHAUSTED
                 )
             if final_publication_matches and exact_final_outcome:
                 (
@@ -2971,6 +3045,42 @@ def run_case(
                     f"pass-{fix_retry_passes - 1}\n", encoding="utf-8"
                 )
             if not thread.is_alive():
+                if (
+                    not fix_retry_null_change
+                    and not exact_final_outcome
+                    and retry_resume_pending
+                    and final_retry_replacement_count < fix_retry_passes
+                ):
+                    thread = threading.Thread(target=run_fixture_worker)
+                    thread.start()
+                    final_retry_replacement_count += 1
+                    retry_resume_pending = False
+                    continue
+                if (
+                    not fix_retry_null_change
+                    and current.state == "attention-required"
+                    and current.attention_reason
+                    == AttentionReason.ATTENTION_REQUIRED
+                    and final_retry_replacement_count < fix_retry_passes
+                ):
+                    remaining = deadline - time.monotonic()
+                    if remaining > 0:
+                        time.sleep(min(0.05, remaining))
+                        continue
+                if (
+                    not fix_retry_null_change
+                    and final_publication_matches
+                    and not exact_final_outcome
+                ):
+                    raise AssertionError(
+                        "final retry worker stopped before its terminal outcome: "
+                        f"operation_id={operation_id} state={current.state} "
+                        f"revision={current.revision} "
+                        f"attention_reason={current.attention_reason} "
+                        f"replacement_count={final_retry_replacement_count} "
+                        f"verification_statuses="
+                        f"{[row.get('status') for row in verification_receipts]}"
+                    )
                 break
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -2984,7 +3094,10 @@ def run_case(
             "runtime worker exceeded the bounded fixture join: "
             f"operation_id={operation_id} state={current.state} "
             f"revision={current.revision} "
-            f"attention_reason={current.attention_reason}"
+            f"attention_reason={current.attention_reason} "
+            f"final_publication={final_publication_path.is_file()} "
+            f"verification_statuses="
+            f"{[row.get('status') for row in verification_receipts]}"
         )
     if not result:
         raise AssertionError(
@@ -4543,7 +4656,20 @@ def run_focused_autonomous_limit_corridor(
         and terminal_exhausted["status"] == "retry-exhausted"
         and terminal_exhausted["total_pass_limit"] == 3
         and not (state / "callback-error.json").exists(),
-        (parent, terminal_exhausted),
+        (
+            rc,
+            parent,
+            terminal_exhausted,
+            (
+                json.loads(
+                    (state / "callback-error.json").read_text(
+                        encoding="utf-8"
+                    )
+                )
+                if (state / "callback-error.json").is_file()
+                else None
+            ),
+        ),
     )
 
 
