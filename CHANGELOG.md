@@ -37,6 +37,19 @@ packages were published for them.
   with zero speculative headroom. The unchanged 27-file active-authority
   contour is remeasured exactly at 15,802 LOC with zero writable authorities,
   zero incident literals, and zero headroom.
+- A durable failed authorized-continuation receipt now hands off instead of
+  raising an untyped error: it derives the standard identity-bound
+  `.task-verification.json` attention packet from the immutable receipt and
+  publishes it idempotently, and repeated consumption of that same failed
+  identity is served from the durable receipt without executing any profile
+  command or binding a review. Because the bounded authorization allows at most
+  one receipt per exact clean HEAD, the packet offers only `escalate`. The
+  registered continuation owner grows by the exact measured 114 lines to
+  295 files / 112,246 lines with zero speculative headroom; the 27-file
+  active-authority contour is untouched at 15,802 LOC.
+- The installed `architecture` and `decompose` skills are registered in
+  `wiki/meta/daily-pipeline-guide.md`, closing the catalog drift that failed
+  `validate-vault.py --summary` inside the full verification profile.
 
 ## [2.8.0] - 2026-08-17
 

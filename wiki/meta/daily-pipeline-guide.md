@@ -2,7 +2,7 @@
 type: meta
 title: "daily-pipeline-guide"
 created: 2026-07-05
-updated: 2026-08-07
+updated: 2026-08-18
 tags:
   - meta
   - guide
@@ -16,6 +16,7 @@ sessions:
   - 019f72c4-816e-7200-a399-505adaa350e0
   - 019f6ddd-d07e-7a30-b018-f6358753fb91
   - 019fab00-3160-7380-8920-4b20183afb76
+  - 01a00f72-9924-7b20-bfdb-b2f34d433f9b
 ---
 
 # Daily Pipeline Guide
@@ -63,6 +64,8 @@ sessions:
 
 ### Инженерная работа
 
+- **architecture** — оркестрация project-артефактов архитектуры и Design Frontier: разрешить активный проект, остаться read-only на discovery/reasoning/handoff, не заменять delivery-карриеры.
+- **decompose** — Work Item DAG из принятого знания проекта: MAP → ACCEPT → авторизованный MATERIALIZE; владеет Planning Frontier, не архитектурой и не file-level планом.
 - **design** — уточнить домен и выбрать минимальный дизайн до реализации.
 - **codebase-design** — спроектировать или углубить границы модулей, durable interfaces и test seams без pass-through дробления.
 - **implementation-plan** — разложить утверждённый outcome/design на owned `consumes`/`produces` TDD-слайсы и evidence.
@@ -85,4 +88,4 @@ sessions:
 
 - Новый материал: `ingest <источник>` → `lint the wiki` (раз в неделю) → `/wiki-fold` (по нуджу).
 - Рабочий день: `/journal` утром → `agenda scan` и при необходимости `agenda collect` → работа с `/save` → `/daily` вечером.
-- Большая задача: `/clarify` → `/design`/`codebase-design` → `implementation-plan` → `/dispatch` → автоматический `/review` → `/reap` результата.
+- Большая задача: `/clarify` → `/architecture` (проект целиком) → `/decompose` до принятых Work Item'ов → `/design`/`codebase-design` → `implementation-plan` → `/dispatch` → автоматический `/review` → `/reap` результата.

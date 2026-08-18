@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import subprocess
 import sys
@@ -15,6 +16,7 @@ from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[2]
+RESUBMIT = ROOT / "scripts" / "pipeline-verification-resubmit.py"
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from harness.contracts import OperationSpec, RuntimeRoute  # noqa: E402
@@ -26,6 +28,18 @@ from task_review_authorized_continuation import (  # noqa: E402
     run_authorized_continuation,
 )
 from task_review_context import _authorized_continuation_inputs  # noqa: E402
+
+
+def load_resubmit_module():
+    """Validate published packets with the real standard packet consumer."""
+
+    spec = importlib.util.spec_from_file_location(
+        "pipeline_verification_resubmit", RESUBMIT
+    )
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def check(label: str, value: bool) -> None:
@@ -321,5 +335,133 @@ with tempfile.TemporaryDirectory(prefix="authorized-review-continuation.") as ra
         else:
             raise AssertionError("changed HEAD reused continuation authority")
     check("changed HEAD fails before another receipt or review invocation", len(review_calls) == 1)
+
+    resubmit = load_resubmit_module()
+    (worktree / "handoff.txt").write_text("handoff\n", encoding="utf-8")
+    subprocess.run(["git", "add", "handoff.txt"], cwd=worktree, check=True)
+    subprocess.run(["git", "commit", "-qm", "handoff"], cwd=worktree, check=True)
+    failed_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=worktree,
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout.strip()
+    failed_escalation_id = str(uuid.uuid4())
+    failed_resolution = decision_record(
+        base / "failed-resolution.json",
+        record_id="resolution-failed-authorized",
+        record_type="resolution",
+        payload={
+            "id": failed_escalation_id,
+            "status": "resolved",
+            "category": "contract-drift",
+            "decision": (
+                "authorize-one-exact-head-full-profile-receipt-and-bind-amended-repair-contract; "
+                "create at most one immutable full-profile verification receipt for exact clean HEAD "
+                f"{head}, bind that receipt and amended Outcome Contract {outcome_sha256} "
+                "into one fresh repair review continuation, and do not replay accepted phases, "
+                "reviewers, providers, callbacks, or predecessor effects"
+            ),
+        },
+    )
+    failed_successor = decision_record(
+        base / "failed-successor.json",
+        record_id="resolution-failed-successor",
+        record_type="resolution",
+        payload={
+            "id": str(uuid.uuid4()),
+            "status": "resolved",
+            "category": "contract-drift",
+            "decision": (
+                "A: authorize one new committed mechanism HEAD in the existing "
+                "task/llm-obsidian-2-8-1-concurrency-fix-sol worktree. Implement and "
+                "regression-test the narrow registered full-profile continuation primitive "
+                "as part of the 2.8.1 product repair; supersede "
+                f"{head} as the final candidate while preserving it as the clean "
+                "proven predecessor. After the single mechanism commit, bind exactly one "
+                "immutable full-profile receipt and exactly one fresh repair Deep review to "
+                "the resulting exact clean HEAD and amended Outcome Contract "
+                f"{outcome_sha256}. Do not replay accepted engineering phases, predecessor "
+                "verification, prior reviewers/providers/callbacks, or external effects; any "
+                "further product mutation requires a new exact-head receipt/review boundary."
+            ),
+        },
+    )
+    failed_calls: list[tuple[str, ...]] = []
+
+    def failing_runner(argv: list[str], **kwargs: object) -> object:
+        if argv[:3] == ["git", "rev-parse", "HEAD"]:
+            return subprocess.CompletedProcess(argv, 0, failed_head + "\n", "")
+        failed_calls.append(tuple(argv))
+        return subprocess.CompletedProcess(
+            argv, 1 if len(failed_calls) == 3 else 0, "profile output\n", ""
+        )
+
+    def failed_continuation() -> None:
+        with (
+            mock.patch(
+                "task_review_authorized_continuation._validate_task",
+                return_value=(meta, vault, task_id),
+            ),
+            mock.patch(
+                "task_review_authorized_continuation.load_chain",
+                return_value=(failed_resolution, failed_successor),
+            ),
+            mock.patch(
+                "task_review_authorized_continuation.resolve_plan_authority",
+                return_value=authority,
+            ),
+        ):
+            try:
+                run_authorized_continuation(
+                    worktree,
+                    authorization_escalation_id=failed_escalation_id,
+                    expected_head=failed_head,
+                    verification_profile="full",
+                    verification_profile_sha256=profile.sha256,
+                    outcome_contract_sha256=outcome_sha256,
+                    verification_runner=failing_runner,
+                    review_driver=review_driver,
+                )
+            except AuthorizedContinuationError:
+                return
+        raise AssertionError("failed full-profile receipt continued the review")
+
+    failed_continuation()
+    packet_path = worktree / ".task-verification.json"
+    packet, _canonical = resubmit._read_packet(packet_path)
+    failed_receipt = Path(str(packet["receipt_pointer"]))
+    check(
+        "durable failed receipt publishes the standard identity-bound attention packet",
+        packet["operation_id"] == task_id
+        and packet["head_sha"] == failed_head
+        and packet["allowed_responses"] == ["escalate"]
+        and [row["command_id"] for row in packet["evidence"]]
+        == ["full-1", "full-2", "full-3"]
+        and packet["evidence"][-1]["exit_code"] == 1
+        and all(
+            Path(str(row["output_pointer"])).is_file()
+            for row in packet["evidence"]
+        )
+        and failed_receipt.is_file()
+        and json.loads(failed_receipt.read_text(encoding="utf-8"))["status"]
+        == "failed"
+        and store.read(
+            task_id, str(packet["verification_operation_id"])
+        ).state
+        == "failed"
+        and len(review_calls) == 1,
+    )
+    published = packet_path.read_bytes()
+    failed_calls.clear()
+    failed_continuation()
+    check(
+        "repeated failed consumption republishes one packet and runs zero commands",
+        packet_path.read_bytes() == published
+        and failed_calls == []
+        and len(review_calls) == 1
+        and json.loads(binding_path.read_text(encoding="utf-8")) == binding,
+    )
 
 print("authorized task review continuation tests passed")

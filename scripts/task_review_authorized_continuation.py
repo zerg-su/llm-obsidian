@@ -19,6 +19,7 @@ from harness.store import OperationStore
 from harness.supervisor import OperationSupervisor
 from harness.verification import (
     VerificationAuthority,
+    VerificationAuthorityError,
     compose_commands,
     load_profiles,
     run_profile,
@@ -45,6 +46,10 @@ SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 GIT_OID = re.compile(r"[0-9a-f]{40,64}\Z")
 IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
 BINDING_NAME = ".task-review-authorized-continuation.json"
+ATTENTION_PACKET_NAME = ".task-verification.json"
+#: The standard packet consumer (``pipeline-verification-resubmit.py``)
+#: refuses anything larger, so an unconsumable packet is never published.
+MAX_ATTENTION_PACKET_BYTES = 65_536
 
 
 class AuthorizedContinuationError(TaskReviewError):
@@ -210,6 +215,89 @@ def _write_once(path: Path, value: Mapping[str, object]) -> None:
     _atomic_json(path, dict(value))
 
 
+def _failed_attention_packet(
+    authority: VerificationAuthority,
+    *,
+    runtime_root: Path,
+    receipt_path: Path,
+) -> dict[str, object]:
+    """Derive the standard identity-bound packet from one failed receipt."""
+
+    return {
+        "schema_version": VerificationAuthority.SCHEMA_VERSION,
+        "operation_id": authority.parent.spec.operation_id,
+        "verification_operation_id": authority.operation_id,
+        "verification_lane_id": authority.lane_id,
+        "verification_run_id": authority.run_id,
+        "definition_sha256": authority.definition_sha256,
+        "step_id": "verify",
+        "head_sha": authority.head_sha,
+        "status": "attention-required",
+        "reason": "verification-failed",
+        "safe_boundary": "tdd-slices-complete",
+        "allowed_responses": ["escalate"],
+        "response_pointer": ".task-verification-response.json",
+        "receipt_pointer": str(receipt_path),
+        "evidence": [
+            {
+                "command_id": item.command_id,
+                "exit_code": item.exit_code,
+                "output_pointer": str(
+                    (runtime_root / item.output_pointer).resolve()
+                ),
+            }
+            for item in authority.evidence
+        ],
+        "verification_attempt": authority.attempt.as_dict(),
+        "verification_attempt_sha256": authority.attempt.sha256,
+    }
+
+
+def _publish_failed_handoff(
+    authority: VerificationAuthority,
+    *,
+    worktree: Path,
+    runtime_root: Path,
+    receipt_path: Path,
+) -> None:
+    """Hand one durable failed receipt to attention without a new effect.
+
+    The bounded authorization allows at most one immutable receipt for its
+    exact clean HEAD, so ``escalate`` is the only truthful response: a repaired
+    HEAD or a same-HEAD retry needs its own receipt/review boundary.
+    """
+
+    packet = _failed_attention_packet(
+        authority, runtime_root=runtime_root, receipt_path=receipt_path
+    )
+    if (
+        len(
+            json.dumps(packet, sort_keys=True, separators=(",", ":")).encode()
+        )
+        > MAX_ATTENTION_PACKET_BYTES
+    ):
+        raise AuthorizedContinuationError(
+            "authorized continuation attention packet is too large"
+        )
+    packet_path = worktree / ATTENTION_PACKET_NAME
+    if packet_path.is_symlink() or (
+        packet_path.exists() and not packet_path.is_file()
+    ):
+        raise AuthorizedContinuationError(
+            "authorized continuation attention packet is invalid"
+        )
+    if packet_path.is_file():
+        try:
+            published = json.loads(packet_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise AuthorizedContinuationError(
+                "authorized continuation attention packet is unreadable"
+            ) from exc
+        if published == packet:
+            return
+    _atomic_json(packet_path, packet)
+
+
 def _authorized_continuation_inputs(
     meta: Mapping[str, Any],
     worktree: Path,
@@ -369,21 +457,41 @@ def _complete_receipt(
         for index in range(len(compose_commands(profile)))
     )
     if receipt_path.is_file() and not receipt_path.is_symlink():
-        return VerificationAuthority.load(
-            receipt_path,
-            store=store,
-            parent=parent,
-            runtime_root=runtime_root,
-            expected_definition_sha256=definition_sha256,
-            expected_profile=profile.name,
-            expected_profile_sha256=profile.sha256,
-            expected_head_sha=head_sha,
-            allowed_statuses=("complete",),
-            expected_command_ids=command_ids,
-            child_states=("complete",),
-            require_released=True,
-            require_effect_succeeded=True,
-        )
+        try:
+            durable = VerificationAuthority.load(
+                receipt_path,
+                store=store,
+                parent=parent,
+                runtime_root=runtime_root,
+                expected_definition_sha256=definition_sha256,
+                expected_profile=profile.name,
+                expected_profile_sha256=profile.sha256,
+                expected_head_sha=head_sha,
+                allowed_statuses=("complete", "failed"),
+                expected_command_ids=command_ids,
+                child_states=("complete", "failed"),
+                require_released=True,
+                require_effect_succeeded=True,
+            )
+        except VerificationAuthorityError as exc:
+            raise AuthorizedContinuationError(
+                "authorized continuation verification receipt is invalid"
+            ) from exc
+        if durable.child.state != durable.status:
+            raise AuthorizedContinuationError(
+                "authorized continuation verification state is invalid"
+            )
+        if durable.status == "failed":
+            _publish_failed_handoff(
+                durable,
+                worktree=worktree,
+                runtime_root=runtime_root,
+                receipt_path=receipt_path,
+            )
+            raise AuthorizedContinuationError(
+                "authorized continuation full-profile verification failed"
+            )
+        return durable
     child = store.create(child_spec, lane_id=lane_id, run_id=run_id)
     supervisor = OperationSupervisor(
         store, parent.spec.owner_id, child_spec.operation_id
@@ -458,6 +566,12 @@ def _complete_receipt(
     )
     if authority.status != "complete":
         supervisor.transition("failed")
+        _publish_failed_handoff(
+            authority,
+            worktree=worktree,
+            runtime_root=runtime_root,
+            receipt_path=receipt_path,
+        )
         raise AuthorizedContinuationError(
             "authorized continuation full-profile verification failed"
         )

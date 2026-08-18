@@ -408,6 +408,14 @@ clean HEAD, frozen full-profile digest, immutable receipt, and fresh review
 admission without rewriting task metadata or predecessor records. The live
 ceiling is therefore pinned to exactly 295 files / 112,132 lines with no
 speculative headroom.
+
+The authorized-continuation failed-receipt handoff repair grows only that same
+owner by the exact measured 114 lines: one durable failed receipt now derives
+and idempotently publishes the standard identity-bound
+``.task-verification.json`` attention packet, and repeated consumption of the
+same failed identity is served from the durable receipt without executing any
+profile command. No file is added, so the live ceiling moves to exactly
+295 files / 112,246 lines with no speculative headroom.
 """
 
 from __future__ import annotations
@@ -427,9 +435,10 @@ SCRIPT_FILE_CEILING = 295
 #: Maximum total lines across those files for the 2.8.1 lifecycle candidate.
 #: The line ceiling moves to the measured candidate with zero headroom: those
 #: three modules plus the shared artifact-contract wiring in the existing
-#: carriers, the RC4 governing-source catalogue projection, and the registered
-#: review fix-delta evidence exclusion.
-SCRIPT_LINE_CEILING = 112_132
+#: carriers, the RC4 governing-source catalogue projection, the registered
+#: review fix-delta evidence exclusion, and the authorized-continuation
+#: failed-receipt attention handoff.
+SCRIPT_LINE_CEILING = 112_246
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

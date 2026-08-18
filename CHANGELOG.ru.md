@@ -38,6 +38,19 @@
   точно измеренные 676 строк к 295 файлам / 112 132 строкам без запаса.
   Неизменный контур active authority из 27 файлов точно перемерен на 15 802
   LOC: ноль writable authorities, ноль incident literals и нулевой запас.
+- Durable failed receipt авторизованного continuation теперь делает handoff, а
+  не поднимает нетипизированную ошибку: из неизменяемого receipt выводится
+  стандартный identity-bound attention packet `.task-verification.json` и
+  публикуется идемпотентно, а повторное потребление той же failed identity
+  обслуживается из durable receipt без выполнения ни одной команды профиля и
+  без привязки review. Поскольку bounded authorization разрешает не более
+  одного receipt на точный чистый HEAD, packet предлагает только `escalate`.
+  Зарегистрированный owner continuation растёт на точно измеренные 114 строк до
+  295 файлов / 112 246 строк без спекулятивного запаса; контур active authority
+  из 27 файлов не тронут и остаётся 15 802 LOC.
+- Установленные скиллы `architecture` и `decompose` зарегистрированы в
+  `wiki/meta/daily-pipeline-guide.md` — закрыт catalog drift, который валил
+  `validate-vault.py --summary` внутри полного профиля верификации.
 
 ## [2.8.0] - 2026-08-17
 
