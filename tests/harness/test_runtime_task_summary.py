@@ -2531,6 +2531,7 @@ def run_case(
             "  if iteration==0 or not (root/'.null-change-retry').is_file():\n"
             "    subprocess.run(['git','commit','--allow-empty','-m',f'provider pass {iteration + 1}'],cwd=root,text=True,capture_output=True,check=True)\n"
             "  publish_summary(summary,sys.argv[6] if iteration and len(sys.argv)>6 else sys.argv[2])\n"
+            "publish_summary(root/'.provider-final-summary-published',json.dumps({'schema_version':1,'iteration':passes-1,'summary_sha256':hashlib.sha256(summary.read_bytes()).hexdigest()},sort_keys=True)+'\\n')\n"
             "if (root/'.provider-await-final-callback').is_file():\n"
             "  for _ in range(2000):\n"
             "    if (state/'callback-receipt.json').is_file(): break\n"
@@ -2899,18 +2900,42 @@ def run_case(
     # re-observe the exact candidate HEAD and tree at every consumption
     # boundary, which at the fixture's 0.02s poll cadence needs headroom a
     # one-pass corridor never does.
-    join_timeout = 12 if wake_source is not None or fix_retry_passes else 8
+    join_timeout = (
+        max(12, 6 * fix_retry_passes)
+        if wake_source is not None or fix_retry_passes
+        else 8
+    )
     if fix_retry_passes and not await_final_callback:
         deadline = time.monotonic() + join_timeout
-        while thread.is_alive():
+        while True:
             current = store.read("owner-1", operation_id)
-            if current.state in TERMINAL or current.state in {
-                "attention-required",
-                "finalizing",
-            }:
-                (worktree / ".provider-terminal-observed").write_text(
-                    f"{current.state}\n", encoding="utf-8"
+            final_publication_path = (
+                worktree / ".provider-final-summary-published"
+            )
+            if final_publication_path.is_file():
+                final_publication = json.loads(
+                    final_publication_path.read_text(encoding="utf-8")
                 )
+                if final_publication != {
+                    "schema_version": 1,
+                    "iteration": fix_retry_passes - 1,
+                    "summary_sha256": hashlib.sha256(
+                        json.dumps(
+                            fix_retry_summary
+                            if fix_retry_summary is not None
+                            else summary,
+                            sort_keys=True,
+                        ).encode()
+                    ).hexdigest(),
+                }:
+                    raise AssertionError(
+                        "final provider publication identity changed"
+                    )
+                (worktree / ".provider-terminal-observed").write_text(
+                    f"pass-{fix_retry_passes - 1}\n", encoding="utf-8"
+                )
+            if not thread.is_alive():
+                break
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 break
@@ -2922,7 +2947,8 @@ def run_case(
         raise AssertionError(
             "runtime worker exceeded the bounded fixture join: "
             f"operation_id={operation_id} state={current.state} "
-            f"revision={current.revision}"
+            f"revision={current.revision} "
+            f"attention_reason={current.attention_reason}"
         )
     if not result:
         raise AssertionError(
@@ -4440,11 +4466,69 @@ def run_focused_baseline_gap_corridor(root: Path) -> None:
     )
 
 
+def run_focused_autonomous_limit_corridor(
+    root: Path, summary: dict[str, object]
+) -> None:
+    """Exercise final-pass provider release only after durable exhaustion."""
+
+    task = "ebeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+
+    def fail_verification(
+        argv: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        if argv == ["git", "rev-parse", "HEAD"]:
+            return subprocess.run(
+                argv,
+                cwd=kwargs["cwd"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+        return subprocess.CompletedProcess(argv, 1, "", "failed\n")
+
+    store, _cmux, state, rc = run_case(
+        root,
+        task,
+        summary,
+        pipeline_name="engineering/fix",
+        fix_retry_passes=3,
+        completion_policy="autonomous",
+        total_pass_limit=3,
+        verification_runner=fail_verification,
+    )
+    parent = store.read("owner-1", task)
+    terminal_exhausted = read_json_eventually(
+        state / "pipeline-fix" / "terminal-exhausted.json"
+    )
+    check(
+        "focused autonomous retry releases after durable exhaustion",
+        rc == 0
+        and parent.state == "failed"
+        and terminal_exhausted["status"] == "retry-exhausted"
+        and terminal_exhausted["total_pass_limit"] == 3
+        and not (state / "callback-error.json").exists(),
+        (parent, terminal_exhausted),
+    )
+
+
 if sys.argv[1:] == ["--focus-concurrency"]:
     with tempfile.TemporaryDirectory(prefix="runtime-task-summary-focus.") as raw:
         focused_root = Path(raw)
         run_focused_summary_refresh_corridor(focused_root)
         run_focused_baseline_gap_corridor(focused_root)
+        run_focused_autonomous_limit_corridor(
+            focused_root,
+            {
+                "schema_version": 2,
+                "type": "session",
+                "title": "Runtime Result",
+                "session": "executor-session",
+                "body": "The declared runtime evidence is established.",
+                "outcome_disposition": "achieved",
+                "outcome_evidence_ids": ["runtime-green"],
+                "residual_gap_pointers": [],
+            },
+        )
     raise SystemExit(0)
 if sys.argv[1:]:
     raise SystemExit("usage: test_runtime_task_summary.py [--focus-concurrency]")
@@ -6026,41 +6110,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         attention_limit_parent,
     )
 
-    autonomous_limit_task = "ebeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
-    (
-        autonomous_limit_store,
-        _autonomous_limit_cmux,
-        autonomous_limit_state,
-        autonomous_limit_rc,
-    ) = run_case(
-        root,
-        autonomous_limit_task,
-        valid_summary,
-        pipeline_name="engineering/fix",
-        fix_retry_passes=3,
-        completion_policy="autonomous",
-        total_pass_limit=3,
-        verification_runner=fail_verification,
-    )
-    autonomous_limit_parent = autonomous_limit_store.read(
-        "owner-1", autonomous_limit_task
-    )
-    terminal_exhausted = read_json_eventually(
-        autonomous_limit_state
-        / "pipeline-fix"
-        / "terminal-exhausted.json"
-    )
-    check(
-        "autonomous fix policy fails terminally after three total passes",
-        autonomous_limit_rc == 0
-        and autonomous_limit_parent.state == "failed"
-        and terminal_exhausted["status"] == "retry-exhausted"
-        and terminal_exhausted["total_pass_limit"] == 3
-        and not (
-            autonomous_limit_state / "callback-error.json"
-        ).exists(),
-        (autonomous_limit_parent, terminal_exhausted),
-    )
+    run_focused_autonomous_limit_corridor(root, valid_summary)
 
     cannot_task = "efefefef-efef-4fef-8fef-efefefefefef"
     cannot_store, cannot_cmux, cannot_state, cannot_rc = run_case(
