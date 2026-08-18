@@ -443,6 +443,13 @@ already-published packet is read bounded, non-following and regular-file-only, s
 a symlink or FIFO at that path is refused instead of blocking publication. The
 live ceiling is therefore pinned to exactly 295 files / 112,345 lines with no
 speculative headroom.
+
+The release-review verification fix adds exactly 37 lines to the existing
+``runtime_worker_verification.py`` owner. It recognizes only an identity-exact,
+atomically published changed-HEAD response whose candidate is the current clean
+HEAD, then defers it from a stale same-HEAD binding to the next ordinary
+reconciliation pass. No production file is added; the live ceiling moves to
+exactly 295 files / 112,382 lines with no speculative headroom.
 """
 
 from __future__ import annotations
@@ -465,7 +472,7 @@ SCRIPT_FILE_CEILING = 295
 #: carriers, the RC4 governing-source catalogue projection, the registered
 #: review fix-delta evidence exclusion, and the authorized-continuation
 #: failed-receipt attention handoff with its applied review findings.
-SCRIPT_LINE_CEILING = 112_345
+SCRIPT_LINE_CEILING = 112_382
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

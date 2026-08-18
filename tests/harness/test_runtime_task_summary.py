@@ -6331,6 +6331,8 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
     commands_before_resubmission = []
     resubmit_helper_done = threading.Event()
     resubmit_helpers: list[threading.Thread] = []
+    stale_binding_ready = threading.Event()
+    stale_binding_release = threading.Event()
 
     def fail_then_pass_verification(
         argv: list[str], **kwargs: object
@@ -6360,6 +6362,10 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         def respond() -> None:
             packet_path = worktree / ".task-verification.json"
             packet = read_json_eventually(packet_path, timeout=3)
+            if not stale_binding_ready.wait(timeout=5):
+                raise AssertionError(
+                    "worker never exposed its pre-resubmission HEAD binding"
+                )
             (worktree / "product.txt").write_text(
                 "ready\nfixed\n", encoding="utf-8"
             )
@@ -6413,6 +6419,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
                     response_publication_release,
                 ),
             )
+            stale_binding_release.set()
             resubmit_helper_done.set()
 
         helper = threading.Thread(target=respond)
@@ -6509,15 +6516,43 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         response_probe_errors,
     )
 
-    failed_store, failed_cmux, failed_state, failed_rc = run_case(
-        root,
-        failing_task,
-        valid_summary,
-        pipeline_name="engineering/change",
-        verification_runner=fail_then_pass_verification,
-        before_start=resubmit_failed_verification,
-        review_launcher=approve_resubmitted_verification,
+    original_bind_verification_contract = (
+        RuntimeWorkerExecution.bind_verification_contract
     )
+
+    def hold_pre_resubmission_head_binding(
+        worker: RuntimeWorkerExecution, verify_step: object | None
+    ) -> None:
+        original_bind_verification_contract(worker, verify_step)
+        if (
+            worker.spec["operation_id"] == failing_task
+            and (worker.spec["cwd"] / ".task-verification.json").is_file()
+            and not stale_binding_ready.is_set()
+        ):
+            stale_binding_ready.set()
+            if not stale_binding_release.wait(timeout=5):
+                raise AssertionError(
+                    "changed-HEAD response was not published after stale binding"
+                )
+
+    RuntimeWorkerExecution.bind_verification_contract = (
+        hold_pre_resubmission_head_binding
+    )
+    try:
+        failed_store, failed_cmux, failed_state, failed_rc = run_case(
+            root,
+            failing_task,
+            valid_summary,
+            pipeline_name="engineering/change",
+            verification_runner=fail_then_pass_verification,
+            before_start=resubmit_failed_verification,
+            review_launcher=approve_resubmitted_verification,
+        )
+    finally:
+        stale_binding_release.set()
+        RuntimeWorkerExecution.bind_verification_contract = (
+            original_bind_verification_contract
+        )
     if not resubmit_helper_done.wait(timeout=1):
         raise AssertionError("resubmission helper did not publish its response")
     for helper in resubmit_helpers:
@@ -6527,6 +6562,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
     check(
         "the corridor's held response publication is never observed invalid",
         not response_probe_errors
+        and stale_binding_ready.is_set()
         and held_response_states == ["absent"]
         and not any(probe.is_alive() for probe in response_probe_threads)
         and response_publication_state(

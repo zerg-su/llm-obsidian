@@ -98,6 +98,15 @@ packages were published for them.
   Every refusal branch is now covered by the registered owner: changed,
   unreadable, too large, invalid, and the interrupt cleanup. Exact measured
   44 lines to 295 files / 112,345 lines with zero headroom.
+- Verification resubmission now reconciles a changed-HEAD response that lands
+  after the worker bound the failed HEAD for the current pass. The worker
+  accepts no new authority in that stale pass: it recognizes only the exact
+  identity-bound response for the current clean successor, waits, and lets the
+  next ordinary reconcile consume it through the existing changed-HEAD path.
+  A deterministic interleaving regression replaces the full-suite flake. The
+  existing verification owner grows by exactly 37 lines; the active authority
+  contour is pinned to 15,839 LOC and the live scripts ratchet to 295 files /
+  112,382 lines, all with zero headroom.
 
 ## [2.8.0] - 2026-08-17
 

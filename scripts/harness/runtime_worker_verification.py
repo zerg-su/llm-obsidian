@@ -947,6 +947,43 @@ class RuntimeWorkerVerificationMixin:
         if response_path.is_symlink() or not raw or len(raw) > MAX_OUTBOX_BYTES:
             raise RuntimeWorkerError("verification resubmission response is invalid")
         response = json.loads(raw)
+        changed_head_keys = {
+            "schema_version",
+            "operation_id",
+            "verification_operation_id",
+            "failed_head_sha",
+            "packet_sha256",
+            "response",
+            "resubmitted_head_sha",
+        }
+        resubmitted_head = (
+            str(response.get("resubmitted_head_sha") or "")
+            if isinstance(response, dict)
+            else ""
+        )
+        if (
+            isinstance(response, dict)
+            and set(response) == changed_head_keys
+            and response.get("schema_version") == 1
+            and response.get("operation_id") == self.spec["operation_id"]
+            and response.get("verification_operation_id")
+            == failed["operation_id"]
+            and response.get("failed_head_sha") == failed["head_sha"]
+            and response.get("packet_sha256") == packet_sha256
+            and response.get("response") == "fix-and-resubmit"
+            and re.fullmatch("[0-9a-f]{40,64}", resubmitted_head)
+            and resubmitted_head != self.verification_head
+            and _verification_candidate_is_current(
+                self.spec["cwd"], resubmitted_head
+            )
+        ):
+            # The executor may commit and atomically publish a changed-HEAD
+            # response after this worker bound the failed HEAD for the current
+            # reconciliation pass.  This exact response belongs to the normal
+            # changed-HEAD path, so wait for the next pass to rebind HEAD
+            # instead of misclassifying valid authority as a malformed
+            # same-HEAD retry.
+            return False
         expected_keys = {
             "schema_version",
             "operation_id",
