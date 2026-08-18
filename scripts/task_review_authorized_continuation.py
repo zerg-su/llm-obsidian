@@ -8,9 +8,10 @@ import json
 import re
 import subprocess
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, NoReturn
 
 from harness.context import ContextInput
+from harness.runtime_callback_io import _atomic_json as _atomic_packet_json
 from harness.contracts import (
     DEFAULT_TIME_BUDGET_SECONDS,
     DEFAULT_TOKEN_LIMIT,
@@ -47,8 +48,9 @@ GIT_OID = re.compile(r"[0-9a-f]{40,64}\Z")
 IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
 BINDING_NAME = ".task-review-authorized-continuation.json"
 ATTENTION_PACKET_NAME = ".task-verification.json"
-#: The standard packet consumer (``pipeline-verification-resubmit.py``)
-#: refuses anything larger, so an unconsumable packet is never published.
+#: The standard packet consumer (``pipeline-verification-resubmit.py``) bounds
+#: the raw packet file, so this bound is measured against the exact bytes the
+#: writer emits and an unconsumable packet is never published.
 MAX_ATTENTION_PACKET_BYTES = 65_536
 
 
@@ -253,29 +255,35 @@ def _failed_attention_packet(
     }
 
 
-def _publish_failed_handoff(
+def _fail_with_attention_handoff(
     authority: VerificationAuthority,
     *,
     worktree: Path,
     runtime_root: Path,
     receipt_path: Path,
-) -> None:
-    """Hand one durable failed receipt to attention without a new effect.
+) -> NoReturn:
+    """Hand one durable failed receipt to attention, then refuse to continue.
 
-    The bounded authorization allows at most one immutable receipt for its
-    exact clean HEAD, so ``escalate`` is the only truthful response: a repaired
-    HEAD or a same-HEAD retry needs its own receipt/review boundary.
+    The bounded authorization allows at most one immutable receipt for its exact
+    clean HEAD, so ``escalate`` is the only truthful response: a repaired HEAD or
+    a same-HEAD retry needs its own receipt/review boundary. For that same reason
+    the verify child stays terminal ``failed`` instead of the resumable
+    ``attention-required`` state the pipeline owner uses, which is also why the
+    durable ingress requires ``child.state == status``. Publishing is idempotent
+    and never destructive: a packet this identity did not derive is refused
+    rather than replaced, and a published packet is cleared only by the
+    coordinator decision that resolves it — never by this owner.
     """
 
     packet = _failed_attention_packet(
         authority, runtime_root=runtime_root, receipt_path=receipt_path
     )
-    if (
-        len(
-            json.dumps(packet, sort_keys=True, separators=(",", ":")).encode()
-        )
-        > MAX_ATTENTION_PACKET_BYTES
-    ):
+    #: Exactly the bytes ``_atomic_packet_json`` emits, so the bound the standard
+    #: consumer applies to the file is the bound measured here.
+    encoded = (
+        json.dumps(packet, sort_keys=True, separators=(",", ":")) + "\n"
+    ).encode()
+    if len(encoded) > MAX_ATTENTION_PACKET_BYTES:
         raise AuthorizedContinuationError(
             "authorized continuation attention packet is too large"
         )
@@ -293,9 +301,25 @@ def _publish_failed_handoff(
             raise AuthorizedContinuationError(
                 "authorized continuation attention packet is unreadable"
             ) from exc
-        if published == packet:
-            return
-    _atomic_json(packet_path, packet)
+        if published != packet:
+            if (
+                not isinstance(published, Mapping)
+                or published.get("verification_operation_id")
+                != packet["verification_operation_id"]
+            ):
+                raise AuthorizedContinuationError(
+                    "authorized continuation cannot replace an attention packet"
+                    " it did not derive"
+                )
+            raise AuthorizedContinuationError(
+                "authorized continuation attention packet changed"
+            )
+    else:
+        _atomic_packet_json(packet_path, packet)
+    raise AuthorizedContinuationError(
+        "authorized continuation full-profile verification failed; typed "
+        f"attention is ready in {packet_path}"
+    )
 
 
 def _authorized_continuation_inputs(
@@ -482,14 +506,11 @@ def _complete_receipt(
                 "authorized continuation verification state is invalid"
             )
         if durable.status == "failed":
-            _publish_failed_handoff(
+            _fail_with_attention_handoff(
                 durable,
                 worktree=worktree,
                 runtime_root=runtime_root,
                 receipt_path=receipt_path,
-            )
-            raise AuthorizedContinuationError(
-                "authorized continuation full-profile verification failed"
             )
         return durable
     child = store.create(child_spec, lane_id=lane_id, run_id=run_id)
@@ -566,14 +587,11 @@ def _complete_receipt(
     )
     if authority.status != "complete":
         supervisor.transition("failed")
-        _publish_failed_handoff(
+        _fail_with_attention_handoff(
             authority,
             worktree=worktree,
             runtime_root=runtime_root,
             receipt_path=receipt_path,
-        )
-        raise AuthorizedContinuationError(
-            "authorized continuation full-profile verification failed"
         )
     for state in ("finalizing", "exiting", "complete"):
         supervisor.transition(state)

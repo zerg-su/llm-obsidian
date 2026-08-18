@@ -398,7 +398,7 @@ with tempfile.TemporaryDirectory(prefix="authorized-review-continuation.") as ra
             argv, 1 if len(failed_calls) == 3 else 0, "profile output\n", ""
         )
 
-    def failed_continuation() -> None:
+    def failed_continuation() -> AuthorizedContinuationError:
         with (
             mock.patch(
                 "task_review_authorized_continuation._validate_task",
@@ -424,11 +424,12 @@ with tempfile.TemporaryDirectory(prefix="authorized-review-continuation.") as ra
                     verification_runner=failing_runner,
                     review_driver=review_driver,
                 )
-            except AuthorizedContinuationError:
-                return
+            except AuthorizedContinuationError as exc:
+                return exc
         raise AssertionError("failed full-profile receipt continued the review")
 
-    failed_continuation()
+    worktree.chmod(0o755)
+    first_failure = failed_continuation()
     packet_path = worktree / ".task-verification.json"
     packet, _canonical = resubmit._read_packet(packet_path)
     failed_receipt = Path(str(packet["receipt_pointer"]))
@@ -462,6 +463,41 @@ with tempfile.TemporaryDirectory(prefix="authorized-review-continuation.") as ra
         and failed_calls == []
         and len(review_calls) == 1
         and json.loads(binding_path.read_text(encoding="utf-8")) == binding,
+    )
+    check(
+        "the published file is exactly the bytes the size guard measures",
+        published
+        == (
+            json.dumps(packet, sort_keys=True, separators=(",", ":")) + "\n"
+        ).encode()
+        and len(published) <= 65_536,
+    )
+    check(
+        "publishing the worktree packet leaves the checkout root mode alone",
+        worktree.stat().st_mode & 0o777 == 0o755
+        and packet_path.stat().st_mode & 0o777 == 0o600,
+    )
+    check(
+        "the refusal points the coordinator at the published packet",
+        str(packet_path) in str(first_failure)
+        and store.read(
+            task_id, str(packet["verification_operation_id"])
+        ).state
+        == "failed",
+    )
+    foreign = dict(packet)
+    foreign["verification_operation_id"] = "foreign-verify-0123456789abcdef"
+    foreign_bytes = (
+        json.dumps(foreign, sort_keys=True, separators=(",", ":")) + "\n"
+    ).encode()
+    packet_path.write_bytes(foreign_bytes)
+    foreign_failure = failed_continuation()
+    check(
+        "a foreign attention packet is refused instead of being replaced",
+        packet_path.read_bytes() == foreign_bytes
+        and "did not derive" in str(foreign_failure)
+        and failed_calls == []
+        and len(review_calls) == 1,
     )
 
 print("authorized task review continuation tests passed")

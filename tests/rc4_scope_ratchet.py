@@ -416,6 +416,15 @@ and idempotently publishes the standard identity-bound
 same failed identity is served from the durable receipt without executing any
 profile command. No file is added, so the live ceiling moves to exactly
 295 files / 112,246 lines with no speculative headroom.
+
+Its Deep review findings are applied inside that same owner for a net measured
+18 lines: the packet is written by the registered writer for that artifact so
+publication no longer hardens the caller-owned checkout root, the size guard
+measures the exact bytes that writer emits, an attention packet this identity
+did not derive is refused instead of replaced, and the terminal-``failed`` and
+never-clear decisions plus the published packet pointer are stated where the
+refusal is raised. The live ceiling therefore moves to exactly
+295 files / 112,264 lines with no speculative headroom.
 """
 
 from __future__ import annotations
@@ -437,8 +446,8 @@ SCRIPT_FILE_CEILING = 295
 #: three modules plus the shared artifact-contract wiring in the existing
 #: carriers, the RC4 governing-source catalogue projection, the registered
 #: review fix-delta evidence exclusion, and the authorized-continuation
-#: failed-receipt attention handoff.
-SCRIPT_LINE_CEILING = 112_246
+#: failed-receipt attention handoff with its applied review findings.
+SCRIPT_LINE_CEILING = 112_264
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

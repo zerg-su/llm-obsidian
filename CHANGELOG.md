@@ -50,6 +50,16 @@ packages were published for them.
 - The installed `architecture` and `decompose` skills are registered in
   `wiki/meta/daily-pipeline-guide.md`, closing the catalog drift that failed
   `validate-vault.py --summary` inside the full verification profile.
+- That handoff's Deep review findings are applied in the same owner: the
+  worktree packet is written by the registered writer for that artifact, so
+  publishing no longer tightens the caller-owned checkout root from 0755 to
+  0700; the size guard measures the exact bytes that writer emits, so the bound
+  the standard consumer applies to the file is the bound enforced here; an
+  attention packet this identity did not derive is refused rather than replaced,
+  and a published packet is cleared only by the coordinator decision that
+  resolves it; and the terminal-`failed` choice plus the published packet path
+  are stated where the refusal is raised. Net exact measured 18 lines to
+  295 files / 112,264 lines with zero headroom.
 
 ## [2.8.0] - 2026-08-17
 
