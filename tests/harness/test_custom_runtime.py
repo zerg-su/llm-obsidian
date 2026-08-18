@@ -355,7 +355,22 @@ with tempfile.TemporaryDirectory(prefix="custom-runtime.") as raw:
         )
     )
     thread.start()
-    thread.join(timeout=12)
+
+    # The worker can be slower than a fixed join under suite load.  Wait for
+    # the durable terminal publication instead, then use a bounded join only
+    # to prove that the worker relinquishes its local resources.
+    publication_deadline = time.monotonic() + 30
+    terminal_published = False
+    while time.monotonic() < publication_deadline:
+        published_root = store.read(TASK, TASK)
+        terminal_published = (
+            published_root.accepted_callback_kind == "wiki-summary"
+            and root_provider.controller.current_state().cursor.result_published
+        )
+        if terminal_published or not thread.is_alive():
+            break
+        time.sleep(0.02)
+    thread.join(timeout=3)
     final = store.read(TASK, TASK)
     receipts = sorted((state_root / "pipeline-custom" / "receipts").glob("*.json"))
     submit_failure = state_root / "pipeline-custom" / "submit-failed.json"
@@ -394,7 +409,8 @@ with tempfile.TemporaryDirectory(prefix="custom-runtime.") as raw:
             )
         )
     if (
-        thread.is_alive()
+        not terminal_published
+        or thread.is_alive()
         or not result
         or result[0] != 0
         or final.state != "finalizing"

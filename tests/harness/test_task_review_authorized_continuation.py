@@ -556,15 +556,20 @@ with tempfile.TemporaryDirectory(prefix="authorized-review-continuation.") as ra
     )
 
     interrupted: list[str] = []
-    real_fdopen = os.fdopen
+    unraisable: list[str] = []
 
-    def interrupting_fdopen(fd, *args, **kwargs):
-        handle = real_fdopen(fd, *args, **kwargs)
+    def interrupting_fdopen(_fd, *_args, **_kwargs):
         interrupted.append("staged")
         raise KeyboardInterrupt("publication interrupted")
 
+    def record_unraisable(args):
+        unraisable.append(str(args.exc_value))
+
     packet_path.unlink(missing_ok=True)
-    with mock.patch.object(os, "fdopen", interrupting_fdopen):
+    with (
+        mock.patch.object(os, "fdopen", interrupting_fdopen),
+        mock.patch.object(sys, "unraisablehook", record_unraisable),
+    ):
         try:
             failed_continuation()
         except KeyboardInterrupt:
@@ -578,7 +583,8 @@ with tempfile.TemporaryDirectory(prefix="authorized-review-continuation.") as ra
         "an interrupt mid-publication leaves no packet to wedge the handoff",
         interrupted == ["staged"]
         and not packet_path.exists()
-        and leftovers == [],
+        and leftovers == []
+        and unraisable == [],
     )
 
     failed_continuation()
