@@ -500,4 +500,123 @@ with tempfile.TemporaryDirectory(prefix="authorized-review-continuation.") as ra
         and len(review_calls) == 1,
     )
 
+    # --- publication invariants and every refusal branch -------------------
+    import errno
+    import os
+    import stat
+
+    import task_review_authorized_continuation as continuation
+
+    def publication_window_states(target: Path) -> list[tuple[bool, int]]:
+        """Record how the polled packet path looks mid-publication."""
+
+        observed: list[tuple[bool, int]] = []
+        real_link = os.link
+
+        def watched_link(src, dst, **kwargs):
+            observed.append(
+                (
+                    Path(dst).exists(),
+                    Path(dst).stat().st_size if Path(dst).exists() else -1,
+                )
+            )
+            return real_link(src, dst, **kwargs)
+
+        packet_path.unlink(missing_ok=True)
+        with mock.patch.object(os, "link", watched_link):
+            failed_continuation()
+        return observed
+
+    packet_path.unlink(missing_ok=True)
+    window = publication_window_states(packet_path)
+    republished = packet_path.read_bytes()
+    check(
+        "the polled packet path never exists before its complete publication",
+        window == [(False, -1)] and json.loads(republished) == packet,
+    )
+
+    interrupted: list[str] = []
+    real_fdopen = os.fdopen
+
+    def interrupting_fdopen(fd, *args, **kwargs):
+        handle = real_fdopen(fd, *args, **kwargs)
+        interrupted.append("staged")
+        raise KeyboardInterrupt("publication interrupted")
+
+    packet_path.unlink(missing_ok=True)
+    with mock.patch.object(os, "fdopen", interrupting_fdopen):
+        try:
+            failed_continuation()
+        except KeyboardInterrupt:
+            pass
+    leftovers = sorted(
+        item.name
+        for item in worktree.iterdir()
+        if item.name.startswith(".task-verification")
+    )
+    check(
+        "an interrupt mid-publication leaves no packet to wedge the handoff",
+        interrupted == ["staged"]
+        and not packet_path.exists()
+        and leftovers == [],
+    )
+
+    failed_continuation()
+    intact = packet_path.read_bytes()
+    changed = dict(packet)
+    changed["safe_boundary"] = "tampered"
+    packet_path.write_bytes(
+        (json.dumps(changed, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    )
+    tampered_bytes = packet_path.read_bytes()
+    changed_failure = failed_continuation()
+    check(
+        "a changed same-identity packet is refused and left untouched",
+        "attention packet changed" in str(changed_failure)
+        and packet_path.read_bytes() == tampered_bytes,
+    )
+
+    packet_path.unlink()
+    packet_path.write_bytes(b"")
+    empty_failure = failed_continuation()
+    check(
+        "a zero-byte packet is refused as unreadable rather than replaced",
+        "unreadable" in str(empty_failure)
+        and packet_path.read_bytes() == b"",
+    )
+
+    packet_path.unlink()
+    packet_path.symlink_to(worktree / "seed.txt")
+    symlink_failure = failed_continuation()
+    check(
+        "a symlinked packet path is refused as invalid",
+        "attention packet is invalid" in str(symlink_failure)
+        and packet_path.is_symlink(),
+    )
+    packet_path.unlink()
+
+    fifo_path = packet_path
+    os.mkfifo(fifo_path, 0o600)
+    fifo_failure = failed_continuation()
+    check(
+        "a non-regular packet path is refused without blocking on it",
+        "attention packet is invalid" in str(fifo_failure)
+        and stat.S_ISFIFO(fifo_path.lstat().st_mode),
+    )
+    fifo_path.unlink()
+
+    with mock.patch.object(
+        continuation, "MAX_ATTENTION_PACKET_BYTES", 16
+    ):
+        oversized_failure = failed_continuation()
+    check(
+        "an oversized packet is refused before anything is published",
+        "too large" in str(oversized_failure)
+        and not packet_path.exists()
+        and not any(
+            item.name.startswith(".task-verification")
+            for item in worktree.iterdir()
+        ),
+    )
+
 print("authorized task review continuation tests passed")

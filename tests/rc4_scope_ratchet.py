@@ -417,21 +417,32 @@ same failed identity is served from the durable receipt without executing any
 profile command. No file is added, so the live ceiling moves to exactly
 295 files / 112,246 lines with no speculative headroom.
 
-Its second review round adds the exact measured 37 lines to that same owner: the
-attention packet is published create-exclusively so the ownership decision and
-the write are one step rather than a check-then-write, and the recorded cohesion
-decision plus the writer-ownership note make the deferred extraction and the
-remaining checkout-root binding explicit. The live ceiling therefore moves to
-exactly 295 files / 112,301 lines with no speculative headroom.
+Its first Deep review round is applied inside that same owner for a net measured
+18 lines: publication stopped hardening the caller-owned checkout root, the size
+guard measures the exact bytes the publication emits, an attention packet this
+identity did not derive is refused instead of replaced, and the
+terminal-``failed`` and never-clear decisions plus the published packet pointer
+are stated where the refusal is raised. That round routed the bytes through the
+registered callback writer; the third round supersedes that writer choice below.
+The ceiling moved to exactly 295 files / 112,264 lines with no speculative
+headroom.
 
-Its Deep review findings are applied inside that same owner for a net measured
-18 lines: the packet is written by the registered writer for that artifact so
-publication no longer hardens the caller-owned checkout root, the size guard
-measures the exact bytes that writer emits, an attention packet this identity
-did not derive is refused instead of replaced, and the terminal-``failed`` and
-never-clear decisions plus the published packet pointer are stated where the
-refusal is raised. The live ceiling therefore moves to exactly
-295 files / 112,264 lines with no speculative headroom.
+Its second review round adds the exact measured 37 lines to that same owner: the
+attention packet became create-exclusive so the ownership decision and the write
+are one step rather than a check-then-write, and the recorded cohesion decision
+plus the writer-ownership note make the deferred extraction and the remaining
+checkout-root binding explicit. The ceiling moved to exactly
+295 files / 112,301 lines with no speculative headroom.
+
+Its third review round adds the exact measured 44 lines to that same owner and
+keeps both publication properties at once: the packet is staged 0600 with flush
+and fsync and then published with ``os.link``, so the ownership decision and the
+write remain a single step while the polled path only ever appears fully formed
+and an interrupt or crash can leave nothing but an ignorable staged file. The
+already-published packet is read bounded, non-following and regular-file-only, so
+a symlink or FIFO at that path is refused instead of blocking publication. The
+live ceiling is therefore pinned to exactly 295 files / 112,345 lines with no
+speculative headroom.
 """
 
 from __future__ import annotations
@@ -454,7 +465,7 @@ SCRIPT_FILE_CEILING = 295
 #: carriers, the RC4 governing-source catalogue projection, the registered
 #: review fix-delta evidence exclusion, and the authorized-continuation
 #: failed-receipt attention handoff with its applied review findings.
-SCRIPT_LINE_CEILING = 112_301
+SCRIPT_LINE_CEILING = 112_345
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

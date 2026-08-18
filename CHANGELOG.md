@@ -54,7 +54,8 @@ packages were published for them.
   attention packet is no longer written by the directory-hardening writer, so
   publishing the attention packet no longer tightens the caller-owned checkout
   root from 0755 to 0700 (the success-path binding written by `_write_once` is a
-  checkout-root artifact that still does; narrowing it is parent-owned); the size guard measures the exact bytes that writer emits, so the bound
+  checkout-root artifact that still does; narrowing it is parent-owned; that
+  writer choice is itself superseded by the staged `os.link` publication below); the size guard measures the exact bytes that writer emits, so the bound
   the standard consumer applies to the file is the bound enforced here; an
   attention packet this identity did not derive is refused rather than replaced,
   and a published packet is cleared only by the coordinator decision that
@@ -84,6 +85,19 @@ packages were published for them.
   refuse-rather-than-replace ownership decision and the write are a single step
   rather than a check-then-write. Exact measured 37 lines to
   295 files / 112,301 lines with zero headroom.
+- The third review round keeps create-exclusive ownership **and** atomic complete
+  publication, which the previous round had traded away: the packet is staged
+  0600 with flush and fsync and then published with `os.link`, so the ownership
+  decision and the write stay a single step while the polled path only ever
+  appears fully formed. An interrupt or crash now leaves nothing but an ignorable
+  staged file instead of a zero-byte packet that permanently wedged the
+  failed-receipt handoff - the previous `O_EXCL`-then-write shape created the
+  path before its content, and a `BaseException` bypassed its cleanup. The
+  already-published packet is read bounded, non-following and regular-file-only,
+  so a symlink or FIFO at that path is refused rather than blocking publication.
+  Every refusal branch is now covered by the registered owner: changed,
+  unreadable, too large, invalid, and the interrupt cleanup. Exact measured
+  44 lines to 295 files / 112,345 lines with zero headroom.
 
 ## [2.8.0] - 2026-08-17
 

@@ -22,6 +22,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 import subprocess
 from pathlib import Path
 from typing import Any, Callable, Mapping, NoReturn
@@ -276,6 +277,46 @@ def _failed_attention_packet(
     }
 
 
+def _published_packet(path: Path) -> object:
+    """Read one already-published packet without following, blocking, or growing.
+
+    ``O_NOFOLLOW`` refuses a symlinked path, the regular-file check refuses a
+    FIFO or directory instead of blocking on it, and the read is bounded by the
+    same limit the standard consumer applies to the file.
+    """
+
+    try:
+        descriptor = os.open(
+            path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+        )
+    except OSError as exc:
+        raise AuthorizedContinuationError(
+            "authorized continuation attention packet is invalid"
+        ) from exc
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise AuthorizedContinuationError(
+                "authorized continuation attention packet is invalid"
+            )
+        raw = os.read(descriptor, MAX_ATTENTION_PACKET_BYTES + 1)
+    except OSError as exc:
+        raise AuthorizedContinuationError(
+            "authorized continuation attention packet is unreadable"
+        ) from exc
+    finally:
+        os.close(descriptor)
+    if len(raw) > MAX_ATTENTION_PACKET_BYTES:
+        raise AuthorizedContinuationError(
+            "authorized continuation attention packet is too large"
+        )
+    try:
+        return json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise AuthorizedContinuationError(
+            "authorized continuation attention packet is unreadable"
+        ) from exc
+
+
 def _fail_with_attention_handoff(
     authority: VerificationAuthority,
     *,
@@ -299,8 +340,8 @@ def _fail_with_attention_handoff(
     packet = _failed_attention_packet(
         authority, runtime_root=runtime_root, receipt_path=receipt_path
     )
-    #: Exactly the bytes ``_atomic_packet_json`` emits, so the bound the standard
-    #: consumer applies to the file is the bound measured here.
+    #: Exactly the bytes published below, so the bound the standard consumer
+    #: applies to the file is the bound enforced here.
     encoded = (
         json.dumps(packet, sort_keys=True, separators=(",", ":")) + "\n"
     ).encode()
@@ -309,50 +350,53 @@ def _fail_with_attention_handoff(
             "authorized continuation attention packet is too large"
         )
     packet_path = worktree / ATTENTION_PACKET_NAME
-    if packet_path.is_symlink():
-        raise AuthorizedContinuationError(
-            "authorized continuation attention packet is invalid"
-        )
+    staged = packet_path.with_name(f".{packet_path.name}.{os.getpid()}.staged")
     try:
-        descriptor = os.open(
-            packet_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600
-        )
-    except FileExistsError:
-        # The ownership decision and the write are one step, so a packet
-        # published between derivation and publication is refused, never
-        # clobbered.
         try:
-            published = json.loads(packet_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            raise AuthorizedContinuationError(
-                "authorized continuation attention packet is unreadable"
-            ) from exc
-        if published != packet:
-            if (
-                not isinstance(published, Mapping)
-                or published.get("verification_operation_id")
-                != packet["verification_operation_id"]
-            ):
-                raise AuthorizedContinuationError(
-                    "authorized continuation cannot replace an attention packet"
-                    " it did not derive"
-                )
-            raise AuthorizedContinuationError(
-                "authorized continuation attention packet changed"
+            staged.unlink(missing_ok=True)
+            descriptor = os.open(
+                staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600
             )
-    except OSError as exc:
-        raise AuthorizedContinuationError(
-            "authorized continuation attention packet is invalid"
-        ) from exc
-    else:
+        except OSError as exc:
+            raise AuthorizedContinuationError(
+                "authorized continuation cannot stage its attention packet"
+            ) from exc
         try:
-            with os.fdopen(descriptor, "wb") as handle:
-                handle.write(encoded)
-                handle.flush()
-                os.fsync(handle.fileno())
-        except Exception:
-            packet_path.unlink(missing_ok=True)
+            handle = os.fdopen(descriptor, "wb")
+        except BaseException:
+            os.close(descriptor)
             raise
+        with handle:
+            handle.write(encoded)
+            handle.flush()
+            os.fsync(handle.fileno())
+        try:
+            # ``link`` publishes the complete artifact and fails when the path is
+            # already taken, so the ownership decision and the write stay one
+            # step while the polled path only ever appears fully formed. An
+            # interrupt or crash can leave nothing but the ignorable staged file.
+            os.link(staged, packet_path)
+        except FileExistsError:
+            published = _published_packet(packet_path)
+            if published != packet:
+                if (
+                    not isinstance(published, Mapping)
+                    or published.get("verification_operation_id")
+                    != packet["verification_operation_id"]
+                ):
+                    raise AuthorizedContinuationError(
+                        "authorized continuation cannot replace an attention"
+                        " packet it did not derive"
+                    )
+                raise AuthorizedContinuationError(
+                    "authorized continuation attention packet changed"
+                )
+        except OSError as exc:
+            raise AuthorizedContinuationError(
+                "authorized continuation attention packet is invalid"
+            ) from exc
+    finally:
+        staged.unlink(missing_ok=True)
     raise AuthorizedContinuationError(
         "authorized continuation full-profile verification failed; typed "
         f"attention is ready in {packet_path}"
