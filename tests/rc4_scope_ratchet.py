@@ -485,8 +485,9 @@ SCRIPT_FILE_CEILING = 296
 #: review fix-delta evidence exclusion, and the authorized-continuation
 #: failed-receipt attention handoff with its applied review findings. The
 #: accepted-callback archive adds the exact 17-line directory-fsync boundary
-#: required by the final 2.8.2 review, with no speculative headroom.
-SCRIPT_LINE_CEILING = 112_978
+#: required by the final 2.8.2 review plus one measured recovery branch line
+#: that re-establishes both barriers after an interrupted mutation.
+SCRIPT_LINE_CEILING = 112_979
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

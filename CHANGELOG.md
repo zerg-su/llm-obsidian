@@ -33,10 +33,11 @@ packages were published for them.
   already-durable zero-effect launch-failure prefix without a reviewer replay.
 - Accepted callback retirement is crash-durable before successor launch: the
   new archive directory, destination rename, and source removal are fsynced in
-  order, while an idempotent duplicate cleanup durably removes its outbox.
+  order. Retries after an interrupted rename or duplicate cleanup re-establish
+  both directory barriers before any successor effect.
 - The active lifecycle-authority contour is truthfully rebaselined to the exact
   28-file / 16,259-LOC candidate, and the live scripts ratchet to the exact
-  296-file / 112,978-line candidate, both with zero speculative headroom.
+  296-file / 112,979-line candidate, both with zero speculative headroom.
 
 ## [2.8.1] - 2026-08-18
 

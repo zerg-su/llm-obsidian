@@ -39,9 +39,10 @@
   zero-effect launch-failure prefix без replay reviewer'а.
 - Retirement принятого callback теперь crash-durable до запуска successor:
   создание archive-каталога, destination rename и удаление source fsync'ятся по
-  порядку, а идемпотентная очистка дубликата durable освобождает outbox.
+  порядку. Retry после прерванного rename или duplicate cleanup заново
+  подтверждает обе directory barriers до любого эффекта successor.
 - Контур active lifecycle authority правдиво перемерен на точный кандидат
-  28 файлов / 16 259 LOC, а live ratchet scripts — на 296 файлов / 112 978
+  28 файлов / 16 259 LOC, а live ratchet scripts — на 296 файлов / 112 979
   строк; оба значения зафиксированы без спекулятивного запаса.
 
 ## [2.8.1] - 2026-08-18

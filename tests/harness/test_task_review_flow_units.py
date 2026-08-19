@@ -321,6 +321,51 @@ with tempfile.TemporaryDirectory(prefix="review-resolution-outbox.") as raw:
         and synced_directories
         == [callback.parent, archive.parent, callback.parent],
     )
+
+    def check_interrupted_retirement(label: str, *, duplicate: bool) -> None:
+        if duplicate:
+            callback.write_bytes(callback_bytes)
+        else:
+            archive.replace(callback)
+        interrupted_syncs: list[Path] = []
+
+        def interrupt_first_sync(path: Path) -> None:
+            interrupted_syncs.append(path)
+            raise OSError("injected callback retirement fsync failure")
+
+        resolution_bundle._fsync_directory = interrupt_first_sync
+        try:
+            try:
+                _archive_resolution_callbacks(runtime_root, changes_state)
+            except OSError:
+                pass
+            else:
+                raise AssertionError(f"{label} did not reach its fsync failpoint")
+        finally:
+            resolution_bundle._fsync_directory = original_fsync_directory
+        check(
+            f"{label} leaves the accepted bytes in the archive",
+            not callback.exists()
+            and archive.is_file()
+            and archive.read_bytes() == callback_bytes
+            and interrupted_syncs
+            == [callback.parent if duplicate else archive.parent],
+        )
+        retry_syncs: list[Path] = []
+        resolution_bundle._fsync_directory = retry_syncs.append
+        try:
+            _archive_resolution_callbacks(runtime_root, changes_state)
+        finally:
+            resolution_bundle._fsync_directory = original_fsync_directory
+        check(
+            f"{label} retry re-establishes both directory barriers",
+            retry_syncs == [archive.parent, callback.parent]
+            and not callback.exists()
+            and archive.is_file(),
+        )
+
+    check_interrupted_retirement("interrupted callback rename", duplicate=False)
+    check_interrupted_retirement("interrupted duplicate cleanup", duplicate=True)
     (gate.root / "attempts").mkdir()
     (gate.root / "attempts" / "cycle-1.json").write_text(
         json.dumps(changes_state, sort_keys=True) + "\n",

@@ -338,10 +338,11 @@ def _archive_resolution_callbacks(
                 callback.replace(archive)
                 _fsync_directory(archive_dir)
                 _fsync_directory(callback.parent)
-        elif not archive.is_file():
-            raise ReviewAttemptError(
-                "review resolution callback bytes are unavailable"
-            )
+        elif archive.is_file():
+            _fsync_directory(archive_dir)
+            _fsync_directory(callback.parent)
+        else:
+            raise ReviewAttemptError("review resolution callback bytes are unavailable")
 
 
 def _archive_prior_terminal_callbacks(
