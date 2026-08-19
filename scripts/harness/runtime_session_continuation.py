@@ -23,6 +23,7 @@ OwnershipProbe = Callable[[], bool]
 RetryReservation = Callable[[], bool]
 StageObserver = Callable[[str, int, str, str, str], None]
 Waiter = Callable[[float], None]
+INITIAL_IDLE_STABILITY_OBSERVATIONS = 10
 
 
 def _no_artifact() -> bool:
@@ -194,10 +195,12 @@ def await_initial_input_ready(
     if observation_interval_seconds < 0:
         raise ValueError("initial input observation interval cannot be negative")
     handled_prompt_digest = ""
+    idle_observations = 0
     for observation in range(observation_limit):
         screen = port.read(surface_id)
         prompt = classify(runtime, screen)
         if prompt.interactive:
+            idle_observations = 0
             if not prompt.recognized:
                 if observation + 1 < observation_limit:
                     wait(observation_interval_seconds)
@@ -215,7 +218,11 @@ def await_initial_input_ready(
             continue
         state = classify_continuation_screen(runtime, screen, "")
         if state == "idle":
-            return True
+            idle_observations += 1
+            if idle_observations >= INITIAL_IDLE_STABILITY_OBSERVATIONS:
+                return True
+        else:
+            idle_observations = 0
         if observation + 1 < observation_limit:
             wait(observation_interval_seconds)
     return False

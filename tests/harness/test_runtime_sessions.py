@@ -829,7 +829,11 @@ class InitialReadyPort:
 
 
 initial_ready_port = InitialReadyPort(
-    ["", "Starting MCP servers", "› Implement {feature}"]
+    [
+        "",
+        "Starting MCP servers",
+        *("› Implement {feature}" for _ in range(10)),
+    ]
 )
 initial_ready_waits: list[float] = []
 check(
@@ -838,12 +842,12 @@ check(
         initial_ready_port,
         surface_id=SURFACE,
         runtime="codex",
-        observation_limit=3,
+        observation_limit=12,
         observation_interval_seconds=0.01,
         wait=initial_ready_waits.append,
     )
-    and initial_ready_port.reads == 3
-    and initial_ready_waits == [0.01, 0.01],
+    and initial_ready_port.reads == 12
+    and initial_ready_waits == [0.01] * 11,
     (initial_ready_port.reads, initial_ready_waits),
 )
 
@@ -928,7 +932,9 @@ class InitialPromptPort(InitialReadyPort):
         assert surface_id == SURFACE
         self.keys.append(key)
         if key == "Enter":
-            self.screens.append("› Implement {feature}")
+            self.screens.extend(
+                "› Implement {feature}" for _ in range(10)
+            )
 
 
 initial_prompt_port = InitialPromptPort()
@@ -938,7 +944,7 @@ check(
         initial_prompt_port,
         surface_id=SURFACE,
         runtime="codex",
-        observation_limit=4,
+        observation_limit=11,
         observation_interval_seconds=0,
         wait=lambda _seconds: None,
     )
@@ -960,7 +966,7 @@ class CodexTrustTransitionPort(InitialReadyPort):
                     )
                 ),
                 "› 1. Yes, continue",
-                "› Ask Codex to do anything",
+                *("› Ask Codex to do anything" for _ in range(10)),
             ]
         )
         self.keys: list[str] = []
@@ -977,15 +983,45 @@ check(
         codex_trust_transition_port,
         surface_id=SURFACE,
         runtime="codex",
-        observation_limit=3,
+        observation_limit=12,
         observation_interval_seconds=0,
         wait=lambda _seconds: None,
     )
     and codex_trust_transition_port.keys == ["Enter"]
-    and codex_trust_transition_port.reads == 3,
+    and codex_trust_transition_port.reads == 12,
     (
         codex_trust_transition_port.keys,
         codex_trust_transition_port.reads,
+    ),
+)
+
+
+class DelayedCodexTrustPort(CodexTrustTransitionPort):
+    def __init__(self) -> None:
+        super().__init__()
+        self.screens = [
+            "› Ask Codex to do anything",
+            *self.screens,
+            *("› Ask Codex to do anything" for _ in range(10)),
+        ]
+
+
+delayed_codex_trust_port = DelayedCodexTrustPort()
+check(
+    "initial Codex input does not race a trust dialog painted after idle",
+    await_initial_input_ready(
+        delayed_codex_trust_port,
+        surface_id=SURFACE,
+        runtime="codex",
+        observation_limit=13,
+        observation_interval_seconds=0,
+        wait=lambda _seconds: None,
+    )
+    and delayed_codex_trust_port.keys == ["Enter"]
+    and delayed_codex_trust_port.reads == 13,
+    (
+        delayed_codex_trust_port.keys,
+        delayed_codex_trust_port.reads,
     ),
 )
 
@@ -1016,7 +1052,7 @@ check(
         partial_initial_prompt_port,
         surface_id=SURFACE,
         runtime="codex",
-        observation_limit=5,
+        observation_limit=12,
         observation_interval_seconds=0,
         wait=lambda _seconds: None,
     )
@@ -1049,7 +1085,7 @@ check(
         codex_update_prompt_port,
         surface_id=SURFACE,
         runtime="codex",
-        observation_limit=4,
+        observation_limit=11,
         observation_interval_seconds=0,
         wait=lambda _seconds: None,
     )

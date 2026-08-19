@@ -17,9 +17,10 @@ packages were published for them.
 - Codex current-review delivery now waits through the footerless transient
   trust choice before treating the editor as ready. This prevents the initial
   review prompt from remaining unsubmitted after the trust dialog closes.
-- The regression covers the complete trust-dialog transition into the real
-  editor. The live scripts ratchet moves by the exact five-line production cost
-  to 296 files / 113,208 lines with no speculative headroom.
+- The regression covers both the visible trust-dialog transition and a dialog
+  painted after an initially idle frame. The live scripts ratchet moves by the
+  exact twelve-line net production cost to 296 files / 113,215 lines with no
+  speculative headroom.
 
 ## [2.8.4] - 2026-08-19
 

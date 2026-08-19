@@ -479,11 +479,11 @@ or verification effect. Archived review-marker recognition adds four measured
 lines to the existing upgrade preflight. The live ceiling is therefore pinned
 to exactly 296 files / 113,203 lines with no speculative headroom.
 
-The 2.8.5 Codex trust-transition repair adds exactly five lines to the existing
-runtime continuation classifier. A footerless transient numbered choice remains
-unknown until the real editor is visible, preventing the initial review input
-from being mistaken for accepted. No production file is added; the live ceiling
-is pinned to exactly 296 files / 113,208 lines with no speculative headroom.
+The 2.8.5 Codex trust-transition repair adds exactly twelve net lines to the
+existing runtime continuation classifier. A footerless transient numbered
+choice remains unknown, and the real editor must stay stable for a bounded
+window before first delivery. No production file is added; the live ceiling is
+pinned to exactly 296 files / 113,215 lines with no speculative headroom.
 """
 
 from __future__ import annotations
@@ -509,7 +509,7 @@ SCRIPT_FILE_CEILING = 296
 #: accepted-callback archive adds the exact 17-line directory-fsync boundary
 #: required by the final 2.8.2 review plus one measured recovery branch line
 #: that re-establishes both barriers after an interrupted mutation.
-SCRIPT_LINE_CEILING = 113_208
+SCRIPT_LINE_CEILING = 113_215
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:
