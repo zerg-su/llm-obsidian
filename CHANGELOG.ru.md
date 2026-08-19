@@ -16,6 +16,20 @@
 внутренними контрольными точками и вошли в следующие публичные релизы; тегов и
 пакетов с этими номерами не выпускалось.
 
+## [2.8.3] — 2026-08-19
+
+### Исправлено
+
+- Durable custom-step callback теперь имеет приоритет над recovery retained-
+  уведомления, поэтому уже завершённый model step продолжается без лишней
+  попытки transport и без replay provider'а.
+- Amendment Outcome Contract на том же HEAD теперь архивирует terminal review
+  callback до запуска successor со свежим outbox.
+- Два repo-owned статуса сбоя перехода теперь поднимают зарегистрированную
+  typed mechanism escalation и будят coordinator self-heal; ошибки model
+  artifact остаются обычным attention. Live ratchet scripts зафиксирован на
+  точном кандидате 296 файлов / 113 030 строк без спекулятивного запаса.
+
 ## [2.8.2] - 2026-08-19
 
 ### Исправлено

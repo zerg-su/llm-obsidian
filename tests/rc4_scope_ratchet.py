@@ -462,6 +462,15 @@ identity-bound write-ahead stages plus thread/process linearization. The exact
  reservation, and its accepted outbox is archived before launch with direct
  same-cycle zero-effect recovery. The live ceiling is pinned to exactly 296
  files / 112,961 lines with no speculative headroom.
+
+The 2.8.3 dogfood transition repair keeps durable callbacks ahead of redundant
+custom notification recovery and archives a terminal same-HEAD review callback
+before an amended successor launch. Those ordering changes are line-neutral.
+The coordinator self-heal relay adds the exact measured 37 lines to the existing
+runtime worker control owner: only the two repo-owned transition failure statuses
+raise the registered typed mechanism escalation, while model artifact failures
+remain ordinary attention. The live ceiling is therefore pinned to exactly 296
+files / 113,030 lines with no speculative headroom.
 """
 
 from __future__ import annotations
@@ -469,7 +478,7 @@ from __future__ import annotations
 from pathlib import Path
 
 
-#: Maximum tracked Python files under ``scripts/`` for the 2.8.2 candidate.
+#: Maximum tracked Python files under ``scripts/`` for the 2.8.3 candidate.
 #: Architecture Workflow v1 adds exactly the three production scripts its
 #: approved plan names: ``architecture_paths.py`` (the confined path/collision
 #: validator both carriers call), ``architecture_workflow_pressure.py`` and
@@ -478,7 +487,7 @@ from pathlib import Path
 #: file ceiling therefore moves by exactly three.
 SCRIPT_FILE_CEILING = 296
 
-#: Maximum total lines across those files for the 2.8.2 lifecycle candidate.
+#: Maximum total lines across those files for the 2.8.3 lifecycle candidate.
 #: The line ceiling moves to the measured candidate with zero headroom: those
 #: three modules plus the shared artifact-contract wiring in the existing
 #: carriers, the RC4 governing-source catalogue projection, the registered
@@ -487,7 +496,7 @@ SCRIPT_FILE_CEILING = 296
 #: accepted-callback archive adds the exact 17-line directory-fsync boundary
 #: required by the final 2.8.2 review plus one measured recovery branch line
 #: that re-establishes both barriers after an interrupted mutation.
-SCRIPT_LINE_CEILING = 112_993
+SCRIPT_LINE_CEILING = 113_030
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:
@@ -506,13 +515,13 @@ def assert_within_ceilings(scripts_dir: Path) -> tuple[int, int]:
     files, lines = measure(scripts_dir)
     if files > SCRIPT_FILE_CEILING:
         raise AssertionError(
-            f"scripts/ holds {files} Python files, above the 2.8.2 ceiling "
+            f"scripts/ holds {files} Python files, above the 2.8.3 ceiling "
             f"{SCRIPT_FILE_CEILING}; justify and raise the ceiling in the same "
             "commit as the growth"
         )
     if lines > SCRIPT_LINE_CEILING:
         raise AssertionError(
-            f"scripts/ holds {lines} lines, above the 2.8.2 ceiling "
+            f"scripts/ holds {lines} lines, above the 2.8.3 ceiling "
             f"{SCRIPT_LINE_CEILING}; justify and raise the ceiling in the same "
             "commit as the growth"
         )

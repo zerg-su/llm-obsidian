@@ -10,6 +10,20 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.8.3] - 2026-08-19
+
+### Fixed
+
+- A durable custom-step callback now outranks retained notification recovery,
+  so an already completed model step advances without a redundant transport
+  attempt or provider replay.
+- A same-HEAD Outcome Contract amendment now archives the terminal review
+  callback before launching its successor with a fresh outbox.
+- The two repository-owned transition failure statuses now raise the registered
+  typed mechanism escalation, waking coordinator self-heal while leaving model
+  artifact failures as ordinary attention. The live scripts ratchet is pinned
+  to the exact 296-file / 113,030-line candidate with no speculative headroom.
+
 ## [2.8.2] - 2026-08-19
 
 ### Fixed
