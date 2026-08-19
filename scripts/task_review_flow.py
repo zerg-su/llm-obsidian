@@ -88,6 +88,7 @@ from task_review_finalization_attempt import (
 )
 from task_review_resolution_bundle import (
     _approved_summary_predecessor_state,
+    _archive_changed_head_callback,
     _archive_prior_terminal_callbacks,
     _archive_resolution_callbacks,
     _resolution_bundle,
@@ -1351,6 +1352,7 @@ def _run_exact_head_review(
                 attempt_id=prior_attempt.identity.attempt_id,
                 terminal_result=prior_attempt.terminal.result.value,
             )
+            _archive_changed_head_callback(runtime_root, gate_root, prior_state, store, context.head_sha)
             if (
                 context.head_sha == prior_attempt.identity.exact_head_sha
                 and not zero_lane_preflight

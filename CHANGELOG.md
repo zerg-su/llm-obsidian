@@ -28,9 +28,12 @@ packages were published for them.
 - When product HEAD changes while a frozen current-review callback is already
   durable, the callback is now consumed and terminalized before the successor
   identity is reserved; the old attempt ID is never rebound or replayed.
+- The accepted predecessor callback is archived before the successor reuses its
+  axis outbox. A direct predecessor-bound same-cycle recovery also repairs the
+  already-durable zero-effect launch-failure prefix without a reviewer replay.
 - The active lifecycle-authority contour is truthfully rebaselined to the exact
-  28-file / 16,257-LOC candidate, and the live scripts ratchet to the exact
-  296-file / 112,876-line candidate, both with zero speculative headroom.
+  28-file / 16,259-LOC candidate, and the live scripts ratchet to the exact
+  296-file / 112,961-line candidate, both with zero speculative headroom.
 
 ## [2.8.1] - 2026-08-18
 

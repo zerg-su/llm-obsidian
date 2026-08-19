@@ -34,8 +34,11 @@
 - Если HEAD продукта меняется после durable-публикации замороженного
   current-review callback, callback теперь принимается и терминализируется до
   резервирования successor; старый attempt ID не перепривязывается и не replay'ится.
+- Принятый callback predecessor'а архивируется до переиспользования axis outbox.
+  Direct predecessor-bound same-cycle recovery также чинит уже durable
+  zero-effect launch-failure prefix без replay reviewer'а.
 - Контур active lifecycle authority правдиво перемерен на точный кандидат
-  28 файлов / 16 257 LOC, а live ratchet scripts — на 296 файлов / 112 876
+  28 файлов / 16 259 LOC, а live ratchet scripts — на 296 файлов / 112 961
   строк; оба значения зафиксированы без спекулятивного запаса.
 
 ## [2.8.1] - 2026-08-18

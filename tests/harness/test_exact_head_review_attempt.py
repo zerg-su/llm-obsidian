@@ -1654,7 +1654,56 @@ with tempfile.TemporaryDirectory(prefix="exact-protocol-selector.") as raw:
     )
 
     write_current_callback(after_approved, "blocked")
+    blocked_callback_envelope = json.loads(
+        callback_path.read_text(encoding="utf-8")
+    )
+    blocked_callback_archive = (
+        callback_path.parent
+        / "accepted"
+        / (
+            f"{blocked_callback_envelope['payload_sha256']}"
+            ".review-callback.json"
+        )
+    )
     commit_changed_head(4, "change after blocked review")
+
+    class RetainedOutboxFailureRuntime(FailingStartRuntime):
+        def start(
+            self,
+            request: object,
+            *,
+            on_surface_opened=None,
+            admit_provider_start=None,
+        ) -> SessionResult:
+            if not blocked_callback_archive.is_file() or callback_path.exists():
+                raise AssertionError(
+                    "blocked callback was not archived before successor start"
+                )
+            callback_path.write_bytes(blocked_callback_archive.read_bytes())
+            return super().start(
+                request,
+                on_surface_opened=on_surface_opened,
+                admit_provider_start=admit_provider_start,
+            )
+
+    outbox_failure_runtime = RetainedOutboxFailureRuntime(
+        store, owner_id=task_id
+    )
+    try:
+        _run_review(
+            meta,
+            vault,
+            product,
+            task_id,
+            runtime_root,
+            runtime_manager=outbox_failure_runtime,
+            apply_finalizing_recovery=forbidden_finalizing_recovery,
+        )
+    except RuntimeError as exc:
+        if str(exc) != "provider start failed":
+            raise
+    else:
+        raise AssertionError("successor outbox failure was hidden")
     after_blocked = _run_review(
         meta,
         vault,
@@ -1668,7 +1717,10 @@ with tempfile.TemporaryDirectory(prefix="exact-protocol-selector.") as raw:
         "changed HEAD consumes the frozen blocked callback before its successor",
         after_blocked["status"] == "reviewing"
         and gate.read()["attempt"]["identity"]["cycle"] == 4
-        and runtime.started == 5,
+        and runtime.started == 5
+        and outbox_failure_runtime.started == 1
+        and blocked_callback_archive.is_file()
+        and not callback_path.exists(),
     )
 
     original_request_exit = runtime.request_exit

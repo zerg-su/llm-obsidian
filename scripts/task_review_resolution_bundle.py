@@ -204,6 +204,53 @@ def _approved_summary_predecessor_state(
     return previous if retry_matches == 1 else None
 
 
+def _same_cycle_effectful_predecessor(
+    gate_root: Path,
+    state: Mapping[str, Any],
+) -> Mapping[str, Any] | None:
+    """Find the direct effectful predecessor of a zero-effect retry."""
+
+    if not zero_effect_gate_shape(state):
+        return None
+    current = ReviewAttempt.from_mapping(state["attempt"])
+    matches: list[Mapping[str, Any]] = []
+    for pointer in sorted((gate_root / "attempts").glob("attempt-*.json")):
+        if not pointer.is_file() or pointer.is_symlink():
+            raise ReviewAttemptError(
+                "mechanism predecessor archive path is invalid"
+            )
+        candidate = _read_json(pointer, "mechanism predecessor archive")
+        predecessor = ReviewAttempt.from_mapping(candidate.get("attempt"))
+        if pointer.name != f"attempt-{predecessor.identity.attempt_id}.json":
+            raise ReviewAttemptError(
+                "mechanism predecessor archive identity drifted"
+            )
+        identity = predecessor.identity
+        if (
+            predecessor.status != "terminal"
+            or predecessor.terminal is None
+            or not predecessor.terminal.lane_results
+            or identity.cycle != current.identity.cycle
+            or identity.finalization_lineage_id
+            != current.identity.finalization_lineage_id
+            or identity.plan_sha256 != current.identity.plan_sha256
+            or identity.outcome_sha256 != current.identity.outcome_sha256
+            or identity.policy != current.identity.policy
+            or current.identity.attempt_id
+            != predecessor_bound_attempt_id(
+                lineage_id=current.identity.finalization_lineage_id,
+                predecessor_attempt_id=identity.attempt_id,
+                exact_head=current.identity.exact_head_sha,
+                cycle_number=current.identity.cycle,
+            )
+        ):
+            continue
+        matches.append(candidate)
+    if len(matches) > 1:
+        raise ReviewAttemptError("mechanism predecessor archive is ambiguous")
+    return matches[0] if matches else None
+
+
 def _archive_resolution_callbacks(
     runtime_root: Path,
     state: Mapping[str, Any],
@@ -307,6 +354,9 @@ def _archive_prior_terminal_callbacks(
         if approved_summary_predecessor_only
         else None
     )
+    mechanism_predecessor = _same_cycle_effectful_predecessor(
+        gate_root, state
+    )
     if (
         approved_summary_predecessor_only
         and approved_summary_predecessor is None
@@ -321,6 +371,10 @@ def _archive_prior_terminal_callbacks(
                 approved_summary_predecessor.get("attempt")
             )
         )
+    elif mechanism_predecessor is not None:
+        archives.append(
+            ReviewAttempt.from_mapping(mechanism_predecessor.get("attempt"))
+        )
     elif (
         current_attempt_only
         and current.terminal is not None
@@ -329,7 +383,11 @@ def _archive_prior_terminal_callbacks(
         archives.append(current)
     for cycle in (
         ()
-        if current_attempt_only or approved_summary_predecessor_only
+        if (
+            current_attempt_only
+            or approved_summary_predecessor_only
+            or mechanism_predecessor is not None
+        )
         else range(current.identity.cycle - 1, 0, -1)
     ):
         pointer = gate_root / "attempts" / f"cycle-{cycle}.json"
@@ -399,6 +457,31 @@ def _archive_prior_terminal_callbacks(
         runtime_root,
         {"review_notification_evidence": boundaries},
     )
+
+
+def _archive_changed_head_callback(
+    runtime_root: Path,
+    gate_root: Path,
+    state: Mapping[str, Any],
+    store: OperationStore,
+    current_head: str,
+) -> None:
+    """Vacate the shared axis outbox before a changed-HEAD successor."""
+
+    attempt = ReviewAttempt.from_mapping(state["attempt"])
+    if (
+        attempt.status == "terminal"
+        and attempt.identity.exact_head_sha != current_head
+        and attempt.terminal is not None
+        and attempt.terminal.lane_results
+    ):
+        _archive_prior_terminal_callbacks(
+            runtime_root,
+            gate_root,
+            state,
+            store,
+            current_attempt_only=True,
+        )
 
 
 def _load_persisted_resolution_evidence(
