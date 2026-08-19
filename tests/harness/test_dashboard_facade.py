@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Registered any-facade dashboard launch and rebind behavior."""
+"""Registered root-dashboard launch and reuse behavior."""
 
 from __future__ import annotations
 
@@ -23,7 +23,6 @@ from harness.dashboard_facade import (  # noqa: E402
     launch_bound_facade_dashboard,
     launch_facade_dashboard,
     launch_review_facade_dashboard,
-    rebind_facade_dashboard,
 )
 import harness.dashboard_facade as facade_module  # noqa: E402
 
@@ -116,13 +115,6 @@ with tempfile.TemporaryDirectory(prefix="dashboard-facade.") as raw:
     caller = "11111111-1111-4111-8111-111111111111"
     request = "request-before-root"
     root = "durable-root"
-    temporary = facade_dashboard_command(
-        vault=vault,
-        store=store,
-        caller_surface=caller,
-        facade="review",
-        request_id=request,
-    )
     rooted = facade_dashboard_command(
         vault=vault,
         store=store,
@@ -132,9 +124,25 @@ with tempfile.TemporaryDirectory(prefix="dashboard-facade.") as raw:
         root_operation_id=root,
     )
     check(
-        "facades compile exact temporary or durable root commands",
-        temporary[-4:] == ["--temporary", request, "--facade", "review"]
-        and rooted[-4:] == ["--root", root, "--facade", "verify"],
+        "facades compile only exact durable root commands",
+        rooted[-4:] == ["--root", root, "--facade", "verify"],
+    )
+    try:
+        facade_dashboard_command(
+            vault=vault,
+            store=store,
+            caller_surface=caller,
+            facade="review",
+            request_id=request,
+        )
+    except ValueError:
+        temporary_rejected = True
+    else:
+        temporary_rejected = False
+    check(
+        "the facade rejects pre-root temporary dashboard launch",
+        temporary_rejected
+        and not hasattr(facade_module, "rebind_facade_dashboard"),
     )
     (vault / ".task-meta.json").write_text(
         json.dumps(
@@ -184,6 +192,7 @@ with tempfile.TemporaryDirectory(prefix="dashboard-facade.") as raw:
         caller_surface=caller,
         facade="review",
         request_id=request,
+        root_operation_id=root,
         runner=lambda argv: captured.append(list(argv)),
     )
     check(
@@ -192,8 +201,8 @@ with tempfile.TemporaryDirectory(prefix="dashboard-facade.") as raw:
         == DashboardLaunchReceipt(
             status="launched",
             facade="review",
-            scope="temporary",
-            root_operation_id="",
+            scope="root",
+            root_operation_id=root,
         )
         and len(captured) == 1,
     )
@@ -218,30 +227,6 @@ with tempfile.TemporaryDirectory(prefix="dashboard-facade.") as raw:
         == ["--root", root, "--facade", "plan-review"],
     )
 
-    rebind_commands: list[list[str]] = []
-    rebound_receipt = rebind_facade_dashboard(
-        vault=vault,
-        store=store,
-        caller_surface=caller,
-        facade="dispatch",
-        temporary_request_id=request,
-        root_operation_id=root,
-        runner=lambda argv: rebind_commands.append(list(argv)),
-    )
-    check(
-        "root creation compiles one temporary-to-durable rebind effect",
-        rebound_receipt.status == "launched"
-        and rebind_commands[0][-6:]
-        == [
-            "--temporary",
-            request,
-            "--root",
-            root,
-            "--facade",
-            "dispatch",
-        ],
-    )
-
     def fail(_argv: list[str]) -> None:
         raise OSError("secret provider output must not escape")
 
@@ -251,6 +236,7 @@ with tempfile.TemporaryDirectory(prefix="dashboard-facade.") as raw:
         caller_surface=caller,
         facade="review",
         request_id=request,
+        root_operation_id=root,
         runner=fail,
     )
     check(
@@ -283,14 +269,6 @@ with tempfile.TemporaryDirectory(prefix="dashboard-facade.") as raw:
             request_id=root,
             root_operation_id=root,
         )
-        timed_out_rebind = rebind_facade_dashboard(
-            vault=vault,
-            store=store,
-            caller_surface=caller,
-            facade="dispatch",
-            temporary_request_id=request,
-            root_operation_id=root,
-        )
     finally:
         facade_module.DASHBOARD_TIMEOUT_SECONDS = original_timeout
     elapsed = time.monotonic() - timeout_started
@@ -304,11 +282,10 @@ with tempfile.TemporaryDirectory(prefix="dashboard-facade.") as raw:
         return False
 
     check(
-        "blocking dashboard launch and rebind degrade and reap at the timeout",
+        "blocking root dashboard launch degrades and reaps at the timeout",
         timed_out_launch.status == "degraded"
-        and timed_out_rebind.status == "degraded"
         and elapsed < 2.0
-        and len(timed_out_pids) == 2
+        and len(timed_out_pids) == 1
         and all(child_is_reaped(pid) for pid in timed_out_pids),
     )
 
@@ -320,29 +297,17 @@ with tempfile.TemporaryDirectory(prefix="dashboard-facade.") as raw:
         vault=vault,
         store=store,
         caller_surface=caller,
-        temporary=request,
-        facade="review",
-        adapter=adapter,
-        marker_root=markers,
-    )
-    before_rebind_send_count = len(adapter.sent)
-    rebound = dashboard.rebind_dashboard(
-        vault=vault,
-        store=store,
-        caller_surface=caller,
-        temporary=request,
         root=root,
         facade="review",
         adapter=adapter,
         marker_root=markers,
     )
-    replay = dashboard.rebind_dashboard(
+    replay = dashboard.open_dashboard(
         vault=vault,
         store=store,
         caller_surface=caller,
-        temporary=request,
         root=root,
-        facade="review",
+        facade="verify",
         adapter=adapter,
         marker_root=markers,
     )
@@ -351,64 +316,16 @@ with tempfile.TemporaryDirectory(prefix="dashboard-facade.") as raw:
         for path in markers.glob("*.json")
     ]
     check(
-        "temporary-to-root rebind reuses one split without duplication",
+        "root dashboard reuse keeps one exact split across facades",
         not opened.reused
-        and rebound.surface_id == observer
         and replay.reused
+        and replay.surface_id == observer
         and adapter.open_count == 1
         and adapter.closed == []
-        and len(adapter.sent) == before_rebind_send_count + 1
-        and adapter.keys[-2:] == [(observer, "ctrl+c"), (observer, "Enter")]
+        and len(adapter.sent) == 1
         and len(marker_values) == 1
         and marker_values[0]["scope"] == "root"
         and marker_values[0]["root_id"] == root,
-    )
-
-    root_first_markers = Path(raw) / "root-first-markers"
-    temporary_observer = "44444444-4444-4444-8444-444444444444"
-    root_first = FakeAdapter(
-        caller, [observer, temporary_observer], workspace
-    )
-    dashboard.open_dashboard(
-        vault=vault,
-        store=store,
-        caller_surface=caller,
-        root="root-first",
-        facade="review",
-        adapter=root_first,
-        marker_root=root_first_markers,
-    )
-    dashboard.open_dashboard(
-        vault=vault,
-        store=store,
-        caller_surface=caller,
-        temporary="late-temporary",
-        facade="verify",
-        adapter=root_first,
-        marker_root=root_first_markers,
-    )
-    converged = dashboard.rebind_dashboard(
-        vault=vault,
-        store=store,
-        caller_surface=caller,
-        temporary="late-temporary",
-        root="root-first",
-        facade="pivot",
-        adapter=root_first,
-        marker_root=root_first_markers,
-    )
-    root_first_values = [
-        json.loads(path.read_text(encoding="ascii"))
-        for path in root_first_markers.glob("*.json")
-    ]
-    check(
-        "root-first cross-facade rebind closes the duplicate observer",
-        converged.reused
-        and converged.surface_id == observer
-        and root_first.closed == [temporary_observer]
-        and len(root_first_values) == 1
-        and root_first_values[0]["scope"] == "root"
-        and "facade" not in root_first_values[0],
     )
 
 if failures:

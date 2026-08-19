@@ -30,7 +30,6 @@ from dispatch_custom_contracts import (
 from dispatch_io import DispatchError, atomic_json, atomic_text, utc_now
 from dispatch_setup import render_task_prompt, review_policy, review_topology_preview
 from approved_plan_snapshot import bind_approved_plan_snapshot
-from harness.dashboard_facade import facade_dashboard_command
 
 
 def run_command(
@@ -54,24 +53,6 @@ def run_command(
         suffix = f": {detail[-1][:300]}" if detail else ""
         raise DispatchError(f"{label} failed{suffix}")
     return result
-
-
-def observer_command(vault_root: Path, request_id: str) -> list[str]:
-    """Exact temporary observer argv before durable task-root creation.
-
-    The caller appends its own exact coordinator surface. The observer stays
-    outside Harness ownership and carries no lifecycle authority, so this
-    argv can neither reorder validate/start nor block an approved pipeline.
-    """
-
-    root = Path(vault_root)
-    return facade_dashboard_command(
-        vault=root,
-        store=root / ".vault-meta" / "harness",
-        caller_surface="",
-        facade="dispatch",
-        request_id=request_id,
-    )
 
 
 def ensure_task_git_excludes(worktree: Path) -> None:

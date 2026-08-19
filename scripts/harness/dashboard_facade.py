@@ -38,12 +38,8 @@ class DashboardLaunchReceipt:
         if (
             self.status not in {"launched", "degraded"}
             or self.facade not in FACADE_KINDS
-            or self.scope not in {"temporary", "root"}
-            or (
-                self.scope == "root"
-                and not ID_RE.fullmatch(self.root_operation_id)
-            )
-            or (self.scope == "temporary" and self.root_operation_id)
+            or self.scope != "root"
+            or not ID_RE.fullmatch(self.root_operation_id)
         ):
             raise ValueError("dashboard launch receipt is invalid")
 
@@ -86,7 +82,7 @@ def facade_dashboard_command(
         raise ValueError("dashboard facade is not registered")
     if not ID_RE.fullmatch(request_id):
         raise ValueError("dashboard request identity is invalid")
-    if root_operation_id and not ID_RE.fullmatch(root_operation_id):
+    if not ID_RE.fullmatch(root_operation_id):
         raise ValueError("dashboard root identity is invalid")
     root = Path(vault).expanduser().resolve()
     state = Path(store).expanduser().resolve()
@@ -103,11 +99,7 @@ def facade_dashboard_command(
     ]
     if caller_surface:
         command.extend(["--surface", caller_surface])
-    command.extend(
-        ["--root", root_operation_id]
-        if root_operation_id
-        else ["--temporary", request_id]
-    )
+    command.extend(["--root", root_operation_id])
     command.extend(["--facade", facade])
     return command
 
@@ -123,50 +115,6 @@ def _run(argv: Sequence[str]) -> None:
     )
 
 
-def rebind_facade_dashboard(
-    *,
-    vault: Path,
-    store: Path,
-    caller_surface: str,
-    facade: str,
-    temporary_request_id: str,
-    root_operation_id: str,
-    runner: Callable[[Sequence[str]], None] = _run,
-) -> DashboardLaunchReceipt:
-    """Best-effort temporary-to-root observer convergence at root creation."""
-
-    binding = DashboardBinding(
-        vault=vault,
-        store=store,
-        caller_surface=caller_surface,
-        request_id=temporary_request_id,
-    )
-    if facade not in FACADE_KINDS or not ID_RE.fullmatch(root_operation_id):
-        raise ValueError("dashboard rebind identity is invalid")
-    command = [
-        sys.executable,
-        str(binding.vault / "scripts" / "harness-dashboard.py"),
-        "rebind",
-        "--vault",
-        str(binding.vault),
-        "--store",
-        str(binding.store),
-        "--surface",
-        binding.caller_surface,
-        "--temporary",
-        binding.request_id,
-        "--root",
-        root_operation_id,
-        "--facade",
-        facade,
-    ]
-    try:
-        runner(command)
-    except Exception:
-        return DashboardLaunchReceipt("degraded", facade, "root", root_operation_id)
-    return DashboardLaunchReceipt("launched", facade, "root", root_operation_id)
-
-
 def launch_facade_dashboard(
     *,
     vault: Path,
@@ -179,7 +127,6 @@ def launch_facade_dashboard(
 ) -> DashboardLaunchReceipt:
     """Launch best-effort; dashboard failure never blocks its product facade."""
 
-    scope = "root" if root_operation_id else "temporary"
     command = facade_dashboard_command(
         vault=vault,
         store=store,
@@ -192,9 +139,9 @@ def launch_facade_dashboard(
         runner(command)
     except Exception:
         return DashboardLaunchReceipt(
-            "degraded", facade, scope, root_operation_id
+            "degraded", facade, "root", root_operation_id
         )
-    return DashboardLaunchReceipt("launched", facade, scope, root_operation_id)
+    return DashboardLaunchReceipt("launched", facade, "root", root_operation_id)
 
 
 def launch_review_facade_dashboard(
@@ -265,5 +212,4 @@ __all__ = [
     "launch_bound_facade_dashboard",
     "launch_facade_dashboard",
     "launch_review_facade_dashboard",
-    "rebind_facade_dashboard",
 ]
