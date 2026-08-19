@@ -16,6 +16,7 @@ from ..runtime_session_contracts import (
 )
 from ..state_machine import TERMINAL
 from ..store import StoreError
+from ..review_workspace import ReviewWorkspaceBinding
 from .review import (
     ReviewContext,
     ReviewExecution,
@@ -69,6 +70,8 @@ def _round_without_checkpoint(
         max_verify_iterations=review.max_verify_iterations,
         state=record.state,
         checkpoint_sha256="",
+        workspace_id=str(raw_lane.get("workspace_id") or ""),
+        window_id=str(raw_lane.get("window_id") or ""),
     )
     spec = review_round_spec(lane)
     try:
@@ -370,6 +373,8 @@ class ReviewGateStateMixin:
             "checkpoint": lane.checkpoint,
             "verification_iteration": lane.verification_iteration,
             "state": lane.state,
+            "workspace_id": lane.workspace_id,
+            "window_id": lane.window_id,
         }
         if lane.checkpoint_sha256:
             value["checkpoint_sha256"] = lane.checkpoint_sha256
@@ -425,6 +430,7 @@ class ReviewGateStateMixin:
             "topology_sha256": request.topology_sha256,
             "fresh_reevaluation_used": False,
             "lanes": [],
+            "review_workspace": {},
             "round_results": {},
             "final_results": {},
             "resolution_evidence": {},
@@ -459,14 +465,17 @@ class ReviewGateStateMixin:
         topology = state.get("topology")
         topology_sha256 = str(state.get("topology_sha256") or "")
         raw_lanes = state.get("lanes")
+        raw_workspace = state.get("review_workspace")
         if (
             not isinstance(policy, dict)
             or policy.get("enabled") is not True
             or not isinstance(context, dict)
             or not isinstance(raw_lanes, list)
             or not raw_lanes
+            or not isinstance(raw_workspace, dict)
         ):
             raise ValueError("active review gate cannot be rehydrated")
+        workspace = ReviewWorkspaceBinding.from_payload(raw_workspace)
         stored_axes = tuple(
             str(item.get("axis") or "")
             for item in raw_lanes
@@ -602,6 +611,8 @@ class ReviewGateStateMixin:
                 max_verify_iterations=review.max_verify_iterations,
                 state=record.state,
                 checkpoint_sha256=checkpoint_sha256,
+                workspace_id=str(raw_lane.get("workspace_id") or ""),
+                window_id=str(raw_lane.get("window_id") or ""),
             )
             lanes.append(lane)
             routes[axis] = record.spec.route
@@ -636,5 +647,7 @@ class ReviewGateStateMixin:
         )
         if isinstance(topology, dict) and request.topology.payload() != topology:
             raise ValueError("stored review effective topology changed")
-        execution = ReviewExecution(request, tuple(lanes))
+        execution = ReviewExecution(
+            request, tuple(lanes), workspace=workspace
+        )
         return ReviewGateRun(execution, rounds)

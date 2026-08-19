@@ -193,6 +193,7 @@ class ReviewGateController(
             active_review_operation_id=request.policy.operation_id,
             context=self._context(request.context),
             lanes=[self._lane(lane) for lane in execution.lanes],
+            review_workspace=execution.workspace.payload(),
             **attempt_update,
         )
         return ReviewGateRun(execution, captured)

@@ -277,6 +277,12 @@ with tempfile.TemporaryDirectory(prefix="review-workflow.") as raw:
 class FakeSessionResult:
     record: object
     checkpoint: str
+    action: str = "started"
+    workspace_id: str = ""
+    workspace_ref: str = "workspace:1"
+    window_id: str = ""
+    window_ref: str = "window:1"
+    surface_ref: str = "surface:1"
 
 
 class FakeReviewRuntime:
@@ -291,6 +297,9 @@ class FakeReviewRuntime:
         self.cleanups: list[tuple[str, str]] = []
         self.prepared: list[str] = []
         self.registered: list[tuple[str, str, str, str, str]] = []
+        self.workspace_count = 0
+        self.surface_workspaces: dict[str, tuple[str, str]] = {}
+        self.results: dict[str, FakeSessionResult] = {}
 
     def preflight_routes(
         self,
@@ -337,9 +346,23 @@ class FakeReviewRuntime:
             ),
         )
         self.store.save(record, expected_revision=0)
-        result = FakeSessionResult(record, f"checkpoint-{len(self.started)}")
+        if request.placement == "workspace":
+            self.workspace_count += 1
+            workspace = f"BBBBBBBB-BBBB-4BBB-8BBB-{self.workspace_count:012d}"
+            window = f"CCCCCCCC-CCCC-4CCC-8CCC-{self.workspace_count:012d}"
+        else:
+            workspace, window = self.surface_workspaces[request.origin_surface]
+        self.surface_workspaces[record.resources.surface_id] = (workspace, window)
+        result = FakeSessionResult(
+            record,
+            f"checkpoint-{len(self.started)}",
+            workspace_id=workspace,
+            window_id=window,
+            surface_ref=f"surface:{len(self.started)}",
+        )
         if on_surface_opened is not None:
             on_surface_opened(result)
+        self.results[record.spec.operation_id] = result
         return result
 
     def continue_session(
@@ -353,7 +376,13 @@ class FakeReviewRuntime:
             (owner_id, operation_id, checkpoint, prompt_pointer)
         )
         record = self.store.read(owner_id, operation_id)
-        return FakeSessionResult(record, checkpoint)
+        workspace, window = self.surface_workspaces[record.resources.surface_id]
+        return FakeSessionResult(
+            record,
+            checkpoint,
+            workspace_id=workspace,
+            window_id=window,
+        )
 
     def accept_callback(self, envelope: object) -> object:
         self.callbacks.append(envelope)
@@ -411,7 +440,9 @@ class FakeReviewRuntime:
         return self.store.read(owner_id, operation_id)
 
     def status(self, owner_id: str, operation_id: str) -> object:
-        return self.store.read(owner_id, operation_id)
+        record = self.store.read(owner_id, operation_id)
+        prior = self.results[operation_id]
+        return replace(prior, record=record)
 
 
 with tempfile.TemporaryDirectory(prefix="review-runtime.") as raw:
@@ -582,7 +613,7 @@ with tempfile.TemporaryDirectory(prefix="review-runtime.") as raw:
         and [request.spec.route.runtime for request in runtime.started[-2:]]
         == ["claude", "codex"]
         and [request.placement for request in runtime.started[-2:]]
-        == ["workspace", "workspace"]
+        == ["workspace", "split"]
         and [
             (item.spec.operation_id, item.lane_id, item.run_id)
             for item in replay_identities

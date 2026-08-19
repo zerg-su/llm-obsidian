@@ -20,6 +20,7 @@ from ..contracts import (
 )
 from ..state_machine import TERMINAL
 from ..runtime_session_contracts import RuntimeSessionError
+from ..review_workspace import ReviewWorkspaceBinding
 from ..dashboard_facade import (
     DashboardBinding,
     launch_bound_facade_dashboard,
@@ -127,6 +128,7 @@ def start_review(
     )
     lanes: list[ReviewLaneSession] = []
     started_lanes: list[ReviewLaneSession] = []
+    workspace_binding: ReviewWorkspaceBinding | None = None
     initial_rounds: list[ReviewRound] = []
     prepared_sessions: list[
         tuple[
@@ -223,30 +225,49 @@ def start_review(
                     raise ValueError(
                         "stored review session identity does not match request"
                     )
-                observed: object = (
-                    existing
-                    if existing.state in TERMINAL
-                    else runtime.status(spec.owner_id, spec.operation_id)
+                observed = runtime.status(spec.owner_id, spec.operation_id)
+                lane = _runtime_lane(
+                    axis=axis,
+                    spec=spec,
+                    value=observed,
+                    max_verify_iterations=(
+                        request.policy.max_verify_iterations
+                    ),
                 )
-                lanes.append(
-                    _runtime_lane(
-                        axis=axis,
-                        spec=spec,
-                        value=observed,
-                        max_verify_iterations=(
-                            request.policy.max_verify_iterations
-                        ),
-                    )
-                )
+                if lane.surface_id:
+                    if workspace_binding is None:
+                        workspace_binding = ReviewWorkspaceBinding.from_result(
+                            request.policy.operation_id, observed
+                        )
+                    else:
+                        workspace_binding.validate_member(observed)
+                lanes.append(lane)
                 continue
+
+            effective_request = (
+                session_request
+                if workspace_binding is None
+                else replace(
+                    session_request,
+                    origin_surface=workspace_binding.anchor_surface_id,
+                    placement="split",
+                )
+            )
 
             def on_surface_opened(
                 result: object,
                 *,
                 axis: str = axis,
-                session_request: ReviewSessionRequest = session_request,
+                session_request: ReviewSessionRequest = effective_request,
             ) -> None:
+                nonlocal workspace_binding
                 record = _runtime_record(result)
+                if workspace_binding is None:
+                    workspace_binding = ReviewWorkspaceBinding.from_result(
+                        request.policy.operation_id, result
+                    )
+                else:
+                    workspace_binding.validate_member(result)
                 initial_lane = _runtime_lane(
                     axis=axis,
                     spec=session_request.spec,
@@ -276,13 +297,16 @@ def start_review(
                 # owner.  RuntimeSessionManager consumes it after provider
                 # preparation and immediately before registering start-provider.
                 start_kwargs["admit_provider_start"] = admit_launch
-            result = runtime.start(session_request, **start_kwargs)
+            result = runtime.start(effective_request, **start_kwargs)
             lane = _runtime_lane(
                 axis=axis,
                 spec=spec,
                 value=result,
                 max_verify_iterations=request.policy.max_verify_iterations,
             )
+            if workspace_binding is None:
+                raise ValueError("review workspace binding was not established")
+            workspace_binding.validate_member(result)
             lanes.append(lane)
             started_lanes.append(lane)
     except Exception:
@@ -308,7 +332,9 @@ def start_review(
             except Exception:
                 pass
         raise
-    return ReviewExecution(request, tuple(lanes), dashboard)
+    if workspace_binding is None:
+        raise ValueError("review workspace binding is unavailable")
+    return ReviewExecution(request, tuple(lanes), dashboard, workspace_binding)
 
 
 def verify_review_lane(

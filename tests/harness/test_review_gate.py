@@ -633,6 +633,11 @@ class FakeSessionResult:
     process_status: str = ""
     surface_status: str = ""
     checkpoint_sha256: str = ""
+    workspace_id: str = "BBBBBBBB-BBBB-4BBB-8BBB-BBBBBBBBBBBB"
+    workspace_ref: str = "workspace:1"
+    window_id: str = "CCCCCCCC-CCCC-4CCC-8CCC-CCCCCCCCCCCC"
+    window_ref: str = "window:1"
+    surface_ref: str = "surface:1"
 
 
 class FakeRuntime:
@@ -4089,6 +4094,23 @@ with tempfile.TemporaryDirectory(prefix="review-late-ready-recovery.") as raw:
     runtime.accept_callback(review_round_envelope(round_, result))
     receipt_root = store.root / "owners" / owner_id / "runtime" / parent_id
     receipt_root.mkdir(parents=True, exist_ok=True)
+    (receipt_root / "session.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "operation_id": parent_id,
+                "run_id": parent.run_id,
+                "surface_ref": "surface:1",
+                "workspace_id": "BBBBBBBB-BBBB-4BBB-8BBB-BBBBBBBBBBBB",
+                "workspace_ref": "workspace:1",
+                "window_id": "CCCCCCCC-CCCC-4CCC-8CCC-CCCCCCCCCCCC",
+                "window_ref": "window:1",
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     (receipt_root / "ready.json").write_text(
         json.dumps(
             {

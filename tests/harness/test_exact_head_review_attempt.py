@@ -115,6 +115,11 @@ class SessionResult:
     process_status: str = ""
     surface_status: str = ""
     checkpoint_sha256: str = ""
+    workspace_id: str = "BBBBBBBB-BBBB-4BBB-8BBB-BBBBBBBBBBBB"
+    workspace_ref: str = "workspace:1"
+    window_id: str = "CCCCCCCC-CCCC-4CCC-8CCC-CCCCCCCCCCCC"
+    window_ref: str = "window:1"
+    surface_ref: str = "surface:1"
 
 
 class FakeRuntime:
@@ -149,7 +154,10 @@ class FakeRuntime:
                 record,
                 resources=replace(
                     record.resources,
-                    surface_id=f"surface-{self.started}",
+                    surface_id=(
+                        f"{self.started:08d}-AAAA-4AAA-8AAA-"
+                        f"{self.started:012d}"
+                    ),
                 ),
                 revision=record.revision + 1,
             )

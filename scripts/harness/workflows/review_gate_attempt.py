@@ -21,6 +21,7 @@ from ..pre_model_reviewer_retirement import (
 from ..review_input_rollover import archive_prior_review_input
 from ..store import StoreError
 from ..dashboard_facade import DashboardBinding
+from ..review_workspace import ReviewWorkspaceBinding
 from ..review_attempt import (
     EXACT_HEAD_REVIEW_PROTOCOL,
     ReviewAttempt,
@@ -181,14 +182,34 @@ class ReviewGateAttemptMixin:
             "callback-submit-attention.json"
         )
         ready_path = receipt_path.with_name("ready.json")
+        session_path = receipt_path.with_name("session.json")
         try:
             receipt = _read_json(receipt_path)
             ready = _read_json(ready_path)
+            session = _read_json(session_path)
         except (OSError, ValueError):
             return False
         if len(children) != 1:
             return False
         child = children[0]
+        try:
+            workspace = ReviewWorkspaceBinding(
+                review_operation_id=attempt.identity.attempt_id,
+                workspace_id=str(session.get("workspace_id") or ""),
+                workspace_ref=str(session.get("workspace_ref") or ""),
+                window_id=str(session.get("window_id") or ""),
+                window_ref=str(session.get("window_ref") or ""),
+                anchor_surface_id=str(receipt.get("surface_id") or ""),
+                anchor_surface_ref=str(session.get("surface_ref") or ""),
+            )
+        except ValueError:
+            return False
+        if (
+            session.get("schema_version") != 1
+            or session.get("operation_id") != lane.operation_id
+            or session.get("run_id") != lane.run_id
+        ):
+            return False
         late_callback_attention = False
         if parent.state == "attention-required":
             try:
@@ -289,6 +310,8 @@ class ReviewGateAttemptMixin:
                 "checkpoint": "",
                 "verification_iteration": lane.verification_iteration,
                 "state": parent.state,
+                "workspace_id": workspace.workspace_id,
+                "window_id": workspace.window_id,
             }
         )
         recovered = ReviewAttempt(attempt.identity, "awaiting-callback")
@@ -301,6 +324,7 @@ class ReviewGateAttemptMixin:
             current.update(
                 status="reviewing",
                 lanes=[raw_lane],
+                review_workspace=workspace.payload(),
                 attempt=recovered.payload(),
             )
             _atomic_json(self.state_path, current)

@@ -35,6 +35,7 @@ from .runtime_sessions import RuntimeSessionManager
 from .store import OperationStore
 from .verification import VerificationError, load_profiles
 from .workflows.structural_pivot import StructuralPivotWorkflow
+from .review_workspace import ReviewWorkspaceBinding
 from .workflows.review_gate import (
     ReviewGateAuthorization,
     authorize_task_finalization,
@@ -171,6 +172,7 @@ def reserve_task_finalization_cycle(
     recover_attention_attempt: bool = False,
     pivot_workflow: object | None = None,
     pivot_runtime: object | None = None,
+    review_workspace: ReviewWorkspaceBinding | None = None,
 ) -> TaskFinalizationReservation | None:
     """Compile all bounded choices, then atomically select the reserved cycle."""
 
@@ -215,6 +217,22 @@ def reserve_task_finalization_cycle(
         runtime = pivot_runtime or RuntimeSessionManager.for_root(
             vault, store_root=store_root
         )
+        if review_workspace is None:
+            gate_state = json.loads(
+                (
+                    review_gate_root(meta, Path(worktree))
+                    / "review-gate.json"
+                ).read_text(encoding="utf-8")
+            )
+            if not isinstance(gate_state, dict) or not isinstance(
+                gate_state.get("review_workspace"), dict
+            ):
+                raise ValueError(
+                    "structural pivot review workspace is unavailable"
+                )
+            review_workspace = ReviewWorkspaceBinding.from_payload(
+                gate_state["review_workspace"]
+            )
         try:
             result = workflow.reconcile(
                 snapshot,
@@ -239,6 +257,7 @@ def reserve_task_finalization_cycle(
                     root_operation_id=task_id,
                     runtime=runtime,
                     origin_surface=str(meta.get("task_surface") or ""),
+                    review_workspace=review_workspace,
                     worktree=Path(worktree),
                     callback_wake=wake,
                 )
