@@ -462,6 +462,9 @@ with tempfile.TemporaryDirectory(prefix="reap-runner-test.") as raw:
                 "task_id": task_id,
                 "version": 3,
                 "interaction_policy": "unattended",
+                "surface_policy": {"placement": "workspace"},
+                "task_workspace": "33333333-3333-4333-8333-333333333333",
+                "task_window": "44444444-4444-4444-8444-444444444444",
             }
         )
         + "\n",
@@ -523,6 +526,10 @@ with tempfile.TemporaryDirectory(prefix="reap-runner-test.") as raw:
             supervisor.bind_resources(OwnedResources())
             record = supervisor.transition("complete")
             return SimpleNamespace(action="cleaned", record=record)
+
+        def close_workspace(self, workspace_id: str, window_id: str):
+            runtime_actions.append("workspace-close")
+            return "closed"
 
     fake_runtime = FakeRuntime()
     original_finalize = runner._finalize_reap
@@ -661,9 +668,49 @@ with tempfile.TemporaryDirectory(prefix="reap-runner-test.") as raw:
     )
     check(
         "reap exits provider before exact cleanup and clears ownership",
-        runtime_actions == ["request-exit", "cleanup"]
+        runtime_actions == ["request-exit", "cleanup", "workspace-close"]
         and durable.resources == OwnedResources(),
     )
+    workspace_cleanup = json.loads(
+        (worktree / ".task-workspace-cleanup.json").read_text(encoding="utf-8")
+    )
+    check(
+        "reap closes the exact task workspace once after provider cleanup",
+        workspace_cleanup["status"] == "closed"
+        and workspace_cleanup["workspace_id"]
+        == "33333333-3333-4333-8333-333333333333"
+        and workspace_cleanup["window_id"]
+        == "44444444-4444-4444-8444-444444444444",
+    )
+    failed_workspace = vault / "failed-workspace-cleanup"
+    failed_workspace.mkdir()
+
+    class FailedWorkspaceRuntime:
+        @staticmethod
+        def close_workspace(_workspace_id: str, _window_id: str) -> str:
+            raise runner.RuntimeSessionError("workspace drift")
+
+    try:
+        runner._finish_task_workspace(
+            FailedWorkspaceRuntime(),
+            failed_workspace,
+            {
+                "task_id": task_id,
+                "surface_policy": {"placement": "workspace"},
+                "task_workspace": "33333333-3333-4333-8333-333333333333",
+                "task_window": "44444444-4444-4444-8444-444444444444",
+            },
+        )
+    except runner.RuntimeSessionError:
+        check(
+            "failed reap workspace cleanup retains the exact container for retry",
+            not (failed_workspace / ".task-workspace-cleanup.json").exists(),
+        )
+    else:
+        check(
+            "failed reap workspace cleanup retains the exact container for retry",
+            False,
+        )
     check(
         "idempotent reap preserves every typed plan-close projection",
         all(
@@ -674,7 +721,7 @@ with tempfile.TemporaryDirectory(prefix="reap-runner-test.") as raw:
             for status in ("closed", "conflict", "retained")
         )
         and finalize_calls == [1]
-        and runtime_actions == ["request-exit", "cleanup"]
+        and runtime_actions == ["request-exit", "cleanup", "workspace-close"]
         and durable.revision == first_terminal.revision,
     )
 

@@ -652,6 +652,11 @@ class FakeRuntime:
         self.superseded_cleanups: list[Path] = []
         self.cleanup_attention = False
         self.cleanup_terminate_once = False
+        self.closed_workspaces: list[tuple[str, str]] = []
+
+    def close_workspace(self, workspace_id: str, window_id: str) -> str:
+        self.closed_workspaces.append((workspace_id, window_id))
+        return "closed"
 
     def preflight_routes(
         self,

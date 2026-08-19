@@ -10,6 +10,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 from datetime import date
 from pathlib import Path
@@ -31,6 +32,7 @@ from harness.runtime_sessions import (  # noqa: E402
     RuntimeSessionError,
     RuntimeSessionManager,
 )
+from harness.runtime_session_contracts import SURFACE_UUID  # noqa: E402
 from harness.review_finalization import (  # noqa: E402
     require_task_review,
     review_gate_root,
@@ -578,6 +580,71 @@ def _finish_provider_runtime(
         time.sleep(0.05)
 
 
+def _atomic_json(path: Path, value: dict[str, object]) -> None:
+    fd, raw = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    temporary = Path(raw)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(value, handle, sort_keys=True, separators=(",", ":"))
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        temporary.chmod(0o600)
+        os.replace(temporary, path)
+        directory_fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _finish_task_workspace(
+    runtime: RuntimeSessionManager,
+    worktree: Path,
+    meta: dict[str, Any],
+) -> None:
+    """Close the exact primary workspace only after provider cleanup succeeds."""
+
+    policy = meta.get("surface_policy")
+    placement = (
+        str(policy.get("placement") or "split")
+        if isinstance(policy, dict)
+        else "split"
+    )
+    if placement != "workspace":
+        return
+    workspace_id = str(meta.get("task_workspace") or "")
+    window_id = str(meta.get("task_window") or "")
+    if not SURFACE_UUID.fullmatch(workspace_id):
+        raise ReapError("task workspace must be an exact UUID")
+    if not SURFACE_UUID.fullmatch(window_id):
+        raise ReapError("task window must be an exact UUID")
+    receipt_path = worktree / ".task-workspace-cleanup.json"
+    expected = {
+        "schema_version": 1,
+        "task_id": str(meta.get("task_id") or ""),
+        "workspace_id": workspace_id,
+        "window_id": window_id,
+    }
+    if receipt_path.is_symlink():
+        raise ReapError("task workspace cleanup receipt changed")
+    if receipt_path.exists():
+        receipt = read_json(receipt_path)
+        if (
+            set(receipt) != {*expected, "status"}
+            or any(receipt.get(key) != value for key, value in expected.items())
+            or receipt.get("status") not in {"closed", "already-gone"}
+        ):
+            raise ReapError("task workspace cleanup receipt changed")
+        return
+    status = runtime.close_workspace(workspace_id, window_id)
+    if status not in {"closed", "already-gone"}:
+        raise ReapError("task workspace cleanup did not prove exact closure")
+    _atomic_json(receipt_path, {**expected, "status": status})
+
+
 def apply_reap(
     vault: Path,
     worktree: Path,
@@ -624,8 +691,9 @@ def apply_reap(
     )
     try:
         _finish_provider_runtime(runtime, task_id)
+        _finish_task_workspace(runtime, worktree, meta)
     except RuntimeSessionError as exc:
-        raise ReapError(f"provider cleanup failed: {exc}") from exc
+        raise ReapError(f"provider or workspace cleanup failed: {exc}") from exc
     if lifecycle.result is not None:
         return dict(lifecycle.result)
     prepared = read_json(worktree / ".task-reap-prepared.json")

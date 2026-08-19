@@ -61,6 +61,36 @@ class RuntimeSessionCleanupMixin:
         }
     )
 
+    def close_workspace(self, workspace_id: str, window_id: str) -> str:
+        """Close one exact UUID-bound workspace, with missing as idempotent success."""
+
+        from .runtime_session_contracts import SURFACE_UUID
+
+        if not SURFACE_UUID.fullmatch(workspace_id):
+            raise RuntimeSessionError("workspace must be an exact UUID")
+        if not SURFACE_UUID.fullmatch(window_id):
+            raise RuntimeSessionError("window must be an exact UUID")
+        try:
+            status = self.cmux.workspace_status(workspace_id, window_id)
+        except Exception as exc:
+            raise RuntimeSessionError(
+                "exact workspace identity cannot be proven"
+            ) from exc
+        if status == "missing":
+            return "already-gone"
+        if status != "alive":
+            raise RuntimeSessionError("exact workspace status is unknown")
+        try:
+            self.cmux.close_workspace_exact(workspace_id, window_id)
+            remaining = self.cmux.workspace_status(workspace_id, window_id)
+        except Exception as exc:
+            raise RuntimeSessionError("exact workspace close failed") from exc
+        if remaining != "missing":
+            raise RuntimeSessionError(
+                "exact workspace remained after close"
+            )
+        return "closed"
+
     @staticmethod
     def _bounded_regular_json(path: Path, *, label: str) -> tuple[dict[str, object], bytes]:
         if path.is_symlink() or not path.is_file():

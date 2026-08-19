@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import json
+import os
 import re
+import tempfile
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Mapping
 
-from .contracts import OperationRecord
+from .contracts import OperationRecord, OwnedResources
 from .runtime_session_contracts import IDENTIFIER, SURFACE_UUID
 
 
@@ -127,4 +131,160 @@ class ReviewWorkspaceBinding:
         return workspace, window
 
 
-__all__ = ["ReviewWorkspaceBinding"]
+@dataclass(frozen=True)
+class ReviewWorkspaceCleanup:
+    """Durable proof that one terminal review program released its container."""
+
+    review_operation_id: str
+    workspace_id: str
+    window_id: str
+    status: str
+
+    def payload(self) -> dict[str, object]:
+        return {
+            "schema_version": 1,
+            "review_operation_id": self.review_operation_id,
+            "workspace_id": self.workspace_id,
+            "window_id": self.window_id,
+            "status": self.status,
+        }
+
+    @classmethod
+    def from_payload(cls, raw: Mapping[str, object]) -> "ReviewWorkspaceCleanup":
+        if set(raw) != {
+            "schema_version",
+            "review_operation_id",
+            "workspace_id",
+            "window_id",
+            "status",
+        } or raw.get("schema_version") != 1:
+            raise ValueError("review workspace cleanup receipt is invalid")
+        value = cls(
+            review_operation_id=str(raw.get("review_operation_id") or ""),
+            workspace_id=str(raw.get("workspace_id") or ""),
+            window_id=str(raw.get("window_id") or ""),
+            status=str(raw.get("status") or ""),
+        )
+        if (
+            not IDENTIFIER.fullmatch(value.review_operation_id)
+            or not SURFACE_UUID.fullmatch(value.workspace_id)
+            or not SURFACE_UUID.fullmatch(value.window_id)
+            or value.status not in {"closed", "already-gone"}
+        ):
+            raise ValueError("review workspace cleanup receipt is invalid")
+        return value
+
+
+def _atomic_json(path: Path, value: Mapping[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    fd, raw = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    temporary = Path(raw)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(dict(value), handle, sort_keys=True, separators=(",", ":"))
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        temporary.chmod(0o600)
+        os.replace(temporary, path)
+        directory_fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def close_review_workspace(
+    root: Path,
+    runtime: object,
+    round_store: object,
+    state: Mapping[str, object],
+) -> ReviewWorkspaceCleanup:
+    """Release a shared review workspace only at a quiescent terminal boundary."""
+
+    if state.get("status") not in {"approved", "changes-requested"}:
+        raise ValueError("review workspace cleanup requires a terminal program")
+    raw_binding = state.get("review_workspace")
+    raw_lanes = state.get("lanes")
+    owner_id = str(state.get("owner_id") or "")
+    operation_id = str(state.get("active_review_operation_id") or "")
+    if (
+        not isinstance(raw_binding, Mapping)
+        or not isinstance(raw_lanes, list)
+        or not raw_lanes
+        or not IDENTIFIER.fullmatch(owner_id)
+        or not IDENTIFIER.fullmatch(operation_id)
+    ):
+        raise ValueError("review workspace cleanup authority is incomplete")
+    binding = ReviewWorkspaceBinding.from_payload(raw_binding)
+    if binding.review_operation_id != operation_id:
+        raise ValueError("review workspace cleanup operation changed")
+    for raw_lane in raw_lanes:
+        if not isinstance(raw_lane, Mapping):
+            raise ValueError("review workspace cleanup lane is invalid")
+        lane_operation = str(raw_lane.get("operation_id") or "")
+        if (
+            not IDENTIFIER.fullmatch(lane_operation)
+            or raw_lane.get("state") != "complete"
+            or raw_lane.get("surface_id")
+            or str(raw_lane.get("workspace_id") or "").casefold()
+            != binding.workspace_id.casefold()
+            or str(raw_lane.get("window_id") or "").casefold()
+            != binding.window_id.casefold()
+        ):
+            raise ValueError("review workspace cleanup lanes are not quiescent")
+        record = round_store.read(owner_id, lane_operation)
+        if (
+            not isinstance(record, OperationRecord)
+            or record.state != "complete"
+            or record.resources != OwnedResources()
+        ):
+            raise ValueError("review workspace cleanup resources remain owned")
+
+    receipt_path = root / operation_id / "workspace-cleanup.json"
+    expected_identity = (
+        operation_id,
+        binding.workspace_id.casefold(),
+        binding.window_id.casefold(),
+    )
+    if receipt_path.is_symlink():
+        raise ValueError("review workspace cleanup receipt is invalid")
+    if receipt_path.exists():
+        try:
+            raw_receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError("review workspace cleanup receipt is invalid") from exc
+        if not isinstance(raw_receipt, Mapping):
+            raise ValueError("review workspace cleanup receipt is invalid")
+        receipt = ReviewWorkspaceCleanup.from_payload(raw_receipt)
+        observed_identity = (
+            receipt.review_operation_id,
+            receipt.workspace_id.casefold(),
+            receipt.window_id.casefold(),
+        )
+        if observed_identity != expected_identity:
+            raise ValueError("review workspace cleanup receipt identity changed")
+        return receipt
+
+    closer = getattr(runtime, "close_workspace", None)
+    if not callable(closer):
+        raise ValueError("review runtime cannot close an exact workspace")
+    status = closer(binding.workspace_id, binding.window_id)
+    receipt = ReviewWorkspaceCleanup(
+        operation_id,
+        binding.workspace_id,
+        binding.window_id,
+        str(status),
+    )
+    ReviewWorkspaceCleanup.from_payload(receipt.payload())
+    _atomic_json(receipt_path, receipt.payload())
+    return receipt
+
+
+__all__ = [
+    "ReviewWorkspaceBinding",
+    "ReviewWorkspaceCleanup",
+    "close_review_workspace",
+]

@@ -4259,6 +4259,42 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         drift_events,
     )
 
+    program_events: list[str] = []
+    program_cmux = FakeCmux(program_events)
+    program_manager = RuntimeSessionManager(
+        OperationStore(root / "program-workspace-store"),
+        program_cmux,
+        FakeProcess(program_events),
+        {"claude": FakeDriver()},
+        preflight=lambda _route, _callback_dir: CapabilityReport(
+            route, True, ("provider:profile-valid",)
+        ),
+    )
+    first_workspace_close = program_manager.close_workspace(WORKSPACE, WINDOW)
+    replay_workspace_close = program_manager.close_workspace(WORKSPACE, WINDOW)
+    check(
+        "program cleanup closes one exact workspace and treats missing as success",
+        first_workspace_close == "closed"
+        and replay_workspace_close == "already-gone"
+        and program_cmux.closed_workspaces == [(WORKSPACE, WINDOW)],
+        program_events,
+    )
+    program_cmux.workspace_status_value = "drift"
+    try:
+        program_manager.close_workspace(WORKSPACE, WINDOW)
+    except RuntimeSessionError:
+        check(
+            "program cleanup fails closed on workspace/window drift",
+            program_cmux.closed_workspaces == [(WORKSPACE, WINDOW)],
+            program_events,
+        )
+    else:
+        check(
+            "program cleanup fails closed on workspace/window drift",
+            False,
+            program_events,
+        )
+
     worker_store = OperationStore(root / "worker-store")
     worker_spec = OperationSpec(
         "worker-1",

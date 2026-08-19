@@ -15,8 +15,16 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from harness.contracts import AttentionReason, CapabilityReport, RuntimeRoute  # noqa: E402
-from harness.review_workspace import ReviewWorkspaceBinding  # noqa: E402
+from harness.contracts import (  # noqa: E402
+    AttentionReason,
+    CapabilityReport,
+    OwnedResources,
+    RuntimeRoute,
+)
+from harness.review_workspace import (  # noqa: E402
+    ReviewWorkspaceBinding,
+    close_review_workspace,
+)
 from harness.store import OperationStore  # noqa: E402
 from harness.workflows.review import (  # noqa: E402
     ReviewContext,
@@ -24,6 +32,7 @@ from harness.workflows.review import (  # noqa: E402
     ReviewRequest,
     start_review,
 )
+from task_review_flow import _close_terminal_workspace_unless_pivot  # noqa: E402
 
 
 TASK_SURFACE = "11111111-1111-4111-8111-111111111111"
@@ -44,6 +53,7 @@ class FakeReviewRuntime:
         self.provider_starts = 0
         self.preflights: list[tuple[object, ...]] = []
         self.results: dict[str, object] = {}
+        self.closed_workspaces: list[tuple[str, str]] = []
 
     def preflight_routes(self, requests: tuple[object, ...]) -> tuple[object, ...]:
         self.preflights.append(requests)
@@ -97,6 +107,10 @@ class FakeReviewRuntime:
 
     def register_callback_target(self, *_args: object) -> None:
         return None
+
+    def close_workspace(self, workspace_id: str, window_id: str) -> str:
+        self.closed_workspaces.append((workspace_id, window_id))
+        return "closed"
 
     @staticmethod
     def assert_workspace_request(request: object) -> None:
@@ -211,6 +225,120 @@ class ReviewTopologyTests(unittest.TestCase):
             round_store=second_store,
         )
         self.assertNotEqual(first.workspace.workspace_id, second.workspace.workspace_id)
+
+    def test_terminal_program_closes_exact_workspace_once_after_all_lanes(self) -> None:
+        runtime, execution = self.start("deep")
+        for lane in execution.lanes:
+            record = runtime.store.read(lane.owner_id, lane.operation_id)
+            runtime.store.save(
+                replace(
+                    record,
+                    state="complete",
+                    resources=OwnedResources(),
+                    revision=record.revision + 1,
+                ),
+                expected_revision=record.revision,
+            )
+        state = {
+            "owner_id": execution.request.owner_id,
+            "status": "approved",
+            "active_review_operation_id": execution.request.policy.operation_id,
+            "review_workspace": execution.workspace.payload(),
+            "lanes": [
+                {
+                    "axis": lane.axis,
+                    "operation_id": lane.operation_id,
+                    "lane_id": lane.lane_id,
+                    "run_id": lane.run_id,
+                    "surface_id": "",
+                    "state": "complete",
+                    "workspace_id": lane.workspace_id,
+                    "window_id": lane.window_id,
+                }
+                for lane in execution.lanes
+            ],
+        }
+        first = close_review_workspace(
+            self.root / "gate", runtime, runtime.store, state
+        )
+        replay = close_review_workspace(
+            self.root / "gate", runtime, runtime.store, state
+        )
+        self.assertEqual(first.status, "closed")
+        self.assertEqual(replay, first)
+        self.assertEqual(
+            runtime.closed_workspaces,
+            [(execution.workspace.workspace_id, execution.workspace.window_id)],
+        )
+        self.assertTrue(
+            (
+                self.root
+                / "gate"
+                / execution.request.policy.operation_id
+                / "workspace-cleanup.json"
+            ).is_file()
+        )
+
+    def test_incomplete_or_attention_program_retains_workspace(self) -> None:
+        runtime, execution = self.start("simple")
+        state = {
+            "owner_id": execution.request.owner_id,
+            "status": "attention-required",
+            "active_review_operation_id": execution.request.policy.operation_id,
+            "review_workspace": execution.workspace.payload(),
+            "lanes": [
+                {
+                    "axis": execution.lanes[0].axis,
+                    "operation_id": execution.lanes[0].operation_id,
+                    "lane_id": execution.lanes[0].lane_id,
+                    "run_id": execution.lanes[0].run_id,
+                    "surface_id": execution.lanes[0].surface_id,
+                    "state": execution.lanes[0].state,
+                    "workspace_id": execution.lanes[0].workspace_id,
+                    "window_id": execution.lanes[0].window_id,
+                }
+            ],
+        }
+        with self.assertRaisesRegex(ValueError, "terminal"):
+            close_review_workspace(
+                self.root / "gate-attention", runtime, runtime.store, state
+            )
+        self.assertEqual(runtime.closed_workspaces, [])
+
+    def test_third_material_failure_retains_workspace_until_pivot(self) -> None:
+        class Gate:
+            closes = 0
+
+            def close_terminal_workspace(self) -> None:
+                self.closes += 1
+
+        class Ledger:
+            def __init__(self, count: int) -> None:
+                self.count = count
+
+            def snapshot(self):
+                return {
+                    "terminal_disposition": "",
+                    "cycles": [
+                        {"terminal_result": "changes-requested"}
+                        for _ in range(self.count)
+                    ],
+                }
+
+        ordinary = Gate()
+        retained = Gate()
+        self.assertFalse(
+            _close_terminal_workspace_unless_pivot(
+                ordinary, Ledger(2), "changes-requested"
+            )
+        )
+        self.assertTrue(
+            _close_terminal_workspace_unless_pivot(
+                retained, Ledger(3), "changes-requested"
+            )
+        )
+        self.assertEqual(ordinary.closes, 1)
+        self.assertEqual(retained.closes, 0)
 
 
 if __name__ == "__main__":

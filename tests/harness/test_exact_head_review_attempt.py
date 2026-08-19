@@ -135,6 +135,11 @@ class FakeRuntime:
         self.continued = 0
         self.rearmed = 0
         self.checkpoint = "checkpoint-1"
+        self.closed_workspaces: list[tuple[str, str]] = []
+
+    def close_workspace(self, workspace_id: str, window_id: str) -> str:
+        self.closed_workspaces.append((workspace_id, window_id))
+        return "closed"
 
     def start(
         self,

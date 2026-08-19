@@ -30,6 +30,7 @@ from ..review_attempt import (
     ReviewAttemptLaneResult,
     ReviewAttemptTerminalResult,
 )
+from ..review_workspace import close_review_workspace
 from .review import (
     ReviewContext,
     ReviewExecution,
@@ -113,6 +114,13 @@ class ReviewGateController(
         self.root = root.expanduser().resolve()
         self.runtime = runtime
         self.round_store = round_store
+
+    def close_terminal_workspace(self):
+        """Release this program's exact workspace after every lane is quiescent."""
+
+        return close_review_workspace(
+            self.root, self.runtime, self.round_store, self.read()
+        )
 
     def _start_execution(
         self,
