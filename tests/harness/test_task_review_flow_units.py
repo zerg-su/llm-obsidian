@@ -118,6 +118,8 @@ class SessionResult:
     action: str = "observed"
     process_status: str = "alive"
     surface_status: str = "alive"
+    workspace_id: str = "33333333-cccc-4ccc-8ccc-333333333333"
+    window_id: str = "44444444-dddd-4ddd-8ddd-444444444444"
 
 
 class FakeRuntime:
@@ -150,7 +152,9 @@ class FakeRuntime:
             record,
             resources=replace(
                 record.resources,
-                surface_id="11111111-aaaa-4aaa-8aaa-111111111111",
+                surface_id=(
+                    f"11111111-aaaa-4aaa-8aaa-{self.started:012d}"
+                ),
             ),
             revision=record.revision + 1,
         )
@@ -254,6 +258,11 @@ with tempfile.TemporaryDirectory(prefix="review-resolution-outbox.") as raw:
         product_root=product_root,
         prompt_pointer="prompts/review.md",
         callback_root="callbacks",
+    )
+    check(
+        "resolution review persists its exact workspace identity",
+        gate.read()["review_workspace"]["workspace_id"]
+        == "33333333-cccc-4ccc-8ccc-333333333333",
     )
     lanes = run.execution.lanes
     callbacks: dict[str, Path] = {}
