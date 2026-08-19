@@ -1425,9 +1425,9 @@ with tempfile.TemporaryDirectory(prefix="exact-protocol-selector.") as raw:
         and runtime.started == 2,
     )
 
-    def finish_current_attempt(
+    def write_current_callback(
         started_receipt: dict[str, object], verdict: str
-    ) -> dict[str, object]:
+    ) -> None:
         active_run = gate.rehydrate_attempt()
         active_lane = active_run.execution.lanes[0]
         active_round = active_run.rounds[active_lane.axis]
@@ -1449,6 +1449,11 @@ with tempfile.TemporaryDirectory(prefix="exact-protocol-selector.") as raw:
             + "\n",
             encoding="utf-8",
         )
+
+    def finish_current_attempt(
+        started_receipt: dict[str, object], verdict: str
+    ) -> dict[str, object]:
+        write_current_callback(started_receipt, verdict)
         return _run_review(
             meta,
             vault,
@@ -1648,7 +1653,7 @@ with tempfile.TemporaryDirectory(prefix="exact-protocol-selector.") as raw:
         and runtime.started == 4,
     )
 
-    blocked_terminal = finish_current_attempt(after_approved, "blocked")
+    write_current_callback(after_approved, "blocked")
     commit_changed_head(4, "change after blocked review")
     after_blocked = _run_review(
         meta,
@@ -1660,9 +1665,8 @@ with tempfile.TemporaryDirectory(prefix="exact-protocol-selector.") as raw:
         apply_finalizing_recovery=forbidden_finalizing_recovery,
     )
     check(
-        "changed HEAD never reuses a blocked terminal attempt",
-        blocked_terminal["status"] == "blocked"
-        and after_blocked["status"] == "reviewing"
+        "changed HEAD consumes the frozen blocked callback before its successor",
+        after_blocked["status"] == "reviewing"
         and gate.read()["attempt"]["identity"]["cycle"] == 4
         and runtime.started == 5,
     )

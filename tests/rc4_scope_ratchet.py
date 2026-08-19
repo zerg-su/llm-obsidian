@@ -456,9 +456,11 @@ The 2.8.2 semantic cmux liveness repair adds the single cohesive
 and bounded liveness/worker integration. The Sol review hardening adds the
 identity-bound write-ahead stages plus thread/process linearization. The exact
  measured production cost is one file and 444 lines, including the live
- coalesced-separator recovery fix. The callback/checkpoint recovery repair adds
- exactly 13 lines to the existing review gate owner, so the live ceiling is
- pinned to exactly 296 files / 112,839 lines with no speculative headroom.
+ coalesced-separator recovery fix. The two current-review callback repairs add
+ exactly 50 lines to existing review owners: checkpoint state is refreshed
+ after rehydration, and a frozen old-HEAD callback is consumed before successor
+ reservation. The live ceiling is pinned to exactly 296 files / 112,876 lines
+ with no speculative headroom.
 """
 
 from __future__ import annotations
@@ -481,7 +483,7 @@ SCRIPT_FILE_CEILING = 296
 #: carriers, the RC4 governing-source catalogue projection, the registered
 #: review fix-delta evidence exclusion, and the authorized-continuation
 #: failed-receipt attention handoff with its applied review findings.
-SCRIPT_LINE_CEILING = 112_839
+SCRIPT_LINE_CEILING = 112_876
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

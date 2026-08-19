@@ -31,8 +31,11 @@
 - Recovery current-review callback теперь обновляет классификацию checkpoint
   после durable rehydration, поэтому уже принятый blocked callback не застревает
   из-за гонки публикации callback и checkpoint.
+- Если HEAD продукта меняется после durable-публикации замороженного
+  current-review callback, callback теперь принимается и терминализируется до
+  резервирования successor; старый attempt ID не перепривязывается и не replay'ится.
 - Контур active lifecycle authority правдиво перемерен на точный кандидат
-  28 файлов / 16 220 LOC, а live ratchet scripts — на 296 файлов / 112 839
+  28 файлов / 16 257 LOC, а live ratchet scripts — на 296 файлов / 112 876
   строк; оба значения зафиксированы без спекулятивного запаса.
 
 ## [2.8.1] - 2026-08-18

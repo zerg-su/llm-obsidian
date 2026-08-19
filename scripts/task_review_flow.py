@@ -1031,6 +1031,43 @@ def _summary_only_manifest_change(
     )
 
 
+def _drain_stale_attempt(
+    gate: ReviewGateController,
+    runtime_root: Path,
+    worktree: Path,
+    vault: Path,
+    current_head: str,
+) -> Mapping[str, Any]:
+    """Consume a frozen callback before binding a changed-HEAD successor."""
+
+    state = gate.read()
+    attempt = ReviewAttempt.from_mapping(state["attempt"])
+    if attempt.status == "terminal" or attempt.identity.exact_head_sha == current_head:
+        return state
+    if attempt.status != "awaiting-callback":
+        raise ReviewAttemptError("changed HEAD retains a non-callback review attempt")
+    frozen_run = gate.rehydrate_attempt()
+    ready = _collect_ready_results(frozen_run, runtime_root, worktree, vault)
+    if not ready:
+        raise ReviewAttemptError(
+            "changed HEAD retains an incomplete review callback"
+        )
+    _complete_ready_results(
+        gate=gate,
+        run=frozen_run,
+        ready=ready,
+        worktree=worktree,
+        vault=vault,
+        runtime_root=runtime_root,
+    )
+    state = gate.read()
+    if ReviewAttempt.from_mapping(state["attempt"]).status != "terminal":
+        raise ReviewAttemptError(
+            "changed HEAD retains an incomplete review callback set"
+        )
+    return state
+
+
 def _run_exact_head_review(
     meta: Mapping[str, Any],
     vault: Path,
@@ -1062,7 +1099,7 @@ def _run_exact_head_review(
     resolution_bundle = None
     current_head = _git(worktree, "rev-parse", "HEAD")
     if gate_exists:
-        current_state = gate.read()
+        current_state = _drain_stale_attempt(gate, runtime_root, worktree, vault, current_head)
         current_attempt = ReviewAttempt.from_mapping(
             current_state["attempt"]
         )
