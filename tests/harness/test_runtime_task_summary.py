@@ -8292,6 +8292,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         review_launcher=complete_when_callback_arrives,
         pipeline_name="engineering/change",
         verification_runner=record_asynchronous_verification,
+        wake_source=FallbackWakeSource(),
     )
     for helper in asynchronous_helpers:
         helper.join(timeout=10.0)
