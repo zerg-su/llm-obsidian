@@ -1908,10 +1908,20 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
                 self.store, record.spec.owner_id, record.spec.operation_id
             )
             supervisor.bind_resources(
-                OwnedResources("33333333-3333-4333-8333-333333333333")
+                OwnedResources(
+                    f"{self.started:08d}-3333-4333-8333-"
+                    f"{self.started:012d}"
+                )
             )
             opened = RuntimeSessionResult(
-                supervisor.read(), "surface-opened", checkpoint="checkpoint-1"
+                supervisor.read(),
+                "surface-opened",
+                checkpoint="checkpoint-1",
+                surface_ref="surface:3",
+                workspace_id="44444444-4444-4444-8444-444444444444",
+                workspace_ref="workspace:4",
+                window_id="55555555-5555-4555-8555-555555555555",
+                window_ref="window:5",
             )
             if on_surface_opened is not None:
                 on_surface_opened(opened)
@@ -1921,7 +1931,14 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
             supervisor.transition("running")
             final = supervisor.transition("awaiting-callback")
             return RuntimeSessionResult(
-                final, "started", checkpoint="checkpoint-1"
+                final,
+                "started",
+                checkpoint="checkpoint-1",
+                surface_ref=opened.surface_ref,
+                workspace_id=opened.workspace_id,
+                workspace_ref=opened.workspace_ref,
+                window_id=opened.window_id,
+                window_ref=opened.window_ref,
             )
 
         def register_callback_target(self, *_args: object) -> None:
