@@ -10,6 +10,17 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.8.5] - 2026-08-19
+
+### Fixed
+
+- Codex current-review delivery now waits through the footerless transient
+  trust choice before treating the editor as ready. This prevents the initial
+  review prompt from remaining unsubmitted after the trust dialog closes.
+- The regression covers the complete trust-dialog transition into the real
+  editor. The live scripts ratchet moves by the exact five-line production cost
+  to 296 files / 113,208 lines with no speculative headroom.
+
 ## [2.8.4] - 2026-08-19
 
 ### Fixed
