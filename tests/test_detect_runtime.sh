@@ -8,15 +8,15 @@ TMP="$(llm_obsidian_test_scratch_dir detect-runtime-test)"
 trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/bin" "$TMP/home"
 
-cat > "$TMP/bin/ps" <<'EOF'
-#!/usr/bin/env bash
-case " $* " in
-  *" -o command= "*)
-    [ -n "${FAKE_PS_COMMAND:-}" ] && printf '%s\n' "$FAKE_PS_COMMAND"
-    ;;
-  *" -o ppid= "*) printf '1\n' ;;
-esac
-EOF
+printf '%s\n' \
+  '#!/usr/bin/env bash' \
+  'case " $* " in' \
+  '  *" -o command= "*)' \
+  '    [ -n "${FAKE_PS_COMMAND:-}" ] && printf '\''%s\n'\'' "$FAKE_PS_COMMAND"' \
+  '    ;;' \
+  '  *" -o ppid= "*) printf '\''1\n'\'' ;;' \
+  'esac' \
+  > "$TMP/bin/ps"
 chmod +x "$TMP/bin/ps"
 
 PASS=0

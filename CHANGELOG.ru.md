@@ -48,6 +48,9 @@
 - Тесты session preflight теперь пишут route snapshots только в уникальные
   временные fixture roots. Полная верификация безопасна в read-only product
   checkout, а параллельные прогоны не делят фиксированную snapshot identity.
+- Shell fixture определения runtime теперь сразу записывается в собственный
+  test scratch без временного файла Bash heredoc, поэтому полный gate исполним
+  в управляемом read-only reviewer sandbox.
 - Контур active lifecycle authority правдиво перемерен на точный кандидат
   28 файлов / 16 259 LOC, а live ratchet scripts — на 296 файлов / 112 993
   строк; оба значения зафиксированы без спекулятивного запаса.

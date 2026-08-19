@@ -42,6 +42,9 @@ packages were published for them.
 - Session-preflight tests now write route snapshots only under unique temporary
   fixture roots. Repository-wide verification is safe in a read-only product
   checkout and simultaneous test runs share no fixed snapshot identity.
+- The runtime-detection shell fixture is emitted directly into its owned test
+  scratch instead of using a Bash heredoc temporary file, keeping the complete
+  gate executable in the managed read-only reviewer sandbox.
 - The active lifecycle-authority contour is truthfully rebaselined to the exact
   28-file / 16,259-LOC candidate, and the live scripts ratchet to the exact
   296-file / 112,993-line candidate, both with zero speculative headroom.
