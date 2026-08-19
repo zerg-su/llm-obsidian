@@ -23,6 +23,11 @@ packages were published for them.
   typed mechanism escalation, waking coordinator self-heal while leaving model
   artifact failures as ordinary attention. The live scripts ratchet is pinned
   to the exact 296-file / 113,030-line candidate with no speculative headroom.
+- An explicitly authorized `cancel-stale` command now retires only expired,
+  narrowly classified pending effects without replay, refuses live or unknown
+  resources, and atomically cancels the exact subtree. The active authority
+  contour is pinned to 28 files / 16,387 LOC and the live scripts ratchet to
+  296 files / 113,199 lines, both with no speculative headroom.
 
 ## [2.8.2] - 2026-08-19
 

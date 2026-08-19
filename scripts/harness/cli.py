@@ -38,7 +38,10 @@ from .state_machine import TERMINAL
 from .status_segment import publish as publish_status
 from .store import OperationStore, StoreError
 from .supervisor import OperationSupervisor
-from .pre_model_reviewer_retirement import retire_failed_reviewer_start
+from .pre_model_reviewer_retirement import (
+    retire_failed_reviewer_start,
+    retire_pending_effect_for_cancel,
+)
 from .runtime_sessions import RuntimeSessionError, RuntimeSessionManager
 from .review_finalization import _head as _review_worktree_head
 from .runtime_worker import _review_resolution_handoff_ready
@@ -188,11 +191,21 @@ def _cancel_or_close(
     process_adapter: object,
     cmux_adapter: object,
     bounded_cancel: bool = False,
+    retire_pending: bool = False,
 ) -> TransitionResult:
     record = store.read(owner, operation_id)
     if record.state in TERMINAL:
         return store.transition(owner, operation_id, record.state)
     if record.pending_effect:
+        if retire_pending:
+            retired_pending = retire_pending_effect_for_cancel(
+                store,
+                owner,
+                operation_id,
+                cmux_adapter=cmux_adapter,
+            )
+            if retired_pending is not None:
+                return retired_pending
         return _attention(
             store,
             owner,
@@ -352,6 +365,7 @@ def _cancel_or_close_subtree(
     process_adapter: object,
     cmux_adapter: object,
     bounded_cancel: bool = False,
+    retire_pending: bool = False,
 ) -> CascadeOutcome:
     """Apply the supported per-operation cancellation child-first, then the root.
 
@@ -373,6 +387,7 @@ def _cancel_or_close_subtree(
             process_adapter=process_adapter,
             cmux_adapter=cmux_adapter,
             bounded_cancel=bounded_cancel,
+            retire_pending=retire_pending,
         )
         if result.state not in TERMINAL and (
             operation_id != root_operation_id or bounded_cancel
@@ -973,14 +988,15 @@ def main(
                     cmux_adapter=cmux_adapter,
                     review_runtime_manager=review_runtime_manager,
                 )
-            elif args.command in {"cancel", "close"}:
+            elif args.command in {"cancel", "cancel-stale", "close"}:
                 outcome = _cancel_or_close_subtree(
                     store,
                     args.owner,
                     operation_id,
                     process_adapter=process_adapter,
                     cmux_adapter=cmux_adapter,
-                    bounded_cancel=args.command == "cancel",
+                    bounded_cancel=args.command in {"cancel", "cancel-stale"},
+                    retire_pending=args.command == "cancel-stale",
                 )
                 cascade_truncated = not outcome.complete
                 value = _cascade_payload(outcome)
@@ -988,7 +1004,8 @@ def main(
                 value = to_dict(result)
         _emit(value, json_mode=args.json)
         if (
-            args.command in {"resume", "cancel", "close", "reconcile"}
+            args.command
+            in {"resume", "cancel", "cancel-stale", "close", "reconcile"}
             and not suppress_status_publish
         ):
             publish_status(

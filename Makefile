@@ -50,6 +50,7 @@ test-harness:
 	@python3 tests/harness/test_regressions.py
 	@python3 tests/harness/test_store.py
 	@python3 tests/harness/test_pre_model_reviewer_retirement.py
+	@python3 tests/harness/test_pending_effect_retirement.py
 	@python3 tests/harness/test_null_change_continuation.py
 	@python3 tests/harness/test_cascade_cancel.py
 	@python3 tests/harness/test_adapters.py

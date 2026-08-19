@@ -304,3 +304,8 @@ permission, dependency, security, public-interface, migration, destructive, or
 external-effect boundary; otherwise it asks the user once. Stop hooks never
 self-repair. The canonical decision table is
 [failure-to-repair contract](skill-references/failure-repair-contract.md).
+An explicitly authorized stale cleanup may use `cancel-stale` only for an
+expired, exact subtree. It never replays a pending effect: the narrow supported
+surface-open, provider-start, and local-verification shapes are absorbed and
+atomically terminalized; live, unknown, or incompletely identified resources
+remain attention-required.

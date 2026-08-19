@@ -13,6 +13,7 @@ from .contracts import (
     OwnedResources,
 )
 from .store import OperationStore
+from .state_machine import resolve_effect as apply_effect_resolution
 from .state_machine import transition as apply_transition
 
 
@@ -53,6 +54,44 @@ class OperationSupervisor:
             current,
             resources=resources,
             revision=current.revision + 1,
+        )
+        self.store.save(updated, expected_revision=current.revision)
+        return updated
+
+    def retire_authorized_pending_effect(
+        self,
+        expected: OperationRecord,
+        outcome: EffectOutcome,
+    ) -> OperationRecord:
+        """Atomically absorb an authorized stale effect and cancel its owner."""
+
+        current = self.read()
+        if (
+            current != expected
+            or current.spec.owner_id != self.owner_id
+            or current.spec.operation_id != self.operation_id
+            or not current.pending_effect
+            or current.effect_outcome != EffectOutcome.PENDING
+            or current.accepted_callback_id
+            or outcome not in {EffectOutcome.SUCCEEDED, EffectOutcome.FAILED}
+        ):
+            raise SupervisorError(
+                "pending-effect retirement identity changed"
+            )
+        updated = apply_effect_resolution(current, outcome)
+        if updated.state == "attention-required":
+            if not updated.resume_state:
+                raise SupervisorError(
+                    "pending-effect retirement has no exact resume state"
+                )
+            updated, _ = apply_transition(updated, updated.resume_state)
+        updated, _ = apply_transition(updated, "cancelling")
+        updated, _ = apply_transition(updated, "exiting")
+        updated, _ = apply_transition(updated, "cancelled")
+        updated = replace(
+            updated,
+            resources=OwnedResources(),
+            revision=updated.revision + 1,
         )
         self.store.save(updated, expected_revision=current.revision)
         return updated

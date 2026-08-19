@@ -21,6 +21,8 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("reconcile")
     cancel = commands.add_parser("cancel")
     cancel.add_argument("operation_id")
+    cancel_stale = commands.add_parser("cancel-stale")
+    cancel_stale.add_argument("operation_id")
     close = commands.add_parser("close")
     close.add_argument("operation_id")
     commands.add_parser("doctor")

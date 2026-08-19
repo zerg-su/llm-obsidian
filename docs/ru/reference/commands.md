@@ -34,6 +34,7 @@
 | `python3 scripts/harness-cli.py resume <operation-id>` | Resume owned operation |
 | `python3 scripts/harness-cli.py reconcile` | Reconcile typed callback/terminal state |
 | `python3 scripts/harness-cli.py cancel <operation-id>` | Cancel exact operation |
+| `python3 scripts/harness-cli.py cancel-stale <operation-id>` | Явно отменить просроченное точное поддерево после fail-closed retirement зависшего effect |
 | `python3 scripts/harness-cli.py close <operation-id>` | Close exact allowed lifecycle |
 | `python3 scripts/harness-cli.py doctor` | Read-only harness diagnosis |
 

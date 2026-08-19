@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
+from time import time
 from typing import Mapping
 
 from .contracts import (
@@ -28,6 +29,116 @@ EVIDENCE_NAMES = (
     "exit.json",
     "callback-target.json",
 )
+
+
+@dataclass(frozen=True)
+class PendingRetirement:
+    outcome: EffectOutcome
+
+
+def _expired(record: OperationRecord, now: float) -> bool:
+    return bool(record.deadline_at and record.deadline_at <= now)
+
+
+def classify_pending_retirement(
+    record: OperationRecord,
+    *,
+    cmux_adapter: object,
+    now: float | None = None,
+) -> PendingRetirement | None:
+    """Classify one explicit stale-cancel request without replaying its effect."""
+
+    observed_at = time() if now is None else now
+    if (
+        not record.pending_effect
+        or record.effect_outcome != EffectOutcome.PENDING
+        or not _expired(record, observed_at)
+        or record.accepted_callback_id
+    ):
+        return None
+    resources = record.resources
+    has_process = bool(
+        resources.process_group
+        or resources.supervisor_pid
+        or resources.process_identity
+        or resources.supervisor_identity
+    )
+    if has_process:
+        return None
+    if record.pending_effect == "open-surface":
+        if (
+            record.state == "attention-required"
+            and record.attention_reason == AttentionReason.SURFACE_OPEN_FAILED
+            and record.resume_state == "starting"
+            and resources == OwnedResources()
+        ):
+            return PendingRetirement(EffectOutcome.FAILED)
+        return None
+    if record.pending_effect == "start-provider":
+        if (
+            record.state != "attention-required"
+            or record.attention_reason
+            not in {
+                AttentionReason.PROCESS_START_FAILED,
+                AttentionReason.ATTENTION_REQUIRED,
+            }
+            or record.resume_state != "starting"
+            or not resources.surface_id
+        ):
+            return None
+        try:
+            status = str(cmux_adapter.status(resources.surface_id))
+        except Exception:
+            return None
+        return (
+            PendingRetirement(EffectOutcome.SUCCEEDED)
+            if status == "missing"
+            else None
+        )
+    if record.pending_effect.startswith("pipeline-verify-"):
+        if (
+            resources != OwnedResources()
+            or record.state not in {"verifying", "attention-required"}
+            or (
+                record.state == "attention-required"
+                and record.resume_state != "verifying"
+            )
+        ):
+            return None
+        return PendingRetirement(EffectOutcome.SUCCEEDED)
+    return None
+
+
+def retire_pending_effect_for_cancel(
+    store: OperationStore,
+    owner: str,
+    operation_id: str,
+    *,
+    cmux_adapter: object,
+) -> TransitionResult | None:
+    """Atomically absorb one stale effect and cancel without external signals."""
+
+    expected = store.read(owner, operation_id)
+    decision = classify_pending_retirement(
+        expected,
+        cmux_adapter=cmux_adapter,
+    )
+    if decision is None:
+        return None
+    try:
+        terminal = OperationSupervisor(
+            store, owner, operation_id
+        ).retire_authorized_pending_effect(expected, decision.outcome)
+    except (StoreError, SupervisorError):
+        return None
+    return TransitionResult(
+        operation_id,
+        expected.state,
+        terminal.state,
+        terminal.revision,
+        terminal.revision != expected.revision,
+        terminal.attention_reason,
+    )
 
 
 def review_attempt_records_are_quiescent(
