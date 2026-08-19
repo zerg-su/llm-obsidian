@@ -40,9 +40,11 @@
 - Retirement принятого callback теперь crash-durable до запуска successor:
   создание archive-каталога, destination rename и удаление source fsync'ятся по
   порядку. Retry после прерванного rename или duplicate cleanup заново
-  подтверждает обе directory barriers до любого эффекта successor.
+  подтверждает обе directory barriers до любого эффекта successor. Production
+  recovery теперь согласует весь bound multi-axis prefix, даже когда один или
+  все source outbox исчезли до возврата прерванного fsync.
 - Контур active lifecycle authority правдиво перемерен на точный кандидат
-  28 файлов / 16 259 LOC, а live ratchet scripts — на 296 файлов / 112 979
+  28 файлов / 16 259 LOC, а live ratchet scripts — на 296 файлов / 112 993
   строк; оба значения зафиксированы без спекулятивного запаса.
 
 ## [2.8.1] - 2026-08-18

@@ -34,10 +34,12 @@ packages were published for them.
 - Accepted callback retirement is crash-durable before successor launch: the
   new archive directory, destination rename, and source removal are fsynced in
   order. Retries after an interrupted rename or duplicate cleanup re-establish
-  both directory barriers before any successor effect.
+  both directory barriers before any successor effect. Production recovery now
+  reconciles the complete bound multi-axis prefix even when one or every
+  source outbox disappeared before the interrupted fsync returned.
 - The active lifecycle-authority contour is truthfully rebaselined to the exact
   28-file / 16,259-LOC candidate, and the live scripts ratchet to the exact
-  296-file / 112,979-line candidate, both with zero speculative headroom.
+  296-file / 112,993-line candidate, both with zero speculative headroom.
 
 ## [2.8.1] - 2026-08-18
 

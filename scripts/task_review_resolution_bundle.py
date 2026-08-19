@@ -361,6 +361,20 @@ def _archive_prior_terminal_callbacks(
         lane.axis: _callback_path(runtime_root, lane.axis)
         for lane in current.identity.lanes
     }
+    current_boundaries = state.get("review_notification_evidence")
+    if current_attempt_only and isinstance(current_boundaries, Mapping):
+        expected_axes = set(callbacks)
+        boundary_axes = {
+            axis for axis in current_boundaries if isinstance(axis, str)
+        }
+        if boundary_axes != expected_axes or len(boundary_axes) != len(
+            current_boundaries
+        ):
+            raise ReviewAttemptError(
+                "current review callback boundary axes drifted"
+            )
+        _archive_resolution_callbacks(runtime_root, state)
+        return
     present = {axis: path for axis, path in callbacks.items() if path.is_file()}
     if not present:
         return

@@ -229,7 +229,7 @@ with tempfile.TemporaryDirectory(prefix="review-resolution-outbox.") as raw:
         "scoped",
         "b" * 64,
     )
-    preset = ReviewPreset.from_flags()
+    preset = ReviewPreset.from_flags(deep=True)
     request = ReviewOperationRequest(
         preset.request("resolution-review", selected_provider="openai"),
         owner_id,
@@ -255,39 +255,46 @@ with tempfile.TemporaryDirectory(prefix="review-resolution-outbox.") as raw:
         prompt_pointer="prompts/review.md",
         callback_root="callbacks",
     )
-    lane = run.execution.lanes[0]
-    round_ = run.rounds[lane.axis]
-    callback = _callback_path(runtime_root, lane.axis)
-    callback.parent.mkdir(parents=True, exist_ok=True)
-    callback.write_text(
-        json.dumps(
-            to_dict(
-                review_round_envelope(
-                    round_,
-                    ReviewResult(
-                        lane.axis,
-                        "changes-requested",
-                        (
-                            ReviewFinding(
-                                finding_id="F-resolution",
-                                axis=lane.axis,
-                                severity="important",
-                                summary="Resolution is required.",
-                                evidence="The exact callback must be archived.",
-                                file="product.py",
-                                line=1,
-                                recommendation="Apply the bounded repair.",
+    lanes = run.execution.lanes
+    callbacks: dict[str, Path] = {}
+    callback_payloads: dict[str, bytes] = {}
+    for lane in lanes:
+        round_ = run.rounds[lane.axis]
+        callback = _callback_path(runtime_root, lane.axis)
+        callback.parent.mkdir(parents=True, exist_ok=True)
+        callback.write_text(
+            json.dumps(
+                to_dict(
+                    review_round_envelope(
+                        round_,
+                        ReviewResult(
+                            lane.axis,
+                            "changes-requested",
+                            (
+                                ReviewFinding(
+                                    finding_id=f"F-resolution-{lane.axis}",
+                                    axis=lane.axis,
+                                    severity="important",
+                                    summary="Resolution is required.",
+                                    evidence=(
+                                        "The exact callback must be archived."
+                                    ),
+                                    file="product.py",
+                                    line=1,
+                                    recommendation="Apply the bounded repair.",
+                                ),
                             ),
+                            0,
                         ),
-                        0,
-                    ),
-                )
-            ),
-            sort_keys=True,
+                    )
+                ),
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
         )
-        + "\n",
-        encoding="utf-8",
-    )
+        callbacks[lane.axis] = callback
+        callback_payloads[lane.axis] = callback.read_bytes()
     ready = _collect_ready_results(run, runtime_root, base, base)
     _complete_ready_results(
         gate=gate,
@@ -298,7 +305,6 @@ with tempfile.TemporaryDirectory(prefix="review-resolution-outbox.") as raw:
         runtime_root=runtime_root,
     )
     changes_state = gate.read()
-    callback_bytes = callback.read_bytes()
     synced_directories: list[Path] = []
     original_fsync_directory = resolution_bundle._fsync_directory
     resolution_bundle._fsync_directory = synced_directories.append
@@ -306,20 +312,45 @@ with tempfile.TemporaryDirectory(prefix="review-resolution-outbox.") as raw:
         _archive_resolution_callbacks(runtime_root, changes_state)
     finally:
         resolution_bundle._fsync_directory = original_fsync_directory
+    lane = lanes[0]
+    callback = callbacks[lane.axis]
+    callback_bytes = callback_payloads[lane.axis]
     boundary = changes_state["review_notification_evidence"][lane.axis]
     archive = (
         callback.parent
         / "accepted"
         / f"{boundary['callback_sha256']}.review-callback.json"
     )
+    archives = {
+        candidate.axis: (
+            callbacks[candidate.axis].parent
+            / "accepted"
+            / (
+                f"{changes_state['review_notification_evidence'][candidate.axis]['callback_sha256']}"
+                ".review-callback.json"
+            )
+        )
+        for candidate in lanes
+    }
     _archive_resolution_callbacks(runtime_root, changes_state)
     check(
         "accepted resolution callback archive is durable before retry",
-        not callback.exists()
-        and archive.is_file()
-        and archive.read_bytes() == callback_bytes
+        all(not callbacks[candidate.axis].exists() for candidate in lanes)
+        and all(
+            archives[candidate.axis].read_bytes()
+            == callback_payloads[candidate.axis]
+            for candidate in lanes
+        )
         and synced_directories
-        == [callback.parent, archive.parent, callback.parent],
+        == [
+            directory
+            for axis in sorted(callbacks)
+            for directory in (
+                callbacks[axis].parent,
+                archives[axis].parent,
+                callbacks[axis].parent,
+            )
+        ],
     )
 
     def check_interrupted_retirement(label: str, *, duplicate: bool) -> None:
@@ -336,7 +367,14 @@ with tempfile.TemporaryDirectory(prefix="review-resolution-outbox.") as raw:
         resolution_bundle._fsync_directory = interrupt_first_sync
         try:
             try:
-                _archive_resolution_callbacks(runtime_root, changes_state)
+                _archive_resolution_callbacks(
+                    runtime_root,
+                    {
+                        "review_notification_evidence": {
+                            lane.axis: boundary
+                        }
+                    },
+                )
             except OSError:
                 pass
             else:
@@ -354,14 +392,28 @@ with tempfile.TemporaryDirectory(prefix="review-resolution-outbox.") as raw:
         retry_syncs: list[Path] = []
         resolution_bundle._fsync_directory = retry_syncs.append
         try:
-            _archive_resolution_callbacks(runtime_root, changes_state)
+            _archive_prior_terminal_callbacks(
+                runtime_root,
+                gate.root,
+                changes_state,
+                store,
+                current_attempt_only=True,
+            )
         finally:
             resolution_bundle._fsync_directory = original_fsync_directory
         check(
-            f"{label} retry re-establishes both directory barriers",
-            retry_syncs == [archive.parent, callback.parent]
+            f"{label} retry reconciles the complete multi-axis prefix",
+            retry_syncs
+            == [
+                directory
+                for axis in sorted(callbacks)
+                for directory in (
+                    archives[axis].parent,
+                    callbacks[axis].parent,
+                )
+            ]
             and not callback.exists()
-            and archive.is_file(),
+            and all(archives[candidate.axis].is_file() for candidate in lanes),
         )
 
     check_interrupted_retirement("interrupted callback rename", duplicate=False)
