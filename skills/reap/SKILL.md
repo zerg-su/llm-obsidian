@@ -8,9 +8,9 @@ allowed-tools: Read Write Edit Glob Grep Bash AskUserQuestion
 
 # /reap — finalize a dispatched task
 
-Reap validates one task's typed summary/review, files it through the canonical
-vault transaction, closes the authorized lifecycle, then arms process exit.
-A review round is not task completion; reap follows final readiness.
+Reap validates one task's summary/review, files it through the canonical vault
+transaction, closes its lifecycle, then arms exit. Review is not completion;
+reap follows final readiness.
 
 ## Normal v4 unattended path
 
@@ -23,31 +23,25 @@ python3 scripts/reap-runner.py \
   --current-session "$(./scripts/current-session-id.sh)"
 ```
 
-New v4 tasks require validated metadata and Wiki Summary v2. Active unattended
-v3 tasks use the same runner with their frozen metadata/Summary v1 contract.
-Require the exact caller session; never infer focused cmux. The runner:
+New v4 tasks require validated metadata and Summary v2. Active unattended v3 tasks use the same runner with frozen metadata/Summary v1. Require the exact
+caller session; never infer focused cmux. The runner:
 
-1. Validate Wiki Summary v2 disposition/evidence/gaps and handoff
-   (`task_contract.py check-handoff`), plan/outcome hashes and state, route, and
-   wikilinks before mutation; never rewrite the desired outcome.
+1. Validate Summary v2 disposition/evidence/gaps and `task_contract.py
+   check-handoff`, plan/outcome identity, route, and wikilinks before mutation;
+   never rewrite the desired outcome.
 2. Require approved review evidence for exact HEAD/profile/summary bytes, then
    archive all rounds, including failed cycles. Parsing attaches validated
    review links; never invent or duplicate them.
 3. Call `cmux_surface_lifecycle.py prepare-reap`, binding the exact result path,
    plan, task, session, and recovery marker.
 4. Apply one `vault-write.py` transaction: `final` closes its source plan only
-   when the dispatch-time source digest still matches; `shared` retains the
-   master plan. A concurrent pending source edit is preserved and reported as
-   a plan-close conflict while the task result is recorded independently.
+   when its dispatch digest still matches; `shared` retains the master plan.
+   Preserve concurrent pending edits as plan-close conflicts while recording
+   the result independently.
    Updates use `expected_sha256`; new pages receive a real DragonScale address.
 5. Reindex, run `validate-vault.py --summary`, then call `complete-reap`.
-6. Call `request-exit` for the exact task. The lifecycle wrapper sends graceful
-   agent exit and closes its exact surface only after process exit. Once task
-   provider ownership is empty, close and verify the exact primary task
-   workspace/window UUID, which also removes its root dashboard. Persist one
-   idempotent cleanup receipt; already-gone is success. Unknown, moved,
-   duplicate, foreign, or still-owned state retains the workspace and fails
-   closed. Do not issue a separate cmux close command.
+6. `request-exit` the exact task. After process exit and empty provider ownership,
+   close its exact surface and primary workspace/window UUID (and root dashboard), then persist an idempotent receipt. Already-gone succeeds; identity drift or live ownership retains it fail-closed. Never close cmux separately.
 
 The JSON result contains `status`, exact `result_path`, `result_link`,
 `plan_close_status` (`closed`, `conflict`, or `retained`), content-free

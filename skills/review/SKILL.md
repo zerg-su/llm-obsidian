@@ -24,8 +24,7 @@ Deep/Full use `review_profiles.deep`; overrides require routing aliases. Full
 is never inferred or combined with `--deep`, and rejects overrides. Lane IDs
 use `anthropic-*`/`openai-*`; concrete routes stay metadata.
 
-One program owns one exact review workspace: its first reviewer creates it;
-later lanes split there and prove its workspace/window UUID before provider
+One program owns one exact review workspace: its first reviewer creates it; later lanes split there and prove its workspace/window UUID before provider
 start. Finalization and pivot stay there; non-review work stays in the primary
 task workspace. Each later cycle gets a fresh workspace.
 
