@@ -92,7 +92,6 @@ def _prepared_recovery_receipts(root: Path) -> list[tuple[Path, RecoveryReceipt]
 
 
 class RuntimeWorkerCustomMixin:
-
     def _deliver_custom_notification(
         self,
         notify_path: Path,
@@ -338,12 +337,13 @@ class RuntimeWorkerCustomMixin:
                 run_id=round_.run_id,
                 callback_pointer=".task-pipeline-step-callback.json",
             )
-            self.notify_custom_step(request)
             _generation, operation_id, run_id, callback_path = _callback_target(
                 self.spec
             )
             if operation_id != round_.spec.operation_id or run_id != round_.run_id:
                 raise RuntimeWorkerError("custom callback target changed")
+            if not callback_path.exists():
+                self.notify_custom_step(request)
             if not callback_path.exists():
                 if self.adopt_fresh_pipeline_step_result():
                     return

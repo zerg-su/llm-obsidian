@@ -1830,6 +1830,253 @@ with tempfile.TemporaryDirectory(prefix="exact-protocol-selector.") as raw:
         and legacy_runtime.started == legacy_starts,
     )
 
+with tempfile.TemporaryDirectory(
+    prefix="same-head-amendment-outbox."
+) as raw:
+    base = Path(raw)
+    vault = base / "vault"
+    product = base / "product"
+    runtime_root = base / "runtime"
+    (vault / "config").mkdir(parents=True)
+    (vault / "skills/review").mkdir(parents=True)
+    product.mkdir()
+    runtime_root.mkdir()
+    (vault / "config/model-routing.toml").write_bytes(
+        (ROOT / "config/model-routing.toml").read_bytes()
+    )
+    (vault / "config/verification-profiles.toml").write_bytes(
+        (ROOT / "config/verification-profiles.toml").read_bytes()
+    )
+    (vault / "skills/review/SKILL.md").write_text(
+        "# Review\n\nInspect only the exact ContextPacket.\n",
+        encoding="utf-8",
+    )
+    plan = vault / "approved-plan.md"
+    plan.write_text(
+        """# Same-HEAD amendment fixture
+
+## Outcome Contract
+
+```json
+{"schema_version":1,"purpose":"Exercise a terminal same-HEAD amendment.","desired_outcome":"The amended authority starts one fresh exact-HEAD review.","success_evidence":[{"evidence_id":"same-head-review","observable":"The old terminal callback is archived before successor launch."}],"non_goals":["No provider replay."]}
+```
+""",
+        encoding="utf-8",
+    )
+    (product / "product.py").write_text("VALUE = 1\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "init", "-b", "main"],
+        cwd=product,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "review@example.invalid"],
+        cwd=product,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Same Head Amendment Test"],
+        cwd=product,
+        check=True,
+    )
+    subprocess.run(["git", "add", "product.py"], cwd=product, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "initial product"],
+        cwd=product,
+        check=True,
+        capture_output=True,
+    )
+    head = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=product, text=True
+    ).strip()
+    profile_sha = load_profiles(
+        vault / "config/verification-profiles.toml"
+    )["scoped"].sha256
+    task_id = "55555555-5555-4555-8555-555555555555"
+    outcome_sha = extract_from_bytes(plan.read_bytes()).sha256
+    (vault / ".vault-meta").mkdir(exist_ok=True)
+    plan_binding = bind_approved_plan_snapshot(
+        {"vault_root": vault.resolve(), "plan_file": plan.resolve()}
+    )
+    summary = product / ".task-summary.json"
+    summary.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "type": "repo-touch",
+                "title": "Same-HEAD amendment",
+                "session": "same-head-session",
+                "body": "The same-HEAD amendment fixture is ready.",
+                "outcome_disposition": "achieved",
+                "outcome_evidence_ids": ["same-head-review"],
+                "residual_gap_pointers": [],
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    meta = {
+        "version": 4,
+        "task_id": task_id,
+        "task_name": "same-head amendment",
+        "task_surface": "66666666-6666-4666-8666-666666666666",
+        "worktree": str(product.resolve()),
+        "vault_root": str(vault.resolve()),
+        "plan_file": str(plan),
+        "plan_snapshot_file": str(plan_binding["_approved_plan_file"]),
+        "approved_plan_sha256": hashlib.sha256(plan.read_bytes()).hexdigest(),
+        "outcome_contract_sha256": outcome_sha,
+        "finalization_policy": {
+            "max_cycles": 5,
+            "add_independent_model_after": 3,
+            "execution": "ephemeral",
+            "primary_route_alias": "finalization-primary",
+            "independent_route_alias": "finalization-independent",
+        },
+        "routing": {
+            "session": {
+                "runtime": "codex",
+                "model": "gpt-5.6-sol",
+                "effort": "low",
+                "source": "fixture",
+            }
+        },
+        "review_policy": {
+            "mode": "simple",
+            "cross_model": False,
+            "runtime": "codex",
+            "model": "sol",
+            "effort": "low",
+            "max_verify_iterations": 1,
+            "verification_profile": "scoped",
+            "verification_profile_sha256": profile_sha,
+        },
+    }
+    (product / ".task-meta.json").write_text(
+        json.dumps(meta, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    store = OperationStore(vault / ".vault-meta/harness")
+
+    class FreshOutboxRuntime(FakeRuntime):
+        def start(
+            self,
+            request: object,
+            *,
+            on_surface_opened=None,
+            admit_provider_start=None,
+        ) -> SessionResult:
+            callback = request.cwd / request.callback_pointer
+            if callback.exists():
+                raise RuntimeError(
+                    "runtime callback pointer must be a fresh owned outbox"
+                )
+            return super().start(
+                request,
+                on_surface_opened=on_surface_opened,
+                admit_provider_start=admit_provider_start,
+            )
+
+    runtime = FreshOutboxRuntime(store, owner_id=task_id)
+
+    def no_legacy_recovery(*_args: object, **_kwargs: object):
+        raise AssertionError("same-HEAD amendment selected legacy recovery")
+
+    first = _run_review(
+        meta,
+        vault,
+        product,
+        task_id,
+        runtime_root,
+        runtime_manager=runtime,
+        apply_finalizing_recovery=no_legacy_recovery,
+    )
+    gate_root = (
+        vault / ".vault-meta/harness/review-data" / task_id / task_id
+    )
+    gate = ReviewGateController(gate_root, runtime, store)
+    active = gate.rehydrate_attempt()
+    lane = active.execution.lanes[0]
+    round_ = active.rounds[lane.axis]
+    callback_path = Path(str(first["lanes"][0]["callback_path"]))
+    callback_path.parent.mkdir(parents=True, exist_ok=True)
+    callback_path.write_text(
+        json.dumps(
+            to_dict(
+                review_round_envelope(
+                    round_,
+                    ReviewResult(
+                        lane.axis,
+                        "changes-requested",
+                        (
+                            ReviewFinding(
+                                "F-same-head-amendment",
+                                lane.axis,
+                                "important",
+                                "amend the outcome authority",
+                                "the successor must keep the exact HEAD",
+                            ),
+                        ),
+                        0,
+                    ),
+                )
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    terminal = _run_review(
+        meta,
+        vault,
+        product,
+        task_id,
+        runtime_root,
+        runtime_manager=runtime,
+        apply_finalizing_recovery=no_legacy_recovery,
+    )
+    old_callback = json.loads(callback_path.read_text(encoding="utf-8"))
+    amended_plan = vault / "amended-plan.md"
+    amended_plan.write_text(
+        plan.read_text(encoding="utf-8").replace(
+            "Exercise a terminal same-HEAD amendment.",
+            "Exercise the approved terminal same-HEAD amendment.",
+        ),
+        encoding="utf-8",
+    )
+    amendment = record_plan_amendment(
+        product,
+        amended_plan,
+        decision="approve the same-HEAD review boundary amendment",
+    )
+    successor = _run_review(
+        meta,
+        vault,
+        product,
+        task_id,
+        runtime_root,
+        runtime_manager=runtime,
+        apply_finalizing_recovery=no_legacy_recovery,
+    )
+    state = gate.read()
+    archived = (
+        callback_path.parent
+        / "accepted"
+        / f"{old_callback['payload_sha256']}.review-callback.json"
+    )
+    check(
+        "same-HEAD amended authority archives the terminal callback before fresh review",
+        terminal["status"] == "changes-requested"
+        and successor["status"] == "reviewing"
+        and state["attempt"]["identity"]["cycle"] == 2
+        and state["attempt"]["identity"]["exact_head_sha"] == head
+        and state["attempt"]["identity"]["plan_sha256"]
+        == amendment.payload["new_plan_sha256"]
+        and archived.is_file()
+        and not callback_path.exists()
+        and runtime.started == 2,
+    )
+
 with tempfile.TemporaryDirectory(prefix="failed-exact-head-attempt.") as raw:
     base = Path(raw)
     store = OperationStore(base / "store")

@@ -399,6 +399,52 @@ with tempfile.TemporaryDirectory(prefix="custom-runtime.") as raw:
         raise AssertionError("root provider input was not reserved")
     root_provider.accept_input()
 
+    # Regression: a model can publish the exact custom-step callback before
+    # retained notification delivery has reached its submit stage.  Callback
+    # acceptance owns forward progress and must not be blocked by a redundant
+    # notification recovery attempt.
+    first_request = json.loads(
+        (worktree / ".task-pipeline-step-request.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    first_output = worktree / str(first_request["output_pointer"])
+    first_result = worktree / str(first_request["result_pointer"])
+    first_output.parent.mkdir(parents=True, exist_ok=True)
+    first_output.write_text("design evidence\n", encoding="utf-8")
+    first_result.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "status": "complete",
+                "outcome": "complete",
+                "output_sha256": sha(first_output.read_bytes()),
+                "head_sha": head,
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    submitted_first = subprocess.run(
+        [
+            sys.executable,
+            str(vault / "scripts" / "pipeline-step-submit.py"),
+            "--worktree",
+            str(worktree),
+        ],
+        cwd=worktree,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if submitted_first.returncode != 0 or not (
+        worktree / ".task-pipeline-step-callback.json"
+    ).is_file():
+        raise AssertionError(
+            ("prepublished custom callback is unavailable", submitted_first)
+        )
+
     verification_calls: list[tuple[str, ...]] = []
 
     def verify(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
@@ -411,8 +457,19 @@ with tempfile.TemporaryDirectory(prefix="custom-runtime.") as raw:
     class NotificationCmux:
         def __init__(self) -> None:
             self.message = ""
+            self.ready_callback_notification_attempts = 0
 
         def send(self, _surface: str, message: str) -> None:
+            if (
+                (worktree / ".task-pipeline-step-callback.json").is_file()
+                and not (
+                    state_root / "pipeline-custom" / "receipts" / "000.json"
+                ).is_file()
+            ):
+                self.ready_callback_notification_attempts += 1
+                raise OSError(
+                    "ready custom callback must outrank notification recovery"
+                )
             self.message = message
 
         def read(self, _surface: str) -> str:
@@ -429,13 +486,14 @@ with tempfile.TemporaryDirectory(prefix="custom-runtime.") as raw:
         def send_key(self, _surface: str, _key: str) -> None:
             return None
 
+    notification_cmux = NotificationCmux()
     thread = threading.Thread(
         target=lambda: result.append(
             run_worker(
                 launch.spec_path,
                 poll_seconds=0.02,
                 checkpoint_probe=lambda _surface, _runtime: "checkpoint",
-                cmux_adapter=NotificationCmux(),
+                cmux_adapter=notification_cmux,
                 verification_runner=verify,
                 wake_source=FallbackWakeSource(),
             )
@@ -503,6 +561,7 @@ with tempfile.TemporaryDirectory(prefix="custom-runtime.") as raw:
         or final.state != "finalizing"
         or final.accepted_callback_kind != "wiki-summary"
         or len(receipts) != 2
+        or notification_cmux.ready_callback_notification_attempts != 0
         or (worktree / ".task-pipeline-step-callback.json").exists()
         or ("git", "diff", "--check") not in verification_calls
     ):
@@ -513,6 +572,7 @@ with tempfile.TemporaryDirectory(prefix="custom-runtime.") as raw:
                 final,
                 receipts,
                 verification_calls,
+                notification_cmux.ready_callback_notification_attempts,
                 submit_failure.read_text(encoding="utf-8")
                 if submit_failure.is_file()
                 else "",

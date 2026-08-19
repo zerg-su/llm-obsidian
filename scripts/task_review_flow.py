@@ -1368,13 +1368,13 @@ def _run_exact_head_review(
                     context_manifest=context_manifest,
                     run=None,
                 )
-            if summary_only_drift:
+            if summary_only_drift or amended_boundary:
                 _archive_prior_terminal_callbacks(
                     runtime_root,
                     gate_root,
                     prior_state,
                     store,
-                    current_attempt_only=summary_only_drift,
+                    current_attempt_only=True,
                 )
             if terminal_decision.cycle_number is None:
                 raise ReviewAttemptError(
