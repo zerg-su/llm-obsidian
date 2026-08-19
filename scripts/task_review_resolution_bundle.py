@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -39,6 +40,16 @@ from task_review_shared import (
     _git_bytes,
     _read_json,
 )
+
+
+def _fsync_directory(path: Path) -> None:
+    """Persist directory-entry changes before a later provider effect."""
+
+    directory = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
 
 
 def _resolution_source_state(
@@ -311,16 +322,22 @@ def _archive_resolution_callbacks(
                 if archived_raw is not None:
                     continue
                 raise ReviewAttemptError("review resolution callback identity drifted")
+            archive_dir_exists = archive_dir.exists()
             archive_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
             archive_dir.chmod(0o700)
+            if not archive_dir_exists:
+                _fsync_directory(callback.parent)
             if archive.exists():
                 if archived_raw != raw:
                     raise ReviewAttemptError(
                         "review resolution callback archive changed"
                     )
                 callback.unlink()
+                _fsync_directory(callback.parent)
             else:
                 callback.replace(archive)
+                _fsync_directory(archive_dir)
+                _fsync_directory(callback.parent)
         elif not archive.is_file():
             raise ReviewAttemptError(
                 "review resolution callback bytes are unavailable"

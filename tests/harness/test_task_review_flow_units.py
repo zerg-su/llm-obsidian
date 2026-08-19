@@ -48,6 +48,7 @@ from task_review_flow import (  # noqa: E402
 )
 from task_review_request import _callback_path  # noqa: E402
 from task_review_shared import StaleRoundCallbackError  # noqa: E402
+import task_review_resolution_bundle as resolution_bundle  # noqa: E402
 from task_review_transport import (  # noqa: E402
     _collect_ready_results,
     _write_round_meta,
@@ -298,7 +299,13 @@ with tempfile.TemporaryDirectory(prefix="review-resolution-outbox.") as raw:
     )
     changes_state = gate.read()
     callback_bytes = callback.read_bytes()
-    _archive_resolution_callbacks(runtime_root, changes_state)
+    synced_directories: list[Path] = []
+    original_fsync_directory = resolution_bundle._fsync_directory
+    resolution_bundle._fsync_directory = synced_directories.append
+    try:
+        _archive_resolution_callbacks(runtime_root, changes_state)
+    finally:
+        resolution_bundle._fsync_directory = original_fsync_directory
     boundary = changes_state["review_notification_evidence"][lane.axis]
     archive = (
         callback.parent
@@ -307,10 +314,12 @@ with tempfile.TemporaryDirectory(prefix="review-resolution-outbox.") as raw:
     )
     _archive_resolution_callbacks(runtime_root, changes_state)
     check(
-        "accepted resolution callback is archived idempotently before retry",
+        "accepted resolution callback archive is durable before retry",
         not callback.exists()
         and archive.is_file()
-        and archive.read_bytes() == callback_bytes,
+        and archive.read_bytes() == callback_bytes
+        and synced_directories
+        == [callback.parent, archive.parent, callback.parent],
     )
     (gate.root / "attempts").mkdir()
     (gate.root / "attempts" / "cycle-1.json").write_text(

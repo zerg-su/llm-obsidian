@@ -483,8 +483,10 @@ SCRIPT_FILE_CEILING = 296
 #: three modules plus the shared artifact-contract wiring in the existing
 #: carriers, the RC4 governing-source catalogue projection, the registered
 #: review fix-delta evidence exclusion, and the authorized-continuation
-#: failed-receipt attention handoff with its applied review findings.
-SCRIPT_LINE_CEILING = 112_961
+#: failed-receipt attention handoff with its applied review findings. The
+#: accepted-callback archive adds the exact 17-line directory-fsync boundary
+#: required by the final 2.8.2 review, with no speculative headroom.
+SCRIPT_LINE_CEILING = 112_978
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:
