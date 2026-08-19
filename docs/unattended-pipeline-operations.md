@@ -41,16 +41,17 @@ hidden counts. TTY output uses a small semantic ANSI palette.
 and is not screen-height truncated; continuous mode always emits the redraw
 clear sequence.
 
-The standalone observer (`scripts/harness-dashboard.py`) is root-scoped in
+The standalone dashboard (`scripts/harness-dashboard.py`) is root-scoped in
 normal mode: `--root <operation-id>` projects exactly one root operation plus
-its recorded descendants, renders an empty waiting frame before dispatch start,
-and never scans another owner's records. The global all-owner projection stays
-available only through the explicit `--all` diagnostic flag. `open` binds one
-external user-owned split to the vault plus the exact coordinator workspace
-plus one root id: reopening one request reuses exactly one split, a second
-request owns a second split, and an ambiguous, stale, moved, or foreign marker
-fails closed without touching another surface. The observer never appears in
-Harness `OwnedResources`, and Harness cleanup never signals or closes it.
+its recorded descendants and never scans another owner's records. Dispatch
+creates and durably binds the primary task workspace first, then opens exactly
+one root dashboard split from the exact task surface before provider start.
+No temporary dashboard is opened or rebound in the coordinator workspace.
+Later review, pivot, and reap facades reuse the same root dashboard. The global
+all-owner projection stays available only through the explicit `--all`
+diagnostic flag. The dashboard never appears in provider `OwnedResources`;
+successful reap closes its exact task workspace after provider cleanup, while
+unknown or incomplete ownership retains the workspace for diagnosis.
 
 One dispatch renders as one tree. Verification children, review parents, and
 review rounds are nested under the compiled step that executes them, resolved
@@ -83,10 +84,23 @@ correctness/architecture/security axes. Reviewer sessions are product
 read-only; the executor resolves findings. Verification reuses the exact
 reviewer lane and surface within the configured round bound.
 
+Each active task has two workspace roles. Its primary task workspace contains
+the executor, one root dashboard, verification, fix, recovery, and all other
+non-review activity. Each review program creates one separate review workspace:
+the first reviewer creates it and every later Simple, Deep, or Full lane splits
+from that exact anchor after proving the same workspace/window UUID. Review
+finalization and structural pivot stay in that review workspace; a later cycle
+creates a fresh one. Lane cleanup closes individual reviewer surfaces. The
+shared workspace closes only after all required callbacks, finalization,
+provider exits, and lane cleanup succeed. Blocked, attention, failed, drifted,
+or incomplete paths retain it.
+
 The task writes canonical `.task-summary.json`. The provider worker validates and delivers
 that value through the internal callback broker. The coordinator owns
 the one `reap-runner.py` vault transaction, review archival, plan close,
-validation, task archival, armed exit, and exact terminal cleanup.
+validation, task archival, armed exit, and exact terminal cleanup. After the
+task provider becomes resource-free, reap closes and verifies the exact primary
+workspace, including its dashboard, and records an idempotent cleanup receipt.
 
 ## Recovery and upgrade
 

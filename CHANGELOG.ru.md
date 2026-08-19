@@ -16,6 +16,29 @@
 внутренними контрольными точками и вошли в следующие публичные релизы; тегов и
 пакетов с этими номерами не выпускалось.
 
+## [2.8.6] — 2026-08-20
+
+### Изменено
+
+- Каждая dispatched-задача теперь владеет одним primary cmux workspace с
+  executor'ом, единственным root dashboard и всей non-review активностью.
+  Dispatch открывает dashboard только после привязки точного task surface, не
+  добавляя task split в workspace координатора.
+- Каждый Simple, Deep или Full review program теперь использует один общий
+  review workspace для всех параллельных lanes, finalization и structural
+  pivot. Следующий review cycle получает новый workspace, а fixes и
+  verification остаются в primary task workspace.
+- Cleanup review и reap теперь опирается на точные UUID workspace/window и
+  durable идемпотентные receipts. Успешная terminal-граница закрывает
+  собственный workspace; attention, незавершённый cleanup, identity drift и
+  failed reap сохраняют его для диагностики.
+
+### Проверка
+
+- Добавлены provider-free transition oracle и regression-тесты dispatch,
+  dashboard, Simple/Deep/Full topology, exact-HEAD cycles, pivot, cleanup и
+  reap для нового two-workspace контракта.
+
 ## [2.8.5] — 2026-08-19
 
 ### Исправлено

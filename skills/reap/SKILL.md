@@ -42,8 +42,12 @@ Require the exact caller session; never infer focused cmux. The runner:
    Updates use `expected_sha256`; new pages receive a real DragonScale address.
 5. Reindex, run `validate-vault.py --summary`, then call `complete-reap`.
 6. Call `request-exit` for the exact task. The lifecycle wrapper sends graceful
-   agent exit and closes the surface only after process exit. Do not close the
-   cmux surface directly.
+   agent exit and closes its exact surface only after process exit. Once task
+   provider ownership is empty, close and verify the exact primary task
+   workspace/window UUID, which also removes its root dashboard. Persist one
+   idempotent cleanup receipt; already-gone is success. Unknown, moved,
+   duplicate, foreign, or still-owned state retains the workspace and fails
+   closed. Do not issue a separate cmux close command.
 
 The JSON result contains `status`, exact `result_path`, `result_link`,
 `plan_close_status` (`closed`, `conflict`, or `retained`), content-free

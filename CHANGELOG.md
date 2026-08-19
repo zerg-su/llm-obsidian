@@ -10,6 +10,29 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.8.6] - 2026-08-20
+
+### Changed
+
+- Each dispatched task now owns one primary cmux workspace containing its
+  executor, single root dashboard, and all non-review activity. Dispatch opens
+  the dashboard only after binding the exact task surface, leaving the
+  coordinator workspace separate.
+- Each Simple, Deep, or Full review program now owns one shared review
+  workspace for all concurrent lanes, finalization, and structural pivot. A
+  later review cycle creates a fresh workspace; fixes and verification remain
+  in the primary task workspace.
+- Review and reap cleanup now use exact workspace/window UUID authority and
+  durable idempotent receipts. Successful terminal boundaries close the owned
+  workspace; attention, incomplete cleanup, drift, and failed reap retain it
+  for diagnosis.
+
+### Validation
+
+- Added a provider-free transition oracle plus dispatch, dashboard,
+  Simple/Deep/Full topology, exact-HEAD cycle, pivot, cleanup, and reap
+  regressions for the two-workspace contract.
+
 ## [2.8.5] - 2026-08-19
 
 ### Fixed

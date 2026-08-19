@@ -27,6 +27,13 @@ Deep/Full use `review_profiles.deep`; overrides require routing aliases. Full
 is never inferred, rejects overrides, and cannot combine with `--deep`. Lane
 IDs use `anthropic-*`/`openai-*`; concrete routes stay metadata.
 
+One review program owns one exact review workspace. Its first reviewer creates
+the workspace; every later Simple/Deep/Full lane splits from the first exact
+surface and must prove the same workspace/window UUID before provider start.
+Review finalization and structural pivot stay there. Executor fixes,
+verification, recovery, and other non-review continuations stay in the primary
+task workspace. A later review cycle creates a fresh review workspace.
+
 Standalone Deep is unchanged. Finalization cycles 1–3 use only
 `finalization-primary`; the third material failure freezes a read-only pivot packet;
 cycles 4–5 add `finalization-independent` only after its accepted receipt,
@@ -84,8 +91,13 @@ contract; return it for amendment.
    A plan finding may rebind retained lanes only when the exact Git delta changes
    the design artifact alone; Outcome, dispositions, or evidence-map changes
    require an amendment and fresh boundary.
-5. After accepted receipts, terminal approval exits provider, then closes only
-   its surface. Archive only exact operation/worktree/HEAD/profile evidence.
+5. Lane cleanup exits each provider and closes only its exact surface. After
+   every required callback and finalization is accepted and all lanes are
+   resource-free, close and verify the program's exact workspace once. Retain
+   it on blocked, attention, incomplete-cleanup, or unprovable identity paths.
+   The third material failure retains it through structural pivot; close it
+   after the pivot is accepted and before cycle 4 opens a fresh workspace.
+   Archive only exact operation/worktree/HEAD/profile evidence.
 6. One explicit changed scope/context boundary permits one compact
    re-evaluation; a second restart or exhausted budget is `attention-required`.
 
