@@ -7,6 +7,7 @@ import json
 import subprocess
 import sys
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
 
@@ -130,3 +131,90 @@ with tempfile.TemporaryDirectory(prefix="pipeline-submit-boundary.") as raw:
     print("OK   untyped mechanism failures fail closed without correction")
 
 print("pipeline submit failure boundary: ok")
+
+
+@dataclass
+class AttentionRecord:
+    state: str = "awaiting-callback"
+    revision: int = 7
+
+
+class AttentionStore:
+    def __init__(self) -> None:
+        self.record = AttentionRecord()
+
+    def transition(
+        self,
+        _owner: str,
+        _operation: str,
+        state: str,
+        **_kwargs: object,
+    ) -> AttentionRecord:
+        self.record = AttentionRecord(state=state, revision=self.record.revision + 1)
+        return self.record
+
+    def read(self, _owner: str, _operation: str) -> AttentionRecord:
+        return self.record
+
+
+class AttentionWorker(RuntimeWorkerControlMixin):
+    def __init__(self, root: Path) -> None:
+        self.store = AttentionStore()
+        self.spec = {
+            "owner_id": "attention-owner",
+            "operation_id": "attention-root",
+            "cwd": root,
+            "surface_id": "task-surface",
+        }
+        self.spec_path = root / "runtime" / "launch.json"
+        self.trusted_vault = ROOT
+        self.callback_handled = False
+        self.summary_attention_revision = -1
+        self.is_custom_pipeline = False
+        self.pipeline = None
+        self.latches: list[str] = []
+        self.escalations: list[tuple[str, ...]] = []
+
+    def publish_error_latch(self, status: str) -> None:
+        self.latches.append(status)
+
+    def task_escalation_runner(
+        self, argv: list[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        self.escalations.append(tuple(argv))
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+
+with tempfile.TemporaryDirectory(prefix="transition-self-heal.") as raw:
+    root = Path(raw)
+    worker = AttentionWorker(root)
+    worker.summary_attention("pipeline-custom-callback-invalid")
+    expected_prefix = (
+        sys.executable,
+        str(ROOT / "scripts" / "task_escalation.py"),
+        "raise",
+        "--worktree",
+        str(root),
+        "--category",
+        "mechanism-failure",
+    )
+    if (
+        worker.store.record.state != "attention-required"
+        or worker.latches != ["pipeline-custom-callback-invalid"]
+        or len(worker.escalations) != 1
+        or worker.escalations[0][: len(expected_prefix)] != expected_prefix
+    ):
+        raise AssertionError(
+            (worker.store.record, worker.latches, worker.escalations)
+        )
+    print("OK   internal transition attention wakes coordinator self-heal")
+
+    worker.summary_attention("review-drive-failed")
+    if len(worker.escalations) != 2:
+        raise AssertionError(worker.escalations)
+    print("OK   amended review transition wakes the same self-heal route")
+
+    worker.summary_attention("wiki-summary-invalid")
+    if len(worker.escalations) != 2:
+        raise AssertionError(worker.escalations)
+    print("OK   model artifact attention does not claim a mechanism failure")

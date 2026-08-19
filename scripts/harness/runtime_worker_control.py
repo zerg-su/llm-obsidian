@@ -44,6 +44,10 @@ _REVIEW_REJECTION_FIELDS = frozenset(
     }
 )
 
+_MECHANISM_FAILURE_ATTENTION = frozenset(
+    {"pipeline-custom-callback-invalid", "review-drive-failed"}
+)
+
 
 def _latest_review_rejection(
     paths: list[Path], *, operation_id: str, run_id: str, axis: str
@@ -79,6 +83,38 @@ def _latest_review_rejection(
 
 
 class RuntimeWorkerControlMixin:
+
+    def relay_mechanism_attention(self, status: str) -> None:
+        """Wake the coordinator for the two repo-owned transition seams."""
+
+        if status not in _MECHANISM_FAILURE_ATTENTION:
+            return
+        trusted_vault = getattr(self, "trusted_vault", None)
+        if not isinstance(trusted_vault, Path):
+            return
+        runner = getattr(self, "task_escalation_runner", subprocess.run)
+        try:
+            runner(
+                [
+                    sys.executable,
+                    str(trusted_vault / "scripts" / "task_escalation.py"),
+                    "raise",
+                    "--worktree",
+                    str(self.spec["cwd"]),
+                    "--category",
+                    "mechanism-failure",
+                    "--reason",
+                    f"Harness transition entered attention-required at {status}",
+                    "--question",
+                    "Classify and repair or authorize the exact model-free continuation",
+                ],
+                cwd=self.spec["cwd"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+        except OSError:
+            return
 
     def handle_pipeline_step_submit_failure(
         self,
@@ -729,6 +765,7 @@ class RuntimeWorkerControlMixin:
                 )
         if write_error:
             self.publish_error_latch(status)
+        self.relay_mechanism_attention(status)
 
     def write_immutable_json(self, path: Path, value: dict[str, object]) -> None:
         encoded = (
