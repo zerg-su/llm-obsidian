@@ -342,7 +342,10 @@ class RuntimeWorkerCustomMixin:
             )
             if operation_id != round_.spec.operation_id or run_id != round_.run_id:
                 raise RuntimeWorkerError("custom callback target changed")
-            if not callback_path.exists():
+            # The first custom request is published before provider launch and
+            # is therefore launch-owned.  Only successor model rounds need a
+            # retained-session notification.
+            if receipts and not callback_path.exists():
                 self.notify_custom_step(request)
             if not callback_path.exists():
                 if self.adopt_fresh_pipeline_step_result():
