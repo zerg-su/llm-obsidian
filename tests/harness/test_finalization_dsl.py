@@ -29,6 +29,7 @@ from harness.review_finalization import (  # noqa: E402
     reserve_task_finalization_cycle,
     task_finalization_policy,
 )
+from harness.review_workspace import ReviewWorkspaceBinding  # noqa: E402
 from model_routing_config import load_tracked_config  # noqa: E402
 
 
@@ -237,6 +238,15 @@ with tempfile.TemporaryDirectory(prefix="finalization-dsl-ledger.") as raw:
                 {
                     "pivot_workflow": AcceptedPivot(),
                     "pivot_runtime": object(),
+                    "review_workspace": ReviewWorkspaceBinding(
+                        review_operation_id=str(uuid.UUID(int=599)),
+                        workspace_id=str(uuid.UUID(int=600)),
+                        workspace_ref="workspace:1",
+                        window_id=str(uuid.UUID(int=601)),
+                        window_ref="window:1",
+                        anchor_surface_id=str(uuid.UUID(int=602)),
+                        anchor_surface_ref="surface:1",
+                    ),
                 }
                 if cycle == 4
                 else {}
