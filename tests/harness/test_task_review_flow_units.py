@@ -354,6 +354,9 @@ with tempfile.TemporaryDirectory(prefix="review-resolution-outbox.") as raw:
     )
 
     def check_interrupted_retirement(label: str, *, duplicate: bool) -> None:
+        sibling = lanes[1]
+        sibling_callback = callbacks[sibling.axis]
+        sibling_archive = archives[sibling.axis]
         if duplicate:
             callback.write_bytes(callback_bytes)
         else:
@@ -389,6 +392,7 @@ with tempfile.TemporaryDirectory(prefix="review-resolution-outbox.") as raw:
             and interrupted_syncs
             == [callback.parent if duplicate else archive.parent],
         )
+        sibling_archive.replace(sibling_callback)
         retry_syncs: list[Path] = []
         resolution_bundle._fsync_directory = retry_syncs.append
         try:
@@ -412,12 +416,51 @@ with tempfile.TemporaryDirectory(prefix="review-resolution-outbox.") as raw:
                     callbacks[axis].parent,
                 )
             ]
-            and not callback.exists()
-            and all(archives[candidate.axis].is_file() for candidate in lanes),
+            and all(not callbacks[candidate.axis].exists() for candidate in lanes)
+            and all(
+                archives[candidate.axis].read_bytes()
+                == callback_payloads[candidate.axis]
+                for candidate in lanes
+            ),
         )
 
     check_interrupted_retirement("interrupted callback rename", duplicate=False)
     check_interrupted_retirement("interrupted duplicate cleanup", duplicate=True)
+
+    def check_boundary_axis_rejection(
+        label: str, boundaries: dict[object, object]
+    ) -> None:
+        invalid_state = dict(changes_state)
+        invalid_state["review_notification_evidence"] = boundaries
+        try:
+            _archive_prior_terminal_callbacks(
+                runtime_root,
+                gate.root,
+                invalid_state,
+                store,
+                current_attempt_only=True,
+            )
+        except ReviewAttemptError as exc:
+            rejected = "boundary axes drifted" in str(exc)
+        else:
+            rejected = False
+        check(label, rejected)
+
+    current_boundaries = dict(changes_state["review_notification_evidence"])
+    missing_boundaries = dict(current_boundaries)
+    missing_boundaries.pop(lanes[1].axis)
+    check_boundary_axis_rejection(
+        "current callback boundary rejects a missing axis",
+        missing_boundaries,
+    )
+    check_boundary_axis_rejection(
+        "current callback boundary rejects an extra axis",
+        {**current_boundaries, "openai-foreign": current_boundaries[lane.axis]},
+    )
+    check_boundary_axis_rejection(
+        "current callback boundary rejects a non-string axis",
+        {**current_boundaries, 7: current_boundaries[lane.axis]},
+    )
     (gate.root / "attempts").mkdir()
     (gate.root / "attempts" / "cycle-1.json").write_text(
         json.dumps(changes_state, sort_keys=True) + "\n",

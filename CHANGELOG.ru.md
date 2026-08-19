@@ -42,7 +42,12 @@
   порядку. Retry после прерванного rename или duplicate cleanup заново
   подтверждает обе directory barriers до любого эффекта successor. Production
   recovery теперь согласует весь bound multi-axis prefix, даже когда один или
-  все source outbox исчезли до возврата прерванного fsync.
+  все source outbox исчезли до возврата прерванного fsync; regression matrix
+  покрывает смешанный archive/source prefix и отклоняет пропущенные, лишние и
+  нестроковые boundary axes.
+- Тесты session preflight теперь пишут route snapshots только в уникальные
+  временные fixture roots. Полная верификация безопасна в read-only product
+  checkout, а параллельные прогоны не делят фиксированную snapshot identity.
 - Контур active lifecycle authority правдиво перемерен на точный кандидат
   28 файлов / 16 259 LOC, а live ratchet scripts — на 296 файлов / 112 993
   строк; оба значения зафиксированы без спекулятивного запаса.

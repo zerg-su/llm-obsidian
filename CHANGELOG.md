@@ -36,7 +36,12 @@ packages were published for them.
   order. Retries after an interrupted rename or duplicate cleanup re-establish
   both directory barriers before any successor effect. Production recovery now
   reconciles the complete bound multi-axis prefix even when one or every
-  source outbox disappeared before the interrupted fsync returned.
+  source outbox disappeared before the interrupted fsync returned; the
+  regression matrix covers mixed archive/source prefixes and rejects missing,
+  extra, or non-string boundary axes.
+- Session-preflight tests now write route snapshots only under unique temporary
+  fixture roots. Repository-wide verification is safe in a read-only product
+  checkout and simultaneous test runs share no fixed snapshot identity.
 - The active lifecycle-authority contour is truthfully rebaselined to the exact
   28-file / 16,259-LOC candidate, and the live scripts ratchet to the exact
   296-file / 112,993-line candidate, both with zero speculative headroom.

@@ -22,10 +22,19 @@ def check(name: str, condition: bool) -> None:
 
 
 with tempfile.TemporaryDirectory(prefix="session-preflight-test.") as raw:
+    run_token = Path(raw).name.rsplit(".", 1)[-1]
+    session_id = f"test-session-{run_token}"
+    capability_session_id = f"capability-session-{run_token}"
+    fixture_root = Path(raw) / "fixture"
+    (fixture_root / "config").mkdir(parents=True)
+    (fixture_root / "config/model-routing.toml").write_text(
+        (ROOT / "config/model-routing.toml").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
     env = dict(os.environ)
     env["PATH"] = "/usr/bin:/bin"
     result = subprocess.run(
-        [sys.executable, str(SCRIPT), "--root", str(ROOT), "--session-id", "test-session", "--runtime", "codex", "--model", "gpt-5.6-sol", "--effort", "high", "--json"],
+        [sys.executable, str(SCRIPT), "--root", str(fixture_root), "--session-id", session_id, "--runtime", "codex", "--model", "gpt-5.6-sol", "--effort", "high", "--json"],
         text=True, capture_output=True, env=env, check=False,
     )
     check("preflight never blocks session", result.returncode == 0)
@@ -34,9 +43,12 @@ with tempfile.TemporaryDirectory(prefix="session-preflight-test.") as raw:
     check("effective route is visible", payload["routing"]["model"] == "gpt-5.6-sol" and payload["routing"]["source"] == "runtime-environment")
     check("retrieval degradation is explicit", payload["retrieval"] in {"hybrid", "sparse-fallback"})
     check("repairs are exact commands", all(item["repair"] for item in payload["issues"]))
-    snapshot = ROOT / ".vault-meta/session-routing/test-session.json"
+    snapshot = fixture_root / f".vault-meta/session-routing/{session_id}.json"
     check("session route snapshot created", snapshot.is_file())
-    snapshot.unlink()
+    check(
+        "product checkout receives no session route snapshot",
+        not (ROOT / f".vault-meta/session-routing/{session_id}.json").exists(),
+    )
 
     guessed_root = Path(raw) / "guessed"
     (guessed_root / "config").mkdir(parents=True)
@@ -68,13 +80,19 @@ with tempfile.TemporaryDirectory(prefix="session-preflight-test.") as raw:
     capability_env = dict(os.environ)
     capability_env["PATH"] = f"{fake_bin}:/usr/bin:/bin"
     result = subprocess.run(
-        [sys.executable, str(SCRIPT), "--root", str(ROOT), "--session-id", "capability-session", "--runtime", "codex", "--model", "gpt-5.6-sol", "--effort", "high", "--json"],
+        [sys.executable, str(SCRIPT), "--root", str(fixture_root), "--session-id", capability_session_id, "--runtime", "codex", "--model", "gpt-5.6-sol", "--effort", "high", "--json"],
         text=True, capture_output=True, env=capability_env, check=False,
     )
     capability_payload = json.loads(result.stdout)
     capability_ids = {item["id"] for item in capability_payload["issues"]}
     check("missing anchored split is visible", "cmux-anchored-split" in capability_ids)
     check("missing typed resume is visible", "cmux-session-resume" in capability_ids)
-    (ROOT / ".vault-meta/session-routing/capability-session.json").unlink(missing_ok=True)
+    check(
+        "product checkout receives no capability route snapshot",
+        not (
+            ROOT
+            / f".vault-meta/session-routing/{capability_session_id}.json"
+        ).exists(),
+    )
 
 print("session preflight tests passed")
