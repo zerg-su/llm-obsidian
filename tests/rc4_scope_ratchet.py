@@ -475,8 +475,9 @@ files / 113,030 lines with no speculative headroom.
 Explicit stale cancellation adds 169 measured lines to existing Harness owners.
 It absorbs only expired, classified pending effects after exact resource checks,
 atomically terminalizes the operation, and never replays a provider, callback,
-or verification effect. The live ceiling is therefore pinned to exactly 296
-files / 113,199 lines with no speculative headroom.
+or verification effect. Archived review-marker recognition adds four measured
+lines to the existing upgrade preflight. The live ceiling is therefore pinned
+to exactly 296 files / 113,203 lines with no speculative headroom.
 """
 
 from __future__ import annotations
@@ -502,7 +503,7 @@ SCRIPT_FILE_CEILING = 296
 #: accepted-callback archive adds the exact 17-line directory-fsync boundary
 #: required by the final 2.8.2 review plus one measured recovery branch line
 #: that re-establishes both barriers after an interrupted mutation.
-SCRIPT_LINE_CEILING = 113_199
+SCRIPT_LINE_CEILING = 113_203
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

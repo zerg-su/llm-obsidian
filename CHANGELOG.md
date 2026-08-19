@@ -27,7 +27,10 @@ packages were published for them.
   narrowly classified pending effects without replay, refuses live or unknown
   resources, and atomically cancels the exact subtree. The active authority
   contour is pinned to 28 files / 16,387 LOC and the live scripts ratchet to
-  296 files / 113,199 lines, both with no speculative headroom.
+  296 files / 113,203 lines, both with no speculative headroom.
+- Upgrade preflight now recognizes the durable `archive_status` of completed
+  reviews instead of misclassifying a retained close-armed transport marker as
+  live work.
 
 ## [2.8.2] - 2026-08-19
 

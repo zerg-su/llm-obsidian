@@ -355,7 +355,11 @@ def active_sessions(root: Path) -> list[str]:
     }
     for tree in worktrees(root):
         review = read_object(tree / ".review-meta.json")
-        if review and review.get("status") not in {"finish_sent", "finished", "archived"}:
+        if (
+            review
+            and review.get("archive_status") != "archived"
+            and review.get("status") not in {"finish_sent", "finished", "archived"}
+        ):
             active.append(f"review:{tree.name}")
     state_root = root / ".vault-meta/research-runs"
     if state_root.is_dir():

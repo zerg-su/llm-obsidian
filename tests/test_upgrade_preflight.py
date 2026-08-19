@@ -143,6 +143,28 @@ with tempfile.TemporaryDirectory(prefix="upgrade-preflight-test.") as raw:
     check("stock v2.0.8 routes need no migration", result.returncode == 0)
     check("stock routes write no local override", not (root / "config/model-routing.local.toml").exists())
 
+    review_meta = root / ".review-meta.json"
+    review_meta.write_text(json.dumps({
+        "version": 5,
+        "status": "finish_sent_close_armed",
+        "archive_status": "archived",
+    }), encoding="utf-8")
+    result = run(root)
+    check(
+        "archived review metadata does not block upgrade",
+        result.returncode == 0 and f"review:{root.name}" not in result.stderr,
+    )
+    review_meta.write_text(json.dumps({
+        "version": 5,
+        "status": "finish_sent_close_armed",
+    }), encoding="utf-8")
+    result = run(root)
+    check(
+        "unarchived close-armed review still blocks upgrade",
+        result.returncode == 4 and f"review:{root.name}" in result.stderr,
+    )
+    review_meta.unlink()
+
     (root / ".codex/dispatch-env.toml").write_text(
         '[codex_dispatch]\nclaude_review_model = "custom-claude"\nclaude_review_effort = "ultra"\n',
         encoding="utf-8",
