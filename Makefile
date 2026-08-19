@@ -98,6 +98,7 @@ test-harness:
 	@python3 tests/harness/test_review_topology.py
 	@python3 tests/harness/test_review_vertical.py
 	@python3 tests/harness/test_review_gate.py
+	@python3 tests/harness/test_review_workspace.py
 	@python3 tests/harness/test_runtime_sessions.py
 	@python3 tests/harness/test_runtime_task_summary.py
 	@python3 tests/harness/test_runtime_research.py
