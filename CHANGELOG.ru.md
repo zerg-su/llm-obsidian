@@ -38,7 +38,7 @@
 - Добавлены provider-free transition oracle и regression-тесты dispatch,
   dashboard, Simple/Deep/Full topology, exact-HEAD cycles, pivot, cleanup и
   reap для нового two-workspace контракта. Контур active authority зафиксирован
-  ровно на 28 файлах / 16 421 LOC, а полный контур scripts — на 297 файлах /
+  ровно на 28 файлах / 16 418 LOC, а полный контур scripts — на 297 файлах /
   113 722 строках; оба без спекулятивного запаса.
 
 ## [2.8.5] — 2026-08-19
