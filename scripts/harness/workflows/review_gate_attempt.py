@@ -739,8 +739,24 @@ class ReviewGateAttemptMixin:
             or not raw_lanes
         ):
             raise ReviewAttemptError("review attempt cannot be rehydrated")
-        checkpointless_axes: set[str] = set()
         for raw_lane in raw_lanes:
+            if (
+                not isinstance(raw_lane, dict)
+                or raw_lane.get("verification_iteration") != 0
+            ):
+                raise ReviewAttemptError(
+                    "review attempt checkpoint cannot be resurrected"
+                )
+        run = self.rehydrate()
+        if run.execution.request.context.head_sha != attempt.identity.exact_head_sha:
+            raise ReviewAttemptError("review attempt cannot bind a changed HEAD")
+        refreshed_lanes = self.read().get("lanes")
+        if not isinstance(refreshed_lanes, list):
+            raise ReviewAttemptError(
+                "review attempt checkpoint cannot be resurrected"
+            )
+        checkpointless_axes: set[str] = set()
+        for raw_lane in refreshed_lanes:
             if (
                 not isinstance(raw_lane, dict)
                 or raw_lane.get("verification_iteration") != 0
@@ -753,9 +769,6 @@ class ReviewGateAttemptMixin:
                 and not str(raw_lane.get("checkpoint") or "")
             ):
                 checkpointless_axes.add(str(raw_lane.get("axis") or ""))
-        run = self.rehydrate()
-        if run.execution.request.context.head_sha != attempt.identity.exact_head_sha:
-            raise ReviewAttemptError("review attempt cannot bind a changed HEAD")
         for lane in run.execution.lanes:
             self._attempt_lane(attempt.identity, lane)
             if lane.axis not in checkpointless_axes:

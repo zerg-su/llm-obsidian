@@ -22,9 +22,12 @@ packages were published for them.
   provider editor visibly contains the exact prompt before sending `Enter`.
   A durable, identity-bound recovery may submit an already-visible historical
   notification once without re-pasting it or replaying accepted model steps.
+- Current-review callback recovery now refreshes checkpoint classification
+  after durable rehydration, so an accepted blocked callback cannot be stranded
+  by the same callback/checkpoint publication race.
 - The active lifecycle-authority contour is truthfully rebaselined to the exact
-  28-file / 16,207-LOC candidate, and the live scripts ratchet to the exact
-  296-file / 112,826-line candidate, both with zero speculative headroom.
+  28-file / 16,220-LOC candidate, and the live scripts ratchet to the exact
+  296-file / 112,839-line candidate, both with zero speculative headroom.
 
 ## [2.8.1] - 2026-08-18
 

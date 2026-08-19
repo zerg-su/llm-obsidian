@@ -28,8 +28,11 @@
   точный prompt станет видимым в редакторе provider'а, и только затем отправляют
   `Enter`. Durable identity-bound recovery может один раз отправить уже видимый
   исторический prompt без повторной вставки и без replay принятых model steps.
+- Recovery current-review callback теперь обновляет классификацию checkpoint
+  после durable rehydration, поэтому уже принятый blocked callback не застревает
+  из-за гонки публикации callback и checkpoint.
 - Контур active lifecycle authority правдиво перемерен на точный кандидат
-  28 файлов / 16 207 LOC, а live ratchet scripts — на 296 файлов / 112 826
+  28 файлов / 16 220 LOC, а live ratchet scripts — на 296 файлов / 112 839
   строк; оба значения зафиксированы без спекулятивного запаса.
 
 ## [2.8.1] - 2026-08-18

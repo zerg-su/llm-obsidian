@@ -969,6 +969,76 @@ with tempfile.TemporaryDirectory(
         and runtime.started == started_before,
     )
 
+
+with tempfile.TemporaryDirectory(
+    prefix="exact-head-restored-checkpoint-blocked."
+) as raw:
+    base = Path(raw)
+    store = OperationStore(base / ".vault-meta/harness")
+    runtime = FakeRuntime(store)
+    gate = ReviewGateController(base / "gate", runtime, store)
+    active = gate.begin_attempt(
+        dispatch_operation_id="task-1",
+        finalization_lineage_id="task-1",
+        cycle=1,
+        plan_sha256="1" * 64,
+        outcome_sha256="2" * 64,
+        request=request("a" * 40),
+        origin_surface="11111111-1111-4111-8111-111111111111",
+        cwd=base,
+        product_root=ROOT,
+        prompt_pointer="prompts/review.md",
+        callback_root="callbacks/review-blocked",
+    )
+    blocked_lane = active.execution.lanes[0]
+    blocked_round = active.rounds[blocked_lane.axis]
+    state = gate.read()
+    gate._replace(
+        lanes=[
+            (
+                {
+                    key: value
+                    for key, value in lane.items()
+                    if key not in {"checkpoint", "checkpoint_sha256"}
+                }
+                | {"checkpoint": ""}
+                if lane.get("axis") == blocked_lane.axis
+                else lane
+            )
+            for lane in state["lanes"]
+        ]
+    )
+    blocked_finding = ReviewFinding(
+        "blocked-evidence",
+        blocked_lane.axis,
+        "important",
+        "the reviewer requires exact durable evidence",
+        "the accepted blocked callback must survive checkpoint recovery",
+    )
+    blocked_result = ReviewResult(
+        blocked_lane.axis,
+        "blocked",
+        (blocked_finding,),
+        0,
+    )
+    CallbackBroker(store, "task-1").accept(
+        review_round_envelope(blocked_round, blocked_result)
+    )
+    started_before = runtime.started
+    recovered = gate.rehydrate_attempt()
+    recovered_lane = next(
+        lane
+        for lane in gate.read()["lanes"]
+        if lane["axis"] == blocked_lane.axis
+    )
+    check(
+        "restored checkpoint consumes an accepted blocked callback",
+        recovered.rounds[blocked_lane.axis] == blocked_round
+        and recovered_lane["checkpoint"] == runtime.checkpoint
+        and runtime.started == started_before,
+    )
+
+
 with tempfile.TemporaryDirectory(prefix="exact-protocol-selector.") as raw:
     base = Path(raw)
     vault = base / "vault"
