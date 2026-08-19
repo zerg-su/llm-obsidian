@@ -10,6 +10,19 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.8.4] - 2026-08-19
+
+### Fixed
+
+- The launch-owned first step of a custom pipeline is no longer delivered a
+  second time by retained-session notification recovery while its callback is
+  still pending. Successor steps keep their existing one-shot notification,
+  and an already-published callback still takes precedence over transport.
+- The regression matrix now covers both initial custom-step races: callback
+  publication before observation and callback absence while the already
+  launched provider owns the request. The complete repository gate and a
+  Simple Sol review pass on the exact candidate.
+
 ## [2.8.3] - 2026-08-19
 
 ### Fixed
