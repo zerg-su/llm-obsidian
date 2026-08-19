@@ -399,6 +399,7 @@ Acceptance heartbeat хранит только stage/status/counters/timestamps.
 
 | Тема | Документ |
 |---|---|
+| Task-centric cmux workspace topology v2.8.6 | [Release notes v2.8.6](docs/releases/v2.8.6.md) |
 | Исправление trust-transition Codex в v2.8.5 | [Release notes v2.8.5](docs/releases/v2.8.5.md) |
 | Исправление первой доставки custom pipeline в v2.8.4 | [Release notes v2.8.4](docs/releases/v2.8.4.md) |
 | Восстановление переходов в v2.8.3 | [Release notes v2.8.3](docs/releases/v2.8.3.md) |

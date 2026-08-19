@@ -12,6 +12,7 @@ from typing import Mapping
 
 from .contracts import OperationRecord, OwnedResources
 from .runtime_session_contracts import IDENTIFIER, SURFACE_UUID
+from .finalization_pivot import pivot_required
 
 
 REF = re.compile(r"(surface|workspace|window):[1-9][0-9]*\Z")
@@ -283,8 +284,86 @@ def close_review_workspace(
     return receipt
 
 
+def late_started_workspace_binding(
+    session: Mapping[str, object],
+    receipt: Mapping[str, object],
+    *,
+    review_operation_id: str,
+    lane_operation_id: str,
+    lane_run_id: str,
+) -> ReviewWorkspaceBinding:
+    """Recover exact workspace authority from one late-start session receipt."""
+
+    if (
+        session.get("schema_version") != 1
+        or session.get("operation_id") != lane_operation_id
+        or session.get("run_id") != lane_run_id
+    ):
+        raise ValueError("late-start review session identity changed")
+    return ReviewWorkspaceBinding(
+        review_operation_id=review_operation_id,
+        workspace_id=str(session.get("workspace_id") or ""),
+        workspace_ref=str(session.get("workspace_ref") or ""),
+        window_id=str(session.get("window_id") or ""),
+        window_ref=str(session.get("window_ref") or ""),
+        anchor_surface_id=str(receipt.get("surface_id") or ""),
+        anchor_surface_ref=str(session.get("surface_ref") or ""),
+    )
+
+
+def recovered_review_lane_payload(
+    stored_lanes: list[object],
+    lane: object,
+    parent: OperationRecord,
+    *,
+    post_cleanup: bool,
+    workspace: ReviewWorkspaceBinding,
+) -> dict[str, object]:
+    """Project one exact recovered lane without expanding gate branch authority."""
+
+    if post_cleanup and stored_lanes:
+        return {
+            **dict(stored_lanes[0]),
+            "surface_id": "",
+            "state": "complete",
+        }
+    return {
+        "axis": str(getattr(lane, "axis")),
+        "operation_id": str(getattr(lane, "operation_id")),
+        "lane_id": str(getattr(lane, "lane_id")),
+        "run_id": str(getattr(lane, "run_id")),
+        "surface_id": parent.resources.surface_id,
+        "checkpoint": "",
+        "verification_iteration": int(
+            getattr(lane, "verification_iteration")
+        ),
+        "state": parent.state,
+        "workspace_id": workspace.workspace_id,
+        "window_id": workspace.window_id,
+    }
+
+
+def close_terminal_review_workspace(
+    gate: object,
+    ledger: object,
+    terminal_result: str,
+) -> bool:
+    """Close ordinary terminal programs; retain cycle three for its pivot."""
+
+    if terminal_result not in {"approved", "changes-requested"}:
+        return False
+    snapshot = ledger.snapshot()
+    if terminal_result == "changes-requested" and pivot_required(snapshot):
+        return True
+    gate.close_terminal_workspace()
+    return False
+
+
 __all__ = [
     "ReviewWorkspaceBinding",
     "ReviewWorkspaceCleanup",
     "close_review_workspace",
+    "close_terminal_review_workspace",
+    "late_started_workspace_binding",
+    "recovered_review_lane_payload",
 ]

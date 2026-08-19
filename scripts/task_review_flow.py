@@ -13,10 +13,7 @@ from typing import Any, Callable, Mapping, Sequence
 
 from harness.contracts import AttentionReason
 from harness.dashboard_facade import DashboardBinding
-from harness.finalization_ledger import (
-    FinalizationLedger,
-    predecessor_bound_attempt_id,
-)
+from harness.finalization_ledger import predecessor_bound_attempt_id
 from harness.review_attempt import (
     EXACT_HEAD_REVIEW_PROTOCOL,
     LEGACY_CROSS_HEAD_RESUME_DISABLED,
@@ -28,7 +25,6 @@ from harness.pre_model_reviewer_retirement import (
     review_attempt_records_are_quiescent,
 )
 from harness.review_finalization import StructuralPivotPending
-from harness.finalization_pivot import pivot_required
 from harness.contracts import ContractError as HarnessContractError
 from harness.custom_pipelines import (
     CustomPipelinePolicy,
@@ -823,22 +819,6 @@ def _complete_ready_results(
     return tuple(actions)
 
 
-def _close_terminal_workspace_unless_pivot(
-    gate: ReviewGateController,
-    ledger: FinalizationLedger,
-    terminal_result: str,
-) -> bool:
-    """Close ordinary terminal programs; retain cycle three for its pivot."""
-
-    if terminal_result not in {"approved", "changes-requested"}:
-        return False
-    snapshot = ledger.snapshot()
-    if terminal_result == "changes-requested" and pivot_required(snapshot):
-        return True
-    gate.close_terminal_workspace()
-    return False
-
-
 def _resume_bound_attention(
     gate: ReviewGateController,
     store: OperationStore,
@@ -1251,14 +1231,12 @@ def _run_exact_head_review(
         )
     if request is None:
         raise TaskReviewError("enabled review has no request")
-    cycle = 1
-    zero_lane_preflight = False
+    cycle, zero_lane_preflight = 1, False
     predecessor_attempt_id = ""
     reserved_attempt_id = ""
     supersedes_approved_attempt_id = ""
     approved_summary_predecessor_attempt_id = ""
-    amended_boundary = False
-    close_prior_workspace_after_reservation = False
+    amended_boundary = close_prior_workspace_after_reservation = False
     recovered_attention_attempt = gate_exists and accepted_callback_cleanup_is_complete(gate)
     if gate_exists:
         prior_state = gate.read()
@@ -1369,15 +1347,9 @@ def _run_exact_head_review(
                         approved_summary_predecessor is not None
                     ),
                 )
-            terminal_decision = ledger.record_terminal(
-                attempt_id=prior_attempt.identity.attempt_id,
-                terminal_result=prior_attempt.terminal.result.value,
-            )
-            close_prior_workspace_after_reservation = (
-                _close_terminal_workspace_unless_pivot(
-                    gate,
-                    ledger,
-                    prior_attempt.terminal.result.value,
+            terminal_decision, close_prior_workspace_after_reservation = (
+                gate.record_terminal_workspace(
+                    ledger, prior_attempt.identity.attempt_id, prior_attempt.terminal.result.value
                 )
             )
             _archive_changed_head_callback(runtime_root, gate_root, prior_state, store, context.head_sha)
@@ -1461,8 +1433,7 @@ def _run_exact_head_review(
     if isinstance(reservation, dict):
         return reservation
     request, ledger, cycle = reservation
-    if close_prior_workspace_after_reservation:
-        gate.close_terminal_workspace()
+    gate.close_retained_workspace(close_prior_workspace_after_reservation)
     _assert_frozen_topology(meta, request)
     if not gate_exists or ReviewAttempt.from_mapping(
         gate.read()["attempt"]
@@ -1538,14 +1509,8 @@ def _run_exact_head_review(
     next_attempt = ReviewAttempt.from_mapping(next_state["attempt"])
     if next_attempt.status == "terminal":
         assert next_attempt.terminal is not None
-        ledger.record_terminal(
-            attempt_id=next_attempt.identity.attempt_id,
-            terminal_result=next_attempt.terminal.result.value,
-        )
-        _close_terminal_workspace_unless_pivot(
-            gate,
-            ledger,
-            next_attempt.terminal.result.value,
+        gate.record_terminal_workspace(
+            ledger, next_attempt.identity.attempt_id, next_attempt.terminal.result.value
         )
     return _receipt(
         status=next_status,

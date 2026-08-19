@@ -484,6 +484,12 @@ existing runtime continuation classifier. A footerless transient numbered
 choice remains unknown, and the real editor must stay stable for a bounded
 window before first delivery. No production file is added; the live ceiling is
 pinned to exactly 296 files / 113,215 lines with no speculative headroom.
+
+The 2.8.6 task-centric workspace topology adds the dedicated
+``review_workspace.py`` owner plus exact dispatch, review-program, pivot, and
+reap placement/cleanup seams. The measured net production change is one file
+and 507 lines. The live ceiling is therefore pinned to exactly 297 files /
+113,722 lines with no speculative headroom.
 """
 
 from __future__ import annotations
@@ -491,16 +497,16 @@ from __future__ import annotations
 from pathlib import Path
 
 
-#: Maximum tracked Python files under ``scripts/`` for the 2.8.5 candidate.
+#: Maximum tracked Python files under ``scripts/`` for the 2.8.6 candidate.
 #: Architecture Workflow v1 adds exactly the three production scripts its
 #: approved plan names: ``architecture_paths.py`` (the confined path/collision
 #: validator both carriers call), ``architecture_workflow_pressure.py`` and
 #: ``architecture_workflow_audit.py`` (the release-owned behavioral evidence
 #: runner and validator, kept out of the frozen legacy eval framework). The
 #: file ceiling therefore moves by exactly three.
-SCRIPT_FILE_CEILING = 296
+SCRIPT_FILE_CEILING = 297
 
-#: Maximum total lines across those files for the 2.8.5 lifecycle candidate.
+#: Maximum total lines across those files for the 2.8.6 lifecycle candidate.
 #: The line ceiling moves to the measured candidate with zero headroom: those
 #: three modules plus the shared artifact-contract wiring in the existing
 #: carriers, the RC4 governing-source catalogue projection, the registered
@@ -509,7 +515,7 @@ SCRIPT_FILE_CEILING = 296
 #: accepted-callback archive adds the exact 17-line directory-fsync boundary
 #: required by the final 2.8.2 review plus one measured recovery branch line
 #: that re-establishes both barriers after an interrupted mutation.
-SCRIPT_LINE_CEILING = 113_215
+SCRIPT_LINE_CEILING = 113_722
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:
@@ -528,13 +534,13 @@ def assert_within_ceilings(scripts_dir: Path) -> tuple[int, int]:
     files, lines = measure(scripts_dir)
     if files > SCRIPT_FILE_CEILING:
         raise AssertionError(
-            f"scripts/ holds {files} Python files, above the 2.8.5 ceiling "
+            f"scripts/ holds {files} Python files, above the 2.8.6 ceiling "
             f"{SCRIPT_FILE_CEILING}; justify and raise the ceiling in the same "
             "commit as the growth"
         )
     if lines > SCRIPT_LINE_CEILING:
         raise AssertionError(
-            f"scripts/ holds {lines} lines, above the 2.8.5 ceiling "
+            f"scripts/ holds {lines} lines, above the 2.8.6 ceiling "
             f"{SCRIPT_LINE_CEILING}; justify and raise the ceiling in the same "
             "commit as the growth"
         )

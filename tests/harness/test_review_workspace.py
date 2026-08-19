@@ -32,7 +32,7 @@ from harness.workflows.review import (  # noqa: E402
     ReviewRequest,
     start_review,
 )
-from task_review_flow import _close_terminal_workspace_unless_pivot  # noqa: E402
+from harness.review_workspace import close_terminal_review_workspace  # noqa: E402
 
 
 TASK_SURFACE = "11111111-1111-4111-8111-111111111111"
@@ -328,12 +328,12 @@ class ReviewTopologyTests(unittest.TestCase):
         ordinary = Gate()
         retained = Gate()
         self.assertFalse(
-            _close_terminal_workspace_unless_pivot(
+            close_terminal_review_workspace(
                 ordinary, Ledger(2), "changes-requested"
             )
         )
         self.assertTrue(
-            _close_terminal_workspace_unless_pivot(
+            close_terminal_review_workspace(
                 retained, Ledger(3), "changes-requested"
             )
         )

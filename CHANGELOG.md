@@ -31,7 +31,9 @@ packages were published for them.
 
 - Added a provider-free transition oracle plus dispatch, dashboard,
   Simple/Deep/Full topology, exact-HEAD cycle, pivot, cleanup, and reap
-  regressions for the two-workspace contract.
+  regressions for the two-workspace contract. The active authority contour is
+  pinned to exactly 28 files / 16,421 LOC, and the complete scripts contour to
+  exactly 297 files / 113,722 lines, both with no speculative headroom.
 
 ## [2.8.5] - 2026-08-19
 
