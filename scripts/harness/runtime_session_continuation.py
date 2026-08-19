@@ -105,6 +105,11 @@ def classify_continuation_screen(runtime: str, screen: str, anchor: str) -> str:
         return "active"
     editor_lines = [line for line in tail if line.startswith(marker)]
     if runtime == "codex" and any(
+        re.fullmatch(r"›\s*[1-9][.)]\s+\S.*", line)
+        for line in editor_lines
+    ):
+        return "unknown"
+    if runtime == "codex" and any(
         re.fullmatch(r"› \[Pasted Content [1-9][0-9]* chars\]", line)
         for line in editor_lines
     ):

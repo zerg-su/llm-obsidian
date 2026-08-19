@@ -947,6 +947,49 @@ check(
 )
 
 
+class CodexTrustTransitionPort(InitialReadyPort):
+    def __init__(self) -> None:
+        super().__init__(
+            [
+                "\n".join(
+                    (
+                        "Do you trust the contents of this directory?",
+                        "› 1. Yes, continue",
+                        "2. No, quit",
+                        "Press enter to continue",
+                    )
+                ),
+                "› 1. Yes, continue",
+                "› Ask Codex to do anything",
+            ]
+        )
+        self.keys: list[str] = []
+
+    def send_key(self, surface_id: str, key: str) -> None:
+        assert surface_id == SURFACE
+        self.keys.append(key)
+
+
+codex_trust_transition_port = CodexTrustTransitionPort()
+check(
+    "initial Codex input waits through the footerless trust transition",
+    await_initial_input_ready(
+        codex_trust_transition_port,
+        surface_id=SURFACE,
+        runtime="codex",
+        observation_limit=3,
+        observation_interval_seconds=0,
+        wait=lambda _seconds: None,
+    )
+    and codex_trust_transition_port.keys == ["Enter"]
+    and codex_trust_transition_port.reads == 3,
+    (
+        codex_trust_transition_port.keys,
+        codex_trust_transition_port.reads,
+    ),
+)
+
+
 class PartialInitialPromptPort(InitialPromptPort):
     def __init__(self) -> None:
         super().__init__()
