@@ -6,10 +6,10 @@ from __future__ import annotations
 import importlib.util
 import hashlib
 import json
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from types import SimpleNamespace
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -57,7 +57,7 @@ def tree_payload(*, surfaces: tuple[str, ...] = (SURFACE_ID,)) -> str:
 original_run_cmux = probe.run_cmux
 original_exact_ids = probe.exact_ids
 original_wait_screen = probe.wait_screen
-original_deliver = probe.deliver_continuation
+original_relay = probe.coordinator_relay
 original_run_runtime = probe.run_runtime
 original_probe_identity = probe.probe_identity
 try:
@@ -163,14 +163,24 @@ try:
             )
         raise AssertionError(argv)
 
-    def accepted_delivery(*_args: object, **kwargs: object) -> object:
-        kwargs["observe_stage"]("submit-accepted", 1, "", "")
-        return SimpleNamespace(acknowledged=True, submit_count=1)
+    def accepted_delivery(
+        _surface_id: str,
+        _runtime: str,
+        _message: str,
+        receipt_path: Path,
+        _identity: dict[str, object],
+    ) -> str:
+        receipt_path.parent.mkdir(parents=True, exist_ok=True)
+        receipt_path.write_text(
+            json.dumps({"stage": "submit-accepted", "submit_count": 1}) + "\n",
+            encoding="utf-8",
+        )
+        return hashlib.sha256(receipt_path.read_bytes()).hexdigest()
 
     probe.run_cmux = concurrent_command
     probe.exact_ids = lambda _ref: (WORKSPACE_ID, SURFACE_ID)
     probe.wait_screen = lambda *_args: "ready"
-    probe.deliver_continuation = accepted_delivery
+    probe.coordinator_relay = accepted_delivery
     count = probe.run_runtime(object(), "codex", 1, "owned-title")
     check("one successful runtime returns its exact turn count", count == 1)
     check(
@@ -198,6 +208,11 @@ try:
         observed_payload = json.loads(receipt.read_text(encoding="utf-8"))
         check("receipt binds the exact requested HEAD", observed_payload["head_sha"] == "a" * 40)
         check("receipt records 20 deliveries for both runtimes", observed_payload["runtime_counts"] == {"claude": 20, "codex": 20})
+        check(
+            "receipt identifies the production coordinator relay corridor",
+            observed_payload["delivery_corridor"] == "task_escalation.send"
+            and observed_payload["durable_stage"] == "submit-accepted",
+        )
         check("receipt records zero tails and provider calls", observed_payload["workspace_tails"] == 0 and observed_payload["provider_calls"] == 0)
         check("receipt binds the exact probe bytes", observed_payload["probe_sha256"] == hashlib.sha256(SCRIPT.read_bytes()).hexdigest())
         check("receipt binds its replayable creating command", observed_payload["command"] == command)
@@ -208,6 +223,48 @@ try:
         else:
             raise AssertionError("an immutable receipt target must not be overwritten")
         check("receipt publication is immutable", True)
+
+    with tempfile.TemporaryDirectory(prefix="v2810-clean-head-test.") as raw:
+        checkout = Path(raw)
+        subprocess.run(
+            ["git", "init", "-b", "main"],
+            cwd=checkout,
+            check=True,
+            capture_output=True,
+        )
+        (checkout / "tracked.txt").write_text("clean\n", encoding="utf-8")
+        subprocess.run(
+            ["git", "add", "tracked.txt"],
+            cwd=checkout,
+            check=True,
+        )
+        subprocess.run(
+            [
+                "git",
+                "-c",
+                "user.name=Probe Test",
+                "-c",
+                "user.email=probe@example.invalid",
+                "commit",
+                "-m",
+                "fixture",
+            ],
+            cwd=checkout,
+            check=True,
+            capture_output=True,
+        )
+        clean_head, _probe_sha = probe.probe_identity(checkout)
+        (checkout / "tracked.txt").write_text("dirty\n", encoding="utf-8")
+        try:
+            probe.probe_identity(checkout)
+        except RuntimeError as exc:
+            check(
+                "real-cmux gate rejects a dirty exact-HEAD subject",
+                "clean" in str(exc),
+            )
+        else:
+            raise AssertionError("dirty checkout must fail before live effects")
+        check("clean probe identity uses the exact checkout HEAD", len(clean_head) == 40)
 
     with tempfile.TemporaryDirectory(prefix="v287-cli-receipt-test.") as raw:
         receipt = Path(raw) / "receipt.json"
@@ -258,7 +315,7 @@ finally:
     probe.run_cmux = original_run_cmux
     probe.exact_ids = original_exact_ids
     probe.wait_screen = original_wait_screen
-    probe.deliver_continuation = original_deliver
+    probe.coordinator_relay = original_relay
     probe.run_runtime = original_run_runtime
     probe.probe_identity = original_probe_identity
 

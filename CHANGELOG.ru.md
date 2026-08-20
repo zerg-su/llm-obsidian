@@ -31,19 +31,24 @@
   editor preflight: native dialogs блокируют любой input effect, delayed
   repaint ожидает точный message anchor, а фиксированный sleep больше не даёт
   authority для `Enter`.
+- Доставка coordinator relay использует write-ahead receipt существующего
+  retained-notification transport. Exact accepted replay не создаёт эффектов,
+  а crash на reserved editor-write или submit boundary fail closed без
+  повторного prompt или Enter.
 - Синхронизация профиля Codex теперь формирует ограниченные имена backup из
   читаемого префикса и полного SHA-256 канонического пути, проверяет все backup
   до первой замены target и не создаёт backup directory при чистом no-op apply.
 
 ### Проверка
 
-- Provider-free real-cmux gate выполнил 50 доставок Codex и 50 Claude без
-  хвостов и provider/model calls. Десять registered production transition
-  corridors прошли по 50 повторов, затем прошёл полный repository test gate.
-- Codex MCP gateway suite прошёл все 126 проверок. Review на Sol XHigh
-  независимо подтвердил gates и нашёл omission coordinator relay, закрытый в
-  этом descendant.
-- Контур scripts зафиксирован по точному live tree: 297 файлов / 114 174 строки
+- Provider-free real-cmux gate выполнил 50 доставок Codex и 50 Claude через
+  production coordinator relay без хвостов и provider/model calls. Десять
+  registered production transition corridors прошли по 50 повторов, затем
+  прошёл полный repository test gate.
+- Codex MCP gateway suite прошёл все 126 проверок. Review на Sol XHigh нашёл
+  и coordinator preflight omission, и его первоначально non-durable effect
+  boundary; оба закрыты в финальном descendant.
+- Контур scripts зафиксирован по точному live tree: 297 файлов / 114 199 строк
   без спекулятивного запаса.
 
 ## [2.8.9] — 2026-08-20

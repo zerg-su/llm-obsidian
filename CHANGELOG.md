@@ -25,6 +25,9 @@ or packages were published for them.
   editor preflight: native dialogs block every input effect, delayed repaints
   wait for the exact message anchor, and a fixed sleep no longer authorizes
   `Enter`.
+- Coordinator relay delivery reuses the retained-notification write-ahead
+  receipt. Exact accepted replay is effect-free, while crashes at the reserved
+  editor-write or submit boundary fail closed without another prompt or Enter.
 - Codex profile sync now derives bounded backup names from a readable prefix
   plus the full canonical-path SHA-256, preflights every backup before the
   first target replacement, and leaves no backup directory on a clean no-op
@@ -33,13 +36,13 @@ or packages were published for them.
 ### Validation
 
 - The provider-free real-cmux gate completed 50 Codex and 50 Claude deliveries
-  with zero tails and zero provider/model calls. Ten registered production
-  transition corridors passed 50 repetitions each, followed by the complete
-  repository test gate.
+  through the production coordinator relay with zero tails and zero
+  provider/model calls. Ten registered production transition corridors passed
+  50 repetitions each, followed by the complete repository test gate.
 - The Codex MCP gateway suite passes all 126 checks. Sol XHigh review
-  independently established the gates and identified the coordinator relay
-  omission closed by this descendant.
-- The scripts contour is pinned to the exact live tree: 297 files / 114,174
+  identified both the coordinator preflight omission and its initial
+  non-durable effect boundary, closed by the final descendant.
+- The scripts contour is pinned to the exact live tree: 297 files / 114,199
   lines with no speculative headroom.
 
 ## [2.8.9] - 2026-08-20

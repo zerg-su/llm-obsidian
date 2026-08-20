@@ -29,7 +29,12 @@ from task_escalation_records import (
 from task_plan_authority import PlanAuthorityError, record_plan_amendment
 from harness.adapters.cmux import run_cmux
 from harness.adapters.cmux import CmuxAdapter, CmuxError
-from harness.runtime_session_continuation import submit_editor_message_once
+from harness.retained_notification import (
+    RetainedNotificationError,
+    deliver_retained_notification_once,
+)
+from harness.prompts import classify
+from harness.runtime_session_continuation import classify_continuation_screen
 from harness.artifact_repair import (
     VERIFICATION_BASELINE_GAP_DECISIONS,
     VERIFICATION_MECHANISM_FLAKE_DECISIONS,
@@ -100,25 +105,79 @@ def send(
     message: str,
     *,
     runtime: str,
+    receipt_path: Path,
+    delivery_identity: dict[str, object],
     clear_codex: bool = False,
     observation_limit: int = 40,
     wait=time.sleep,
-) -> None:
+) -> str:
     cmux = CmuxAdapter()
     try:
-        delivery = submit_editor_message_once(
+        if clear_codex:
+            screen = cmux.read(surface)
+            prompt = classify(runtime, screen)
+            if prompt.interactive:
+                raise RetainedNotificationError(
+                    "coordinator relay permission"
+                    if prompt.recognized
+                    else "coordinator relay unknown"
+                )
+            if classify_continuation_screen(runtime, screen, "") != "idle":
+                raise RetainedNotificationError(
+                    "coordinator relay editor-unavailable"
+                )
+            for _ in range(40):
+                cmux.send_key(surface, "Backspace")
+            screen = cmux.read(surface)
+            prompt = classify(runtime, screen)
+            if prompt.interactive:
+                raise RetainedNotificationError(
+                    "coordinator relay permission"
+                    if prompt.recognized
+                    else "coordinator relay unknown"
+                )
+            if classify_continuation_screen(runtime, screen, "") != "idle":
+                raise RetainedNotificationError(
+                    "coordinator relay editor-unavailable"
+                )
+        deliver_retained_notification_once(
             cmux,
             surface_id=surface,
             runtime=runtime,
-            text=message,
-            clear_editor=clear_codex,
+            message=message,
+            receipt_path=receipt_path,
+            identity=delivery_identity,
+            successor_ready=lambda: False,
             observation_limit=observation_limit,
             wait=wait,
         )
-        if not delivery.submitted:
-            raise CmuxError(f"coordinator relay {delivery.evidence}")
-    except (CmuxError, OSError, ValueError) as exc:
+        if receipt_path.is_symlink() or not receipt_path.is_file():
+            raise RetainedNotificationError(
+                "coordinator relay receipt is unavailable"
+            )
+        return hashlib.sha256(receipt_path.read_bytes()).hexdigest()
+    except (CmuxError, RetainedNotificationError, OSError, ValueError) as exc:
         die(str(exc) or "cmux ordered relay failed", 3)
+
+
+def _delivery_path(worktree: Path, record_id: str, direction: str) -> Path:
+    return (
+        worktree
+        / ".task-escalation-records"
+        / "delivery"
+        / f"{record_id}-{direction}.json"
+    )
+
+
+def _delivery_identity(
+    record_id: str, *, direction: str, surface: str, runtime: str
+) -> dict[str, object]:
+    return {
+        "record_id": record_id,
+        "direction": direction,
+        "surface_id": surface,
+        "runtime": runtime,
+    }
 
 
 def load_unattended(worktree: Path) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -289,8 +348,22 @@ def raise_escalation(
         notify(coordinator, title, body)
     except SystemExit:
         toast_failed = True
+    coordinator_runtime = str(meta.get("wiki_runtime") or "")
     try:
-        send(coordinator, wake, runtime=str(meta.get("wiki_runtime") or ""))
+        send(
+            coordinator,
+            wake,
+            runtime=coordinator_runtime,
+            receipt_path=_delivery_path(
+                worktree, raised.record_id, "to-coordinator"
+            ),
+            delivery_identity=_delivery_identity(
+                raised.record_id,
+                direction="to-coordinator",
+                surface=coordinator,
+                runtime=coordinator_runtime,
+            ),
+        )
     except SystemExit:
         try:
             append_delivery_failure(
@@ -384,14 +457,25 @@ def resolve_escalation(worktree: Path, decision: str) -> int:
             "published; the harness consumes attempt 1 without another "
             "command. "
         )
+    executor_runtime = str(
+        meta.get("executor_runtime") or meta.get("runtime") or ""
+    )
     send(
         task_surface,
         f"[Coordinator decision for escalation {marker.get('id')}] {answer} "
         f"{retry_note}"
         "Continue only within this decision and the approved plan; escalate again on further drift.",
-        runtime=str(meta.get("executor_runtime") or meta.get("runtime") or ""),
-        clear_codex=str(meta.get("executor_runtime") or meta.get("runtime") or "")
-        == "codex",
+        runtime=executor_runtime,
+        receipt_path=_delivery_path(
+            worktree, resolved.record_id, "to-task"
+        ),
+        delivery_identity=_delivery_identity(
+            resolved.record_id,
+            direction="to-task",
+            surface=task_surface,
+            runtime=executor_runtime,
+        ),
+        clear_codex=executor_runtime == "codex",
     )
     duration = elapsed_ms(
         resolved.payload.get("raised_at"), resolved.payload.get("resolved_at")

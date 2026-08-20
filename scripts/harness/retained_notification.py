@@ -10,6 +10,7 @@ import tempfile
 import threading
 from contextlib import contextmanager
 from pathlib import Path
+from time import sleep
 from typing import Callable, Iterator, Mapping, Protocol
 
 from .prompts import classify
@@ -209,7 +210,7 @@ def recover_visible_notification(
         return True
 
 
-def _deliver_new_notification(
+def deliver_retained_notification_once(
     port: NotificationPort,
     *,
     surface_id: str,
@@ -218,8 +219,10 @@ def _deliver_new_notification(
     receipt_path: Path,
     identity: Mapping[str, object],
     successor_ready: Callable[[], bool],
+    observation_limit: int = 40,
+    wait: Callable[[float], None] = sleep,
 ) -> None:
-    """Run one write-ahead notification delivery under its effect lock."""
+    """Run one write-ahead editor/submit delivery under its effect lock."""
 
     digest = _identity_sha256(identity)
     expected = {
@@ -279,8 +282,9 @@ def _deliver_new_notification(
                 pre_send_editor_sha256=(
                     str(current.get("pre_editor_sha256") or "") if current else ""
                 ),
-                observation_limit=40,
+                observation_limit=observation_limit,
                 observation_interval_seconds=0.05,
+                wait=wait,
             )
         except _NotificationSubmitted:
             return
@@ -357,7 +361,7 @@ def deliver_worker_notification(
             "notification": notify_path.name,
         }
         if ready():
-            _deliver_new_notification(
+            deliver_retained_notification_once(
                 port,
                 surface_id=str(spec["surface_id"]),
                 runtime=str(spec["runtime"]),
@@ -390,7 +394,7 @@ def deliver_worker_notification(
         "notification": notify_path.name,
     }
     delivery_path = notify_path.with_name(f"{notify_path.stem}-delivery.json")
-    _deliver_new_notification(
+    deliver_retained_notification_once(
         port,
         surface_id=str(spec["surface_id"]),
         runtime=str(spec["runtime"]),

@@ -266,7 +266,7 @@ def built_in_summary_liveness(repetition: int) -> None:
     assert decision.action == "nudge" and recovered.nudge_count == 1
 
 
-def coordinator_relay_handoff(repetition: int) -> None:
+def coordinator_relay_handoff(root: Path, repetition: int) -> None:
     runtime = "codex" if repetition % 2 == 0 else "claude"
     port = CoordinatorRelayPort(runtime)
     original = task_escalation_cli.CmuxAdapter
@@ -276,6 +276,13 @@ def coordinator_relay_handoff(repetition: int) -> None:
             SURFACE,
             f"Typed coordinator relay {repetition:03d}",
             runtime=runtime,
+            receipt_path=root / "relay-delivery.json",
+            delivery_identity={
+                "record_id": stable_id("coordinator-relay", repetition),
+                "direction": "to-coordinator",
+                "surface_id": SURFACE,
+                "runtime": runtime,
+            },
             observation_limit=2,
             wait=lambda _seconds: None,
         )
@@ -581,7 +588,9 @@ with tempfile.TemporaryDirectory(prefix="transition-transport-stress.") as raw:
     for repetition in range(REPETITIONS):
         dispatch_handoff(root / f"dispatch-{repetition:03d}", repetition)
         built_in_summary_liveness(repetition)
-        coordinator_relay_handoff(repetition)
+        coordinator_relay_handoff(
+            root / f"coordinator-relay-{repetition:03d}", repetition
+        )
         claude_initial_input_handoff(repetition)
         pipeline_notification_race(
             root / f"custom-{repetition:03d}",

@@ -10,6 +10,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 from pathlib import Path
@@ -20,7 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from harness.adapters.cmux import CmuxAdapter  # noqa: E402
-from harness.runtime_session_continuation import deliver_continuation  # noqa: E402
+import task_escalation as task_escalation_cli  # noqa: E402
 
 
 UUID_RE = re.compile(r"[0-9A-F]{8}-(?:[0-9A-F]{4}-){3}[0-9A-F]{12}")
@@ -160,6 +161,22 @@ def workspace_is_absent(title: str, workspace_ref: str) -> bool:
     )
 
 
+def coordinator_relay(
+    surface_id: str,
+    runtime: str,
+    message: str,
+    receipt_path: Path,
+    identity: dict[str, object],
+) -> str:
+    return task_escalation_cli.send(
+        surface_id,
+        message,
+        runtime=runtime,
+        receipt_path=receipt_path,
+        delivery_identity=identity,
+    )
+
+
 def run_runtime(adapter: CmuxAdapter, runtime: str, turns: int, title: str) -> int:
     command = f"python3 {Path(__file__).resolve()} --child {runtime} --turns {turns}"
     created = run_cmux(
@@ -179,33 +196,37 @@ def run_runtime(adapter: CmuxAdapter, runtime: str, turns: int, title: str) -> i
     workspace_id = ""
     try:
         workspace_id, surface_id = exact_ids(workspace_ref)
-        for turn in range(turns):
-            wait_screen(adapter, surface_id, f"V287_READY_{runtime}_{turn:02d}")
-            stages: list[tuple[str, int]] = []
-            result = deliver_continuation(
-                adapter,
-                surface_id=surface_id,
-                prompt=f"V287_{runtime}_{turn:02d}",
-                runtime=runtime,
-                artifact_ready=lambda: False,
-                ownership_ready=lambda: True,
-                reserve_retry=lambda: False,
-                observe_stage=lambda stage, count, *_digests: stages.append(
-                    (stage, count)
-                ),
-                observation_limit=40,
-                observation_interval_seconds=0.05,
-            )
-            if (
-                not result.acknowledged
-                or result.submit_count != 1
-                or stages.count(("submit-accepted", 1)) != 1
-            ):
-                raise RuntimeError(
-                    f"{runtime} turn {turn} was not acknowledged exactly once: "
-                    f"{result} {stages}"
+        with tempfile.TemporaryDirectory(
+            prefix=f"v2810-{runtime}-relay."
+        ) as raw_receipts:
+            receipt_root = Path(raw_receipts)
+            for turn in range(turns):
+                wait_screen(adapter, surface_id, f"V287_READY_{runtime}_{turn:02d}")
+                receipt_path = receipt_root / f"turn-{turn:02d}.json"
+                digest = coordinator_relay(
+                    surface_id,
+                    runtime,
+                    f"V287_{runtime}_{turn:02d}",
+                    receipt_path,
+                    {
+                        "probe": "v2810-real-cmux-coordinator-relay",
+                        "runtime": runtime,
+                        "turn": turn,
+                        "surface_id": surface_id,
+                    },
                 )
-            wait_screen(adapter, surface_id, f"V287_ACK_{runtime}_{turn:02d}")
+                raw_receipt = receipt_path.read_bytes()
+                delivery = json.loads(raw_receipt)
+                if (
+                    delivery.get("stage") != "submit-accepted"
+                    or delivery.get("submit_count") != 1
+                    or hashlib.sha256(raw_receipt).hexdigest() != digest
+                ):
+                    raise RuntimeError(
+                        f"{runtime} turn {turn} lacked one durable submit: "
+                        f"{delivery}"
+                    )
+                wait_screen(adapter, surface_id, f"V287_ACK_{runtime}_{turn:02d}")
         wait_screen(adapter, surface_id, f"V287_DONE_{runtime}")
     finally:
         run_cmux(
@@ -220,10 +241,19 @@ def run_runtime(adapter: CmuxAdapter, runtime: str, turns: int, title: str) -> i
     raise RuntimeError("real cmux probe left its exact workspace tail")
 
 
-def probe_identity() -> tuple[str, str]:
+def probe_identity(root: Path = ROOT) -> tuple[str, str]:
+    status = subprocess.run(
+        ("git", "status", "--porcelain", "--untracked-files=all"),
+        cwd=root,
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout
+    if status:
+        raise RuntimeError("real cmux probe requires a clean exact-HEAD checkout")
     head = subprocess.run(
         ("git", "rev-parse", "HEAD"),
-        cwd=ROOT,
+        cwd=root,
         text=True,
         capture_output=True,
         check=True,
@@ -241,14 +271,16 @@ def receipt_payload(
     return {
         "schema_version": 1,
         "status": "complete",
-        "gate": "v287-real-cmux-delivery",
-        "release": "2.8.7",
+        "gate": "v2810-real-cmux-coordinator-relay",
+        "release": "2.8.10",
         "head_sha": head,
         "command": command,
         "working_directory": str(Path.cwd().resolve()),
         "probe_sha256": probe_sha256,
         "python_version": sys.version.split()[0],
         "runtime_counts": {"claude": turns, "codex": turns},
+        "delivery_corridor": "task_escalation.send",
+        "durable_stage": "submit-accepted",
         "workspace_tails": 0,
         "provider_calls": 0,
         "model_calls": 0,
@@ -301,8 +333,8 @@ def parent(
     if receipt is not None:
         write_receipt(receipt, payload)
     print(
-        "Question: do real cmux Claude/Codex editor transitions submit each "
-        "visible prompt exactly once?"
+        "Question: does the production coordinator relay submit each real-cmux "
+        "Claude/Codex message exactly once through its durable boundary?"
     )
     print(f"Evidence: codex={totals['codex']} claude={totals['claude']} tails=0")
     print("Decision: real-cmux provider-free delivery gate is green")

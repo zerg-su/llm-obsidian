@@ -867,87 +867,222 @@ class SeparateSubmitProbe:
 
 
 relay_surface = "00000000-0000-0000-0000-000000000123"
-separate_submit = SeparateSubmitProbe(
-    [
-        "• Status 0\n›",
-        "• Status 1\n›",
-        "• Status 2\n› continue exact recovery",
-    ]
-)
-with patch.object(
-    task_escalation_cli, "CmuxAdapter", return_value=separate_submit
-):
-    task_escalation_cli.send(
-        relay_surface,
-        "continue exact recovery",
-        runtime="codex",
-        observation_limit=3,
-        wait=lambda _seconds: None,
+relay_identity = {"kind": "coordinator-relay", "record_id": "relay-a"}
+
+
+class CrashAfterEffectProbe(SeparateSubmitProbe):
+    def __init__(self, screens: list[str], crash_effect: str) -> None:
+        super().__init__(screens)
+        self.crash_effect = crash_effect
+
+    def send(self, surface: str, message: str) -> None:
+        super().send(surface, message)
+        if self.crash_effect == "send":
+            raise OSError("injected crash after editor write")
+
+    def send_key(self, surface: str, key: str) -> None:
+        super().send_key(surface, key)
+        if self.crash_effect == "send-key":
+            raise OSError("injected crash after submit")
+
+
+with tempfile.TemporaryDirectory(prefix="task-escalation-delivery.") as raw:
+    delivery_root = Path(raw)
+    receipt_path = delivery_root / "relay.json"
+    separate_submit = SeparateSubmitProbe(
+        [
+            "• Status 0\n›",
+            "• Status 1\n›",
+            "• Status 2\n› continue exact recovery",
+        ]
     )
-check(
-    "coordinator relay waits through repaint before one submit",
-    separate_submit.calls
-    == [
-        ("read", relay_surface, ""),
-        (
-            "send",
-            relay_surface,
-            "continue exact recovery",
-        ),
-        ("read", relay_surface, ""),
-        ("read", relay_surface, ""),
-        ("send-key", relay_surface, "Enter"),
-    ],
-)
-
-known_dialog = SeparateSubmitProbe(
-    [
-        "Set up auto mode for your environment?\n"
-        "1. Set it up\n2. Not now\n3. Don't show again\n"
-        "Enter to confirm · Esc to cancel\n"
-    ]
-)
-with patch.object(task_escalation_cli, "CmuxAdapter", return_value=known_dialog):
-    try:
+    with patch.object(
+        task_escalation_cli, "CmuxAdapter", return_value=separate_submit
+    ):
         task_escalation_cli.send(
             relay_surface,
             "continue exact recovery",
-            runtime="claude",
+            runtime="codex",
+            receipt_path=receipt_path,
+            delivery_identity=relay_identity,
+            observation_limit=3,
             wait=lambda _seconds: None,
         )
-    except SystemExit as exc:
-        known_dialog_exit = exc.code
-    else:
-        known_dialog_exit = 0
-check(
-    "known coordinator dialog blocks every editor and submit effect",
-    known_dialog_exit == 3
-    and known_dialog.calls == [("read", relay_surface, "")],
-)
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    check(
+        "coordinator relay durably waits through repaint before one submit",
+        separate_submit.calls
+        == [
+            ("read", relay_surface, ""),
+            ("send", relay_surface, "continue exact recovery"),
+            ("read", relay_surface, ""),
+            ("read", relay_surface, ""),
+            ("send-key", relay_surface, "Enter"),
+        ]
+        and receipt["stage"] == "submit-accepted"
+        and receipt["submit_count"] == 1,
+    )
 
-unknown_dialog = SeparateSubmitProbe(
-    [
-        "A new provider decision appeared\n"
-        "1. Enable experimental behavior\n2. Stop\nEnter to proceed\n"
-    ]
-)
-with patch.object(task_escalation_cli, "CmuxAdapter", return_value=unknown_dialog):
-    try:
+    replay_probe = SeparateSubmitProbe([])
+    with patch.object(
+        task_escalation_cli, "CmuxAdapter", return_value=replay_probe
+    ):
         task_escalation_cli.send(
             relay_surface,
             "continue exact recovery",
-            runtime="claude",
+            runtime="codex",
+            receipt_path=receipt_path,
+            delivery_identity=relay_identity,
             wait=lambda _seconds: None,
         )
-    except SystemExit as exc:
-        unknown_dialog_exit = exc.code
-    else:
-        unknown_dialog_exit = 0
-check(
-    "unknown coordinator dialog blocks every editor and submit effect",
-    unknown_dialog_exit == 3
-    and unknown_dialog.calls == [("read", relay_surface, "")],
-)
+    check(
+        "accepted coordinator relay replay emits no editor or submit effect",
+        replay_probe.calls == [],
+    )
+
+    paste_crash_path = delivery_root / "paste-crash.json"
+    paste_crash = CrashAfterEffectProbe(["• Status 0\n›"], "send")
+    with patch.object(
+        task_escalation_cli, "CmuxAdapter", return_value=paste_crash
+    ):
+        try:
+            task_escalation_cli.send(
+                relay_surface,
+                "continue exact recovery",
+                runtime="codex",
+                receipt_path=paste_crash_path,
+                delivery_identity={**relay_identity, "record_id": "paste-crash"},
+                wait=lambda _seconds: None,
+            )
+        except SystemExit as exc:
+            paste_crash_exit = exc.code
+        else:
+            paste_crash_exit = 0
+    paste_replay = SeparateSubmitProbe([])
+    with patch.object(
+        task_escalation_cli, "CmuxAdapter", return_value=paste_replay
+    ):
+        try:
+            task_escalation_cli.send(
+                relay_surface,
+                "continue exact recovery",
+                runtime="codex",
+                receipt_path=paste_crash_path,
+                delivery_identity={**relay_identity, "record_id": "paste-crash"},
+                wait=lambda _seconds: None,
+            )
+        except SystemExit as exc:
+            paste_replay_exit = exc.code
+        else:
+            paste_replay_exit = 0
+    check(
+        "editor-write crash remains durably uncertain without replay",
+        paste_crash_exit == 3
+        and paste_replay_exit == 3
+        and json.loads(paste_crash_path.read_text(encoding="utf-8"))["stage"]
+        == "paste-reserved"
+        and paste_replay.calls == [],
+    )
+
+    submit_crash_path = delivery_root / "submit-crash.json"
+    submit_crash = CrashAfterEffectProbe(
+        ["• Status 0\n›", "• Status 1\n› continue exact recovery"],
+        "send-key",
+    )
+    with patch.object(
+        task_escalation_cli, "CmuxAdapter", return_value=submit_crash
+    ):
+        try:
+            task_escalation_cli.send(
+                relay_surface,
+                "continue exact recovery",
+                runtime="codex",
+                receipt_path=submit_crash_path,
+                delivery_identity={**relay_identity, "record_id": "submit-crash"},
+                wait=lambda _seconds: None,
+            )
+        except SystemExit as exc:
+            submit_crash_exit = exc.code
+        else:
+            submit_crash_exit = 0
+    submit_replay = SeparateSubmitProbe([])
+    with patch.object(
+        task_escalation_cli, "CmuxAdapter", return_value=submit_replay
+    ):
+        try:
+            task_escalation_cli.send(
+                relay_surface,
+                "continue exact recovery",
+                runtime="codex",
+                receipt_path=submit_crash_path,
+                delivery_identity={**relay_identity, "record_id": "submit-crash"},
+                wait=lambda _seconds: None,
+            )
+        except SystemExit as exc:
+            submit_replay_exit = exc.code
+        else:
+            submit_replay_exit = 0
+    check(
+        "submit crash remains durably uncertain without a second Enter",
+        submit_crash_exit == 3
+        and submit_replay_exit == 3
+        and json.loads(submit_crash_path.read_text(encoding="utf-8"))["stage"]
+        == "submit-reserved"
+        and submit_replay.calls == [],
+    )
+
+    known_dialog = SeparateSubmitProbe(
+        [
+            "Set up auto mode for your environment?\n"
+            "1. Set it up\n2. Not now\n3. Don't show again\n"
+            "Enter to confirm · Esc to cancel\n"
+        ]
+    )
+    with patch.object(task_escalation_cli, "CmuxAdapter", return_value=known_dialog):
+        try:
+            task_escalation_cli.send(
+                relay_surface,
+                "continue exact recovery",
+                runtime="claude",
+                receipt_path=delivery_root / "known-dialog.json",
+                delivery_identity={**relay_identity, "record_id": "known-dialog"},
+                wait=lambda _seconds: None,
+            )
+        except SystemExit as exc:
+            known_dialog_exit = exc.code
+        else:
+            known_dialog_exit = 0
+    check(
+        "known coordinator dialog blocks every editor and submit effect",
+        known_dialog_exit == 3
+        and known_dialog.calls == [("read", relay_surface, "")],
+    )
+
+    unknown_dialog = SeparateSubmitProbe(
+        [
+            "A new provider decision appeared\n"
+            "1. Enable experimental behavior\n2. Stop\nEnter to proceed\n"
+        ]
+    )
+    with patch.object(task_escalation_cli, "CmuxAdapter", return_value=unknown_dialog):
+        try:
+            task_escalation_cli.send(
+                relay_surface,
+                "continue exact recovery",
+                runtime="claude",
+                receipt_path=delivery_root / "unknown-dialog.json",
+                delivery_identity={**relay_identity, "record_id": "unknown-dialog"},
+                wait=lambda _seconds: None,
+            )
+        except SystemExit as exc:
+            unknown_dialog_exit = exc.code
+        else:
+            unknown_dialog_exit = 0
+    check(
+        "unknown coordinator dialog blocks every editor and submit effect",
+        unknown_dialog_exit == 3
+        and unknown_dialog.calls == [("read", relay_surface, "")],
+    )
 
 
 print("All task escalation record tests passed.")
