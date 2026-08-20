@@ -26,6 +26,9 @@ from harness.liveness import (  # noqa: E402
 from harness.runtime_worker_control import RuntimeWorkerControlMixin  # noqa: E402
 from harness.runtime_worker_custom import RuntimeWorkerCustomMixin  # noqa: E402
 from harness.runtime_worker_review_bridge import RuntimeWorkerReviewBridgeMixin  # noqa: E402
+from harness.runtime_session_continuation import (  # noqa: E402
+    await_initial_input_visible,
+)
 from harness.store import OperationStore  # noqa: E402
 from harness.supervisor import OperationSupervisor  # noqa: E402
 from harness.verification_attempt import (  # noqa: E402
@@ -236,6 +239,59 @@ def built_in_summary_liveness(repetition: int) -> None:
     assert decision.action == "nudge" and recovered.nudge_count == 1
 
 
+def claude_initial_input_handoff(repetition: int) -> None:
+    """Current Claude renders a typed composer with ``›`` after idle ``❯``."""
+
+    prompt = (
+        "Read and follow the complete task contract at "
+        f"/tmp/v287-{repetition:03d}/.task-prompt.md "
+        f"(SHA-256 {repetition + 1:064x})."
+    )
+
+    class TypedClaudePort:
+        def __init__(self, screen: str) -> None:
+            self.screen = screen
+
+        def read(self, surface_id: str) -> str:
+            assert surface_id == SURFACE
+            return self.screen
+
+    wrapped = TypedClaudePort(f"› {prompt[:46]}\n  {prompt[46:]}")
+    assert await_initial_input_visible(
+        wrapped,
+        surface_id=SURFACE,
+        runtime="claude",
+        text=prompt,
+        observation_limit=1,
+        observation_interval_seconds=0,
+        wait=lambda _seconds: None,
+    )
+
+    collapsed = TypedClaudePort(
+        f"› [Pasted text #{repetition + 1} +2 lines]"
+    )
+    assert await_initial_input_visible(
+        collapsed,
+        surface_id=SURFACE,
+        runtime="claude",
+        text=prompt,
+        observation_limit=1,
+        observation_interval_seconds=0,
+        wait=lambda _seconds: None,
+    )
+
+    bare = TypedClaudePort("›")
+    assert not await_initial_input_visible(
+        bare,
+        surface_id=SURFACE,
+        runtime="claude",
+        text=prompt,
+        observation_limit=1,
+        observation_interval_seconds=0,
+        wait=lambda _seconds: None,
+    )
+
+
 def verification_retry_handoff(repetition: int) -> None:
     parent_id = f"verify-parent-{repetition:03d}"
     parent = OperationSpec(
@@ -382,6 +438,7 @@ with tempfile.TemporaryDirectory(prefix="transition-transport-stress.") as raw:
     for repetition in range(REPETITIONS):
         dispatch_handoff(root / f"dispatch-{repetition:03d}", repetition)
         built_in_summary_liveness(repetition)
+        claude_initial_input_handoff(repetition)
         pipeline_notification_race(
             root / f"custom-{repetition:03d}",
             repetition,
@@ -421,6 +478,6 @@ with tempfile.TemporaryDirectory(prefix="transition-transport-stress.") as raw:
         reap_handoff(root / f"reap-{repetition:03d}", repetition)
 
 print(
-    "Transition transport stress passed: 8 registered production corridors x "
+    "Transition transport stress passed: 9 registered production corridors x "
     f"{REPETITIONS} repetitions"
 )

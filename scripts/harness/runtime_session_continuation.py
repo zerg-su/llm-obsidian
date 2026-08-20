@@ -115,6 +115,24 @@ def classify_continuation_screen(runtime: str, screen: str, anchor: str) -> str:
         for line in editor_lines
     ):
         return "input-ready"
+    if runtime == "claude":
+        # Claude's current composer paints ready-idle with ``❯`` but may paint
+        # the newly typed input with ``›``.  A wrapped compact pointer must be
+        # reassembled before matching; a bare ``›`` or unrelated choice stays
+        # fail-closed.  The provider's native collapsed-paste token is also an
+        # exact post-send editor shape and carries no submit authority itself.
+        alternate_editor = [line for line in tail if line.startswith("›")]
+        wrapped_editor = " ".join(tail)
+        if alternate_editor and anchor and anchor in wrapped_editor:
+            return "input-ready"
+        if any(
+            re.fullmatch(
+                r"› \[Pasted text #[1-9][0-9]* \+[1-9][0-9]* lines?\]",
+                line,
+            )
+            for line in alternate_editor
+        ):
+            return "input-ready"
     if any(anchor and anchor in line for line in editor_lines):
         return "input-ready"
     if editor_lines:
