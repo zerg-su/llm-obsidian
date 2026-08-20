@@ -55,9 +55,9 @@
   совпадающим anchor из scrollback.
 - Exact-HEAD real-cmux gate выполнил по 20 доставок для каждого runtime с нулём
   provider calls и нулём оставшихся owned workspace.
-- Детерминированная regression параллельного запуска расширяет окно общей
-  config-записи и доказывает одного writer'а при корректных локальных excludes
-  обоих worktree.
+- Детерминированная regression параллельного запуска удерживает первый общий
+  config-writer, пока вторая задача не попытается взять тот же lock, и
+  доказывает одного writer'а при корректных локальных excludes обоих worktree.
 - Immutable stability profile прошёл все 12 проверок, включая полный suite,
   81,39% statement-line coverage Harness по 173 модулям и 4 370
   детерминированных transition cases.
