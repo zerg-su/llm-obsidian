@@ -536,6 +536,13 @@ dialog families dismiss with ``Esc`` while every changed or unknown dialog
 stays fail-closed. The pre-paste guard and prompt policy add exactly 35 measured
 production lines and no script. The live ceiling is therefore pinned to
 exactly 297 files / 114,118 lines with no speculative headroom.
+
+The 2.8.10 transport stabilization removes the obsolete ordered-paste
+capability and implicit-submit path while adding bounded Codex repaint
+containment, transactional config-backup preflight, and a clean no-op guard.
+No script is added; the net candidate is exactly 297 files / 114,086 lines, so
+the ceiling decreases by 32 lines and remains pinned with no speculative
+headroom.
 """
 
 from __future__ import annotations
@@ -543,7 +550,7 @@ from __future__ import annotations
 from pathlib import Path
 
 
-#: Maximum tracked Python files under ``scripts/`` for the 2.8.9 candidate.
+#: Maximum tracked Python files under ``scripts/`` for the 2.8.10 candidate.
 #: Architecture Workflow v1 adds exactly the three production scripts its
 #: approved plan names: ``architecture_paths.py`` (the confined path/collision
 #: validator both carriers call), ``architecture_workflow_pressure.py`` and
@@ -552,11 +559,11 @@ from pathlib import Path
 #: file ceiling therefore moves by exactly three.
 SCRIPT_FILE_CEILING = 297
 
-#: Maximum total lines across those files for the 2.8.9 lifecycle candidate.
-#: The exact 35-line increase adds native auto-mode dialog containment and the
-#: pre-paste dialog guard. No script is added and the measured candidate has
-#: zero headroom.
-SCRIPT_LINE_CEILING = 114_118
+#: Maximum total lines across those files for the 2.8.10 lifecycle candidate.
+#: The net 32-line reduction removes the implicit-submit transport and adds
+#: bounded repaint containment plus transactional config-sync guards. No
+#: script is added and the measured candidate has zero headroom.
+SCRIPT_LINE_CEILING = 114_086
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:
@@ -575,13 +582,13 @@ def assert_within_ceilings(scripts_dir: Path) -> tuple[int, int]:
     files, lines = measure(scripts_dir)
     if files > SCRIPT_FILE_CEILING:
         raise AssertionError(
-            f"scripts/ holds {files} Python files, above the 2.8.9 ceiling "
+            f"scripts/ holds {files} Python files, above the 2.8.10 ceiling "
             f"{SCRIPT_FILE_CEILING}; justify and raise the ceiling in the same "
             "commit as the growth"
         )
     if lines > SCRIPT_LINE_CEILING:
         raise AssertionError(
-            f"scripts/ holds {lines} lines, above the 2.8.9 ceiling "
+            f"scripts/ holds {lines} lines, above the 2.8.10 ceiling "
             f"{SCRIPT_LINE_CEILING}; justify and raise the ceiling in the same "
             "commit as the growth"
         )

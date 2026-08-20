@@ -394,6 +394,7 @@ There is no speculative roadmap in this README. The repository describes what is
 
 | Topic | Document |
 |---|---|
+| v2.8.10 editor/submit and config-sync stabilization | [v2.8.10 release notes](docs/releases/v2.8.10.md) |
 | v2.8.9 Claude auto-mode onboarding containment | [v2.8.9 release notes](docs/releases/v2.8.9.md) |
 | v2.8.8 ordered-transition stabilization | [v2.8.8 release notes](docs/releases/v2.8.8.md) |
 | v2.8.7 internal transition-liveness candidate | [v2.8.7 candidate notes](docs/releases/v2.8.7.md) |

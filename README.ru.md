@@ -399,6 +399,7 @@ Acceptance heartbeat хранит только stage/status/counters/timestamps.
 
 | Тема | Документ |
 |---|---|
+| Стабилизация editor/submit и config sync в v2.8.10 | [Release notes v2.8.10](docs/releases/v2.8.10.md) |
 | Containment onboarding auto mode Claude в v2.8.9 | [Release notes v2.8.9](docs/releases/v2.8.9.md) |
 | Стабилизация ordered transition transport v2.8.8 | [Release notes v2.8.8](docs/releases/v2.8.8.md) |
 | Внутренний кандидат transition-liveness v2.8.7 | [Заметки кандидата v2.8.7](docs/releases/v2.8.7.md) |

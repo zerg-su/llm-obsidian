@@ -10,6 +10,33 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, 2.4.0, and 2.8.7 were
 internal checkpoints folded into the following public releases; no public tags
 or packages were published for them.
 
+## [2.8.10] - 2026-08-20
+
+### Fixed
+
+- cmux composer delivery again keeps editor input and submission under separate
+  owners: `cmux send` writes the prompt, Harness proves the current editor
+  state, and exactly one `Enter` submits it. The obsolete ordered-paste
+  capability and implicit-submit path are removed.
+- Codex continuation delivery now waits through pre-submit status repaints and
+  transient post-submit idle frames until real provider activity appears,
+  without sending a second prompt or `Enter`.
+- Codex profile sync now derives bounded backup names from a readable prefix
+  plus the full canonical-path SHA-256, preflights every backup before the
+  first target replacement, and leaves no backup directory on a clean no-op
+  apply.
+
+### Validation
+
+- The provider-free real-cmux gate completed 50 Codex and 50 Claude deliveries
+  with zero tails and zero provider/model calls. Nine registered production
+  transition corridors passed 50 repetitions each, followed by the complete
+  repository test gate.
+- The Codex MCP gateway suite passes all 126 checks. Exact-HEAD implementation
+  review by Sol XHigh approved the repair without remaining findings.
+- The scripts contour is pinned to the exact live tree: 297 files / 114,086
+  lines with no speculative headroom.
+
 ## [2.8.9] - 2026-08-20
 
 ### Fixed
