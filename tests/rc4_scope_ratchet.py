@@ -529,6 +529,13 @@ stale matching ``›`` above the actual current idle ``❯``. The shared editor
 parser now rejects that stale alternate block by its screen order, adding
 exactly 14 measured production lines. The live ceiling is pinned to exactly
 297 files / 113,949 lines with no speculative headroom.
+
+The 2.8.9 compatibility repair contains Claude's native auto-mode environment
+onboarding before any retained task input is reserved or pasted. Two exact
+dialog families dismiss with ``Esc`` while every changed or unknown dialog
+stays fail-closed. The pre-paste guard and prompt policy add exactly 35 measured
+production lines and no script. The live ceiling is therefore pinned to
+exactly 297 files / 114,118 lines with no speculative headroom.
 """
 
 from __future__ import annotations
@@ -536,7 +543,7 @@ from __future__ import annotations
 from pathlib import Path
 
 
-#: Maximum tracked Python files under ``scripts/`` for the 2.8.8 candidate.
+#: Maximum tracked Python files under ``scripts/`` for the 2.8.9 candidate.
 #: Architecture Workflow v1 adds exactly the three production scripts its
 #: approved plan names: ``architecture_paths.py`` (the confined path/collision
 #: validator both carriers call), ``architecture_workflow_pressure.py`` and
@@ -545,14 +552,11 @@ from pathlib import Path
 #: file ceiling therefore moves by exactly three.
 SCRIPT_FILE_CEILING = 297
 
-#: Maximum total lines across those files for the 2.8.8 lifecycle candidate.
-#: The exact 134-line increase adds one capability-checked, exact-surface cmux
-#: ordered-paste adapter; routes every registered agent-editor wake through
-#: that seam; rejects ambiguous capability-probe failures without downgrade;
-#: accepts byte-identical callback-outbox replay idempotently; and moves the
-#: coordinator escalation relay to the same transport. No script is added and
-#: the measured candidate has zero headroom.
-SCRIPT_LINE_CEILING = 114_083
+#: Maximum total lines across those files for the 2.8.9 lifecycle candidate.
+#: The exact 35-line increase adds native auto-mode dialog containment and the
+#: pre-paste dialog guard. No script is added and the measured candidate has
+#: zero headroom.
+SCRIPT_LINE_CEILING = 114_118
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:
@@ -571,13 +575,13 @@ def assert_within_ceilings(scripts_dir: Path) -> tuple[int, int]:
     files, lines = measure(scripts_dir)
     if files > SCRIPT_FILE_CEILING:
         raise AssertionError(
-            f"scripts/ holds {files} Python files, above the 2.8.8 ceiling "
+            f"scripts/ holds {files} Python files, above the 2.8.9 ceiling "
             f"{SCRIPT_FILE_CEILING}; justify and raise the ceiling in the same "
             "commit as the growth"
         )
     if lines > SCRIPT_LINE_CEILING:
         raise AssertionError(
-            f"scripts/ holds {lines} lines, above the 2.8.8 ceiling "
+            f"scripts/ holds {lines} lines, above the 2.8.9 ceiling "
             f"{SCRIPT_LINE_CEILING}; justify and raise the ceiling in the same "
             "commit as the growth"
         )

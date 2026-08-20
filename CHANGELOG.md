@@ -10,6 +10,29 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, 2.4.0, and 2.8.7 were
 internal checkpoints folded into the following public releases; no public tags
 or packages were published for them.
 
+## [2.8.9] - 2026-08-20
+
+### Fixed
+
+- Claude's environment onboarding for auto mode is now treated as a native
+  provider dialog rather than task authority. Harness dismisses the exact
+  onboarding and in-progress setup wizard with `Esc`, without selecting an
+  environment, changing the user's lasting preference, or requesting a task
+  approval.
+- Retained-session continuation delivery now inspects the current provider
+  screen before reserving or pasting task input. Any recognized or unknown
+  native dialog blocks the paste, so a typed custom, fix, review, or summary
+  transition cannot be consumed by provider UI.
+
+### Validation
+
+- The exact onboarding and wizard transitions pass 50 stateful repetitions.
+  The registered transition transport matrix remains green across nine
+  production corridors with 50 repetitions each, and the complete Harness
+  gate passes.
+- The scripts contour moves by the exact 35-line production repair to 297
+  files / 114,118 lines with no speculative headroom.
+
 ## [2.8.8] - 2026-08-20
 
 ### Fixed
