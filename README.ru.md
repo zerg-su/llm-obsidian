@@ -400,7 +400,7 @@ Acceptance heartbeat хранит только stage/status/counters/timestamps.
 | Тема | Документ |
 |---|---|
 | Стабилизация ordered transition transport v2.8.8 | [Release notes v2.8.8](docs/releases/v2.8.8.md) |
-| Стабилизация transition-liveness v2.8.7 | [Release notes v2.8.7](docs/releases/v2.8.7.md) |
+| Внутренний кандидат transition-liveness v2.8.7 | [Заметки кандидата v2.8.7](docs/releases/v2.8.7.md) |
 | Task-centric cmux workspace topology v2.8.6 | [Release notes v2.8.6](docs/releases/v2.8.6.md) |
 | Исправление trust-transition Codex в v2.8.5 | [Release notes v2.8.5](docs/releases/v2.8.5.md) |
 | Исправление первой доставки custom pipeline в v2.8.4 | [Release notes v2.8.4](docs/releases/v2.8.4.md) |

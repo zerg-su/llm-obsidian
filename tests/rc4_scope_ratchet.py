@@ -546,12 +546,13 @@ from pathlib import Path
 SCRIPT_FILE_CEILING = 297
 
 #: Maximum total lines across those files for the 2.8.8 lifecycle candidate.
-#: The exact 128-line increase adds one capability-checked, exact-surface cmux
+#: The exact 134-line increase adds one capability-checked, exact-surface cmux
 #: ordered-paste adapter; routes every registered agent-editor wake through
-#: that seam; accepts byte-identical callback-outbox replay idempotently; and
-#: moves the coordinator escalation relay to the same transport. No script is
-#: added and the measured candidate has zero headroom.
-SCRIPT_LINE_CEILING = 114_077
+#: that seam; rejects ambiguous capability-probe failures without downgrade;
+#: accepts byte-identical callback-outbox replay idempotently; and moves the
+#: coordinator escalation relay to the same transport. No script is added and
+#: the measured candidate has zero headroom.
+SCRIPT_LINE_CEILING = 114_083
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

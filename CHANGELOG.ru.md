@@ -12,9 +12,9 @@
 > в частном DevOps-вольте до публичного универсального выпуска 2026 года.
 > Поэтому эта история начинается заново с версии 1.0.0.
 
-Ниже перечислены только публичные релизы. Версии 2.0.5, 2.1.1 и 2.4.0 были
-внутренними контрольными точками и вошли в следующие публичные релизы; тегов и
-пакетов с этими номерами не выпускалось.
+Ниже перечислены только публичные релизы. Версии 2.0.5, 2.1.1, 2.4.0 и 2.8.7
+были внутренними контрольными точками и вошли в следующие публичные релизы;
+тегов и пакетов с этими номерами не выпускалось.
 
 ## [2.8.8] — 2026-08-20
 
@@ -29,6 +29,16 @@
 - Повторная публикация точного канонического callback стала идемпотентным
   успехом. Пятьдесят одновременных одинаковых publishers сходятся к одному
   immutable outbox; чужие или изменённые байты отклоняются без перезаписи.
+- Точный текущий callback pipeline-step отменяет вставленное, но не
+  отправленное retained-уведомление без дополнительного `Enter`, provider turn
+  или replay.
+- Initial input и retained delivery Claude связывают wrapped/collapsed input с
+  точным текущим composer; stale scrollback не может разрешить отправку.
+- Стабильный typed result reconciles один раз на точную пару revision операции
+  и digest результата, после чего bounded idle/self-heal ladder продолжает
+  нормальную работу.
+- Параллельные запуски сериализуют общую мутацию
+  `extensions.worktreeConfig`, сохраняя локальные excludes каждого worktree.
 
 ### Проверка
 
@@ -37,60 +47,11 @@
   завершил один реальный turn ровно с одним accepted submit.
 - Transition matrix прогоняет девять production-коридоров по 50 раз. Контур
   active review зафиксирован на 28 файлах / 16 498 LOC, а scripts — на 297
-  файлах / 114 077 строках; оба без запаса.
-
-## [2.8.7] — 2026-08-20
-
-### Исправлено
-
-- Точный текущий callback шага pipeline теперь отменяет retained-уведомление,
-  которое было вставлено, но ещё не отправлено. Harness записывает durable
-  delivery `superseded` и продолжает без лишнего `Enter`, provider turn или
-  replay модели.
-- Длинные transition-prompts теперь нормализуют ограниченный visibility anchor
-  после обрезки: конечный пробел больше не оставляет видимое сообщение на
-  стадии `transport-accepted`.
-- Initial input Claude теперь распознаёт точную форму typed composer `›`, а
-  также нативный collapsed-paste token Claude. Перенесённый текст сначала
-  собирается только внутри последнего непрерывного composer и затем сверяется
-  с точным anchor prompt; старый anchor в scrollback не может авторизовать
-  пустой composer или посторонний choice.
-- Если старый idle `❯` остаётся в scrollback Claude, visibility и digest-
-  acknowledgement теперь выбирают один и тот же точный текущий composer `›`.
-  Initial input executor/reviewer и retained transition delivery отправляются
-  ровно один раз вместо `input-unconfirmed` или неотправленного сообщения.
-- Безопасно ожидающая retained-доставка остаётся наблюдаемой и больше не
-  переводит занятую custom- или engineering/fix-сессию сразу в
-  `attention-required`. Неопределённые эффекты paste/submit по-прежнему
-  fail-closed.
-- Liveness выполняет reconcile один раз для точной пары «revision операции +
-  result», после чего существующая лестница idle, nudge, restart и attention
-  снова нормально набирает время вместо бесконечного reconcile неизменного
-  summary.
-- Параллельные task launches теперь сериализуют единственную общую мутацию
-  `extensions.worktreeConfig` в common Git directory репозитория. Локальные
-  excludes каждого worktree остаются независимыми, а параллельный запуск
-  больше не падает на общем Git `config.lock` до старта provider'а.
-
-### Проверка
-
-- Provider-free матрица прогнала все девять зарегистрированных production-
-  переходов по 50 раз. Обычная retained-доставка даёт ровно один `Enter`, а
-  гонка с точным successor — ни одного. Добавленный Claude initial-input
-  corridor во всех 50 повторениях принимает точный wrapped/collapsed input и
-  отклоняет пустой composer, в том числе bare/unrelated composer под
-  совпадающим anchor из scrollback. Она также покрывает текущий typed composer
-  под retained idle scrollback и обратный порядок stale typed / current idle
-  для initial и continuation delivery. Ratchet live scripts зафиксирован точно
-  на кандидате 297 файлов / 113 949 строк без спекулятивного запаса.
-- Exact-HEAD real-cmux gate выполнил по 20 доставок для каждого runtime с нулём
-  provider calls и нулём оставшихся owned workspace.
-- Детерминированная regression параллельного запуска удерживает первый общий
-  config-writer, пока вторая задача не попытается взять тот же lock, и
-  доказывает одного writer'а при корректных локальных excludes обоих worktree.
-- Immutable stability profile прошёл все 12 проверок, включая полный suite,
-  81,39% statement-line coverage Harness по 173 модулям и 4 370
-  детерминированных transition cases.
+  файлах / 114 083 строках; оба без запаса.
+- Вошедший в релиз внутренний кандидат 2.8.7 дополнительно прошёл exact-HEAD
+  real-cmux gate по 20 доставок на runtime и детерминированную regression
+  параллельного запуска. Его transition- и self-heal-покрытие остаётся частью
+  release gate 2.8.8.
 
 ## [2.8.6] — 2026-08-20
 

@@ -6,9 +6,9 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
 
 > llm-obsidian descends from [AgriciDaniel/claude-obsidian](https://github.com/AgriciDaniel/claude-obsidian) (see [ATTRIBUTION.md](ATTRIBUTION.md)); its mechanics were incubated and battle-tested in a private DevOps vault through 2026 before this generic public release. This changelog starts fresh at 1.0.0.
 
-Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
-checkpoints folded into the following public releases; no public tags or
-packages were published for them.
+Only public releases are listed. Versions 2.0.5, 2.1.1, 2.4.0, and 2.8.7 were
+internal checkpoints folded into the following public releases; no public tags
+or packages were published for them.
 
 ## [2.8.8] - 2026-08-20
 
@@ -23,6 +23,15 @@ packages were published for them.
 - Repeating the exact canonical callback publication is an idempotent success.
   Fifty concurrent identical publishers converge on one immutable outbox;
   foreign or changed bytes remain rejected and untouched.
+- Exact current pipeline-step callbacks supersede pasted-but-unsubmitted
+  retained notifications without another `Enter`, provider turn, or replay.
+- Claude initial input and retained delivery bind wrapped or collapsed input to
+  the exact current composer; stale scrollback cannot authorize submission.
+- Stable typed results reconcile once per exact operation revision and result
+  digest so the bounded idle/self-heal ladder can advance normally.
+- Concurrent task launches serialize the repository-common
+  `extensions.worktreeConfig` mutation while preserving each worktree's local
+  excludes.
 
 ### Validation
 
@@ -31,59 +40,11 @@ packages were published for them.
   adapter completed one real turn with exactly one accepted submit.
 - The transition matrix drives nine registered production corridors 50 times
   each. The active review contour is pinned to 28 files / 16,498 LOC and the
-  scripts contour to 297 files / 114,077 lines, both with zero headroom.
-
-## [2.8.7] - 2026-08-20
-
-### Fixed
-
-- Exact current pipeline-step callbacks now supersede retained notifications
-  that were pasted but not submitted. The Harness records a durable
-  `superseded` delivery and advances without an extra `Enter`, provider turn,
-  or model replay.
-- Long transition prompts now normalize their bounded visibility anchor after
-  truncation, preventing a trailing-space mismatch from stranding an otherwise
-  visible prompt at `transport-accepted`.
-- Claude initial input now recognizes the exact typed-composer `›` shape as
-  well as Claude's native collapsed-paste token. Wrapped text is reassembled
-  only inside the final contiguous composer before the exact prompt anchor is
-  checked; an old scrollback anchor cannot authorize a bare composer or
-  unrelated choice.
-- When a retained idle `❯` remains in Claude scrollback, visibility and digest
-  acknowledgement now select the same exact current `›` composer. Initial
-  executor/reviewer input and retained transition delivery therefore submit
-  once instead of failing `input-unconfirmed` or remaining unsubmitted.
-- Safely pending retained delivery remains observable instead of converting a
-  busy custom or engineering/fix session into immediate `attention-required`.
-  Uncertain paste/submit effects still fail closed.
-- Liveness reconciles each exact operation-revision/result identity once, then
-  allows the existing idle, nudge, restart, and attention ladder to age
-  normally instead of looping forever on an unchanged summary.
-- Concurrent task launches now serialize the single shared
-  `extensions.worktreeConfig` mutation in the repository common Git directory.
-  Per-worktree excludes remain independent, and a parallel launch can no
-  longer fail on Git's shared `config.lock` before the provider starts.
-
-### Validation
-
-- Added a provider-free matrix that drives all nine registered production
-  transition owners for 50 repetitions each. Ordinary retained delivery emits
-  exactly one `Enter`; exact-successor races emit none. The added Claude
-  initial-input corridor accepts wrapped and collapsed exact input while
-  rejecting a bare composer, including bare and unrelated composers beneath a
-  matching scrollback anchor, in all 50 repetitions. It also covers a current
-  typed composer beneath retained idle scrollback and the inverse stale-typed /
-  current-idle ordering for both initial and continuation delivery. The live
-  scripts ratchet is pinned to the exact 297-file / 113,949-line candidate with
-  no speculative headroom.
-- An exact-HEAD real-cmux gate completed 20 deliveries for each supported
-  runtime with zero provider calls and zero owned workspace tails.
-- A deterministic parallel-launch regression holds the first shared-config
-  writer until the second task has attempted the same lock, then proves one
-  writer at a time while both worktrees receive their exact local excludes.
-- The immutable stability profile passed all 12 checks, including the complete
-  test suite, 81.39% Harness statement-line coverage across 173 modules, and
-  4,370 deterministic transition cases.
+  scripts contour to 297 files / 114,083 lines, both with zero headroom.
+- The folded 2.8.7 candidate additionally completed an exact-HEAD real-cmux
+  gate with 20 deliveries per runtime and a deterministic parallel-launch
+  regression. Its transition and self-heal coverage remains part of the 2.8.8
+  release gate.
 
 ## [2.8.6] - 2026-08-20
 

@@ -226,6 +226,137 @@ check(
     and "capabilities" in legacy_calls[0]
     and legacy_calls[1][-4:] == ["send", "--surface", surface, "legacy input"],
 )
+
+
+unsupported_calls: list[list[str]] = []
+
+
+def unsupported_capabilities(
+    command: list[str], **_kwargs: object
+) -> subprocess.CompletedProcess[str]:
+    unsupported_calls.append(command)
+    if "capabilities" in command:
+        return subprocess.CompletedProcess(
+            command,
+            1,
+            "",
+            "Error: Unknown command 'capabilities'. Run 'cmux --help' for the full command list.",
+        )
+    if "send" in command:
+        return subprocess.CompletedProcess(command, 0, "", "")
+    return subprocess.CompletedProcess(command, 1, "", "unexpected command")
+
+
+CmuxAdapter(unsupported_capabilities).paste(surface, "unsupported input")
+check(
+    "unsupported legacy capabilities command has one exact fallback",
+    len(unsupported_calls) == 2
+    and "capabilities" in unsupported_calls[0]
+    and unsupported_calls[1][-4:]
+    == ["send", "--surface", surface, "unsupported input"],
+)
+
+
+def capability_failure_is_rejected(
+    label: str,
+    runner: object,
+    calls: list[list[str]],
+) -> None:
+    try:
+        CmuxAdapter(runner).paste(surface, "must not downgrade")  # type: ignore[arg-type]
+    except CmuxError:
+        rejected = True
+    else:
+        rejected = False
+    check(label, rejected and len(calls) == 1 and "capabilities" in calls[0])
+
+
+transient_probe_calls: list[list[str]] = []
+
+
+def transient_capability_failure(
+    command: list[str], **_kwargs: object
+) -> subprocess.CompletedProcess[str]:
+    transient_probe_calls.append(command)
+    if "capabilities" in command:
+        return subprocess.CompletedProcess(command, 1, "", "transient probe failure")
+    return subprocess.CompletedProcess(command, 0, "", "")
+
+
+capability_failure_is_rejected(
+    "transient capability failure cannot downgrade ordered input",
+    transient_capability_failure,
+    transient_probe_calls,
+)
+
+timeout_probe_calls: list[list[str]] = []
+
+
+def timed_out_capability_probe(
+    command: list[str], **_kwargs: object
+) -> subprocess.CompletedProcess[str]:
+    timeout_probe_calls.append(command)
+    if "capabilities" in command:
+        raise subprocess.TimeoutExpired(command, 1)
+    return subprocess.CompletedProcess(command, 0, "", "")
+
+
+capability_failure_is_rejected(
+    "timed out capability probe cannot downgrade ordered input",
+    timed_out_capability_probe,
+    timeout_probe_calls,
+)
+
+
+def rejected_input_response(
+    label: str,
+    capability_stdout: str,
+    paste_stdout: str | None = None,
+) -> None:
+    response_calls: list[list[str]] = []
+
+    def runner(
+        command: list[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        response_calls.append(command)
+        if "capabilities" in command:
+            return subprocess.CompletedProcess(command, 0, capability_stdout, "")
+        if "terminal.paste" in command and paste_stdout is not None:
+            return subprocess.CompletedProcess(command, 0, paste_stdout, "")
+        return subprocess.CompletedProcess(command, 1, "", "unexpected command")
+
+    try:
+        CmuxAdapter(runner).paste(surface, "invalid response")
+    except CmuxError:
+        rejected = True
+    else:
+        rejected = False
+    check(label, rejected and all("send" not in call for call in response_calls))
+
+
+rejected_input_response(
+    "malformed capability JSON fails closed",
+    "not-json",
+)
+rejected_input_response(
+    "malformed capability schema fails closed",
+    json.dumps({"capabilities": "terminal.input.ordered.v1"}),
+)
+rejected_input_response(
+    "malformed ordered paste JSON fails closed",
+    json.dumps({"capabilities": ["terminal.input.ordered.v1"]}),
+    "not-json",
+)
+rejected_input_response(
+    "ordered paste identity drift fails closed",
+    json.dumps({"capabilities": ["terminal.input.ordered.v1"]}),
+    json.dumps(
+        {
+            "submitted": True,
+            "surface_id": "44444444-4444-4444-4444-444444444444",
+        }
+    ),
+)
 workspace_opened = cmux.open_workspace(surface, cwd=ROOT)
 check(
     "workspace creation derives exact origin window without surface guessing",

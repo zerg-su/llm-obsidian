@@ -368,7 +368,13 @@ class CmuxAdapter:
             return self._ordered_input_supported
         try:
             value = json.loads(self._run(["capabilities"]).stdout)
-        except CmuxError:
+        except CmuxError as exc:
+            if not re.fullmatch(
+                r"(?:Error: )?Unknown command 'capabilities'\. "
+                r"Run 'cmux --help' for the full command list\.",
+                str(exc),
+            ):
+                raise
             self._ordered_input_supported = False
             return False
         except json.JSONDecodeError as exc:
