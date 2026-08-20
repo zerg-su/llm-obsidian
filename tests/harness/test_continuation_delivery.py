@@ -127,6 +127,7 @@ def run_case(
     paste_screen_sha256: str = "",
     runtime: str = "codex",
     ownership: list[bool] | None = None,
+    observation_limit: int = 2,
 ):
     port = FakePort(([pre_screen] if send_prompt else []) + screens)
     artifact_values = list(artifacts or [])
@@ -159,7 +160,7 @@ def run_case(
         pre_send_screen_sha256=pre_send_screen_sha256,
         pre_send_editor_sha256=pre_send_editor_sha256,
         paste_screen_sha256=paste_screen_sha256,
-        observation_limit=2,
+        observation_limit=observation_limit,
         wait=lambda _seconds: None,
     )
     return result, port, retries, stages
@@ -1155,11 +1156,23 @@ assert port.keys == ["Enter"] and not retries
 print("OK   visible transcript anchor does not hide exact provider activity")
 
 result, port, retries, _stages = run_case(
-    ["› # Harness-owned review verification", "›"]
+    ["› # Harness-owned review verification", "›", "›"]
 )
 assert not result.acknowledged and result.evidence == "idle"
 assert port.keys == ["Enter"] and not retries
 print("OK   idle repaint cannot acknowledge a continuation")
+
+result, port, retries, _stages = run_case(
+    [
+        "› # Harness-owned review verification",
+        "›",
+        "• Working (post-submit activity)",
+    ],
+    observation_limit=3,
+)
+assert result.acknowledged and result.evidence == "provider-activity"
+assert result.submit_count == 1 and port.keys == ["Enter"] and not retries
+print("OK   transient post-submit idle waits for exact provider activity")
 
 result, port, retries, _stages = run_case(
     ["› # Harness-owned review verification", "", ""]

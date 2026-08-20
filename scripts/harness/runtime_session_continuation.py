@@ -590,6 +590,9 @@ def deliver_continuation(
             screen_state = classify_continuation_screen(runtime, screen, anchor)
             if screen_state == "active" and _screen_digest(screen) != paste_digest:
                 return ContinuationDelivery(True, "provider-activity", submit_count)
+            if screen_state == "idle" and observation + 1 < observation_limit:
+                wait(observation_interval_seconds)
+                continue
             if screen_state in {"idle", "permission", "unknown", "missing"}:
                 evidence = (
                     "submit-unconfirmed"
