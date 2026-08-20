@@ -29,8 +29,9 @@
   стадии `transport-accepted`.
 - Initial input Claude теперь распознаёт точную форму typed composer `›`, а
   также нативный collapsed-paste token Claude. Перенесённый текст сначала
-  собирается обратно и только затем сверяется с точным anchor prompt; пустой
-  composer и посторонний choice по-прежнему fail-closed.
+  собирается только внутри последнего непрерывного composer и затем сверяется
+  с точным anchor prompt; старый anchor в scrollback не может авторизовать
+  пустой composer или посторонний choice.
 - Безопасно ожидающая retained-доставка остаётся наблюдаемой и больше не
   переводит занятую custom- или engineering/fix-сессию сразу в
   `attention-required`. Неопределённые эффекты paste/submit по-прежнему
@@ -46,7 +47,8 @@
   переходов по 50 раз. Обычная retained-доставка даёт ровно один `Enter`, а
   гонка с точным successor — ни одного. Добавленный Claude initial-input
   corridor во всех 50 повторениях принимает точный wrapped/collapsed input и
-  отклоняет пустой composer.
+  отклоняет пустой composer, в том числе bare/unrelated composer под
+  совпадающим anchor из scrollback.
 - Exact-HEAD real-cmux gate выполнил по 20 доставок для каждого runtime с нулём
   provider calls и нулём оставшихся owned workspace.
 - Immutable stability profile прошёл все 12 проверок, включая полный suite,

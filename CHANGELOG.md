@@ -23,8 +23,9 @@ packages were published for them.
   visible prompt at `transport-accepted`.
 - Claude initial input now recognizes the exact typed-composer `›` shape as
   well as Claude's native collapsed-paste token. Wrapped text is reassembled
-  before the exact prompt anchor is checked; a bare composer or unrelated
-  choice remains fail-closed.
+  only inside the final contiguous composer before the exact prompt anchor is
+  checked; an old scrollback anchor cannot authorize a bare composer or
+  unrelated choice.
 - Safely pending retained delivery remains observable instead of converting a
   busy custom or engineering/fix session into immediate `attention-required`.
   Uncertain paste/submit effects still fail closed.
@@ -38,7 +39,8 @@ packages were published for them.
   transition owners for 50 repetitions each. Ordinary retained delivery emits
   exactly one `Enter`; exact-successor races emit none. The added Claude
   initial-input corridor accepts wrapped and collapsed exact input while
-  rejecting a bare composer in all 50 repetitions.
+  rejecting a bare composer, including bare and unrelated composers beneath a
+  matching scrollback anchor, in all 50 repetitions.
 - An exact-HEAD real-cmux gate completed 20 deliveries for each supported
   runtime with zero provider calls and zero owned workspace tails.
 - The immutable stability profile passed all 12 checks, including the complete

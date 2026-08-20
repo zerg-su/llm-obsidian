@@ -27,6 +27,7 @@ from harness.runtime_worker_control import RuntimeWorkerControlMixin  # noqa: E4
 from harness.runtime_worker_custom import RuntimeWorkerCustomMixin  # noqa: E402
 from harness.runtime_worker_review_bridge import RuntimeWorkerReviewBridgeMixin  # noqa: E402
 from harness.runtime_session_continuation import (  # noqa: E402
+    _editor_digest,
     await_initial_input_visible,
 )
 from harness.store import OperationStore  # noqa: E402
@@ -256,12 +257,15 @@ def claude_initial_input_handoff(repetition: int) -> None:
             assert surface_id == SURFACE
             return self.screen
 
+    before_editor_sha256 = _editor_digest("claude", "❯")
+
     wrapped = TypedClaudePort(f"› {prompt[:46]}\n  {prompt[46:]}")
     assert await_initial_input_visible(
         wrapped,
         surface_id=SURFACE,
         runtime="claude",
         text=prompt,
+        before_editor_sha256=before_editor_sha256,
         observation_limit=1,
         observation_interval_seconds=0,
         wait=lambda _seconds: None,
@@ -275,6 +279,7 @@ def claude_initial_input_handoff(repetition: int) -> None:
         surface_id=SURFACE,
         runtime="claude",
         text=prompt,
+        before_editor_sha256=before_editor_sha256,
         observation_limit=1,
         observation_interval_seconds=0,
         wait=lambda _seconds: None,
@@ -286,6 +291,35 @@ def claude_initial_input_handoff(repetition: int) -> None:
         surface_id=SURFACE,
         runtime="claude",
         text=prompt,
+        before_editor_sha256=before_editor_sha256,
+        observation_limit=1,
+        observation_interval_seconds=0,
+        wait=lambda _seconds: None,
+    )
+
+    scrollback_bare = TypedClaudePort(
+        f"› {prompt}\n\n• Prior turn finished\n\n›"
+    )
+    assert not await_initial_input_visible(
+        scrollback_bare,
+        surface_id=SURFACE,
+        runtime="claude",
+        text=prompt,
+        before_editor_sha256=before_editor_sha256,
+        observation_limit=1,
+        observation_interval_seconds=0,
+        wait=lambda _seconds: None,
+    )
+
+    scrollback_choice = TypedClaudePort(
+        f"› {prompt}\n\n• Prior turn finished\n\n› 1. Keep waiting"
+    )
+    assert not await_initial_input_visible(
+        scrollback_choice,
+        surface_id=SURFACE,
+        runtime="claude",
+        text=prompt,
+        before_editor_sha256=before_editor_sha256,
         observation_limit=1,
         observation_interval_seconds=0,
         wait=lambda _seconds: None,

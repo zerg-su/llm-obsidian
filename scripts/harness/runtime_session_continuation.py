@@ -76,6 +76,23 @@ def _editor_digest(runtime: str, screen: str) -> str:
     return sha256("\n".join(_editor_state(runtime, screen)).encode("utf-8")).hexdigest()
 
 
+def _claude_alternate_editor(screen: str) -> tuple[str, ...]:
+    """Return only Claude's final contiguous ``›`` composer block."""
+
+    raw_tail = screen.splitlines()[-24:]
+    normalized = [" ".join(line.strip().split()) for line in raw_tail]
+    starts = [index for index, line in enumerate(normalized) if line.startswith("›")]
+    if not starts:
+        return ()
+    start = starts[-1]
+    editor = [normalized[start]]
+    for raw, line in zip(raw_tail[start + 1 :], normalized[start + 1 :]):
+        if not line or not raw[:1].isspace() or line.startswith(("›", "❯")):
+            break
+        editor.append(line)
+    return tuple(editor)
+
+
 def classify_continuation_screen(runtime: str, screen: str, anchor: str) -> str:
     """Classify only provider UI states that are safe for continuation delivery.
 
@@ -121,9 +138,13 @@ def classify_continuation_screen(runtime: str, screen: str, anchor: str) -> str:
         # reassembled before matching; a bare ``›`` or unrelated choice stays
         # fail-closed.  The provider's native collapsed-paste token is also an
         # exact post-send editor shape and carries no submit authority itself.
-        alternate_editor = [line for line in tail if line.startswith("›")]
-        wrapped_editor = " ".join(tail)
-        if alternate_editor and anchor and anchor in wrapped_editor:
+        alternate_editor = _claude_alternate_editor(screen)
+        current_editor = " ".join(alternate_editor)
+        if alternate_editor and re.fullmatch(
+            r"›\s*[1-9][.)]\s+\S.*", alternate_editor[0]
+        ):
+            return "unknown"
+        if alternate_editor and anchor and anchor in current_editor:
             return "input-ready"
         if any(
             re.fullmatch(

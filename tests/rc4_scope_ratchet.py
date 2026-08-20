@@ -501,6 +501,12 @@ the existing runtime continuation classifier. It recognizes only the exact
 typed-composer anchor or native collapsed-paste token while a bare composer
 stays fail-closed. The live ceiling is therefore pinned to exactly 297 files /
 113,874 lines with no speculative headroom.
+
+The review correction adds exactly 21 measured lines to bind the prompt anchor
+to Claude's final contiguous composer block. Matching scrollback above a bare
+or unrelated composer remains non-authoritative. The final live ceiling is
+therefore pinned to exactly 297 files / 113,895 lines with no speculative
+headroom.
 """
 
 from __future__ import annotations
@@ -526,7 +532,7 @@ SCRIPT_FILE_CEILING = 297
 #: accepted-callback archive adds the exact 17-line directory-fsync boundary
 #: required by the final 2.8.2 review plus one measured recovery branch line
 #: that re-establishes both barriers after an interrupted mutation.
-SCRIPT_LINE_CEILING = 113_874
+SCRIPT_LINE_CEILING = 113_895
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:
