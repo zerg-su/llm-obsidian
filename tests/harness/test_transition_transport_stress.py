@@ -29,6 +29,7 @@ from harness.runtime_worker_review_bridge import RuntimeWorkerReviewBridgeMixin 
 from harness.runtime_session_continuation import (  # noqa: E402
     _editor_digest,
     await_initial_input_visible,
+    deliver_continuation,
 )
 from harness.store import OperationStore  # noqa: E402
 from harness.supervisor import OperationSupervisor  # noqa: E402
@@ -340,6 +341,54 @@ def claude_initial_input_handoff(repetition: int) -> None:
         observation_interval_seconds=0,
         wait=lambda _seconds: None,
     )
+
+    stale_alternate = f"› {prompt}\n\n• Prior turn finished\n❯"
+    stale_current_idle = TypedClaudePort(stale_alternate)
+    assert not await_initial_input_visible(
+        stale_current_idle,
+        surface_id=SURFACE,
+        runtime="claude",
+        text=prompt,
+        before_editor_sha256=before_editor_sha256,
+        observation_limit=1,
+        observation_interval_seconds=0,
+        wait=lambda _seconds: None,
+    )
+
+    class StaleContinuationPort:
+        def __init__(self) -> None:
+            self.screens = ["❯", stale_alternate]
+            self.sent: list[str] = []
+            self.keys: list[str] = []
+
+        def read(self, surface_id: str) -> str:
+            assert surface_id == SURFACE
+            return self.screens.pop(0) if self.screens else ""
+
+        def send(self, surface_id: str, text: str) -> None:
+            assert surface_id == SURFACE
+            self.sent.append(text)
+
+        def send_key(self, surface_id: str, key: str) -> None:
+            assert surface_id == SURFACE and key == "Enter"
+            self.keys.append(key)
+
+    continuation = StaleContinuationPort()
+    result = deliver_continuation(
+        continuation,
+        surface_id=SURFACE,
+        prompt=prompt,
+        runtime="claude",
+        artifact_ready=lambda: False,
+        ownership_ready=lambda: True,
+        reserve_retry=lambda: False,
+        observe_stage=lambda *_args: None,
+        observation_limit=1,
+        observation_interval_seconds=0,
+        wait=lambda _seconds: None,
+    )
+    assert not result.acknowledged and result.evidence == "idle"
+    assert continuation.sent == [prompt] and continuation.keys == []
 
 
 def verification_retry_handoff(repetition: int) -> None:

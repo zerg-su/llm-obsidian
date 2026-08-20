@@ -523,6 +523,12 @@ above the current typed ``›`` composer. The shared initial/continuation digest
 now follows the semantically recognized current composer, adding exactly 11
 measured production lines. The live ceiling is pinned to exactly 297 files /
 113,935 lines with no speculative headroom.
+
+The final implementation review exercised the inverse ordering as well: a
+stale matching ``›`` above the actual current idle ``❯``. The shared editor
+parser now rejects that stale alternate block by its screen order, adding
+exactly 14 measured production lines. The live ceiling is pinned to exactly
+297 files / 113,949 lines with no speculative headroom.
 """
 
 from __future__ import annotations
@@ -548,7 +554,7 @@ SCRIPT_FILE_CEILING = 297
 #: accepted-callback archive adds the exact 17-line directory-fsync boundary
 #: required by the final 2.8.2 review plus one measured recovery branch line
 #: that re-establishes both barriers after an interrupted mutation.
-SCRIPT_LINE_CEILING = 113_935
+SCRIPT_LINE_CEILING = 113_949
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

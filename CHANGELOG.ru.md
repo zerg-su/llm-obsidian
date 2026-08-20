@@ -57,9 +57,9 @@
   corridor во всех 50 повторениях принимает точный wrapped/collapsed input и
   отклоняет пустой composer, в том числе bare/unrelated composer под
   совпадающим anchor из scrollback. Она также покрывает текущий typed composer
-  под retained idle scrollback для initial и continuation delivery. Ratchet
-  live scripts зафиксирован точно на кандидате 297 файлов / 113 935 строк без
-  спекулятивного запаса.
+  под retained idle scrollback и обратный порядок stale typed / current idle
+  для initial и continuation delivery. Ratchet live scripts зафиксирован точно
+  на кандидате 297 файлов / 113 949 строк без спекулятивного запаса.
 - Exact-HEAD real-cmux gate выполнил по 20 доставок для каждого runtime с нулём
   provider calls и нулём оставшихся owned workspace.
 - Детерминированная regression параллельного запуска удерживает первый общий

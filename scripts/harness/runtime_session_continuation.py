@@ -55,6 +55,14 @@ def _screen_digest(screen: str) -> str:
     return sha256(normalized.encode("utf-8")).hexdigest()
 
 
+def _is_claude_primary_editor_line(line: str) -> bool:
+    if line.startswith("❯"):
+        return True
+    marker_index = line.find("❯")
+    prefix = line[:marker_index].strip() if marker_index >= 0 else ""
+    return bool(prefix and set(prefix) <= {"─", "━", "═"})
+
+
 def _editor_state(runtime: str, screen: str) -> tuple[str, ...]:
     marker = {"claude": "❯", "codex": "›"}.get(runtime)
     if not marker:
@@ -65,9 +73,8 @@ def _editor_state(runtime: str, screen: str) -> tuple[str, ...]:
         if line.startswith(marker):
             editor_lines.append(line)
             continue
-        marker_index = line.find(marker)
-        prefix = line[:marker_index].strip() if marker_index >= 0 else ""
-        if runtime == "claude" and prefix and set(prefix) <= {"─", "━", "═"}:
+        if runtime == "claude" and _is_claude_primary_editor_line(line):
+            marker_index = line.find(marker)
             editor_lines.append(line[marker_index:])
     return tuple(editor_lines)
 
@@ -90,6 +97,13 @@ def _claude_alternate_editor(screen: str) -> tuple[str, ...]:
     if not starts:
         return ()
     start = starts[-1]
+    primary_starts = [
+        index
+        for index, line in enumerate(normalized)
+        if _is_claude_primary_editor_line(line)
+    ]
+    if primary_starts and primary_starts[-1] > start:
+        return ()
     editor = [normalized[start]]
     for raw, line in zip(raw_tail[start + 1 :], normalized[start + 1 :]):
         if not line or not raw[:1].isspace() or line.startswith(("›", "❯")):

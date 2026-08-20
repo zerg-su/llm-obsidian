@@ -159,6 +159,40 @@ assert retained_idle_port.sent == [PROMPT]
 assert retained_idle_port.keys == ["Enter"]
 print("OK   current Claude composer supersedes retained idle scrollback")
 
+stale_alternate_current_idle = (
+    f"› {PROMPT.splitlines()[0]}\n"
+    "  Inspect the exact HEAD.\n\n"
+    "• Prior turn finished\n"
+    "❯"
+)
+stale_initial = FakePort(["❯", stale_alternate_current_idle])
+try:
+    send_visible_notification(
+        stale_initial,
+        surface_id=SURFACE,
+        runtime="claude",
+        message=PROMPT,
+        observation_limit=1,
+        wait=lambda _seconds: None,
+    )
+except RetainedNotificationError:
+    pass
+else:
+    raise AssertionError("stale Claude alternate composer authorized initial Enter")
+assert stale_initial.sent == [PROMPT] and stale_initial.keys == []
+print("OK   stale Claude alternate composer cannot authorize initial Enter")
+
+stale_continuation_result, stale_continuation_port, _, _ = run_case(
+    [stale_alternate_current_idle],
+    pre_screen="❯",
+    runtime="claude",
+)
+assert not stale_continuation_result.acknowledged
+assert stale_continuation_result.evidence == "idle"
+assert stale_continuation_port.sent == [PROMPT]
+assert stale_continuation_port.keys == []
+print("OK   stale Claude alternate composer cannot authorize continuation Enter")
+
 space_boundary_prompt = f"{'x' * 95} continue after the anchor boundary"
 space_boundary = FakePort(["› old", f"› {'x' * 95}"])
 send_visible_notification(

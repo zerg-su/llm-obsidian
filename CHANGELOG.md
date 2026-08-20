@@ -49,9 +49,10 @@ packages were published for them.
   initial-input corridor accepts wrapped and collapsed exact input while
   rejecting a bare composer, including bare and unrelated composers beneath a
   matching scrollback anchor, in all 50 repetitions. It also covers a current
-  typed composer beneath retained idle scrollback for both initial and
-  continuation delivery. The live scripts ratchet is pinned to the exact
-  297-file / 113,935-line candidate with no speculative headroom.
+  typed composer beneath retained idle scrollback and the inverse stale-typed /
+  current-idle ordering for both initial and continuation delivery. The live
+  scripts ratchet is pinned to the exact 297-file / 113,949-line candidate with
+  no speculative headroom.
 - An exact-HEAD real-cmux gate completed 20 deliveries for each supported
   runtime with zero provider calls and zero owned workspace tails.
 - A deterministic parallel-launch regression holds the first shared-config
