@@ -495,6 +495,12 @@ The 2.8.7 transition stabilization adds 134 measured production lines across
 the existing retained-notification, continuation, custom/fix worker, and
 liveness owners. No production file is added; the live ceiling is pinned to
 exactly 297 files / 113,856 lines with no speculative headroom.
+
+The final 2.8.7 Claude initial-input repair adds exactly 18 measured lines to
+the existing runtime continuation classifier. It recognizes only the exact
+typed-composer anchor or native collapsed-paste token while a bare composer
+stays fail-closed. The live ceiling is therefore pinned to exactly 297 files /
+113,874 lines with no speculative headroom.
 """
 
 from __future__ import annotations
@@ -520,7 +526,7 @@ SCRIPT_FILE_CEILING = 297
 #: accepted-callback archive adds the exact 17-line directory-fsync boundary
 #: required by the final 2.8.2 review plus one measured recovery branch line
 #: that re-establishes both barriers after an interrupted mutation.
-SCRIPT_LINE_CEILING = 113_856
+SCRIPT_LINE_CEILING = 113_874
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

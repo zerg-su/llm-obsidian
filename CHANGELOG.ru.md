@@ -27,6 +27,10 @@
 - Длинные transition-prompts теперь нормализуют ограниченный visibility anchor
   после обрезки: конечный пробел больше не оставляет видимое сообщение на
   стадии `transport-accepted`.
+- Initial input Claude теперь распознаёт точную форму typed composer `›`, а
+  также нативный collapsed-paste token Claude. Перенесённый текст сначала
+  собирается обратно и только затем сверяется с точным anchor prompt; пустой
+  composer и посторонний choice по-прежнему fail-closed.
 - Безопасно ожидающая retained-доставка остаётся наблюдаемой и больше не
   переводит занятую custom- или engineering/fix-сессию сразу в
   `attention-required`. Неопределённые эффекты paste/submit по-прежнему
@@ -38,9 +42,11 @@
 
 ### Проверка
 
-- Provider-free матрица прогнала все восемь зарегистрированных production-
+- Provider-free матрица прогнала все девять зарегистрированных production-
   переходов по 50 раз. Обычная retained-доставка даёт ровно один `Enter`, а
-  гонка с точным successor — ни одного.
+  гонка с точным successor — ни одного. Добавленный Claude initial-input
+  corridor во всех 50 повторениях принимает точный wrapped/collapsed input и
+  отклоняет пустой composer.
 - Exact-HEAD real-cmux gate выполнил по 20 доставок для каждого runtime с нулём
   provider calls и нулём оставшихся owned workspace.
 - Immutable stability profile прошёл все 12 проверок, включая полный suite,

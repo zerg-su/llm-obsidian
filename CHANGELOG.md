@@ -21,6 +21,10 @@ packages were published for them.
 - Long transition prompts now normalize their bounded visibility anchor after
   truncation, preventing a trailing-space mismatch from stranding an otherwise
   visible prompt at `transport-accepted`.
+- Claude initial input now recognizes the exact typed-composer `›` shape as
+  well as Claude's native collapsed-paste token. Wrapped text is reassembled
+  before the exact prompt anchor is checked; a bare composer or unrelated
+  choice remains fail-closed.
 - Safely pending retained delivery remains observable instead of converting a
   busy custom or engineering/fix session into immediate `attention-required`.
   Uncertain paste/submit effects still fail closed.
@@ -30,9 +34,11 @@ packages were published for them.
 
 ### Validation
 
-- Added a provider-free matrix that drives all eight registered production
+- Added a provider-free matrix that drives all nine registered production
   transition owners for 50 repetitions each. Ordinary retained delivery emits
-  exactly one `Enter`; exact-successor races emit none.
+  exactly one `Enter`; exact-successor races emit none. The added Claude
+  initial-input corridor accepts wrapped and collapsed exact input while
+  rejecting a bare composer in all 50 repetitions.
 - An exact-HEAD real-cmux gate completed 20 deliveries for each supported
   runtime with zero provider calls and zero owned workspace tails.
 - The immutable stability profile passed all 12 checks, including the complete
