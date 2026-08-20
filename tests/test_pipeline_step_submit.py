@@ -8,6 +8,7 @@ import json
 import subprocess
 import sys
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 
@@ -259,12 +260,35 @@ with tempfile.TemporaryDirectory(prefix="pipeline-step-submit.") as raw:
     original_outbox = (worktree / OUTBOX).read_bytes()
     second = run(worktree)
     check(
-        "submitter never overwrites an existing callback outbox",
-        second.returncode != 0
+        "exact callback outbox replay is an idempotent no-op",
+        second.returncode == 0
         and (worktree / OUTBOX).read_bytes() == original_outbox
-        and "already exists" in second.stderr
-        and failure_class(second) == "code-authority",
-        second.stderr,
+        and json.loads(second.stdout)["status"] == "submitted",
+        (second.stdout, second.stderr),
+    )
+
+    (worktree / OUTBOX).unlink()
+    with ThreadPoolExecutor(max_workers=20) as pool:
+        concurrent_results = list(pool.map(lambda _index: run(worktree), range(50)))
+    check(
+        "concurrent exact submitters converge on one immutable outbox",
+        all(item.returncode == 0 for item in concurrent_results)
+        and (worktree / OUTBOX).read_bytes() == original_outbox,
+        [(item.returncode, item.stderr) for item in concurrent_results],
+    )
+
+    foreign_outbox = json.loads(original_outbox)
+    foreign_outbox["run_id"] = "foreign-run"
+    write_json(worktree / OUTBOX, foreign_outbox)
+    foreign_bytes = (worktree / OUTBOX).read_bytes()
+    foreign_result = run(worktree)
+    check(
+        "foreign callback outbox remains immutable and fails closed",
+        foreign_result.returncode != 0
+        and (worktree / OUTBOX).read_bytes() == foreign_bytes
+        and "already exists" in foreign_result.stderr
+        and failure_class(foreign_result) == "code-authority",
+        foreign_result.stderr,
     )
 
     reset_transport(worktree)

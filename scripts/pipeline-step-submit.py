@@ -514,8 +514,6 @@ def _envelope(
 
 
 def _write_outbox(path: Path, envelope: CallbackEnvelope) -> None:
-    if path.exists() or path.is_symlink():
-        raise SubmitError("callback outbox already exists")
     encoded = (
         json.dumps(
             to_dict(envelope),
@@ -524,6 +522,19 @@ def _write_outbox(path: Path, envelope: CallbackEnvelope) -> None:
         )
         + "\n"
     ).encode()
+
+    def exact_existing_outbox() -> bool:
+        if path.is_symlink() or not path.is_file():
+            return False
+        try:
+            return path.stat().st_size == len(encoded) and path.read_bytes() == encoded
+        except OSError as exc:
+            raise SubmitError("callback outbox is unreadable") from exc
+
+    if path.exists() or path.is_symlink():
+        if exact_existing_outbox():
+            return
+        raise SubmitError("callback outbox already exists")
     descriptor, raw = tempfile.mkstemp(
         prefix=f".{path.name}.", dir=path.parent
     )
@@ -537,6 +548,8 @@ def _write_outbox(path: Path, envelope: CallbackEnvelope) -> None:
         try:
             os.link(temporary, path)
         except FileExistsError as exc:
+            if exact_existing_outbox():
+                return
             raise SubmitError("callback outbox already exists") from exc
         directory = os.open(path.parent, os.O_RDONLY)
         try:
