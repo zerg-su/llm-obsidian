@@ -10,31 +10,6 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
-## [2.8.7] - 2026-08-20
-
-### Fixed
-
-- Exact current pipeline-step callbacks now supersede retained notifications
-  that were pasted but not submitted. The Harness records a durable
-  `superseded` delivery and advances without an extra `Enter`, provider turn,
-  or model replay.
-- Safely pending retained delivery remains observable instead of converting a
-  busy custom or engineering/fix session into immediate `attention-required`.
-  Uncertain paste/submit effects still fail closed.
-- Liveness reconciles each exact operation-revision/result identity once, then
-  allows the existing idle, nudge, restart, and attention ladder to age
-  normally instead of looping forever on an unchanged summary.
-
-### Validation
-
-- Added a provider-free matrix covering dispatch, built-in summary, custom,
-  engineering/fix, verification retry, summary refresh, review callback, and
-  reap transitions for 50 repetitions each. Ordinary retained delivery emits
-  exactly one `Enter`; successor races emit none.
-- The active authority contour is pinned to exactly 28 files / 16,493 LOC and
-  the complete scripts contour to 297 files / 113,856 lines, both without
-  speculative headroom.
-
 ## [2.8.6] - 2026-08-20
 
 ### Changed

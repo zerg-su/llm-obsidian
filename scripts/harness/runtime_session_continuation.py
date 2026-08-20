@@ -46,7 +46,7 @@ def _prompt_anchor(prompt: str) -> str:
     for line in prompt.splitlines():
         normalized = " ".join(line.strip().split())
         if normalized:
-            return normalized[:96]
+            return normalized[:96].rstrip()
     return ""
 
 

@@ -146,6 +146,20 @@ send_visible_notification(
 assert delayed.sent == [PROMPT] and delayed.keys == ["Enter"]
 print("OK   retained notification waits for editor visibility before Enter")
 
+space_boundary_prompt = f"{'x' * 95} continue after the anchor boundary"
+space_boundary = FakePort(["› old", f"› {'x' * 95}"])
+send_visible_notification(
+    space_boundary,
+    surface_id=SURFACE,
+    runtime="codex",
+    message=space_boundary_prompt,
+    observation_limit=1,
+    wait=lambda _seconds: None,
+)
+assert space_boundary.sent == [space_boundary_prompt]
+assert space_boundary.keys == ["Enter"]
+print("OK   a long prompt ending its bounded anchor on whitespace still submits")
+
 with tempfile.TemporaryDirectory(prefix="notification-recovery.") as raw:
     recovery = Path(raw) / "submit-recovery.json"
     pending = SemanticPort([f"❯ {PROMPT.splitlines()[0]}"])
