@@ -32,6 +32,10 @@ packages were published for them.
 - Liveness reconciles each exact operation-revision/result identity once, then
   allows the existing idle, nudge, restart, and attention ladder to age
   normally instead of looping forever on an unchanged summary.
+- Concurrent task launches now serialize the single shared
+  `extensions.worktreeConfig` mutation in the repository common Git directory.
+  Per-worktree excludes remain independent, and a parallel launch can no
+  longer fail on Git's shared `config.lock` before the provider starts.
 
 ### Validation
 
@@ -43,6 +47,9 @@ packages were published for them.
   matching scrollback anchor, in all 50 repetitions.
 - An exact-HEAD real-cmux gate completed 20 deliveries for each supported
   runtime with zero provider calls and zero owned workspace tails.
+- A deterministic parallel-launch regression widens the shared-config write
+  window and proves one writer at a time while both worktrees receive their
+  exact local excludes.
 - The immutable stability profile passed all 12 checks, including the complete
   test suite, 81.39% Harness statement-line coverage across 173 modules, and
   4,370 deterministic transition cases.

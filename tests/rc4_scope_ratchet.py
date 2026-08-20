@@ -507,6 +507,15 @@ to Claude's final contiguous composer block. Matching scrollback above a bare
 or unrelated composer remains non-authoritative. The final live ceiling is
 therefore pinned to exactly 297 files / 113,895 lines with no speculative
 headroom.
+
+The post-fix mirrored launch exposed one shared-repository setup race before
+any provider start: concurrent task worktrees could write
+``extensions.worktreeConfig`` through Git's common config at the same time.
+The bounded repair adds exactly 29 measured lines to the existing dispatch
+workspace owner. One common-directory lock now serializes only that shared
+mutation; each worktree keeps its independent exclude/config write. The live
+ceiling is therefore pinned to exactly 297 files / 113,924 lines with no
+speculative headroom.
 """
 
 from __future__ import annotations
@@ -532,7 +541,7 @@ SCRIPT_FILE_CEILING = 297
 #: accepted-callback archive adds the exact 17-line directory-fsync boundary
 #: required by the final 2.8.2 review plus one measured recovery branch line
 #: that re-establishes both barriers after an interrupted mutation.
-SCRIPT_LINE_CEILING = 113_895
+SCRIPT_LINE_CEILING = 113_924
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

@@ -10,7 +10,10 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest import mock
 
@@ -155,6 +158,74 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         common_exclude_path.read_text(encoding="utf-8")
         + "existing-common-ignore\n",
         encoding="utf-8",
+    )
+
+    concurrent_worktrees = (
+        tmp / "worktrees" / "concurrent-one",
+        tmp / "worktrees" / "concurrent-two",
+    )
+    for candidate in concurrent_worktrees:
+        candidate.mkdir(parents=True)
+    concurrent_git_dirs = {
+        candidate: tmp / "git-dirs" / candidate.name
+        for candidate in concurrent_worktrees
+    }
+    shared_git_dir = tmp / "shared-git-dir"
+    shared_git_dir.mkdir()
+    config_writer_counts = {"active": 0, "maximum": 0}
+    config_writer_guard = threading.Lock()
+    start_task_setup = threading.Barrier(len(concurrent_worktrees))
+
+    def concurrent_git_command(argv, *, cwd=None, **_kwargs):
+        if argv == ["git", "rev-parse", "--git-common-dir"]:
+            return subprocess.CompletedProcess(argv, 0, f"{shared_git_dir}\n", "")
+        if argv == ["git", "rev-parse", "--absolute-git-dir"]:
+            return subprocess.CompletedProcess(
+                argv, 0, f"{concurrent_git_dirs[Path(cwd)]}\n", ""
+            )
+        if argv == ["git", "config", "extensions.worktreeConfig", "true"]:
+            with config_writer_guard:
+                config_writer_counts["active"] += 1
+                config_writer_counts["maximum"] = max(
+                    config_writer_counts["maximum"],
+                    config_writer_counts["active"],
+                )
+            time.sleep(0.05)
+            with config_writer_guard:
+                config_writer_counts["active"] -= 1
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        if argv[:3] == ["git", "config", "--worktree"]:
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        raise AssertionError(f"unexpected Git command: {argv}")
+
+    def configure_task(candidate):
+        start_task_setup.wait()
+        return runner.ensure_task_git_excludes(candidate)
+
+    with mock.patch(
+        "dispatch_workspace.run_command", side_effect=concurrent_git_command
+    ):
+        with ThreadPoolExecutor(max_workers=len(concurrent_worktrees)) as pool:
+            concurrent_results = list(
+                pool.map(configure_task, concurrent_worktrees)
+            )
+    check(
+        "parallel task setup serializes the shared Git config writer",
+        concurrent_results == [None, None]
+        and config_writer_counts["maximum"] == 1,
+        f"max concurrent config writers: {config_writer_counts['maximum']}",
+    )
+    check(
+        "parallel task setup preserves each worktree-local exclude",
+        all(
+            set(
+                (concurrent_git_dirs[candidate] / "info" / "task-exclude")
+                .read_text(encoding="utf-8")
+                .splitlines()
+            )
+            == set(runner.TASK_LOCAL_GIT_EXCLUDES)
+            for candidate in concurrent_worktrees
+        ),
     )
 
     request_id = str(uuid.uuid4())

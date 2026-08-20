@@ -55,14 +55,43 @@ def run_command(
     return result
 
 
+def _enable_worktree_config(worktree: Path) -> None:
+    """Serialize the one shared Git-config mutation across task launches."""
+
+    raw_common_dir = run_command(
+        ["git", "rev-parse", "--git-common-dir"],
+        cwd=worktree,
+        label="task Git common directory",
+    ).stdout.strip()
+    if not raw_common_dir:
+        raise DispatchError("task Git common directory is empty")
+    common_dir = Path(raw_common_dir)
+    if not common_dir.is_absolute():
+        common_dir = worktree / common_dir
+    common_dir = common_dir.resolve()
+    if not common_dir.is_dir():
+        raise DispatchError("task Git common directory is not a directory")
+    config_guard = common_dir / "llm-obsidian-worktree-config.lock"
+    if config_guard.is_symlink() or (
+        config_guard.exists() and not config_guard.is_file()
+    ):
+        raise DispatchError("task Git config lock is not a regular file")
+    with config_guard.open("a+", encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            run_command(
+                ["git", "config", "extensions.worktreeConfig", "true"],
+                cwd=worktree,
+                label="task Git worktree config",
+            )
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
 def ensure_task_git_excludes(worktree: Path) -> None:
     """Keep root task bindings out of only this worktree's Git status."""
 
-    run_command(
-        ["git", "config", "extensions.worktreeConfig", "true"],
-        cwd=worktree,
-        label="task Git worktree config",
-    )
+    _enable_worktree_config(worktree)
     raw_git_dir = run_command(
         ["git", "rev-parse", "--absolute-git-dir"],
         cwd=worktree,
