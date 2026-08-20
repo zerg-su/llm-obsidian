@@ -10,6 +10,29 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.8.8] - 2026-08-20
+
+### Fixed
+
+- Agent-editor transitions now use cmux's capability-advertised ordered paste
+  with an exact surface identity. Executor, review, custom, fix, verification,
+  summary, liveness, callback, and coordinator-escalation wakes share the same
+  transport while preserving separate paste/submit evidence.
+- Continuation delivery waits through a transient unchanged idle frame instead
+  of immediately classifying the paste as failed.
+- Repeating the exact canonical callback publication is an idempotent success.
+  Fifty concurrent identical publishers converge on one immutable outbox;
+  foreign or changed bytes remain rejected and untouched.
+
+### Validation
+
+- A live Claude Sonnet Low prototype reproduced the legacy lost-input race,
+  then completed ten consecutive ordered-paste deliveries. The production
+  adapter completed one real turn with exactly one accepted submit.
+- The transition matrix drives nine registered production corridors 50 times
+  each. The active review contour is pinned to 28 files / 16,498 LOC and the
+  scripts contour to 297 files / 114,077 lines, both with zero headroom.
+
 ## [2.8.7] - 2026-08-20
 
 ### Fixed

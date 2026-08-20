@@ -536,7 +536,7 @@ from __future__ import annotations
 from pathlib import Path
 
 
-#: Maximum tracked Python files under ``scripts/`` for the 2.8.7 candidate.
+#: Maximum tracked Python files under ``scripts/`` for the 2.8.8 candidate.
 #: Architecture Workflow v1 adds exactly the three production scripts its
 #: approved plan names: ``architecture_paths.py`` (the confined path/collision
 #: validator both carriers call), ``architecture_workflow_pressure.py`` and
@@ -545,16 +545,13 @@ from pathlib import Path
 #: file ceiling therefore moves by exactly three.
 SCRIPT_FILE_CEILING = 297
 
-#: Maximum total lines across those files for the 2.8.7 lifecycle candidate.
-#: The line ceiling moves to the measured candidate with zero headroom: those
-#: three modules plus the shared artifact-contract wiring in the existing
-#: carriers, the RC4 governing-source catalogue projection, the registered
-#: review fix-delta evidence exclusion, and the authorized-continuation
-#: failed-receipt attention handoff with its applied review findings. The
-#: accepted-callback archive adds the exact 17-line directory-fsync boundary
-#: required by the final 2.8.2 review plus one measured recovery branch line
-#: that re-establishes both barriers after an interrupted mutation.
-SCRIPT_LINE_CEILING = 113_949
+#: Maximum total lines across those files for the 2.8.8 lifecycle candidate.
+#: The exact 128-line increase adds one capability-checked, exact-surface cmux
+#: ordered-paste adapter; routes every registered agent-editor wake through
+#: that seam; accepts byte-identical callback-outbox replay idempotently; and
+#: moves the coordinator escalation relay to the same transport. No script is
+#: added and the measured candidate has zero headroom.
+SCRIPT_LINE_CEILING = 114_077
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:
@@ -573,13 +570,13 @@ def assert_within_ceilings(scripts_dir: Path) -> tuple[int, int]:
     files, lines = measure(scripts_dir)
     if files > SCRIPT_FILE_CEILING:
         raise AssertionError(
-            f"scripts/ holds {files} Python files, above the 2.8.7 ceiling "
+            f"scripts/ holds {files} Python files, above the 2.8.8 ceiling "
             f"{SCRIPT_FILE_CEILING}; justify and raise the ceiling in the same "
             "commit as the growth"
         )
     if lines > SCRIPT_LINE_CEILING:
         raise AssertionError(
-            f"scripts/ holds {lines} lines, above the 2.8.7 ceiling "
+            f"scripts/ holds {lines} lines, above the 2.8.8 ceiling "
             f"{SCRIPT_LINE_CEILING}; justify and raise the ceiling in the same "
             "commit as the growth"
         )
