@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import fcntl
 import importlib.util
 import hashlib
 import json
@@ -11,9 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import threading
 import uuid
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest import mock
 
@@ -160,123 +157,31 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         encoding="utf-8",
     )
 
-    concurrent_worktrees = (
-        tmp / "worktrees" / "concurrent-one",
-        tmp / "worktrees" / "concurrent-two",
+    lock_scenario = ROOT / "tests" / "dispatch_git_config_lock_scenario.py"
+    serialized = subprocess.run(
+        [sys.executable, str(lock_scenario)],
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
     )
-    for candidate in concurrent_worktrees:
-        candidate.mkdir(parents=True)
-    concurrent_git_dirs = {
-        candidate: tmp / "git-dirs" / candidate.name
-        for candidate in concurrent_worktrees
-    }
-    shared_git_dir = tmp / "shared-git-dir"
-    shared_git_dir.mkdir()
-    writer_entered = threading.Event()
-    second_worker_started = threading.Event()
-    second_worker_allowed = threading.Event()
-    second_lock_attempted = threading.Event()
-    first_writer_released = threading.Event()
-    overlap_observed = threading.Event()
-    task_thread = threading.local()
-    config_lock_changed = threading.Condition()
-    config_lock_owner = {"role": ""}
-
-    def concurrent_git_command(argv, *, cwd=None, **_kwargs):
-        if argv == ["git", "rev-parse", "--git-common-dir"]:
-            task_thread.awaiting_config_lock = True
-            return subprocess.CompletedProcess(argv, 0, f"{shared_git_dir}\n", "")
-        if argv == ["git", "rev-parse", "--absolute-git-dir"]:
-            return subprocess.CompletedProcess(
-                argv, 0, f"{concurrent_git_dirs[Path(cwd)]}\n", ""
-            )
-        if argv == ["git", "config", "extensions.worktreeConfig", "true"]:
-            if getattr(task_thread, "awaiting_config_lock", False):
-                if task_thread.role == "first":
-                    writer_entered.set()
-                raise AssertionError("shared Git config writer bypassed its lock")
-            if task_thread.role == "first":
-                writer_entered.set()
-                second_lock_attempted.wait()
-                first_writer_released.set()
-            elif not first_writer_released.is_set():
-                overlap_observed.set()
-            return subprocess.CompletedProcess(argv, 0, "", "")
-        if argv[:3] == ["git", "config", "--worktree"]:
-            return subprocess.CompletedProcess(argv, 0, "", "")
-        raise AssertionError(f"unexpected Git command: {argv}")
-
-    def controlled_flock(_descriptor, operation):
-        if (
-            operation == fcntl.LOCK_EX
-            and getattr(task_thread, "awaiting_config_lock", False)
-        ):
-            task_thread.awaiting_config_lock = False
-            with config_lock_changed:
-                if task_thread.role == "second":
-                    second_lock_attempted.set()
-                while config_lock_owner["role"]:
-                    config_lock_changed.wait()
-                config_lock_owner["role"] = task_thread.role
-                task_thread.holds_config_lock = True
-            return None
-        if operation == fcntl.LOCK_UN and getattr(
-            task_thread, "holds_config_lock", False
-        ):
-            with config_lock_changed:
-                config_lock_owner["role"] = ""
-                task_thread.holds_config_lock = False
-                config_lock_changed.notify_all()
-        return None
-
-    def configure_task(role, candidate):
-        task_thread.role = role
-        if role == "second":
-            second_worker_started.set()
-            second_worker_allowed.wait()
-        return runner.ensure_task_git_excludes(candidate)
-
-    with mock.patch(
-        "dispatch_workspace.run_command", side_effect=concurrent_git_command
-    ), mock.patch("dispatch_workspace.fcntl.flock", side_effect=controlled_flock):
-        with ThreadPoolExecutor(max_workers=len(concurrent_worktrees)) as pool:
-            first_result = pool.submit(
-                configure_task, "first", concurrent_worktrees[0]
-            )
-            check(
-                "parallel task setup reaches the held shared writer",
-                writer_entered.wait(),
-            )
-            second_result = pool.submit(
-                configure_task, "second", concurrent_worktrees[1]
-            )
-            second_worker_started.wait()
-            check(
-                "held writer survives controlled second-worker scheduling delay",
-                not first_writer_released.is_set()
-                and not second_lock_attempted.is_set(),
-                "the first writer was released before the delayed worker ran",
-            )
-            second_worker_allowed.set()
-            concurrent_results = [first_result.result(), second_result.result()]
     check(
         "parallel task setup serializes the shared Git config writer",
-        concurrent_results == [None, None]
-        and second_lock_attempted.is_set()
-        and not overlap_observed.is_set(),
-        "the second task entered before the first writer released",
+        serialized.returncode == 0,
+        serialized.stderr,
+    )
+    bypassed = subprocess.run(
+        [sys.executable, str(lock_scenario), "--simulate-lock-bypass"],
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
     )
     check(
-        "parallel task setup preserves each worktree-local exclude",
-        all(
-            set(
-                (concurrent_git_dirs[candidate] / "info" / "task-exclude")
-                .read_text(encoding="utf-8")
-                .splitlines()
-            )
-            == set(runner.TASK_LOCAL_GIT_EXCLUDES)
-            for candidate in concurrent_worktrees
-        ),
+        "shared Git config lock proof is mutation-sensitive",
+        bypassed.returncode != 0
+        and "shared Git config writer bypassed its lock" in bypassed.stderr,
+        bypassed.stderr,
     )
 
     request_id = str(uuid.uuid4())
