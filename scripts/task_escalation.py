@@ -28,6 +28,7 @@ from task_escalation_records import (
 )
 from task_plan_authority import PlanAuthorityError, record_plan_amendment
 from harness.adapters.cmux import run_cmux
+from harness.adapters.cmux import CmuxAdapter, CmuxError
 from harness.artifact_repair import (
     VERIFICATION_BASELINE_GAP_DECISIONS,
     VERIFICATION_MECHANISM_FLAKE_DECISIONS,
@@ -94,16 +95,16 @@ def read_surface(worktree: Path, meta: dict[str, Any], key: str, fallback: str) 
 
 
 def send(surface: str, message: str, *, clear_codex: bool = False) -> None:
-    if clear_codex:
-        for _ in range(40):
-            run_cmux(["send-key", "--surface", surface, "backspace"])
-    sent = run_cmux(["send", "--surface", surface, message])
-    if sent.returncode != 0:
-        die((sent.stdout + sent.stderr).strip() or "cmux send failed", 3)
-    time.sleep(0.2)
-    entered = run_cmux(["send-key", "--surface", surface, "Enter"])
-    if entered.returncode != 0:
-        die((entered.stdout + entered.stderr).strip() or "cmux send-key failed", 3)
+    cmux = CmuxAdapter()
+    try:
+        if clear_codex:
+            for _ in range(40):
+                cmux.send_key(surface, "Backspace")
+        cmux.paste(surface, message)
+        time.sleep(0.2)
+        cmux.send_key(surface, "Enter")
+    except (CmuxError, OSError, ValueError) as exc:
+        die(str(exc) or "cmux ordered relay failed", 3)
 
 
 def load_unattended(worktree: Path) -> tuple[dict[str, Any], dict[str, Any]]:

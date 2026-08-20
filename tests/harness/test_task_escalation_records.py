@@ -847,4 +847,41 @@ with tempfile.TemporaryDirectory(prefix="task-escalation-stale-self-heal.") as r
     )
 
 
+class OrderedInputProbe:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, str]] = []
+
+    def paste(self, surface: str, message: str) -> None:
+        self.calls.append(("paste", surface, message))
+
+    def send_key(self, surface: str, key: str) -> None:
+        self.calls.append(("send-key", surface, key))
+
+
+ordered_input = OrderedInputProbe()
+with patch.object(
+    task_escalation_cli, "CmuxAdapter", return_value=ordered_input
+):
+    task_escalation_cli.send(
+        "00000000-0000-0000-0000-000000000123",
+        "continue exact recovery",
+    )
+check(
+    "coordinator relay uses one exact ordered paste before submit",
+    ordered_input.calls
+    == [
+        (
+            "paste",
+            "00000000-0000-0000-0000-000000000123",
+            "continue exact recovery",
+        ),
+        (
+            "send-key",
+            "00000000-0000-0000-0000-000000000123",
+            "Enter",
+        ),
+    ],
+)
+
+
 print("All task escalation record tests passed.")
