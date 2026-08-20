@@ -32,9 +32,9 @@
   repaint ожидает точный message anchor, а фиксированный sleep больше не даёт
   authority для `Enter`.
 - Доставка coordinator relay использует write-ahead receipt существующего
-  retained-notification transport. Exact accepted replay не создаёт эффектов,
-  а crash на reserved editor-write или submit boundary fail closed без
-  повторного prompt или Enter.
+  retained-notification transport. Очистка stale Codex editor находится под
+  тем же lock и начинается с durable reservation; accepted replay возвращается
+  до любого cmux read/key, а crash в clear/editor-write/submit fail closed.
 - Синхронизация профиля Codex теперь формирует ограниченные имена backup из
   читаемого префикса и полного SHA-256 канонического пути, проверяет все backup
   до первой замены target и не создаёт backup directory при чистом no-op apply.
@@ -46,9 +46,9 @@
   registered production transition corridors прошли по 50 повторов, затем
   прошёл полный repository test gate.
 - Codex MCP gateway suite прошёл все 126 проверок. Review на Sol XHigh нашёл
-  и coordinator preflight omission, и его первоначально non-durable effect
-  boundary; оба закрыты в финальном descendant.
-- Контур scripts зафиксирован по точному live tree: 297 файлов / 114 199 строк
+  coordinator preflight omission, первоначально non-durable effect boundary и
+  pre-receipt Codex clear; всё закрыто в финальном descendant.
+- Контур scripts зафиксирован по точному live tree: 297 файлов / 114 218 строк
   без спекулятивного запаса.
 
 ## [2.8.9] — 2026-08-20

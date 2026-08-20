@@ -940,6 +940,94 @@ with tempfile.TemporaryDirectory(prefix="task-escalation-delivery.") as raw:
         replay_probe.calls == [],
     )
 
+    clear_receipt_path = delivery_root / "clear-relay.json"
+    clear_identity = {**relay_identity, "record_id": "clear-relay"}
+    clear_delivery = SeparateSubmitProbe(
+        [
+            "• Status 0\n› stale draft",
+            "• Status 0\n›",
+            "• Status 1\n›",
+            "• Status 2\n› continue exact recovery",
+        ]
+    )
+    with patch.object(
+        task_escalation_cli, "CmuxAdapter", return_value=clear_delivery
+    ):
+        task_escalation_cli.send(
+            relay_surface,
+            "continue exact recovery",
+            runtime="codex",
+            receipt_path=clear_receipt_path,
+            delivery_identity=clear_identity,
+            clear_codex=True,
+            observation_limit=2,
+            wait=lambda _seconds: None,
+        )
+    clear_replay = SeparateSubmitProbe([])
+    with patch.object(
+        task_escalation_cli, "CmuxAdapter", return_value=clear_replay
+    ):
+        task_escalation_cli.send(
+            relay_surface,
+            "continue exact recovery",
+            runtime="codex",
+            receipt_path=clear_receipt_path,
+            delivery_identity=clear_identity,
+            clear_codex=True,
+            wait=lambda _seconds: None,
+        )
+    check(
+        "accepted Codex clear relay replay emits zero cmux effects",
+        clear_replay.calls == [],
+    )
+
+    clear_crash_path = delivery_root / "clear-crash.json"
+    clear_crash_identity = {**relay_identity, "record_id": "clear-crash"}
+    clear_crash = CrashAfterEffectProbe(["• Status 0\n› stale draft"], "send-key")
+    with patch.object(
+        task_escalation_cli, "CmuxAdapter", return_value=clear_crash
+    ):
+        try:
+            task_escalation_cli.send(
+                relay_surface,
+                "continue exact recovery",
+                runtime="codex",
+                receipt_path=clear_crash_path,
+                delivery_identity=clear_crash_identity,
+                clear_codex=True,
+                wait=lambda _seconds: None,
+            )
+        except SystemExit as exc:
+            clear_crash_exit = exc.code
+        else:
+            clear_crash_exit = 0
+    clear_crash_replay = SeparateSubmitProbe([])
+    with patch.object(
+        task_escalation_cli, "CmuxAdapter", return_value=clear_crash_replay
+    ):
+        try:
+            task_escalation_cli.send(
+                relay_surface,
+                "continue exact recovery",
+                runtime="codex",
+                receipt_path=clear_crash_path,
+                delivery_identity=clear_crash_identity,
+                clear_codex=True,
+                wait=lambda _seconds: None,
+            )
+        except SystemExit as exc:
+            clear_crash_replay_exit = exc.code
+        else:
+            clear_crash_replay_exit = 0
+    check(
+        "Codex clear crash stays durably uncertain without replay",
+        clear_crash_exit == 3
+        and clear_crash_replay_exit == 3
+        and json.loads(clear_crash_path.read_text(encoding="utf-8"))["stage"]
+        == "prepare-reserved"
+        and clear_crash_replay.calls == [],
+    )
+
     paste_crash_path = delivery_root / "paste-crash.json"
     paste_crash = CrashAfterEffectProbe(["• Status 0\n›"], "send")
     with patch.object(

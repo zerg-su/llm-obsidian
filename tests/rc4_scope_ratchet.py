@@ -565,7 +565,7 @@ SCRIPT_FILE_CEILING = 297
 #: adds bounded repaint containment, transactional config-sync guards, and the
 #: shared coordinator editor preflight. No script is added and the measured
 #: candidate has zero headroom.
-SCRIPT_LINE_CEILING = 114_199
+SCRIPT_LINE_CEILING = 114_218
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

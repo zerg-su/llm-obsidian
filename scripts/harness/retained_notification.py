@@ -26,6 +26,8 @@ from .runtime_session_continuation import (
 
 DELIVERY_STAGES = frozenset(
     {
+        "prepare-reserved",
+        "prepare-accepted",
         "paste-reserved",
         "transport-accepted",
         "submit-reserved",
@@ -219,6 +221,7 @@ def deliver_retained_notification_once(
     receipt_path: Path,
     identity: Mapping[str, object],
     successor_ready: Callable[[], bool],
+    prepare_editor: Callable[[], None] | None = None,
     observation_limit: int = 40,
     wait: Callable[[float], None] = sleep,
 ) -> None:
@@ -235,12 +238,26 @@ def deliver_retained_notification_once(
         stage = str(current.get("stage") or "") if current is not None else ""
         if stage and stage not in DELIVERY_STAGES:
             raise RetainedNotificationError("notification delivery stage is invalid")
-        if stage == "paste-reserved" or stage == "submit-reserved":
+        if stage in {"prepare-reserved", "paste-reserved", "submit-reserved"}:
             raise RetainedNotificationError(
                 "notification delivery effect is uncertain"
             )
         if stage in {"submit-accepted", "superseded"}:
             return
+
+        if current is None and prepare_editor is not None:
+            preparation = {
+                **expected,
+                "submit_count": 0,
+                "pre_screen_sha256": "",
+                "pre_editor_sha256": "",
+                "paste_screen_sha256": "",
+            }
+            _atomic_json(receipt_path, {**preparation, "stage": "prepare-reserved"})
+            prepare_editor()
+            _atomic_json(receipt_path, {**preparation, "stage": "prepare-accepted"})
+            current = _read_receipt(receipt_path, expected)
+            stage = "prepare-accepted"
 
         def observe_stage(
             next_stage: str,
@@ -275,7 +292,7 @@ def deliver_retained_notification_once(
                 ownership_ready=lambda: True,
                 reserve_retry=lambda: False,
                 observe_stage=observe_stage,
-                send_prompt=current is None,
+                send_prompt=current is None or stage == "prepare-accepted",
                 pre_send_screen_sha256=(
                     str(current.get("pre_screen_sha256") or "") if current else ""
                 ),

@@ -113,7 +113,7 @@ def send(
 ) -> str:
     cmux = CmuxAdapter()
     try:
-        if clear_codex:
+        def prepare_editor() -> None:
             screen = cmux.read(surface)
             prompt = classify(runtime, screen)
             if prompt.interactive:
@@ -140,6 +140,7 @@ def send(
                 raise RetainedNotificationError(
                     "coordinator relay editor-unavailable"
                 )
+
         deliver_retained_notification_once(
             cmux,
             surface_id=surface,
@@ -148,6 +149,7 @@ def send(
             receipt_path=receipt_path,
             identity=delivery_identity,
             successor_ready=lambda: False,
+            prepare_editor=prepare_editor if clear_codex else None,
             observation_limit=observation_limit,
             wait=wait,
         )
