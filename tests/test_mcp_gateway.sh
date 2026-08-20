@@ -531,6 +531,18 @@ python3 "$GW/codex-sync.py" --repo-root "$SANDBOX/codex-repo" --codex-home "$SAN
 expect_exit "H12 second --check clean" "$?" 0
 expect_grep "H13 no changes message" "$OUT" "codex-sync: no changes"
 
+NOOP_HOME="$SANDBOX/noop-home"
+mkdir -p "$NOOP_HOME"
+cp "$SANDBOX/codex-home/"*.toml "$NOOP_HOME/"
+python3 "$GW/codex-sync.py" --repo-root "$SANDBOX/codex-repo" --codex-home "$NOOP_HOME" --apply >"$OUT" 2>&1
+expect_exit "H13a clean --apply exits 0" "$?" 0
+expect_grep "H13b clean --apply reports no changes" "$OUT" "codex-sync: no changes"
+if [[ ! -e "$NOOP_HOME/backups" ]]; then
+  ok "H13c clean --apply creates no backup directory"
+else
+  bad "H13c clean --apply creates no backup directory" "unexpected $NOOP_HOME/backups"
+fi
+
 mkdir -p "$SANDBOX/fork-repo/.codex" "$SANDBOX/fork-repo/.mcp-profiles" "$SANDBOX/fork-repo/.claude-plugin" "$SANDBOX/fork-home"
 cp "$SANDBOX/codex-repo/.mcp.json.example" "$SANDBOX/fork-repo/.mcp.json.example"
 cp "$SANDBOX/codex-repo/.mcp-profiles/research.json" "$SANDBOX/fork-repo/.mcp-profiles/research.json"

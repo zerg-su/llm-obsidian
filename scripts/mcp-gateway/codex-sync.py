@@ -318,6 +318,8 @@ def prepare_backups(paths: list[Path], backup_dir: Path) -> None:
 def apply_changes(changed: list[tuple[Path, str, str]], backup_dir: Path) -> None:
     """Create every backup before the first target replacement."""
 
+    if not changed:
+        return
     prepare_backups([path for path, _old, _new in changed], backup_dir)
     for path, _old, new in changed:
         path.parent.mkdir(parents=True, exist_ok=True)
