@@ -72,8 +72,13 @@ def _editor_state(runtime: str, screen: str) -> tuple[str, ...]:
     return tuple(editor_lines)
 
 
-def _editor_digest(runtime: str, screen: str) -> str:
-    return sha256("\n".join(_editor_state(runtime, screen)).encode("utf-8")).hexdigest()
+def _editor_digest(runtime: str, screen: str, anchor: str = "") -> str:
+    editor = _editor_state(runtime, screen)
+    if runtime == "claude" and _claude_alternate_input_state(
+        screen, anchor
+    ) == "input-ready":
+        editor = _claude_alternate_editor(screen)
+    return sha256("\n".join(editor).encode("utf-8")).hexdigest()
 
 
 def _claude_alternate_editor(screen: str) -> tuple[str, ...]:
@@ -91,6 +96,25 @@ def _claude_alternate_editor(screen: str) -> tuple[str, ...]:
             break
         editor.append(line)
     return tuple(editor)
+
+
+def _claude_alternate_input_state(screen: str, anchor: str) -> str:
+    """Classify only Claude's current alternate composer, not retained scrollback."""
+
+    editor = _claude_alternate_editor(screen)
+    if not editor:
+        return ""
+    if re.fullmatch(r"›\s*[1-9][.)]\s+\S.*", editor[0]):
+        return "unknown"
+    current = " ".join(editor)
+    ready = bool(anchor and anchor in current) or any(
+        re.fullmatch(
+            r"› \[Pasted text #[1-9][0-9]* \+[1-9][0-9]* lines?\]",
+            line,
+        )
+        for line in editor
+    )
+    return "input-ready" if ready else ""
 
 
 def classify_continuation_screen(runtime: str, screen: str, anchor: str) -> str:
@@ -138,22 +162,9 @@ def classify_continuation_screen(runtime: str, screen: str, anchor: str) -> str:
         # reassembled before matching; a bare ``›`` or unrelated choice stays
         # fail-closed.  The provider's native collapsed-paste token is also an
         # exact post-send editor shape and carries no submit authority itself.
-        alternate_editor = _claude_alternate_editor(screen)
-        current_editor = " ".join(alternate_editor)
-        if alternate_editor and re.fullmatch(
-            r"›\s*[1-9][.)]\s+\S.*", alternate_editor[0]
-        ):
-            return "unknown"
-        if alternate_editor and anchor and anchor in current_editor:
-            return "input-ready"
-        if any(
-            re.fullmatch(
-                r"› \[Pasted text #[1-9][0-9]* \+[1-9][0-9]* lines?\]",
-                line,
-            )
-            for line in alternate_editor
-        ):
-            return "input-ready"
+        alternate_state = _claude_alternate_input_state(screen, anchor)
+        if alternate_state:
+            return alternate_state
     if any(anchor and anchor in line for line in editor_lines):
         return "input-ready"
     if editor_lines:
@@ -298,7 +309,7 @@ def await_initial_input_visible(
         )
         if state == "input-ready":
             if not before_editor_sha256 or (
-                _editor_digest(runtime, screen) != before_editor_sha256
+                _editor_digest(runtime, screen, anchor) != before_editor_sha256
             ):
                 return True
         if state == "permission":
@@ -306,7 +317,7 @@ def await_initial_input_visible(
         if (
             before_editor_sha256
             and _editor_state(runtime, screen)
-            and _editor_digest(runtime, screen) != before_editor_sha256
+            and _editor_digest(runtime, screen, anchor) != before_editor_sha256
         ):
             return True
         if observation + 1 < observation_limit:
@@ -487,7 +498,7 @@ def deliver_continuation(
                 )
             if (
                 _screen_digest(screen) == pre_send_digest
-                or _editor_digest(runtime, screen) == pre_send_editor_digest
+                or _editor_digest(runtime, screen, anchor) == pre_send_editor_digest
             ):
                 if observation + 1 < observation_limit:
                     wait(observation_interval_seconds)

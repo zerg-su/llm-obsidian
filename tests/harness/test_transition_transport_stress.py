@@ -271,6 +271,22 @@ def claude_initial_input_handoff(repetition: int) -> None:
         wait=lambda _seconds: None,
     )
 
+    retained_idle = TypedClaudePort(
+        f"• Earlier status\n❯\n\n› {prompt[:46]}\n  {prompt[46:]}"
+    )
+    assert await_initial_input_visible(
+        retained_idle,
+        surface_id=SURFACE,
+        runtime="claude",
+        text=prompt,
+        before_editor_sha256=_editor_digest(
+            "claude", "• Earlier status\n❯"
+        ),
+        observation_limit=1,
+        observation_interval_seconds=0,
+        wait=lambda _seconds: None,
+    )
+
     collapsed = TypedClaudePort(
         f"› [Pasted text #{repetition + 1} +2 lines]"
     )

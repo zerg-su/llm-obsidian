@@ -146,6 +146,19 @@ send_visible_notification(
 assert delayed.sent == [PROMPT] and delayed.keys == ["Enter"]
 print("OK   retained notification waits for editor visibility before Enter")
 
+retained_idle_result, retained_idle_port, _, _ = run_case(
+    [
+        f"• Earlier status\n❯\n\n› {PROMPT.splitlines()[0]}\n  Inspect the exact HEAD.",
+        "✻ Working… (1s · 12 tokens)\n❯",
+    ],
+    pre_screen="• Earlier status\n❯",
+    runtime="claude",
+)
+assert retained_idle_result.acknowledged
+assert retained_idle_port.sent == [PROMPT]
+assert retained_idle_port.keys == ["Enter"]
+print("OK   current Claude composer supersedes retained idle scrollback")
+
 space_boundary_prompt = f"{'x' * 95} continue after the anchor boundary"
 space_boundary = FakePort(["› old", f"› {'x' * 95}"])
 send_visible_notification(

@@ -26,6 +26,10 @@ packages were published for them.
   only inside the final contiguous composer before the exact prompt anchor is
   checked; an old scrollback anchor cannot authorize a bare composer or
   unrelated choice.
+- When a retained idle `❯` remains in Claude scrollback, visibility and digest
+  acknowledgement now select the same exact current `›` composer. Initial
+  executor/reviewer input and retained transition delivery therefore submit
+  once instead of failing `input-unconfirmed` or remaining unsubmitted.
 - Safely pending retained delivery remains observable instead of converting a
   busy custom or engineering/fix session into immediate `attention-required`.
   Uncertain paste/submit effects still fail closed.
@@ -44,7 +48,10 @@ packages were published for them.
   exactly one `Enter`; exact-successor races emit none. The added Claude
   initial-input corridor accepts wrapped and collapsed exact input while
   rejecting a bare composer, including bare and unrelated composers beneath a
-  matching scrollback anchor, in all 50 repetitions.
+  matching scrollback anchor, in all 50 repetitions. It also covers a current
+  typed composer beneath retained idle scrollback for both initial and
+  continuation delivery. The live scripts ratchet is pinned to the exact
+  297-file / 113,935-line candidate with no speculative headroom.
 - An exact-HEAD real-cmux gate completed 20 deliveries for each supported
   runtime with zero provider calls and zero owned workspace tails.
 - A deterministic parallel-launch regression holds the first shared-config

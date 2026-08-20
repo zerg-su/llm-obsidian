@@ -516,6 +516,13 @@ workspace owner. One common-directory lock now serializes only that shared
 mutation; each worktree keeps its independent exclude/config write. The live
 ceiling is therefore pinned to exactly 297 files / 113,924 lines with no
 speculative headroom.
+
+Final mirrored dogfood exposed one mixed Claude screen that the earlier
+initial-input regression did not model: a retained idle ``❯`` in scrollback
+above the current typed ``›`` composer. The shared initial/continuation digest
+now follows the semantically recognized current composer, adding exactly 11
+measured production lines. The live ceiling is pinned to exactly 297 files /
+113,935 lines with no speculative headroom.
 """
 
 from __future__ import annotations
@@ -541,7 +548,7 @@ SCRIPT_FILE_CEILING = 297
 #: accepted-callback archive adds the exact 17-line directory-fsync boundary
 #: required by the final 2.8.2 review plus one measured recovery branch line
 #: that re-establishes both barriers after an interrupted mutation.
-SCRIPT_LINE_CEILING = 113_924
+SCRIPT_LINE_CEILING = 113_935
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

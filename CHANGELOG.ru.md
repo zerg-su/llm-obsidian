@@ -32,6 +32,10 @@
   собирается только внутри последнего непрерывного composer и затем сверяется
   с точным anchor prompt; старый anchor в scrollback не может авторизовать
   пустой composer или посторонний choice.
+- Если старый idle `❯` остаётся в scrollback Claude, visibility и digest-
+  acknowledgement теперь выбирают один и тот же точный текущий composer `›`.
+  Initial input executor/reviewer и retained transition delivery отправляются
+  ровно один раз вместо `input-unconfirmed` или неотправленного сообщения.
 - Безопасно ожидающая retained-доставка остаётся наблюдаемой и больше не
   переводит занятую custom- или engineering/fix-сессию сразу в
   `attention-required`. Неопределённые эффекты paste/submit по-прежнему
@@ -52,7 +56,10 @@
   гонка с точным successor — ни одного. Добавленный Claude initial-input
   corridor во всех 50 повторениях принимает точный wrapped/collapsed input и
   отклоняет пустой composer, в том числе bare/unrelated composer под
-  совпадающим anchor из scrollback.
+  совпадающим anchor из scrollback. Она также покрывает текущий typed composer
+  под retained idle scrollback для initial и continuation delivery. Ratchet
+  live scripts зафиксирован точно на кандидате 297 файлов / 113 935 строк без
+  спекулятивного запаса.
 - Exact-HEAD real-cmux gate выполнил по 20 доставок для каждого runtime с нулём
   provider calls и нулём оставшихся owned workspace.
 - Детерминированная regression параллельного запуска удерживает первый общий
