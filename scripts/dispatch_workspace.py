@@ -30,6 +30,7 @@ from dispatch_custom_contracts import (
 from dispatch_io import DispatchError, atomic_json, atomic_text, utc_now
 from dispatch_setup import render_task_prompt, review_policy, review_topology_preview
 from approved_plan_snapshot import bind_approved_plan_snapshot
+from harness.dashboard_facade import facade_dashboard_command
 
 
 def run_command(
@@ -55,43 +56,32 @@ def run_command(
     return result
 
 
-def _enable_worktree_config(worktree: Path) -> None:
-    """Serialize the one shared Git-config mutation across task launches."""
+def observer_command(vault_root: Path, request_id: str) -> list[str]:
+    """Exact temporary observer argv before durable task-root creation.
 
-    raw_common_dir = run_command(
-        ["git", "rev-parse", "--git-common-dir"],
-        cwd=worktree,
-        label="task Git common directory",
-    ).stdout.strip()
-    if not raw_common_dir:
-        raise DispatchError("task Git common directory is empty")
-    common_dir = Path(raw_common_dir)
-    if not common_dir.is_absolute():
-        common_dir = worktree / common_dir
-    common_dir = common_dir.resolve()
-    if not common_dir.is_dir():
-        raise DispatchError("task Git common directory is not a directory")
-    config_guard = common_dir / "llm-obsidian-worktree-config.lock"
-    if config_guard.is_symlink() or (
-        config_guard.exists() and not config_guard.is_file()
-    ):
-        raise DispatchError("task Git config lock is not a regular file")
-    with config_guard.open("a+", encoding="utf-8") as handle:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-        try:
-            run_command(
-                ["git", "config", "extensions.worktreeConfig", "true"],
-                cwd=worktree,
-                label="task Git worktree config",
-            )
-        finally:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    The caller appends its own exact coordinator surface. The observer stays
+    outside Harness ownership and carries no lifecycle authority, so this
+    argv can neither reorder validate/start nor block an approved pipeline.
+    """
+
+    root = Path(vault_root)
+    return facade_dashboard_command(
+        vault=root,
+        store=root / ".vault-meta" / "harness",
+        caller_surface="",
+        facade="dispatch",
+        request_id=request_id,
+    )
 
 
 def ensure_task_git_excludes(worktree: Path) -> None:
     """Keep root task bindings out of only this worktree's Git status."""
 
-    _enable_worktree_config(worktree)
+    run_command(
+        ["git", "config", "extensions.worktreeConfig", "true"],
+        cwd=worktree,
+        label="task Git worktree config",
+    )
     raw_git_dir = run_command(
         ["git", "rev-parse", "--absolute-git-dir"],
         cwd=worktree,

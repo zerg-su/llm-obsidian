@@ -26,7 +26,6 @@ from review_contract import (  # noqa: E402
     review_runtime_provider,
 )
 from harness.status_segment import CONTROLLER_KINDS  # noqa: E402
-from harness.review_workspace import ReviewWorkspaceBinding  # noqa: E402
 from harness.finalization_policy import (  # noqa: E402
     FinalizationPolicy,
     compile_finalization_routes,
@@ -677,17 +676,3 @@ with tempfile.TemporaryDirectory(prefix="review-topology-prompts.") as raw:
         "Classify every declared success-evidence item" in no_summary_prompt
         and "Check every declared non-goal for scope creep" in no_summary_prompt,
     )
-
-binding = ReviewWorkspaceBinding(
-    review_operation_id="review-program",
-    workspace_id="11111111-1111-4111-8111-111111111111",
-    workspace_ref="workspace:1",
-    window_id="22222222-2222-4222-8222-222222222222",
-    window_ref="window:2",
-    anchor_surface_id="33333333-3333-4333-8333-333333333333",
-    anchor_surface_ref="surface:3",
-)
-check(
-    "review topology persists one exact program workspace binding",
-    ReviewWorkspaceBinding.from_payload(binding.payload()) == binding,
-)

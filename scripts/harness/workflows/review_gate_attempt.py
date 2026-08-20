@@ -21,7 +21,6 @@ from ..pre_model_reviewer_retirement import (
 from ..review_input_rollover import archive_prior_review_input
 from ..store import StoreError
 from ..dashboard_facade import DashboardBinding
-from ..review_workspace import late_started_workspace_binding, recovered_review_lane_payload
 from ..review_attempt import (
     EXACT_HEAD_REVIEW_PROTOCOL,
     ReviewAttempt,
@@ -182,18 +181,9 @@ class ReviewGateAttemptMixin:
             "callback-submit-attention.json"
         )
         ready_path = receipt_path.with_name("ready.json")
-        session_path = receipt_path.with_name("session.json")
         try:
             receipt = _read_json(receipt_path)
             ready = _read_json(ready_path)
-            session = _read_json(session_path)
-            workspace = late_started_workspace_binding(
-                session,
-                receipt,
-                review_operation_id=attempt.identity.attempt_id,
-                lane_operation_id=lane.operation_id,
-                lane_run_id=lane.run_id,
-            )
         except (OSError, ValueError):
             return False
         if len(children) != 1:
@@ -283,12 +273,23 @@ class ReviewGateAttemptMixin:
             or receipt.get("child_run_id") != child.run_id
         ):
             return False
-        raw_lane = recovered_review_lane_payload(
-            stored_lanes,
-            lane,
-            parent,
-            post_cleanup=post_cleanup,
-            workspace=workspace,
+        raw_lane = (
+            {
+                **stored_lanes[0],
+                "surface_id": "",
+                "state": "complete",
+            }
+            if post_cleanup and stored_lanes
+            else {
+                "axis": lane.axis,
+                "operation_id": lane.operation_id,
+                "lane_id": lane.lane_id,
+                "run_id": lane.run_id,
+                "surface_id": parent.resources.surface_id,
+                "checkpoint": "",
+                "verification_iteration": lane.verification_iteration,
+                "state": parent.state,
+            }
         )
         recovered = ReviewAttempt(attempt.identity, "awaiting-callback")
         with self._locked():
@@ -300,7 +301,6 @@ class ReviewGateAttemptMixin:
             current.update(
                 status="reviewing",
                 lanes=[raw_lane],
-                review_workspace=workspace.payload(),
                 attempt=recovered.payload(),
             )
             _atomic_json(self.state_path, current)

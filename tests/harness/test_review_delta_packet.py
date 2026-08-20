@@ -36,8 +36,6 @@ from task_review_shared import ResolutionBundle  # noqa: E402
 
 REVIEWED = "a" * 40
 RESOLVED = "b" * 40
-WORKSPACE = "33333333-3333-4333-8333-333333333333"
-WINDOW = "44444444-4444-4444-8444-444444444444"
 
 
 def check(label: str, value: bool) -> None:
@@ -222,8 +220,6 @@ rejected(
 class SessionResult:
     record: OperationRecord
     checkpoint: str
-    workspace_id: str = WORKSPACE
-    window_id: str = WINDOW
 
 
 class FakeRuntime:
@@ -338,8 +334,7 @@ with tempfile.TemporaryDirectory(prefix="review-delta-attention.") as raw:
     check(
         "complete materialized packet is valid before prompt delivery",
         resolution_packet_ready(gate, run, context_manifest, bundle)
-        and gate.read()["status"] == "reviewing"
-        and gate.read()["review_workspace"]["workspace_id"] == WORKSPACE,
+        and gate.read()["status"] == "reviewing",
     )
     materialized = json.loads(context_manifest.read_text(encoding="utf-8"))
     part_index = next(

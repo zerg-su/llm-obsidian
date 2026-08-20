@@ -55,8 +55,6 @@ from review_contract import VERIFY_BUDGETS  # noqa: E402
 PROJECT = "cccc0267-0000-4000-8000-000000000000"
 ORIGIN_SURFACE = "00000000-0000-4000-8000-00000000c0de"
 TASK_SURFACE = "00000000-0000-4000-8000-00000000beef"
-REVIEW_WORKSPACE = "00000000-0000-4000-8000-00000000cafe"
-REVIEW_WINDOW = "00000000-0000-4000-8000-00000000fade"
 COORDINATOR_SESSION = "coordinator-session"
 
 _RUNNER_SPEC = importlib.util.spec_from_file_location(
@@ -189,11 +187,6 @@ class FakeReviewSessionResult:
     record: object
     checkpoint: str
     checkpoint_sha256: str = ""
-    surface_ref: str = "surface:1"
-    workspace_id: str = REVIEW_WORKSPACE
-    workspace_ref: str = "workspace:1"
-    window_id: str = REVIEW_WINDOW
-    window_ref: str = "window:1"
 
 
 class CorridorReviewRuntime:
@@ -209,11 +202,6 @@ class CorridorReviewRuntime:
         self.owner_id = owner_id
         self.crashes = crashes
         self.started = 0
-        self.closed_workspaces: list[tuple[str, str]] = []
-
-    def close_workspace(self, workspace_id: str, window_id: str) -> str:
-        self.closed_workspaces.append((workspace_id, window_id))
-        return "closed"
 
     def start(
         self,

@@ -13,7 +13,7 @@ from harness.runtime_sessions import (
     RuntimeSessionResult,
 )
 from harness.workflows.dispatch import start_dispatch
-from harness.dashboard_facade import DashboardLaunchReceipt, launch_facade_dashboard
+from harness.dashboard_facade import rebind_facade_dashboard
 from dispatch_contracts import (
     COORDINATOR_ACTION,
     DispatchError,
@@ -87,6 +87,14 @@ def start(
         stage_started = time.monotonic()
         create_worktree(request)
         identity = initialize_task(request)
+        dashboard_rebind = rebind_facade_dashboard(
+            vault=request["vault_root"],
+            store=request["vault_root"] / ".vault-meta" / "harness",
+            caller_surface=request["origin_surface"],
+            facade="dispatch",
+            temporary_request_id=request["request_id"],
+            root_operation_id=identity["task_id"],
+        )
         atomic_text(
             request["worktree"] / ".task-prompt.md",
             render_task_prompt(request, config),
@@ -108,7 +116,6 @@ def start(
             store_root=request["vault_root"] / ".vault-meta" / "harness",
         )
         prepared: dict[str, str] = {}
-        dashboard_receipt: dict[str, DashboardLaunchReceipt] = {}
 
         def prepare_surface(opened: RuntimeSessionResult) -> None:
             child = _child_identity(opened)
@@ -125,14 +132,6 @@ def start(
                 child,
             )
             prepared.update(child)
-            dashboard_receipt["root"] = launch_facade_dashboard(
-                vault=request["vault_root"],
-                store=request["vault_root"] / ".vault-meta" / "harness",
-                caller_surface=child["surface"],
-                facade="dispatch",
-                request_id=identity["task_id"],
-                root_operation_id=identity["task_id"],
-            )
 
         stage = "provider-runtime"
         stage_started = time.monotonic()
@@ -218,7 +217,7 @@ def start(
             "task_window": prepared["window"],
             "task_window_ref": prepared["window_ref"],
             "log_status": log_status,
-            "observer": dashboard_receipt["root"].__dict__,
+            "observer": dashboard_rebind.__dict__,
             "coordinator_action": COORDINATOR_ACTION,
             "setup_duration_ms": round(
                 (time.monotonic() - run_started) * 1000

@@ -131,7 +131,6 @@ class LivenessState:
     callback_sha256: str = ""
     receipt_sha256: str = ""
     stable_result_reads: int = 0
-    reconciled_result_identity: str = ""
     nudge_count: int = 0
     restart_count: int = 0
     callback_submit_binding: str = ""
@@ -217,31 +216,11 @@ def observe_liveness(
             and evidence.receipt_sha256 != previous.receipt_sha256,
         )
     )
-    same_result_generation = (
-        evidence.operation_revision == previous.operation_revision
-        and evidence.operation_state == previous.operation_state
-    )
     stable_result_reads = (
         previous.stable_result_reads + 1
         if evidence.typed_result_sha256
-        and same_result_generation
         and evidence.typed_result_sha256 == previous.typed_result_sha256
         else (1 if evidence.typed_result_sha256 else 0)
-    )
-    result_identity = (
-        hashlib.sha256(
-            json.dumps(
-                {
-                    "operation_revision": evidence.operation_revision,
-                    "operation_state": evidence.operation_state,
-                    "typed_result_sha256": evidence.typed_result_sha256,
-                },
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode()
-        ).hexdigest()
-        if evidence.typed_result_sha256
-        else ""
     )
     current = replace(
         previous,
@@ -263,9 +242,7 @@ def observe_liveness(
     if (
         evidence.typed_result_sha256
         and stable_result_reads >= policy.stable_result_reads
-        and result_identity != current.reconciled_result_identity
     ):
-        current = replace(current, reconciled_result_identity=result_identity)
         return _decision("reconcile-result", evidence, current), current
     if evidence.process_status == "dead":
         if current.restart_count < policy.max_restarts:

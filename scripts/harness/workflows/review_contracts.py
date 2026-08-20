@@ -21,7 +21,6 @@ from ..contracts import (
 )
 from ..runtime_sessions import RuntimeSessionRequest
 from ..dashboard_facade import DashboardLaunchReceipt
-from ..review_workspace import ReviewWorkspaceBinding
 from ..state_machine import TERMINAL
 from ..review_program import PURPOSES
 from review_contract import (
@@ -382,8 +381,6 @@ class ReviewRuntimePort(Protocol):
 
     def cleanup(self, owner_id: str, operation_id: str) -> object: ...
 
-    def close_workspace(self, workspace_id: str, window_id: str) -> str: ...
-
     def cleanup_superseded_review(self, receipt_path: Path) -> object: ...
 
 
@@ -401,8 +398,6 @@ class ReviewLaneSession:
     max_verify_iterations: int
     state: str = "running"
     checkpoint_sha256: str = ""
-    workspace_id: str = ""
-    window_id: str = ""
 
     def __post_init__(self) -> None:
         try:
@@ -429,23 +424,10 @@ class ReviewExecution:
     request: ReviewOperationRequest
     lanes: tuple[ReviewLaneSession, ...]
     dashboard: DashboardLaunchReceipt | None = None
-    workspace: ReviewWorkspaceBinding | None = None
 
     def __post_init__(self) -> None:
         if tuple(lane.axis for lane in self.lanes) != self.request.policy.axes:
             raise ValueError("review execution must preserve every ordered axis")
-        if self.workspace is not None:
-            if self.workspace.review_operation_id != self.request.policy.operation_id:
-                raise ValueError("review workspace operation identity changed")
-            live = tuple(lane for lane in self.lanes if lane.surface_id)
-            if any(
-                lane.workspace_id.casefold() != self.workspace.workspace_id.casefold()
-                or lane.window_id.casefold() != self.workspace.window_id.casefold()
-                for lane in live
-            ):
-                raise ValueError("review execution workspace identity changed")
-            if len({lane.surface_id.casefold() for lane in live}) != len(live):
-                raise ValueError("review execution surface identity is duplicated")
 
 
 @dataclass(frozen=True)
@@ -643,6 +625,4 @@ def _runtime_lane(
         max_verify_iterations=max_verify_iterations,
         state=record.state,
         checkpoint_sha256=checkpoint_sha256,
-        workspace_id=str(getattr(value, "workspace_id", "") or ""),
-        window_id=str(getattr(value, "window_id", "") or ""),
     )

@@ -20,7 +20,7 @@ must not be inferred from another runtime.
 | `PostToolUse[ExitPlanMode]` plan capture | Automatic | Not provided by this plugin | Use `/save-plan` equivalent explicitly |
 | Compaction recovery | PostCompact adapter + host context behavior | Valid PostCompact hint; `SessionStart(source=compact)` reloads hot cache | Manual |
 | Harness operations | Shared owner-scoped ledger; `status`, `inspect`, `resume`, `reconcile`, `cancel`, `close`, `doctor` | Same | Read-only inspection works; visible provider lifecycle requires a supported host |
-| Harness terminal observer | Dispatch opens one root-scoped dashboard from the exact primary task surface; later facades reuse it | Same task-workspace placement and exact root binding | Owner-wide diagnostic only; no provider lifecycle |
+| Harness terminal observer | Any registered facade opens/reuses one external root-scoped terminal observer; temporary markers rebind without another split | Same root-scoped observer, rebind, and split ownership | Owner-wide diagnostic only; no provider lifecycle |
 | cmux workspace progress | Exact live controller programs in the coordinator origin workspace; idle clears | Same content-free label and cleanup semantics | Not projected |
 | Operation telemetry | Shared scripts emit `pipeline-events.jsonl`; task/review lifecycle adds numeric latency and outcome counters | Same | Same for explicit scripts |
 | Durable review history | Unified simple/deep operation archives exact HEAD/profile evidence at reap | Same | Explicit exact-operation archive from the coordinator vault |
@@ -120,13 +120,12 @@ label and the same `set-progress`/`clear-progress` transport.
 
 The Harness dashboard is also read-only but has a different scope. Normal live
 mode is a root-scoped terminal observer bound to exactly one durable root from
-dispatch, plan/review, verify, fix, recovery, pivot, or reap. Dispatch binds the
-primary task surface/workspace/window first, then opens exactly one dashboard
-split from that surface before provider launch; no task dashboard is created in
-the coordinator workspace and no temporary marker is rebound. Later facades
-reuse the root dashboard. Root lineage is explicit in new OperationSpec
-records; stale, foreign, or ambiguous ancestry is excluded rather than
-inferred. The normal composition is task-name-first:
+dispatch, plan/review, verify, fix, recovery, pivot, or reap; its cmux split is
+external and user-owned. Before root creation, one request-keyed temporary
+marker may be opened and atomically rebound onto the durable root without a
+second split. Root lineage is explicit in new OperationSpec records; stale,
+foreign, or ambiguous ancestry is excluded rather than inferred. The normal
+composition is task-name-first:
 title/store/update, root and executor summaries, compact steps with exactly
 current work expanded, recent roots, issues, and a legend. `--all` and
 `harness dashboard` remain an explicit owner-wide diagnostic, never the default
@@ -267,14 +266,7 @@ specs, callbacks, baselines, liveness state, and results live under exact
 owner/operation/run identity, so several sessions in one project do not share
 singleton files. Simple review uses one holistic lane. Default Deep uses two
 independent holistic model lanes; single-model Deep and explicit Full reuse the
-same independent intent and engineering specialist responsibilities. One
-review program owns one separate workspace: its first lane creates it and later
-lanes split from that exact surface after validating the same workspace/window
-UUID. Review finalization and structural pivot use the same binding; a later
-cycle creates a fresh workspace. Individual provider cleanup closes only lane
-surfaces. Program cleanup closes the workspace only after every accepted
-callback and lane exit is complete, and retains it on attention, failure, or
-identity uncertainty. Anthropic
+same independent intent and engineering specialist responsibilities. Anthropic
 reviewers keep `dontAsk` but may read and run arbitrary local checks inside the
 native Claude OS sandbox. The product worktree and Git metadata stay explicitly
 read-only; writes are limited to operation-owned review scratch/callback roots

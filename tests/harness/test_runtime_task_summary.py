@@ -168,8 +168,6 @@ PROJECT = "33333333-3333-4333-8333-333333333333"
 TASK = "44444444-4444-4444-8444-444444444444"
 INVALID_TASK = "55555555-5555-4555-8555-555555555555"
 BLOCKED_TASK = "66666666-6666-4666-8666-666666666666"
-REVIEW_WORKSPACE = "77777777-7777-4777-8777-777777777777"
-REVIEW_WINDOW = "88888888-8888-4888-8888-888888888888"
 
 ATOMIC_SUMMARY_PUBLISHER = (
     "import os,pathlib,tempfile,time\n"
@@ -328,8 +326,6 @@ class FakeCmux:
 class FakeReviewSessionResult:
     record: object
     checkpoint: str
-    workspace_id: str = REVIEW_WORKSPACE
-    window_id: str = REVIEW_WINDOW
 
 
 class TypedReviewRuntime:
@@ -997,10 +993,6 @@ def assert_rejected_drive_with_live_review_stays_waiting(root: Path) -> None:
         product_root=product,
         prompt_pointer=".task-prompt.md",
         callback_root="callbacks/review",
-    )
-    check(
-        "live review persists its exact workspace identity",
-        gate.read()["review_workspace"]["workspace_id"] == REVIEW_WORKSPACE,
     )
     lane = run.execution.lanes[0]
     for step in ("preflight", "starting", "running", "awaiting-callback"):
@@ -8292,7 +8284,6 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         review_launcher=complete_when_callback_arrives,
         pipeline_name="engineering/change",
         verification_runner=record_asynchronous_verification,
-        wake_source=FallbackWakeSource(),
     )
     for helper in asynchronous_helpers:
         helper.join(timeout=10.0)

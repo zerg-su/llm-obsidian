@@ -9,7 +9,6 @@ import os
 import sys
 import tempfile
 import uuid
-from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -31,7 +30,6 @@ from harness.finalization_pivot import (  # noqa: E402
     pivot_receipt_path,
 )
 from harness.store import OperationStore  # noqa: E402
-from harness.review_workspace import ReviewWorkspaceBinding  # noqa: E402
 from harness.workflows.structural_pivot import (  # noqa: E402
     StructuralPivotWorkflow,
     pivot_operation_id,
@@ -53,18 +51,6 @@ def check(label: str, value: bool, detail: object = "") -> None:
 
 def identity(number: int) -> str:
     return str(uuid.UUID(int=number))
-
-
-def review_workspace() -> ReviewWorkspaceBinding:
-    return ReviewWorkspaceBinding(
-        review_operation_id="review-cycle-3",
-        workspace_id="22222222-2222-4222-8222-222222222222",
-        workspace_ref="workspace:2",
-        window_id="33333333-3333-4333-8333-333333333333",
-        window_ref="window:3",
-        anchor_surface_id="44444444-4444-4444-8444-444444444444",
-        anchor_surface_ref="surface:4",
-    )
 
 
 def snapshot(count: int = 3) -> dict[str, object]:
@@ -118,32 +104,11 @@ class FakeRuntime:
         self.provider_starts = 0
         self.exit_requests = 0
         self.cleanups = 0
-        self.requests: list[object] = []
 
-    def start(self, request: object, *, on_surface_opened=None) -> object:
-        self.requests.append(request)
+    def start(self, request: object) -> object:
         spec = request.spec
         record = self.store.read(spec.owner_id, spec.operation_id)
         if record.state == "created":
-            record = replace(
-                record,
-                resources=replace(
-                    record.resources,
-                    surface_id="55555555-5555-4555-8555-555555555555",
-                ),
-            )
-            self.store.save(record, expected_revision=record.revision)
-            result = SimpleNamespace(
-                record=self.store.read(spec.owner_id, spec.operation_id),
-                action="surface-opened",
-                surface_ref="surface:5",
-                workspace_id=review_workspace().workspace_id,
-                workspace_ref=review_workspace().workspace_ref,
-                window_id=review_workspace().window_id,
-                window_ref=review_workspace().window_ref,
-            )
-            if on_surface_opened is not None:
-                on_surface_opened(result)
             self.provider_starts += 1
             for state_name in ("preflight", "starting", "running", "awaiting-callback"):
                 self.store.transition(spec.owner_id, spec.operation_id, state_name)
@@ -190,11 +155,6 @@ class FakeRuntime:
         if record.state == "complete":
             return SimpleNamespace(record=record, action="terminal")
         self.cleanups += 1
-        record = replace(
-            record,
-            resources=replace(record.resources, surface_id=""),
-        )
-        self.store.save(record, expected_revision=record.revision)
         self.store.transition(owner_id, operation_id, "complete")
         return SimpleNamespace(
             record=self.store.read(owner_id, operation_id), action="complete"
@@ -204,31 +164,10 @@ class FakeRuntime:
 class AmbiguousStartRuntime(FakeRuntime):
     """Crash after the provider effect is reserved but before owned identity."""
 
-    def start(self, request: object, *, on_surface_opened=None) -> object:
+    def start(self, request: object) -> object:
         spec = request.spec
         record = self.store.read(spec.owner_id, spec.operation_id)
         if record.state == "created":
-            record = replace(
-                record,
-                resources=replace(
-                    record.resources,
-                    surface_id="55555555-5555-4555-8555-555555555555",
-                ),
-            )
-            self.store.save(record, expected_revision=record.revision)
-            if on_surface_opened is not None:
-                on_surface_opened(
-                    SimpleNamespace(
-                        record=self.store.read(
-                            spec.owner_id, spec.operation_id
-                        ),
-                        workspace_id=review_workspace().workspace_id,
-                        workspace_ref=review_workspace().workspace_ref,
-                        window_id=review_workspace().window_id,
-                        window_ref=review_workspace().window_ref,
-                        surface_ref="surface:5",
-                    )
-                )
             self.provider_starts += 1
             self.store.transition(spec.owner_id, spec.operation_id, "preflight")
             self.store.transition(spec.owner_id, spec.operation_id, "starting")
@@ -448,7 +387,6 @@ with tempfile.TemporaryDirectory(prefix="structural-pivot-runtime.") as raw:
         root_operation_id=owner,
         runtime=runtime,
         origin_surface="11111111-1111-1111-1111-111111111111",
-        review_workspace=review_workspace(),
         worktree=ROOT,
     )
     records = store.list(owner)
@@ -460,9 +398,6 @@ with tempfile.TemporaryDirectory(prefix="structural-pivot-runtime.") as raw:
         "start uses one registered read-only review-input session and child round",
         started.status == "in-flight"
         and runtime.provider_starts == 1
-        and runtime.requests[0].placement == "split"
-        and runtime.requests[0].origin_surface
-        == review_workspace().anchor_surface_id
         and parent.state == "awaiting-callback"
         and child.state == "awaiting-callback"
         and meta["transport"] == "review-round"
@@ -478,7 +413,6 @@ with tempfile.TemporaryDirectory(prefix="structural-pivot-runtime.") as raw:
         root_operation_id=owner,
         runtime=runtime,
         origin_surface="11111111-1111-1111-1111-111111111111",
-        review_workspace=review_workspace(),
         worktree=ROOT,
     )
     check(
@@ -572,7 +506,6 @@ with tempfile.TemporaryDirectory(prefix="structural-pivot-ambiguous-start.") as 
         root_operation_id=identity(900),
         runtime=runtime,
         origin_surface="11111111-1111-1111-1111-111111111111",
-        review_workspace=review_workspace(),
         worktree=ROOT,
     )
     replay = flow.start(
@@ -580,7 +513,6 @@ with tempfile.TemporaryDirectory(prefix="structural-pivot-ambiguous-start.") as 
         root_operation_id=identity(900),
         runtime=runtime,
         origin_surface="11111111-1111-1111-1111-111111111111",
-        review_workspace=review_workspace(),
         worktree=ROOT,
     )
     check(
@@ -645,7 +577,6 @@ with tempfile.TemporaryDirectory(prefix="structural-pivot-foreign-callback.") as
         root_operation_id=identity(900),
         runtime=runtime,
         origin_surface="11111111-1111-1111-1111-111111111111",
-        review_workspace=review_workspace(),
         worktree=ROOT,
     )
     envelope = publish_callback(state, store)
@@ -678,7 +609,6 @@ for boundary in ("callback-accepted", "child-exiting", "receipt-published"):
             root_operation_id=identity(900),
             runtime=runtime,
             origin_surface="11111111-1111-1111-1111-111111111111",
-            review_workspace=review_workspace(),
             worktree=ROOT,
         )
         publish_callback(state, store)
@@ -709,7 +639,6 @@ with tempfile.TemporaryDirectory(prefix="structural-pivot-provider-exit.") as ra
         root_operation_id=identity(900),
         runtime=runtime,
         origin_surface="11111111-1111-1111-1111-111111111111",
-        review_workspace=review_workspace(),
         worktree=ROOT,
     )
     parent, _round = active_round(store)

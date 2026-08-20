@@ -7,7 +7,6 @@ import json
 import sys
 import tempfile
 import uuid
-from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -36,7 +35,6 @@ from harness.review_finalization import (  # noqa: E402
     reserve_task_finalization_cycle,
 )
 from harness.store import OperationStore  # noqa: E402
-from harness.review_workspace import ReviewWorkspaceBinding  # noqa: E402
 from harness.workflows.review import (  # noqa: E402
     ReviewResult,
     ReviewRound,
@@ -66,30 +64,9 @@ class PivotRuntime:
         self.exits = 0
         self.cleanups = 0
 
-    def start(self, request: object, *, on_surface_opened=None) -> object:
+    def start(self, request: object) -> object:
         record = self.store.read(self.owner, request.spec.operation_id)
         if record.state == "created":
-            record = replace(
-                record,
-                resources=replace(
-                    record.resources,
-                    surface_id="55555555-5555-4555-8555-555555555555",
-                ),
-            )
-            self.store.save(record, expected_revision=record.revision)
-            if on_surface_opened is not None:
-                on_surface_opened(
-                    SimpleNamespace(
-                        record=self.store.read(
-                            self.owner, record.spec.operation_id
-                        ),
-                        workspace_id="22222222-2222-4222-8222-222222222222",
-                        workspace_ref="workspace:2",
-                        window_id="33333333-3333-4333-8333-333333333333",
-                        window_ref="window:3",
-                        surface_ref="surface:5",
-                    )
-                )
             self.starts += 1
             for state in ("preflight", "starting", "running", "awaiting-callback"):
                 self.store.transition(self.owner, record.spec.operation_id, state)
@@ -113,14 +90,6 @@ class PivotRuntime:
 
     def cleanup(self, owner: str, operation_id: str) -> object:
         self.cleanups += 1
-        record = self.store.read(owner, operation_id)
-        self.store.save(
-            replace(
-                record,
-                resources=replace(record.resources, surface_id=""),
-            ),
-            expected_revision=record.revision,
-        )
         self.store.transition(owner, operation_id, "complete")
         return SimpleNamespace(record=self.store.read(owner, operation_id))
 
@@ -302,19 +271,6 @@ with tempfile.TemporaryDirectory(prefix="finalization-pivot-reserve.") as raw:
     }
 
     def reserve(number: int, **pivot: object):
-        if pivot:
-            pivot.setdefault(
-                "review_workspace",
-                ReviewWorkspaceBinding(
-                    review_operation_id="review-cycle-3",
-                    workspace_id="22222222-2222-4222-8222-222222222222",
-                    workspace_ref="workspace:2",
-                    window_id="33333333-3333-4333-8333-333333333333",
-                    window_ref="window:3",
-                    anchor_surface_id="44444444-4444-4444-8444-444444444444",
-                    anchor_surface_ref="surface:4",
-                ),
-            )
         return reserve_task_finalization_cycle(
             meta,
             ledger=ledger,
@@ -492,26 +448,6 @@ with tempfile.TemporaryDirectory(prefix="finalization-pivot-wiring.") as raw:
             attempt_id=attempt, terminal_result="changes-requested"
         )
     store = OperationStore(store_root)
-    gate_root = store_root / "review-data" / lineage / lineage
-    gate_root.mkdir(parents=True)
-    (gate_root / "review-gate.json").write_text(
-        json.dumps(
-            {
-                "review_workspace": ReviewWorkspaceBinding(
-                    review_operation_id="review-cycle-3",
-                    workspace_id="22222222-2222-4222-8222-222222222222",
-                    workspace_ref="workspace:2",
-                    window_id="33333333-3333-4333-8333-333333333333",
-                    window_ref="window:3",
-                    anchor_surface_id="44444444-4444-4444-8444-444444444444",
-                    anchor_surface_ref="surface:4",
-                ).payload()
-            },
-            sort_keys=True,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
     runtime = PivotRuntime(store, lineage)
     try:
         reserve_task_finalization_cycle(

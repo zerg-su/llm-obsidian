@@ -115,11 +115,6 @@ class SessionResult:
     process_status: str = ""
     surface_status: str = ""
     checkpoint_sha256: str = ""
-    workspace_id: str = "BBBBBBBB-BBBB-4BBB-8BBB-BBBBBBBBBBBB"
-    workspace_ref: str = "workspace:1"
-    window_id: str = "CCCCCCCC-CCCC-4CCC-8CCC-CCCCCCCCCCCC"
-    window_ref: str = "window:1"
-    surface_ref: str = "surface:1"
 
 
 class FakeRuntime:
@@ -135,11 +130,6 @@ class FakeRuntime:
         self.continued = 0
         self.rearmed = 0
         self.checkpoint = "checkpoint-1"
-        self.closed_workspaces: list[tuple[str, str]] = []
-
-    def close_workspace(self, workspace_id: str, window_id: str) -> str:
-        self.closed_workspaces.append((workspace_id, window_id))
-        return "closed"
 
     def start(
         self,
@@ -159,10 +149,7 @@ class FakeRuntime:
                 record,
                 resources=replace(
                     record.resources,
-                    surface_id=(
-                        f"{self.started:08d}-AAAA-4AAA-8AAA-"
-                        f"{self.started:012d}"
-                    ),
+                    surface_id=f"surface-{self.started}",
                 ),
                 revision=record.revision + 1,
             )

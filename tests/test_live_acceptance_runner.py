@@ -50,8 +50,6 @@ COMMIT = "a" * 40
 FINGERPRINT = "b" * 64
 NOW = datetime.now(timezone.utc).isoformat()
 SURFACE = "11111111-1111-4111-8111-111111111111"
-REVIEW_WORKSPACE = "33333333-3333-4333-8333-333333333333"
-REVIEW_WINDOW = "44444444-4444-4444-8444-444444444444"
 CONTRACT_CELLS = [
     {
         "cell_id": cell_id,
@@ -400,8 +398,6 @@ class FakeRuntimeSessions:
                 record=current,
                 checkpoint=self.checkpoints[key],
                 callback_pointer=request.callback_pointer,
-                workspace_id=REVIEW_WORKSPACE,
-                window_id=REVIEW_WINDOW,
             )
         record = OperationRecord(
             spec,
@@ -410,9 +406,7 @@ class FakeRuntimeSessions:
             lane_id,
             run_id,
             OwnedResources(
-                surface_id=(
-                    f"22222222-2222-4222-8222-{len(self.records) + 1:012d}"
-                ),
+                surface_id="22222222-2222-4222-8222-222222222222",
                 process_group=2222,
                 supervisor_pid=3333,
             ),
@@ -456,8 +450,6 @@ class FakeRuntimeSessions:
             record=record,
             checkpoint=checkpoint,
             callback_pointer=request.callback_pointer,
-            workspace_id=REVIEW_WORKSPACE,
-            window_id=REVIEW_WINDOW,
         )
         if on_surface_opened is not None:
             on_surface_opened(result)

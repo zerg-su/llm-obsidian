@@ -33,7 +33,6 @@ from .fresh_artifact_repair import (
 )
 from .retained_notification import (
     RetainedNotificationError,
-    RetainedNotificationPending,
     deliver_worker_notification,
 )
 
@@ -84,39 +83,6 @@ def _latest_review_rejection(
 
 
 class RuntimeWorkerControlMixin:
-
-    def pipeline_step_callback_ready(
-        self, *, operation_id: str, run_id: str
-    ) -> bool:
-        """Recognize only the exact registered pipeline-step successor."""
-
-        try:
-            _generation, current_operation, current_run, callback_path = (
-                _callback_target(self.spec)
-            )
-            if (
-                current_operation != operation_id
-                or current_run != run_id
-                or callback_path.is_symlink()
-                or not callback_path.is_file()
-                or callback_path.stat().st_size > MAX_OUTBOX_BYTES
-            ):
-                return False
-            envelope = _envelope(json.loads(callback_path.read_text(encoding="utf-8")))
-        except (
-            HarnessContractError,
-            RuntimeWorkerError,
-            OSError,
-            TypeError,
-            ValueError,
-            json.JSONDecodeError,
-        ):
-            return False
-        return (
-            envelope.operation_id == operation_id
-            and envelope.run_id == run_id
-            and envelope.kind == "result"
-        )
 
     def relay_mechanism_attention(self, status: str) -> None:
         """Wake the coordinator for the two repo-owned transition seams."""
@@ -915,13 +881,7 @@ class RuntimeWorkerControlMixin:
                 notify_path=notify_path,
                 marker=marker,
                 message=message,
-                successor_ready=lambda: self.pipeline_step_callback_ready(
-                    operation_id=operation_id,
-                    run_id=str(request["run_id"]),
-                ),
             )
-        except RetainedNotificationPending:
-            return
         except RetainedNotificationError as exc:
             raise RuntimeWorkerError(
                 "engineering/fix phase notification delivery failed"
@@ -953,8 +913,6 @@ class RuntimeWorkerControlMixin:
                 marker=marker,
                 message=message,
             )
-        except RetainedNotificationPending:
-            return False
         except RetainedNotificationError as exc:
             raise RuntimeWorkerError(
                 "engineering/fix finalization notification delivery failed"

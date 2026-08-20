@@ -12,7 +12,7 @@ from task_sessions import (
     TaskSessionError,
     close_surface_exact,
     cmux_tree,
-    require_uuid,
+    require_token,
     surface_context,
     workspace_layout,
 )
@@ -24,7 +24,7 @@ def bind_workspace_identity(
 ) -> dict[str, str]:
     """Replace short creation output with the exact UUIDs from the child surface."""
 
-    surface = require_uuid(str(child.get("surface") or ""), "task surface")
+    surface = require_token(str(child.get("surface") or ""), "task surface")
     context = surface_context(surface, runner)
     if context is None:  # pragma: no cover - non-optional lookup
         raise TaskSessionError("task workspace surface disappeared during binding")
@@ -40,8 +40,8 @@ def bind_workspace_identity(
         raise TaskSessionError("task workspace window changed during binding")
     workspace = str(context.get("workspace") or "")
     window = str(context.get("window") or "")
-    workspace = require_uuid(workspace, "task workspace")
-    window = require_uuid(window, "task window")
+    if not workspace or not window:
+        raise TaskSessionError("task workspace UUID binding is incomplete")
     return {
         **child,
         "workspace": workspace,
@@ -56,8 +56,8 @@ def close_workspace_exact(
 ) -> str:
     """Close one UUID-bound workspace and prove it disappeared from its window."""
 
-    workspace = require_uuid(workspace, "workspace")
-    window = require_uuid(window, "window")
+    workspace = require_token(workspace, "workspace")
+    window = require_token(window, "window")
     for _attempt in range(2):
         layout = workspace_layout(cmux_tree(runner), window, workspace, missing_ok=True)
         if layout is None:

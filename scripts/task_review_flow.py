@@ -1231,12 +1231,13 @@ def _run_exact_head_review(
         )
     if request is None:
         raise TaskReviewError("enabled review has no request")
-    cycle, zero_lane_preflight = 1, False
+    cycle = 1
+    zero_lane_preflight = False
     predecessor_attempt_id = ""
     reserved_attempt_id = ""
     supersedes_approved_attempt_id = ""
     approved_summary_predecessor_attempt_id = ""
-    amended_boundary = close_prior_workspace_after_reservation = False
+    amended_boundary = False
     recovered_attention_attempt = gate_exists and accepted_callback_cleanup_is_complete(gate)
     if gate_exists:
         prior_state = gate.read()
@@ -1347,10 +1348,9 @@ def _run_exact_head_review(
                         approved_summary_predecessor is not None
                     ),
                 )
-            terminal_decision, close_prior_workspace_after_reservation = (
-                gate.record_terminal_workspace(
-                    ledger, prior_attempt.identity.attempt_id, prior_attempt.terminal.result.value
-                )
+            terminal_decision = ledger.record_terminal(
+                attempt_id=prior_attempt.identity.attempt_id,
+                terminal_result=prior_attempt.terminal.result.value,
             )
             _archive_changed_head_callback(runtime_root, gate_root, prior_state, store, context.head_sha)
             if (
@@ -1433,7 +1433,6 @@ def _run_exact_head_review(
     if isinstance(reservation, dict):
         return reservation
     request, ledger, cycle = reservation
-    gate.close_retained_workspace(close_prior_workspace_after_reservation)
     _assert_frozen_topology(meta, request)
     if not gate_exists or ReviewAttempt.from_mapping(
         gate.read()["attempt"]
@@ -1509,8 +1508,9 @@ def _run_exact_head_review(
     next_attempt = ReviewAttempt.from_mapping(next_state["attempt"])
     if next_attempt.status == "terminal":
         assert next_attempt.terminal is not None
-        gate.record_terminal_workspace(
-            ledger, next_attempt.identity.attempt_id, next_attempt.terminal.result.value
+        ledger.record_terminal(
+            attempt_id=next_attempt.identity.attempt_id,
+            terminal_result=next_attempt.terminal.result.value,
         )
     return _receipt(
         status=next_status,

@@ -30,10 +30,6 @@ from ..review_attempt import (
     ReviewAttemptLaneResult,
     ReviewAttemptTerminalResult,
 )
-from ..review_workspace import (
-    close_review_workspace,
-    close_terminal_review_workspace,
-)
 from .review import (
     ReviewContext,
     ReviewExecution,
@@ -118,30 +114,6 @@ class ReviewGateController(
         self.runtime = runtime
         self.round_store = round_store
 
-    def close_terminal_workspace(self):
-        """Release this program's exact workspace after every lane is quiescent."""
-
-        return close_review_workspace(
-            self.root, self.runtime, self.round_store, self.read()
-        )
-
-    def record_terminal_workspace(
-        self, ledger: object, attempt_id: str, terminal_result: str
-    ):
-        """Record one result and apply its review-program cleanup boundary."""
-
-        decision = ledger.record_terminal(
-            attempt_id=attempt_id, terminal_result=terminal_result
-        )
-        retained = close_terminal_review_workspace(
-            self, ledger, terminal_result
-        )
-        return decision, retained
-
-    def close_retained_workspace(self, retained: bool) -> None:
-        if retained:
-            self.close_terminal_workspace()
-
     def _start_execution(
         self,
         *,
@@ -221,7 +193,6 @@ class ReviewGateController(
             active_review_operation_id=request.policy.operation_id,
             context=self._context(request.context),
             lanes=[self._lane(lane) for lane in execution.lanes],
-            review_workspace=execution.workspace.payload(),
             **attempt_update,
         )
         return ReviewGateRun(execution, captured)

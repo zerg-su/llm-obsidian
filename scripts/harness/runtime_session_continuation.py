@@ -46,21 +46,13 @@ def _prompt_anchor(prompt: str) -> str:
     for line in prompt.splitlines():
         normalized = " ".join(line.strip().split())
         if normalized:
-            return normalized[:96].rstrip()
+            return normalized[:96]
     return ""
 
 
 def _screen_digest(screen: str) -> str:
     normalized = "\n".join(line.rstrip() for line in screen.splitlines()).strip()
     return sha256(normalized.encode("utf-8")).hexdigest()
-
-
-def _is_claude_primary_editor_line(line: str) -> bool:
-    if line.startswith("❯"):
-        return True
-    marker_index = line.find("❯")
-    prefix = line[:marker_index].strip() if marker_index >= 0 else ""
-    return bool(prefix and set(prefix) <= {"─", "━", "═"})
 
 
 def _editor_state(runtime: str, screen: str) -> tuple[str, ...]:
@@ -73,62 +65,15 @@ def _editor_state(runtime: str, screen: str) -> tuple[str, ...]:
         if line.startswith(marker):
             editor_lines.append(line)
             continue
-        if runtime == "claude" and _is_claude_primary_editor_line(line):
-            marker_index = line.find(marker)
+        marker_index = line.find(marker)
+        prefix = line[:marker_index].strip() if marker_index >= 0 else ""
+        if runtime == "claude" and prefix and set(prefix) <= {"─", "━", "═"}:
             editor_lines.append(line[marker_index:])
     return tuple(editor_lines)
 
 
-def _editor_digest(runtime: str, screen: str, anchor: str = "") -> str:
-    editor = _editor_state(runtime, screen)
-    if runtime == "claude" and _claude_alternate_input_state(
-        screen, anchor
-    ) == "input-ready":
-        editor = _claude_alternate_editor(screen)
-    return sha256("\n".join(editor).encode("utf-8")).hexdigest()
-
-
-def _claude_alternate_editor(screen: str) -> tuple[str, ...]:
-    """Return only Claude's final contiguous ``›`` composer block."""
-
-    raw_tail = screen.splitlines()[-24:]
-    normalized = [" ".join(line.strip().split()) for line in raw_tail]
-    starts = [index for index, line in enumerate(normalized) if line.startswith("›")]
-    if not starts:
-        return ()
-    start = starts[-1]
-    primary_starts = [
-        index
-        for index, line in enumerate(normalized)
-        if _is_claude_primary_editor_line(line)
-    ]
-    if primary_starts and primary_starts[-1] > start:
-        return ()
-    editor = [normalized[start]]
-    for raw, line in zip(raw_tail[start + 1 :], normalized[start + 1 :]):
-        if not line or not raw[:1].isspace() or line.startswith(("›", "❯")):
-            break
-        editor.append(line)
-    return tuple(editor)
-
-
-def _claude_alternate_input_state(screen: str, anchor: str) -> str:
-    """Classify only Claude's current alternate composer, not retained scrollback."""
-
-    editor = _claude_alternate_editor(screen)
-    if not editor:
-        return ""
-    if re.fullmatch(r"›\s*[1-9][.)]\s+\S.*", editor[0]):
-        return "unknown"
-    current = " ".join(editor)
-    ready = bool(anchor and anchor in current) or any(
-        re.fullmatch(
-            r"› \[Pasted text #[1-9][0-9]* \+[1-9][0-9]* lines?\]",
-            line,
-        )
-        for line in editor
-    )
-    return "input-ready" if ready else ""
+def _editor_digest(runtime: str, screen: str) -> str:
+    return sha256("\n".join(_editor_state(runtime, screen)).encode("utf-8")).hexdigest()
 
 
 def classify_continuation_screen(runtime: str, screen: str, anchor: str) -> str:
@@ -170,15 +115,6 @@ def classify_continuation_screen(runtime: str, screen: str, anchor: str) -> str:
         for line in editor_lines
     ):
         return "input-ready"
-    if runtime == "claude":
-        # Claude's current composer paints ready-idle with ``❯`` but may paint
-        # the newly typed input with ``›``.  A wrapped compact pointer must be
-        # reassembled before matching; a bare ``›`` or unrelated choice stays
-        # fail-closed.  The provider's native collapsed-paste token is also an
-        # exact post-send editor shape and carries no submit authority itself.
-        alternate_state = _claude_alternate_input_state(screen, anchor)
-        if alternate_state:
-            return alternate_state
     if any(anchor and anchor in line for line in editor_lines):
         return "input-ready"
     if editor_lines:
@@ -323,7 +259,7 @@ def await_initial_input_visible(
         )
         if state == "input-ready":
             if not before_editor_sha256 or (
-                _editor_digest(runtime, screen, anchor) != before_editor_sha256
+                _editor_digest(runtime, screen) != before_editor_sha256
             ):
                 return True
         if state == "permission":
@@ -331,7 +267,7 @@ def await_initial_input_visible(
         if (
             before_editor_sha256
             and _editor_state(runtime, screen)
-            and _editor_digest(runtime, screen, anchor) != before_editor_sha256
+            and _editor_digest(runtime, screen) != before_editor_sha256
         ):
             return True
         if observation + 1 < observation_limit:
@@ -512,7 +448,7 @@ def deliver_continuation(
                 )
             if (
                 _screen_digest(screen) == pre_send_digest
-                or _editor_digest(runtime, screen, anchor) == pre_send_editor_digest
+                or _editor_digest(runtime, screen) == pre_send_editor_digest
             ):
                 if observation + 1 < observation_limit:
                     wait(observation_interval_seconds)
@@ -529,8 +465,6 @@ def deliver_continuation(
 
     submit_count = accepted_submit_count
     for submit_attempt in range(2):
-        if artifact_ready():
-            return ContinuationDelivery(True, "artifact", submit_count)
         if submit_attempt and not reserve_retry():
             return ContinuationDelivery(
                 False, "submit-retry-budget-unavailable", submit_count

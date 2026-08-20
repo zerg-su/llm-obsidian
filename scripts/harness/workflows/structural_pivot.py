@@ -36,7 +36,6 @@ from ..finalization_pivot import (
 )
 from ..review_submit import publish_review_input_template, round_schema_lines
 from ..runtime_session_contracts import RuntimeSessionRequest
-from ..review_workspace import ReviewWorkspaceBinding
 from ..state_machine import TERMINAL
 from ..store import OperationStore, StoreError
 from .review import (
@@ -82,12 +81,7 @@ class StructuralPivotResult:
 class StructuralPivotRuntime(Protocol):
     """Existing runtime/session operations used by this workflow."""
 
-    def start(
-        self,
-        request: RuntimeSessionRequest,
-        *,
-        on_surface_opened: Callable[[object], None] | None = None,
-    ) -> object: ...
+    def start(self, request: RuntimeSessionRequest) -> object: ...
 
     def status(self, owner_id: str, operation_id: str) -> object: ...
 
@@ -413,7 +407,6 @@ class StructuralPivotWorkflow:
         root_operation_id: str,
         runtime: StructuralPivotRuntime,
         origin_surface: str,
-        review_workspace: ReviewWorkspaceBinding,
         worktree: Path,
         callback_wake: str = "",
     ) -> StructuralPivotResult:
@@ -444,23 +437,18 @@ class StructuralPivotWorkflow:
                 spec=parent.spec,
                 lane_id=parent.lane_id,
                 run_id=parent.run_id,
-                origin_surface=review_workspace.anchor_surface_id,
+                origin_surface=origin_surface,
                 cwd=self.store.root,
                 prompt_pointer=prompt_pointer,
                 callback_pointer=callback_pointer,
-                placement="split",
+                placement="workspace",
                 product_root=worktree,
                 initial_callback_operation_id=round_.operation_id,
                 initial_callback_run_id=round_.run_id,
                 callback_wake=callback_wake,
                 model_restart_limit=0,
             )
-            observed = self._record(
-                runtime.start(
-                    request,
-                    on_surface_opened=review_workspace.validate_member,
-                )
-            )
+            observed = self._record(runtime.start(request))
             self._observe("runtime-started")
             if observed.spec != parent.spec:
                 raise StructuralPivotError("pivot runtime operation identity changed")

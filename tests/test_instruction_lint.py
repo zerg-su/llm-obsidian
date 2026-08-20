@@ -237,14 +237,14 @@ assert "materialize_current_context" in dispatch_runner
 assert 'origin_surface=request["origin_surface"]' in dispatch_execution
 assert "identify --surface \"$CMUX_SURFACE_ID\" --no-caller" not in dispatch
 assert "never inspects the globally focused surface" in dispatch
-assert "Do not open a dashboard before built-in validate/start" in dispatch
-assert '--temporary "<request-id>"' not in dispatch
-assert "exact primary task surface" in dispatch
-assert "coordinator workspace receives no task split" in dispatch
-assert "there is no temporary marker or rebind step" in dispatch
-assert "on_surface_opened=prepare_surface" in dispatch_execution
+assert "harness-dashboard.py open" in dispatch
+assert '--temporary "<request-id>"' in dispatch
+assert '--root "<request-id>"' not in dispatch
+assert "exact approved request UUID" in dispatch
+assert "`observer.argv` omits `--surface`" in dispatch
+assert "anchored value before execution" in dispatch
 assert "contained display failure" in dispatch
-assert "provider `OwnedResources`" in dispatch
+assert "external to Harness ownership" in dispatch
 assert "awk '/^\\*/" not in dispatch
 assert "verify that its exact target exists under `wiki/`" in dispatch
 assert "reap type/title/`plan_mode`" in dispatch

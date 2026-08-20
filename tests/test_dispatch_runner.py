@@ -157,33 +157,6 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         encoding="utf-8",
     )
 
-    lock_scenario = ROOT / "tests" / "dispatch_git_config_lock_scenario.py"
-    serialized = subprocess.run(
-        [sys.executable, str(lock_scenario)],
-        text=True,
-        capture_output=True,
-        check=False,
-        timeout=30,
-    )
-    check(
-        "parallel task setup serializes the shared Git config writer",
-        serialized.returncode == 0,
-        serialized.stderr,
-    )
-    bypassed = subprocess.run(
-        [sys.executable, str(lock_scenario), "--simulate-lock-bypass"],
-        text=True,
-        capture_output=True,
-        check=False,
-        timeout=30,
-    )
-    check(
-        "shared Git config lock proof is mutation-sensitive",
-        bypassed.returncode != 0
-        and "shared Git config writer bypassed its lock" in bypassed.stderr,
-        bypassed.stderr,
-    )
-
     request_id = str(uuid.uuid4())
     raw_request = {
         "schema_version": 1,
@@ -231,6 +204,8 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
 
     request = runner.validate_request(raw_request)
 
+    observer_argv = runner.observer_command(request["vault_root"], request_id)
+    resolved_vault = Path(request["vault_root"])
     builtin_spec = tmp / f"{request_id}.json"
     builtin_spec.write_text(json.dumps(raw_request, sort_keys=True), encoding="utf-8")
     builtin_validate = subprocess.run(
@@ -245,14 +220,26 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         if builtin_validate.returncode == 0
         else {}
     )
+    observer_echo = validate_payload.get("observer") or {}
     check(
-        "validate has no pre-start dashboard contract",
+        "validate exposes the exact temporary observer command before root creation",
         builtin_validate.returncode == 0
-        and "observer" not in validate_payload,
+        and observer_echo.get("temporary") == request_id
+        and observer_echo.get("argv") == observer_argv
+        and observer_argv[observer_argv.index("--temporary") + 1] == request_id
+        and observer_argv[observer_argv.index("--vault") + 1]
+        == str(resolved_vault)
+        and observer_argv[observer_argv.index("--store") + 1]
+        == str(resolved_vault / ".vault-meta" / "harness")
+        and str(resolved_vault / "scripts" / "harness-dashboard.py")
+        in observer_argv
+        and "open" in observer_argv
+        and "--surface" not in observer_argv
+        and "--all" not in observer_argv,
         builtin_validate.stderr,
     )
     check(
-        "validation has no provider, store, dashboard, or worktree effect",
+        "exposing the observer command has no provider, store, or worktree effect",
         not worktree.exists()
         and not (vault / ".vault-meta" / "harness").exists(),
     )
@@ -1935,20 +1922,10 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
                 self.store, record.spec.owner_id, record.spec.operation_id
             )
             supervisor.bind_resources(
-                OwnedResources(
-                    f"{self.started:08d}-3333-4333-8333-"
-                    f"{self.started:012d}"
-                )
+                OwnedResources("33333333-3333-4333-8333-333333333333")
             )
             opened = RuntimeSessionResult(
-                supervisor.read(),
-                "surface-opened",
-                checkpoint="checkpoint-1",
-                surface_ref="surface:3",
-                workspace_id="44444444-4444-4444-8444-444444444444",
-                workspace_ref="workspace:4",
-                window_id="55555555-5555-4555-8555-555555555555",
-                window_ref="window:5",
+                supervisor.read(), "surface-opened", checkpoint="checkpoint-1"
             )
             if on_surface_opened is not None:
                 on_surface_opened(opened)
@@ -1958,14 +1935,7 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
             supervisor.transition("running")
             final = supervisor.transition("awaiting-callback")
             return RuntimeSessionResult(
-                final,
-                "started",
-                checkpoint="checkpoint-1",
-                surface_ref=opened.surface_ref,
-                workspace_id=opened.workspace_id,
-                workspace_ref=opened.workspace_ref,
-                window_id=opened.window_id,
-                window_ref=opened.window_ref,
+                final, "started", checkpoint="checkpoint-1"
             )
 
         def register_callback_target(self, *_args: object) -> None:
@@ -2158,8 +2128,8 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
 
     original_sync = dispatch_execution.sync_codex_profile
     original_log = dispatch_execution.dispatch_log
-    original_dashboard_launch = dispatch_execution.launch_facade_dashboard
-    launched_dashboards: list[dict[str, object]] = []
+    original_rebind = dispatch_execution.rebind_facade_dashboard
+    rebound_dashboards: list[dict[str, object]] = []
     sync_failure_raw = json.loads(json.dumps(raw_request))
     sync_failure_raw["request_id"] = str(uuid.uuid4())
     sync_failure_raw["task_name"] = "runtime-sync-failure"
@@ -2183,8 +2153,8 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     )
     dispatch_execution.sync_codex_profile = lambda *_args, **_kwargs: None
     dispatch_execution.dispatch_log = lambda *_args, **_kwargs: None
-    dispatch_execution.launch_facade_dashboard = lambda **kwargs: (
-        launched_dashboards.append(kwargs)
+    dispatch_execution.rebind_facade_dashboard = lambda **kwargs: (
+        rebound_dashboards.append(kwargs)
         or DashboardLaunchReceipt(
             "launched", "dispatch", "root", str(kwargs["root_operation_id"])
         )
@@ -2202,7 +2172,7 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     finally:
         dispatch_execution.sync_codex_profile = original_sync
         dispatch_execution.dispatch_log = original_log
-        dispatch_execution.launch_facade_dashboard = original_dashboard_launch
+        dispatch_execution.rebind_facade_dashboard = original_rebind
     harness_record = OperationStore(vault / ".vault-meta/harness").read(
         harness_request["request_id"], harness_request["request_id"]
     )
@@ -2218,13 +2188,12 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         and harness_record.state == "awaiting-callback",
     )
     check(
-        "durable task creation launches one root dashboard from the task surface",
-        len(launched_dashboards) == 2
-        and launched_dashboards[0]["caller_surface"]
-        == harness_result["task_surface"]
-        and launched_dashboards[0]["root_operation_id"]
+        "durable task creation rebinds the temporary observer exactly once",
+        len(rebound_dashboards) == 2
+        and rebound_dashboards[0]["temporary_request_id"]
+        == harness_request["request_id"]
+        and rebound_dashboards[0]["root_operation_id"]
         == harness_result["task_id"]
-        and launched_dashboards[0]["facade"] == "dispatch"
         and harness_result["observer"]["status"] == "launched",
     )
     check(

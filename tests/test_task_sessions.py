@@ -672,7 +672,7 @@ def workspace_spawn_runner(args: list[str], **_: object) -> Result:
                 }],
             })
         return Result(stdout=json.dumps({
-            "windows": [{"id": "66666666-6666-4666-8666-666666666666", "ref": "window:7", "workspaces": workspaces}],
+            "windows": [{"id": "window-id", "ref": "window:7", "workspaces": workspaces}],
         }))
     if "new-workspace" in args:
         workspace_created = True
@@ -696,7 +696,7 @@ bound_workspace = workspace_lifecycle.bind_workspace_identity(
 check(
     "workspace binding records exact UUID ownership",
     bound_workspace["workspace"] == "44444444-4444-4444-8444-444444444444"
-    and bound_workspace["window"] == "66666666-6666-4666-8666-666666666666"
+    and bound_workspace["window"] == "window-id"
     and bound_workspace["workspace_ref"] == "workspace:22",
 )
 
@@ -716,7 +716,7 @@ def owned_workspace_runner(args: list[str], **_: object) -> Result:
                 "panes": [{"id": "pane-id", "ref": "pane:22", "surfaces": []}],
             })
         return Result(stdout=json.dumps({
-            "windows": [{"id": "66666666-6666-4666-8666-666666666666", "ref": "window:7", "workspaces": workspaces}],
+            "windows": [{"id": "window-id", "ref": "window:7", "workspaces": workspaces}],
         }))
     if args == [
         "cmux", "workspace", "close", "44444444-4444-4444-8444-444444444444"
@@ -729,7 +729,7 @@ def owned_workspace_runner(args: list[str], **_: object) -> Result:
 check(
     "dedicated task workspace closes by exact UUID",
     workspace_lifecycle.close_workspace_exact(
-        "44444444-4444-4444-8444-444444444444", "66666666-6666-4666-8666-666666666666", owned_workspace_runner
+        "44444444-4444-4444-8444-444444444444", "window-id", owned_workspace_runner
     ) == "closed",
 )
 check(
@@ -741,7 +741,7 @@ with tempfile.TemporaryDirectory(prefix="workspace-container-test.") as raw_cont
     container = Path(raw_container)
     (container / ".task-meta.json").write_text(json.dumps({
         "task_workspace": "44444444-4444-4444-8444-444444444444",
-        "task_window": "66666666-6666-4666-8666-666666666666",
+        "task_window": "window-id",
         "surface_policy": {"placement": "workspace"},
     }), encoding="utf-8")
     owned_workspace_open = True
@@ -771,7 +771,7 @@ def exact_close_runner(args: list[str], **_: object) -> Result:
         surfaces = [{"id": exact_surface, "ref": "surface:33"}] if exact_open else []
         return Result(stdout=json.dumps({
             "windows": [{
-                "id": "66666666-6666-4666-8666-666666666666",
+                "id": "window-id",
                 "ref": "window:7",
                 "workspaces": [{
                     "id": "workspace-id",

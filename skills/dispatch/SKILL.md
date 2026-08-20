@@ -63,14 +63,17 @@ Bounded review/schema work may use the compiled ephemeral profile below.
    Omit caller identity fields normally: the
    runner binds `CMUX_SURFACE_ID`, current session ID, and host-confirmed route.
    It never inspects the globally focused surface.
-   Do not open a dashboard before built-in validate/start. The runner first
-   creates and durably binds the exact primary task surface, workspace, and
-   window, then opens exactly one root dashboard split from that task surface
-   before provider launch. The coordinator workspace receives no task split.
-   Every later registered facade reuses that root dashboard through
-   `harness.dashboard_facade`; there is no temporary marker or rebind step.
-   Continue after a contained display failure; the dashboard remains outside
-   provider `OwnedResources` while its task workspace is lifecycle-owned.
+   Before built-in validate/start, if cmux is available, idempotently run
+   `python3 <vault-root>/scripts/harness-dashboard.py open --vault <vault-root>
+   --store <vault-root>/.vault-meta/harness --surface "$CMUX_SURFACE_ID"
+   --temporary "<request-id>" --facade dispatch` with the exact approved request UUID.
+   Every other registered root-producing facade uses the same
+   `harness.dashboard_facade` helper. If its durable root is not available yet,
+   it opens one `--temporary` request scope and then uses `rebind` on that exact
+   marker/split; it never opens a replacement split. The split sees
+   only that request tree. `observer.argv` omits `--surface`; coordinator appends
+   its anchored value before execution. Continue after a contained display failure;
+   the observer is external to Harness ownership.
 6. Run `python3 <vault-root>/scripts/dispatch-runner.py validate --spec
    <request.json>` and show its typed route/hash echo-confirm block. Include the
    exact target, route, plan/context, interaction/review/reap/surface/watchdog
@@ -105,10 +108,8 @@ plan into the owner-only content-addressed
 binds metadata/review context to that exact digest. Later source-plan edits
 affect only future dispatches; an active task changes plan identity only through
 the explicit predecessor-bound amendment constructor. The generic provider runtime
-owns the anchored split/workspace, provider launch, callback relay, resume, and
-exact cleanup. The primary task workspace contains the executor, root dashboard,
-verification, fix, recovery, and other non-review activity. Each review program
-creates a separate shared review workspace. A UUID is
+owns the anchored split/workspace,
+provider launch, callback relay, resume, and exact cleanup. A UUID is
 claimed before mutation; launched requests are idempotent, while preparing or
 failed requests fail closed.
 
