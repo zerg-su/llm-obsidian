@@ -159,6 +159,73 @@ check(
     "duplicate semantic status fails closed",
     duplicate_status_rejected,
 )
+
+
+ordered_calls: list[list[str]] = []
+
+
+def ordered_terminal_input(
+    command: list[str], **_kwargs: object
+) -> subprocess.CompletedProcess[str]:
+    ordered_calls.append(command)
+    if "capabilities" in command:
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            json.dumps({"capabilities": ["terminal.input.ordered.v1"]}),
+            "",
+        )
+    if "terminal.paste" in command:
+        payload = json.loads(command[-1])
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            json.dumps(
+                {
+                    "submitted": True,
+                    "surface_id": payload["surface_id"],
+                    "workspace_id": workspace,
+                }
+            ),
+            "",
+        )
+    return subprocess.CompletedProcess(command, 1, "", "unexpected command")
+
+
+CmuxAdapter(ordered_terminal_input).paste(surface, "ordered input")
+check(
+    "ordered terminal paste binds exact surface identity",
+    len(ordered_calls) == 2
+    and "capabilities" in ordered_calls[0]
+    and "terminal.paste" in ordered_calls[1]
+    and json.loads(ordered_calls[1][-1])
+    == {"surface_id": surface, "text": "ordered input"},
+)
+
+
+legacy_calls: list[list[str]] = []
+
+
+def legacy_terminal_input(
+    command: list[str], **_kwargs: object
+) -> subprocess.CompletedProcess[str]:
+    legacy_calls.append(command)
+    if "capabilities" in command:
+        return subprocess.CompletedProcess(
+            command, 0, json.dumps({"capabilities": []}), ""
+        )
+    if "send" in command:
+        return subprocess.CompletedProcess(command, 0, "", "")
+    return subprocess.CompletedProcess(command, 1, "", "unexpected command")
+
+
+CmuxAdapter(legacy_terminal_input).paste(surface, "legacy input")
+check(
+    "ordered paste capability has one explicit legacy fallback",
+    len(legacy_calls) == 2
+    and "capabilities" in legacy_calls[0]
+    and legacy_calls[1][-4:] == ["send", "--surface", surface, "legacy input"],
+)
 workspace_opened = cmux.open_workspace(surface, cwd=ROOT)
 check(
     "workspace creation derives exact origin window without surface guessing",

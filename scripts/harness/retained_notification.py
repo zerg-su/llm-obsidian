@@ -19,6 +19,7 @@ from .runtime_session_continuation import (
     _prompt_anchor,
     await_initial_input_visible,
     deliver_continuation,
+    paste_editor_text,
 )
 
 
@@ -136,7 +137,7 @@ def send_visible_notification(
     """Paste once, prove editor visibility, then submit exactly one Enter."""
 
     before_screen = port.read(surface_id)
-    port.send(surface_id, message)
+    paste_editor_text(port, surface_id=surface_id, text=message)
     kwargs: dict[str, object] = {}
     if wait is not None:
         kwargs["wait"] = wait

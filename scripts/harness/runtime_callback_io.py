@@ -18,6 +18,7 @@ from typing import Any, Mapping
 from .contracts import CallbackEnvelope
 from .callback_submit_recovery import ArtifactEvidence
 from .runtime_worker_contracts import IDENTIFIER, RuntimeWorkerError
+from .runtime_session_continuation import paste_editor_text
 from research_contract import load_artifact
 from review_resolution import DISPOSITIONS
 from .artifact_repair import (
@@ -257,7 +258,11 @@ def _publish_callback_wake_locked(
         },
     )
     try:
-        cmux_adapter.send(spec["origin_surface"], wake)
+        paste_editor_text(
+            cmux_adapter,
+            surface_id=spec["origin_surface"],
+            text=wake,
+        )
         _atomic_json(
             notify_path,
             {
@@ -455,7 +460,11 @@ def ensure_review_resolution(
         owner.restore_template()
 
         def send(message: str) -> None:
-            worker.cmux_adapter.send(worker.spec["surface_id"], message)
+            paste_editor_text(
+                worker.cmux_adapter,
+                surface_id=worker.spec["surface_id"],
+                text=message,
+            )
             worker.cmux_adapter.send_key(worker.spec["surface_id"], "Enter")
 
         owner.deliver_correction(

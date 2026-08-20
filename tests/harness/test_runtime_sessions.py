@@ -5965,6 +5965,16 @@ class InitialStartWorkerCmux(FakeCmux):
         return self.post_submit[0]
 
 
+class OrderedInitialStartCmux(InitialStartWorkerCmux):
+    """The worker must use the ordered paste seam when the adapter has it."""
+
+    def paste(self, surface_id: str, text: str) -> None:
+        super().send(surface_id, text)
+
+    def send(self, surface_id: str, text: str) -> None:
+        raise AssertionError("initial input bypassed ordered terminal paste")
+
+
 class PostSubmitTrustCmux(InitialStartWorkerCmux):
     """A recognized workspace dialog that appears only after task submit."""
 
@@ -6224,6 +6234,25 @@ def check_worker_accepts_acknowledged_initial_start() -> None:
             "an acknowledged initial start sends exactly one prompt and Enter",
             len(cmux.sent) == 1 and cmux.submit_count == 1 and code == 0,
             (cmux.sent, cmux.submit_count, code),
+        )
+
+
+def check_worker_uses_ordered_initial_paste() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        cmux = OrderedInitialStartCmux([ACTIVE_CLAUDE_SCREEN])
+        code, launch, _store, _callback = _initial_start_worker(
+            root, "ordered-initial", cmux
+        )
+        kinds, delivery = _initial_start_delivery(launch)
+        check(
+            "initial worker uses one ordered paste before semantic submit",
+            code == 0
+            and len(cmux.sent) == 1
+            and cmux.submit_count == 1
+            and kinds[:2] == ["provider-started", "input-accepted"]
+            and delivery["send_status"] == "accepted",
+            (code, cmux.sent, cmux.submit_count, kinds, delivery),
         )
 
 
@@ -7049,6 +7078,7 @@ _INITIAL_START_FIXTURES = (
     check_initial_start_observes_within_budget,
     check_worker_contains_unconfirmed_initial_start,
     check_worker_accepts_acknowledged_initial_start,
+    check_worker_uses_ordered_initial_paste,
     check_research_worker_rejects_mutated_argv_prompt_pointer,
     check_worker_ready_binds_retargeted_initial_provider_generation,
     check_worker_degrades_invalid_optional_wake_identity,

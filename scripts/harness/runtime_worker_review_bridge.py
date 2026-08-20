@@ -25,6 +25,7 @@ from .review_continuation_recovery import (
     classify_review_continuation,
 )
 from .review_continuation_observation import observe_review_continuation
+from .runtime_session_continuation import paste_editor_text
 from review_contract import ReviewContractError, axis_finding_id
 
 
@@ -1292,7 +1293,11 @@ class RuntimeWorkerReviewBridgeMixin:
                 return True
         _atomic_json(notify_path, {**marker, "status": "pending"})
         message = f"Refresh .task-summary.json before review finalization: its body still describes the pre-resolution HEAD. Preserve the exact schema/type/title/session, cover every applied or rejected finding, and summarize final HEAD {approved_head}."
-        self.cmux_adapter.send(self.spec["surface_id"], message)
+        paste_editor_text(
+            self.cmux_adapter,
+            surface_id=self.spec["surface_id"],
+            text=message,
+        )
         self.cmux_adapter.send_key(self.spec["surface_id"], "Enter")
         _atomic_json(notify_path, {**marker, "status": "sent"})
         return True

@@ -36,6 +36,7 @@ from .retained_notification import (
     RetainedNotificationPending,
     deliver_worker_notification,
 )
+from .runtime_session_continuation import paste_editor_text
 
 
 _REVIEW_REJECTION_FIELDS = frozenset(
@@ -229,7 +230,11 @@ class RuntimeWorkerControlMixin:
             )
 
             def send(wake: str) -> None:
-                self.cmux_adapter.send(self.spec["surface_id"], wake)
+                paste_editor_text(
+                    self.cmux_adapter,
+                    surface_id=self.spec["surface_id"],
+                    text=wake,
+                )
                 self.cmux_adapter.send_key(self.spec["surface_id"], "Enter")
 
             owner.deliver_correction(
@@ -724,7 +729,11 @@ class RuntimeWorkerControlMixin:
                     observer("correction-template-restored")
 
             def send(wake: str) -> None:
-                self.cmux_adapter.send(self.spec["surface_id"], wake)
+                paste_editor_text(
+                    self.cmux_adapter,
+                    surface_id=self.spec["surface_id"],
+                    text=wake,
+                )
                 self.cmux_adapter.send_key(self.spec["surface_id"], "Enter")
 
             owner.deliver_correction(
@@ -996,7 +1005,11 @@ class RuntimeWorkerControlMixin:
         message = f"Typed task escalation callback received. Category: pipeline-decision. {body} Inspect {attention_path} and resolve from the originating coordinator with: {command}. Allowed decisions: {', '.join(allowed_decisions)}."
         if len(message.encode()) > 4096:
             raise RuntimeWorkerError("pipeline decision notification exceeds its bound")
-        self.cmux_adapter.send(self.spec["origin_surface"], message)
+        paste_editor_text(
+            self.cmux_adapter,
+            surface_id=self.spec["origin_surface"],
+            text=message,
+        )
         self.cmux_adapter.send_key(self.spec["origin_surface"], "Enter")
         self.write_immutable_json(notify_path, delivery)
 

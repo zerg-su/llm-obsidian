@@ -38,6 +38,7 @@ from .retained_notification import (
     RetainedNotificationPending,
     deliver_worker_notification,
 )
+from .runtime_session_continuation import paste_editor_text
 
 
 @contextmanager
@@ -199,9 +200,10 @@ class RuntimeWorkerCustomMixin:
             + shlex.quote(str(self.spec["cwd"]))
             + " --decision <decision>"
         )
-        self.cmux_adapter.send(
-            self.spec["origin_surface"],
-            f"Typed custom pipeline escalation received. Inspect {path} and resolve from the originating coordinator with: {command}. Allowed decisions: stop, reapprove-pipeline.",
+        paste_editor_text(
+            self.cmux_adapter,
+            surface_id=self.spec["origin_surface"],
+            text=f"Typed custom pipeline escalation received. Inspect {path} and resolve from the originating coordinator with: {command}. Allowed decisions: stop, reapprove-pipeline.",
         )
         self.cmux_adapter.send_key(self.spec["origin_surface"], "Enter")
         self.write_immutable_json(
@@ -925,8 +927,10 @@ class RuntimeWorkerCustomMixin:
                     "status": "pending",
                 },
             )
-            self.cmux_adapter.send(
-                self.spec["origin_surface"], self.spec["callback_wake"]
+            paste_editor_text(
+                self.cmux_adapter,
+                surface_id=self.spec["origin_surface"],
+                text=self.spec["callback_wake"],
             )
             self.cmux_adapter.send_key(self.spec["origin_surface"], "Enter")
             _atomic_json(

@@ -17,6 +17,18 @@ class ContinuationPort(Protocol):
     def send_key(self, surface_id: str, key: str) -> None: ...
 
 
+def paste_editor_text(
+    port: ContinuationPort, *, surface_id: str, text: str
+) -> None:
+    """Use exact ordered paste when the adapter exposes it."""
+
+    ordered_paste = getattr(port, "paste", None)
+    if callable(ordered_paste):
+        ordered_paste(surface_id, text)
+        return
+    port.send(surface_id, text)
+
+
 ArtifactProbe = Callable[[], bool]
 CheckpointProbe = Callable[[str, str], str]
 OwnershipProbe = Callable[[], bool]
@@ -472,7 +484,7 @@ def deliver_continuation(
         observe_stage(
             "paste-reserved", 0, pre_send_digest, pre_send_editor_digest, ""
         )
-        port.send(surface_id, prompt)
+        paste_editor_text(port, surface_id=surface_id, text=prompt)
         observe_stage(
             "transport-accepted", 0, pre_send_digest, pre_send_editor_digest, ""
         )
@@ -520,6 +532,13 @@ def deliver_continuation(
             paste_screen = screen
             paste_digest = _screen_digest(screen)
             break
+        if screen_state in {"idle", "unknown"} and (
+            _screen_digest(screen) == pre_send_digest
+            and _editor_digest(runtime, screen, anchor) == pre_send_editor_digest
+        ):
+            if observation + 1 < observation_limit:
+                wait(observation_interval_seconds)
+            continue
         if screen_state in {"idle", "permission", "unknown"}:
             return ContinuationDelivery(False, screen_state, 0)
         if observation + 1 < observation_limit:

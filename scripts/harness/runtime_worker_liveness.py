@@ -17,6 +17,7 @@ from .runtime_worker import (
     _review_resolution_handoff_ready,
     _submit_failure_requires_attention,
 )
+from .runtime_session_continuation import paste_editor_text
 
 
 class RuntimeWorkerLivenessMixin:
@@ -545,9 +546,10 @@ class RuntimeWorkerLivenessMixin:
                 else:
                     self.inspect_callback()
             elif decision.action == "nudge":
-                self.cmux_adapter.send(
-                    self.spec["surface_id"],
-                    "Harness liveness check: continue the current task, or if it is complete, write the exact required typed callback now.",
+                paste_editor_text(
+                    self.cmux_adapter,
+                    surface_id=self.spec["surface_id"],
+                    text="Harness liveness check: continue the current task, or if it is complete, write the exact required typed callback now.",
                 )
                 self.cmux_adapter.send_key(self.spec["surface_id"], "Enter")
             elif decision.action in {"restart", "attention-required"}:

@@ -22,6 +22,7 @@ from .runtime_session_continuation import (
     await_initial_input_ready,
     await_initial_input_visible,
     await_initial_start_acknowledged,
+    paste_editor_text,
     resolve_recognized_provider_prompt,
 )
 from .runtime_worker_control import RuntimeWorkerControlMixin
@@ -319,7 +320,11 @@ class RuntimeWorkerExecution(
                 self.spec["runtime"],
                 self.cmux_adapter.read(self.spec["surface_id"]),
             )
-            self.cmux_adapter.send(self.spec["surface_id"], delivery_text)
+            paste_editor_text(
+                self.cmux_adapter,
+                surface_id=self.spec["surface_id"],
+                text=delivery_text,
+            )
             if not await_initial_input_visible(
                 self.cmux_adapter,
                 surface_id=self.spec["surface_id"],

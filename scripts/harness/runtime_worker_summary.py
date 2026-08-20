@@ -28,6 +28,7 @@ from .runtime_worker_verification import (
     _review_resolution_drift_in_flight,
     _verification_candidate_is_current,
 )
+from .runtime_session_continuation import paste_editor_text
 from .verification_attempt import verification_input_sha256
 from .fresh_artifact_repair import (
     FreshArtifactRepair,
@@ -178,7 +179,11 @@ class RuntimeWorkerSummaryMixin:
             )
 
             def send(wake: str) -> None:
-                self.cmux_adapter.send(self.spec["surface_id"], wake)
+                paste_editor_text(
+                    self.cmux_adapter,
+                    surface_id=self.spec["surface_id"],
+                    text=wake,
+                )
                 self.cmux_adapter.send_key(self.spec["surface_id"], "Enter")
 
             owner.deliver_correction(
@@ -758,7 +763,11 @@ class RuntimeWorkerSummaryMixin:
                 "status": "pending",
             },
         )
-        self.cmux_adapter.send(self.spec["origin_surface"], wake)
+        paste_editor_text(
+            self.cmux_adapter,
+            surface_id=self.spec["origin_surface"],
+            text=wake,
+        )
         self.cmux_adapter.send_key(self.spec["origin_surface"], "Enter")
         _atomic_json(
             notify_path,

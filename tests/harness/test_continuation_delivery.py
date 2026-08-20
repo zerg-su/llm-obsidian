@@ -68,6 +68,26 @@ class SemanticPort(FakePort):
         return "idle"
 
 
+class OrderedDelayedPort(FakePort):
+    def __init__(self) -> None:
+        super().__init__(
+            [
+                "❯",
+                "❯",
+                f"❯ {PROMPT.splitlines()[0]}",
+                "✻ Working… (1s · 12 tokens)",
+            ]
+        )
+        self.pasted: list[str] = []
+
+    def paste(self, surface_id: str, text: str) -> None:
+        assert surface_id == SURFACE
+        self.pasted.append(text)
+
+    def send(self, surface_id: str, text: str) -> None:
+        raise AssertionError("legacy send bypassed ordered terminal paste")
+
+
 class FakeWorker:
     def __init__(self, port: FakePort) -> None:
         self.cmux_adapter = port
@@ -132,6 +152,26 @@ def run_case(
         wait=lambda _seconds: None,
     )
     return result, port, retries, stages
+
+
+ordered_delayed = OrderedDelayedPort()
+ordered_result = deliver_continuation(
+    ordered_delayed,
+    surface_id=SURFACE,
+    prompt=PROMPT,
+    runtime="claude",
+    artifact_ready=lambda: False,
+    ownership_ready=lambda: True,
+    reserve_retry=lambda: False,
+    observe_stage=lambda *_args: None,
+    observation_limit=4,
+    observation_interval_seconds=0,
+    wait=lambda _seconds: None,
+)
+assert ordered_result.acknowledged
+assert ordered_delayed.pasted == [PROMPT]
+assert ordered_delayed.keys == ["Enter"]
+print("OK   ordered paste waits through one unchanged idle frame")
 
 
 delayed = FakePort(["❯", f"❯ {PROMPT.splitlines()[0]}"])

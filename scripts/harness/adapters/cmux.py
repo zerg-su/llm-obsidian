@@ -195,6 +195,7 @@ class CmuxAdapter:
         self.runner = runner or subprocess.run
         self.binary = binary
         self.timeout = timeout
+        self._ordered_input_supported: bool | None = None
 
     def _run(self, args: Sequence[str]) -> subprocess.CompletedProcess[str]:
         kwargs: dict[str, object] = {
@@ -361,6 +362,50 @@ class CmuxAdapter:
     def send(self, surface_id: str, text: str) -> None:
         self._require_surface(surface_id)
         self._run(["send", "--surface", surface_id, text])
+
+    def _supports_ordered_input(self) -> bool:
+        if self._ordered_input_supported is not None:
+            return self._ordered_input_supported
+        try:
+            value = json.loads(self._run(["capabilities"]).stdout)
+        except CmuxError:
+            self._ordered_input_supported = False
+            return False
+        except json.JSONDecodeError as exc:
+            raise CmuxError("cmux capabilities returned invalid JSON") from exc
+        capabilities = value.get("capabilities") if isinstance(value, dict) else None
+        if not isinstance(capabilities, list) or any(
+            not isinstance(item, str) for item in capabilities
+        ):
+            raise CmuxError("cmux capabilities response is invalid")
+        self._ordered_input_supported = "terminal.input.ordered.v1" in capabilities
+        return self._ordered_input_supported
+
+    def paste(self, surface_id: str, text: str) -> None:
+        """Paste through cmux ordered terminal input when it is available."""
+
+        self._require_surface(surface_id)
+        if not self._supports_ordered_input():
+            self.send(surface_id, text)
+            return
+        request = json.dumps(
+            {"surface_id": surface_id, "text": text},
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        try:
+            value = json.loads(
+                self._run(["rpc", "terminal.paste", request]).stdout
+            )
+        except json.JSONDecodeError as exc:
+            raise CmuxError("cmux ordered paste returned invalid JSON") from exc
+        if (
+            not isinstance(value, dict)
+            or value.get("submitted") is not True
+            or str(value.get("surface_id") or "").casefold()
+            != surface_id.casefold()
+        ):
+            raise CmuxError("cmux ordered paste identity is invalid")
 
     def send_key(self, surface_id: str, key: str) -> None:
         self._require_surface(surface_id)

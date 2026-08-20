@@ -68,6 +68,9 @@ class Port:
         return self.screen
 
     def send(self, surface_id: str, text: str) -> None:
+        raise AssertionError("registered transition bypassed ordered paste")
+
+    def paste(self, surface_id: str, text: str) -> None:
         assert surface_id == SURFACE
         self.sent.append(text)
         anchor = " ".join(text.splitlines()[0].strip().split())[:96]

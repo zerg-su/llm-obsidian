@@ -30,6 +30,7 @@ from .verification import (
     VerificationAuthorityError,
 )
 from .verification_attempt import MAX_SAME_HEAD_ATTEMPT_INDEX
+from .runtime_session_continuation import paste_editor_text
 
 
 def _verification_candidate_is_current(cwd: Path, expected_head_sha: str) -> bool:
@@ -833,9 +834,10 @@ class RuntimeWorkerVerificationMixin:
             "pipeline-decision", "--verification-baseline-gap", "--reason",
             "Isolated evidence established an unrelated baseline verification gap.",
             "--question", "Admit review with the exact failed receipt preserved?"))
-        self.cmux_adapter.send(
-            self.spec["surface_id"],
-            f"Typed pipeline verification attention is ready in .task-verification.json. For changed-HEAD fix-and-resubmit, commit the fix and run `python3 {self.trusted_vault}/scripts/pipeline-verification-resubmit.py --worktree {self.spec['cwd']}`. If isolated evidence establishes a mechanism flake, run this exact typed raise command: `{verification_raise}`. If it instead proves an unrelated baseline gap, run: `{baseline_raise}`. A same-HEAD retry or gap admission happens only through its exact coordinator decision. Do not create an empty commit, launch review, or invoke reap.",
+        paste_editor_text(
+            self.cmux_adapter,
+            surface_id=self.spec["surface_id"],
+            text=f"Typed pipeline verification attention is ready in .task-verification.json. For changed-HEAD fix-and-resubmit, commit the fix and run `python3 {self.trusted_vault}/scripts/pipeline-verification-resubmit.py --worktree {self.spec['cwd']}`. If isolated evidence establishes a mechanism flake, run this exact typed raise command: `{verification_raise}`. If it instead proves an unrelated baseline gap, run: `{baseline_raise}`. A same-HEAD retry or gap admission happens only through its exact coordinator decision. Do not create an empty commit, launch review, or invoke reap.",
         )
         self.cmux_adapter.send_key(self.spec["surface_id"], "Enter")
         _atomic_json(
