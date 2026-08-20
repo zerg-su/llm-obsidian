@@ -215,20 +215,33 @@ def run_runtime(adapter: CmuxAdapter, runtime: str, turns: int, title: str) -> i
     raise RuntimeError("real cmux probe left its exact workspace tail")
 
 
-def receipt_payload(head: str, turns: int) -> dict[str, object]:
+def probe_identity() -> tuple[str, str]:
+    head = subprocess.run(
+        ("git", "rev-parse", "HEAD"),
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout.strip()
+    probe_sha256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+    return head, probe_sha256
+
+
+def receipt_payload(
+    head: str,
+    probe_sha256: str,
+    turns: int,
+    command: list[str],
+) -> dict[str, object]:
     return {
         "schema_version": 1,
         "status": "complete",
         "gate": "v287-real-cmux-delivery",
         "release": "2.8.7",
         "head_sha": head,
-        "command": [
-            "python3",
-            "prototypes/v287_real_cmux_delivery.py",
-            "--turns",
-            str(turns),
-        ],
-        "probe_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+        "command": command,
+        "working_directory": str(Path.cwd().resolve()),
+        "probe_sha256": probe_sha256,
         "python_version": sys.version.split()[0],
         "runtime_counts": {"claude": turns, "codex": turns},
         "workspace_tails": 0,
@@ -256,20 +269,30 @@ def write_receipt(path: Path, payload: dict[str, object]) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def parent(turns: int, receipt: Path | None = None) -> int:
+def parent(
+    turns: int,
+    receipt: Path | None = None,
+    command: list[str] | None = None,
+) -> int:
+    starting_identity = probe_identity()
     adapter = CmuxAdapter(timeout=8)
     totals = {"codex": 0, "claude": 0}
     for runtime in ("codex", "claude"):
         title = f"llm-obsidian-v287-{runtime}-{uuid.uuid4().hex[:10]}"
         totals[runtime] = run_runtime(adapter, runtime, turns, title)
-    head = subprocess.run(
-        ("git", "rev-parse", "HEAD"),
-        cwd=ROOT,
-        text=True,
-        capture_output=True,
-        check=True,
-    ).stdout.strip()
-    payload = receipt_payload(head, turns)
+    ending_identity = probe_identity()
+    if ending_identity != starting_identity:
+        raise RuntimeError(
+            "real cmux probe checkout identity changed during the gate"
+        )
+    head, probe_sha256 = starting_identity
+    creating_command = command or [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "--turns",
+        str(turns),
+    ]
+    payload = receipt_payload(head, probe_sha256, turns, creating_command)
     if receipt is not None:
         write_receipt(receipt, payload)
     print(
@@ -286,6 +309,7 @@ def parent(turns: int, receipt: Path | None = None) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    creating_argv = list(sys.argv[1:] if argv is None else argv)
     parser = argparse.ArgumentParser()
     parser.add_argument("--child", choices=("codex", "claude"))
     parser.add_argument("--turns", type=int, default=20)
@@ -298,7 +322,11 @@ def main(argv: list[str] | None = None) -> int:
     return (
         child(args.child, args.turns)
         if args.child
-        else parent(args.turns, args.receipt)
+        else parent(
+            args.turns,
+            args.receipt,
+            [sys.executable, str(Path(__file__).resolve()), *creating_argv],
+        )
     )
 
 
