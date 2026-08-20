@@ -25,6 +25,7 @@ from harness.runtime_session_continuation import deliver_continuation  # noqa: E
 
 UUID_RE = re.compile(r"[0-9A-F]{8}-(?:[0-9A-F]{4}-){3}[0-9A-F]{12}")
 WORKSPACE_REF_RE = re.compile(r"workspace:[1-9][0-9]*")
+BRACKETED_PASTE_START, BRACKETED_PASTE_END = "\x1b[200~", "\x1b[201~"
 
 
 def child(runtime: str, turns: int) -> int:
@@ -34,18 +35,22 @@ def child(runtime: str, turns: int) -> int:
         if runtime == "codex"
         else "✻ Working…(1s · ↓10 tokens)"
     )
+    print("\x1b[?2004h", end="", flush=True)
     for turn in range(turns):
         for _line in range(25):
             print("v287-editor-frame", flush=True)
         print(f"V287_READY_{runtime}_{turn:02d}", flush=True)
         print(marker, end=" ", flush=True)
         value = sys.stdin.readline().strip()
+        if value.startswith(BRACKETED_PASTE_START) and value.endswith(BRACKETED_PASTE_END):
+            value = value[len(BRACKETED_PASTE_START) : -len(BRACKETED_PASTE_END)]
         if value != f"V287_{runtime}_{turn:02d}":
             print(f"V287_REJECT_{turn:02d}", flush=True)
             return 7
         print(active, flush=True)
         print(f"V287_ACK_{runtime}_{turn:02d}", flush=True)
         time.sleep(0.15)
+    print("\x1b[?2004l", end="", flush=True)
     print(f"V287_DONE_{runtime}", flush=True)
     return 0
 

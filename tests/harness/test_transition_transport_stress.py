@@ -68,14 +68,14 @@ class Port:
         return self.screen
 
     def send(self, surface_id: str, text: str) -> None:
-        raise AssertionError("registered transition bypassed ordered paste")
-
-    def paste(self, surface_id: str, text: str) -> None:
         assert surface_id == SURFACE
         self.sent.append(text)
         anchor = " ".join(text.splitlines()[0].strip().split())[:96]
         marker = "›" if self.runtime == "codex" else "❯"
         self.screen = f"{marker} {anchor}"
+
+    def paste(self, surface_id: str, text: str) -> None:
+        raise AssertionError("atomic terminal paste crossed the submit boundary")
 
     def send_key(self, surface_id: str, key: str) -> None:
         assert surface_id == SURFACE and key == "Enter"

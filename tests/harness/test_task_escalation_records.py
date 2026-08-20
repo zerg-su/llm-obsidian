@@ -847,31 +847,34 @@ with tempfile.TemporaryDirectory(prefix="task-escalation-stale-self-heal.") as r
     )
 
 
-class OrderedInputProbe:
+class SeparateSubmitProbe:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str, str]] = []
 
+    def send(self, surface: str, message: str) -> None:
+        self.calls.append(("send", surface, message))
+
     def paste(self, surface: str, message: str) -> None:
-        self.calls.append(("paste", surface, message))
+        raise AssertionError("atomic terminal paste crossed the submit boundary")
 
     def send_key(self, surface: str, key: str) -> None:
         self.calls.append(("send-key", surface, key))
 
 
-ordered_input = OrderedInputProbe()
+separate_submit = SeparateSubmitProbe()
 with patch.object(
-    task_escalation_cli, "CmuxAdapter", return_value=ordered_input
+    task_escalation_cli, "CmuxAdapter", return_value=separate_submit
 ):
     task_escalation_cli.send(
         "00000000-0000-0000-0000-000000000123",
         "continue exact recovery",
     )
 check(
-    "coordinator relay uses one exact ordered paste before submit",
-    ordered_input.calls
+    "coordinator relay keeps one editor write before one submit",
+    separate_submit.calls
     == [
         (
-            "paste",
+            "send",
             "00000000-0000-0000-0000-000000000123",
             "continue exact recovery",
         ),

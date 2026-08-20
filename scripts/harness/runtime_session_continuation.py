@@ -20,12 +20,10 @@ class ContinuationPort(Protocol):
 def paste_editor_text(
     port: ContinuationPort, *, surface_id: str, text: str
 ) -> None:
-    """Use exact ordered paste when the adapter exposes it."""
+    """Write editor text without crossing the separately owned submit boundary."""
 
-    ordered_paste = getattr(port, "paste", None)
-    if callable(ordered_paste):
-        ordered_paste(surface_id, text)
-        return
+    # cmux ``terminal.paste`` may commit canonical input atomically.  Harness
+    # must observe editor visibility before it owns the one explicit Enter.
     port.send(surface_id, text)
 
 
@@ -541,6 +539,7 @@ def deliver_continuation(
             break
         if screen_state in {"idle", "unknown"} and (
             _screen_digest(screen) == pre_send_digest
+            or runtime == "codex"
             and _editor_digest(runtime, screen, anchor) == pre_send_editor_digest
         ):
             if observation + 1 < observation_limit:

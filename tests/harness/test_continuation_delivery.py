@@ -68,7 +68,7 @@ class SemanticPort(FakePort):
         return "idle"
 
 
-class OrderedDelayedPort(FakePort):
+class AtomicPasteDelayedPort(FakePort):
     def __init__(self) -> None:
         super().__init__(
             [
@@ -78,14 +78,25 @@ class OrderedDelayedPort(FakePort):
                 "✻ Working… (1s · 12 tokens)",
             ]
         )
-        self.pasted: list[str] = []
+    def paste(self, surface_id: str, text: str) -> None:
+        raise AssertionError("atomic terminal paste crossed the submit boundary")
+
+
+class AtomicPasteRepaintPort(FakePort):
+    """A status repaint must not outrun an accepted editor write."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            [
+                "• Status 0\n›",
+                "• Status 1\n›",
+                f"• Status 2\n› {PROMPT.splitlines()[0]}",
+                "• Working (provider-free repaint probe)",
+            ]
+        )
 
     def paste(self, surface_id: str, text: str) -> None:
-        assert surface_id == SURFACE
-        self.pasted.append(text)
-
-    def send(self, surface_id: str, text: str) -> None:
-        raise AssertionError("legacy send bypassed ordered terminal paste")
+        raise AssertionError("atomic terminal paste crossed the submit boundary")
 
 
 class FakeWorker:
@@ -154,9 +165,9 @@ def run_case(
     return result, port, retries, stages
 
 
-ordered_delayed = OrderedDelayedPort()
-ordered_result = deliver_continuation(
-    ordered_delayed,
+atomic_paste_delayed = AtomicPasteDelayedPort()
+atomic_paste_result = deliver_continuation(
+    atomic_paste_delayed,
     surface_id=SURFACE,
     prompt=PROMPT,
     runtime="claude",
@@ -168,10 +179,30 @@ ordered_result = deliver_continuation(
     observation_interval_seconds=0,
     wait=lambda _seconds: None,
 )
-assert ordered_result.acknowledged
-assert ordered_delayed.pasted == [PROMPT]
-assert ordered_delayed.keys == ["Enter"]
-print("OK   ordered paste waits through one unchanged idle frame")
+assert atomic_paste_result.acknowledged
+assert atomic_paste_delayed.sent == [PROMPT]
+assert atomic_paste_delayed.keys == ["Enter"]
+print("OK   editor text and submit stay separate across an unchanged idle frame")
+
+
+atomic_paste_repaint = AtomicPasteRepaintPort()
+atomic_paste_repaint_result = deliver_continuation(
+    atomic_paste_repaint,
+    surface_id=SURFACE,
+    prompt=PROMPT,
+    runtime="codex",
+    artifact_ready=lambda: False,
+    ownership_ready=lambda: True,
+    reserve_retry=lambda: False,
+    observe_stage=lambda *_args: None,
+    observation_limit=4,
+    observation_interval_seconds=0,
+    wait=lambda _seconds: None,
+)
+assert atomic_paste_repaint_result.acknowledged
+assert atomic_paste_repaint.sent == [PROMPT]
+assert atomic_paste_repaint.keys == ["Enter"]
+print("OK   editor text waits through a non-editor status repaint")
 
 
 delayed = FakePort(["❯", f"❯ {PROMPT.splitlines()[0]}"])

@@ -100,7 +100,7 @@ def send(surface: str, message: str, *, clear_codex: bool = False) -> None:
         if clear_codex:
             for _ in range(40):
                 cmux.send_key(surface, "Backspace")
-        cmux.paste(surface, message)
+        cmux.send(surface, message)
         time.sleep(0.2)
         cmux.send_key(surface, "Enter")
     except (CmuxError, OSError, ValueError) as exc:

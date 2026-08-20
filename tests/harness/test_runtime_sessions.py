@@ -5965,14 +5965,11 @@ class InitialStartWorkerCmux(FakeCmux):
         return self.post_submit[0]
 
 
-class OrderedInitialStartCmux(InitialStartWorkerCmux):
-    """The worker must use the ordered paste seam when the adapter has it."""
+class AtomicPasteInitialStartCmux(InitialStartWorkerCmux):
+    """Atomic terminal paste must not absorb the Harness-owned submit."""
 
     def paste(self, surface_id: str, text: str) -> None:
-        super().send(surface_id, text)
-
-    def send(self, surface_id: str, text: str) -> None:
-        raise AssertionError("initial input bypassed ordered terminal paste")
+        raise AssertionError("atomic terminal paste crossed the submit boundary")
 
 
 class PostSubmitTrustCmux(InitialStartWorkerCmux):
@@ -6237,16 +6234,16 @@ def check_worker_accepts_acknowledged_initial_start() -> None:
         )
 
 
-def check_worker_uses_ordered_initial_paste() -> None:
+def check_worker_keeps_initial_text_before_submit() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
-        cmux = OrderedInitialStartCmux([ACTIVE_CLAUDE_SCREEN])
+        cmux = AtomicPasteInitialStartCmux([ACTIVE_CLAUDE_SCREEN])
         code, launch, _store, _callback = _initial_start_worker(
-            root, "ordered-initial", cmux
+            root, "separate-initial-submit", cmux
         )
         kinds, delivery = _initial_start_delivery(launch)
         check(
-            "initial worker uses one ordered paste before semantic submit",
+            "initial worker keeps one editor write before one semantic submit",
             code == 0
             and len(cmux.sent) == 1
             and cmux.submit_count == 1
@@ -7078,7 +7075,7 @@ _INITIAL_START_FIXTURES = (
     check_initial_start_observes_within_budget,
     check_worker_contains_unconfirmed_initial_start,
     check_worker_accepts_acknowledged_initial_start,
-    check_worker_uses_ordered_initial_paste,
+    check_worker_keeps_initial_text_before_submit,
     check_research_worker_rejects_mutated_argv_prompt_pointer,
     check_worker_ready_binds_retargeted_initial_provider_generation,
     check_worker_degrades_invalid_optional_wake_identity,
