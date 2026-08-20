@@ -116,6 +116,34 @@ def classify(runtime: str, screen: str, *, closure_armed: bool = False) -> Promp
         )
         if region and _has(region, first_run):
             return PromptDecision(True, "first-run-style", ("Enter",), True)
+        auto_mode_onboarding = (
+            "Set up auto mode for your environment?",
+            "1. Set it up",
+            "2. Not now",
+            "3. Don't show again",
+        )
+        if region and _has(region, auto_mode_onboarding):
+            # This is provider onboarding, not task authority. Dismiss it for
+            # this session without choosing an environment or suppressing the
+            # user's future reminder.
+            return PromptDecision(
+                True,
+                "auto-mode-onboarding-dismiss",
+                ("Esc",),
+                True,
+            )
+        auto_mode_wizard = (
+            "How would you describe the code you work on with Claude?",
+            "Personal / hobby projects",
+            "Work / enterprise (private repos, sensitive data)",
+        )
+        if region and _has(region, auto_mode_wizard):
+            return PromptDecision(
+                True,
+                "auto-mode-wizard-cancel",
+                ("Esc",),
+                True,
+            )
         background = (
             "Background work is running",
             "The following will stop when you exit:",

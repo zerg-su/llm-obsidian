@@ -763,6 +763,33 @@ assert stages == [
 ]
 print("OK   paste visibility precedes first Enter and activity acknowledges")
 
+claude_auto_mode_onboarding = (
+    "Set up auto mode for your environment?\n"
+    "1. Set it up\n2. Not now\n3. Don't show again\n"
+    "Enter to confirm · Esc to cancel\n"
+)
+result, port, retries, stages = run_case(
+    [claude_auto_mode_onboarding],
+    pre_screen=claude_auto_mode_onboarding,
+    runtime="claude",
+)
+assert not result.acknowledged and result.evidence == "permission"
+assert port.sent == [] and port.keys == [] and not retries and not stages
+print("OK   known native setup prompt blocks paste before transport reservation")
+
+unknown_native_dialog = (
+    "A new provider decision appeared\n"
+    "1. Enable experimental behavior\n2. Stop\nEnter to proceed\n"
+)
+result, port, retries, stages = run_case(
+    [unknown_native_dialog],
+    pre_screen=unknown_native_dialog,
+    runtime="claude",
+)
+assert not result.acknowledged and result.evidence == "unknown"
+assert port.sent == [] and port.keys == [] and not retries and not stages
+print("OK   unknown native prompt blocks paste before transport reservation")
+
 pre_key_port = FakePort([
     "› previous editor",
     "› # Harness-owned review verification",

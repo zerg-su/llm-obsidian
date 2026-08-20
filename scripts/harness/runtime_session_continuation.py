@@ -479,6 +479,13 @@ def deliver_continuation(
     pre_send_editor_digest = pre_send_editor_sha256
     if send_prompt:
         pre_send_screen = port.read(surface_id)
+        native_prompt = classify(runtime, pre_send_screen)
+        if native_prompt.interactive:
+            return ContinuationDelivery(
+                False,
+                "permission" if native_prompt.recognized else "unknown",
+                0,
+            )
         pre_send_digest = _screen_digest(pre_send_screen)
         pre_send_editor_digest = _editor_digest(runtime, pre_send_screen)
         observe_stage(

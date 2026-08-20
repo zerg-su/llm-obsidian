@@ -667,6 +667,19 @@ with tempfile.TemporaryDirectory(prefix="harness-release-blockers.") as raw:
         "1. Exit anyway\n2. Move to background and exit\n3. Stay\n"
         "Enter to confirm\n"
     )
+    claude_auto_mode_onboarding = (
+        "Set up auto mode for your environment?\n"
+        "1. Set it up\n2. Not now\n3. Don't show again\n"
+        "Enter to confirm · Esc to cancel\n"
+    )
+    claude_auto_mode_wizard = (
+        "How would you describe the code you work on with Claude?\n"
+        "1. Personal / hobby projects\n"
+        "2. Open source\n"
+        "3. Work / enterprise (private repos, sensitive data)\n"
+        "4. A mix of these\n"
+        "Enter to confirm · Esc to cancel\n"
+    )
     codex_rate_limit_switch = (
         "Approaching rate limits\n"
         "Switch to gpt-5.6-luna for lower credit usage?\n"
@@ -684,7 +697,18 @@ with tempfile.TemporaryDirectory(prefix="harness-release-blockers.") as raw:
         and classify("claude", claude_mcp).keys == ("Tab", "Tab", "Enter")
         and classify("claude", claude_first_run).keys == ("Enter",)
         and classify("claude", claude_exit, closure_armed=True).keys == ("Enter",)
+        and classify("claude", claude_auto_mode_onboarding).keys
+        == ("Esc",)
+        and classify("claude", claude_auto_mode_wizard).keys == ("Esc",)
         and classify("codex", codex_rate_limit_switch).keys == ("down", "Enter"),
+    )
+    auto_mode_near_match = claude_auto_mode_onboarding.replace(
+        "2. Not now", "2. Configure automatically", 1
+    )
+    check(
+        "Claude auto-mode onboarding rejects a changed safe option",
+        not classify("claude", auto_mode_near_match).recognized
+        and not classify("claude", auto_mode_near_match).keys,
     )
     clipped_near_match = codex_clipped_workspace.replace(
         "trust the", "inspect the", 1
@@ -733,6 +757,49 @@ with tempfile.TemporaryDirectory(prefix="harness-release-blockers.") as raw:
 
         def send_key(self, surface: str, key: str) -> None:
             self.keys.append((surface, key))
+
+    auto_mode_dismissals: list[bool] = []
+    for index in range(50):
+        operation_id = f"op-auto-mode-{index}"
+        auto_mode_spec = OperationSpec(
+            operation_id,
+            f"key-auto-mode-{index}",
+            "dispatch",
+            "owner-1",
+            route,
+            "packet.json",
+            "scoped",
+        )
+        store.create(
+            auto_mode_spec,
+            lane_id="lane-1",
+            run_id=f"run-auto-mode-{index}",
+        )
+        for state in ("preflight", "starting", "running"):
+            store.transition("owner-1", operation_id, state)
+        auto_mode_cmux = FakeCmux()
+        automate_prompt(
+            store,
+            "owner-1",
+            operation_id,
+            route.runtime,
+            "11111111-1111-1111-1111-111111111111",
+            (
+                claude_auto_mode_onboarding
+                if index % 2 == 0
+                else claude_auto_mode_wizard
+            ),
+            auto_mode_cmux,
+        )
+        auto_mode_dismissals.append(
+            auto_mode_cmux.keys
+            == [("11111111-1111-1111-1111-111111111111", "Esc")]
+            and store.read("owner-1", operation_id).state == "running"
+        )
+    check(
+        "Claude auto-mode setup dismissal stays model-free across 50 transitions",
+        all(auto_mode_dismissals),
+    )
 
     fake_cmux = FakeCmux()
     automate_prompt(
