@@ -10,6 +10,35 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.8.7] - 2026-08-20
+
+### Fixed
+
+- Exact current pipeline-step callbacks now supersede retained notifications
+  that were pasted but not submitted. The Harness records a durable
+  `superseded` delivery and advances without an extra `Enter`, provider turn,
+  or model replay.
+- Long transition prompts now normalize their bounded visibility anchor after
+  truncation, preventing a trailing-space mismatch from stranding an otherwise
+  visible prompt at `transport-accepted`.
+- Safely pending retained delivery remains observable instead of converting a
+  busy custom or engineering/fix session into immediate `attention-required`.
+  Uncertain paste/submit effects still fail closed.
+- Liveness reconciles each exact operation-revision/result identity once, then
+  allows the existing idle, nudge, restart, and attention ladder to age
+  normally instead of looping forever on an unchanged summary.
+
+### Validation
+
+- Added a provider-free matrix that drives all eight registered production
+  transition owners for 50 repetitions each. Ordinary retained delivery emits
+  exactly one `Enter`; exact-successor races emit none.
+- An exact-HEAD real-cmux gate completed 20 deliveries for each supported
+  runtime with zero provider calls and zero owned workspace tails.
+- The immutable stability profile passed all 12 checks, including the complete
+  test suite, 81.39% Harness statement-line coverage across 173 modules, and
+  4,370 deterministic transition cases.
+
 ## [2.8.6] - 2026-08-20
 
 ### Changed

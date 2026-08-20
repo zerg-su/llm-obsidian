@@ -16,6 +16,37 @@
 внутренними контрольными точками и вошли в следующие публичные релизы; тегов и
 пакетов с этими номерами не выпускалось.
 
+## [2.8.7] — 2026-08-20
+
+### Исправлено
+
+- Точный текущий callback шага pipeline теперь отменяет retained-уведомление,
+  которое было вставлено, но ещё не отправлено. Harness записывает durable
+  delivery `superseded` и продолжает без лишнего `Enter`, provider turn или
+  replay модели.
+- Длинные transition-prompts теперь нормализуют ограниченный visibility anchor
+  после обрезки: конечный пробел больше не оставляет видимое сообщение на
+  стадии `transport-accepted`.
+- Безопасно ожидающая retained-доставка остаётся наблюдаемой и больше не
+  переводит занятую custom- или engineering/fix-сессию сразу в
+  `attention-required`. Неопределённые эффекты paste/submit по-прежнему
+  fail-closed.
+- Liveness выполняет reconcile один раз для точной пары «revision операции +
+  result», после чего существующая лестница idle, nudge, restart и attention
+  снова нормально набирает время вместо бесконечного reconcile неизменного
+  summary.
+
+### Проверка
+
+- Provider-free матрица прогнала все восемь зарегистрированных production-
+  переходов по 50 раз. Обычная retained-доставка даёт ровно один `Enter`, а
+  гонка с точным successor — ни одного.
+- Exact-HEAD real-cmux gate выполнил по 20 доставок для каждого runtime с нулём
+  provider calls и нулём оставшихся owned workspace.
+- Immutable stability profile прошёл все 12 проверок, включая полный suite,
+  81,39% statement-line coverage Harness по 173 модулям и 4 370
+  детерминированных transition cases.
+
 ## [2.8.6] — 2026-08-20
 
 ### Изменено
