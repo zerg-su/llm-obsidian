@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import hashlib
 import json
 import os
 import re
@@ -283,8 +284,11 @@ def diff_text(path: Path, old: str, new: str) -> str:
 
 
 def backup_name(path: Path) -> str:
-    label = str(path.expanduser().resolve()).lstrip(os.sep)
-    return re.sub(r"[^A-Za-z0-9_.-]+", "__", label)
+    resolved = str(path.expanduser().resolve())
+    readable = re.sub(r"[^A-Za-z0-9_.-]+", "_", path.name) or "config"
+    digest = hashlib.sha256(resolved.encode("utf-8")).hexdigest()
+    suffix = f".{digest}.bak"
+    return f"{readable[: 200 - len(suffix)]}{suffix}"
 
 
 def write_atomic(path: Path, content: str) -> None:
@@ -301,14 +305,23 @@ def write_atomic(path: Path, content: str) -> None:
         tmp.unlink(missing_ok=True)
 
 
-def write_with_backup(path: Path, content: str, backup_dir: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+def prepare_backups(paths: list[Path], backup_dir: Path) -> None:
     backup_dir.mkdir(parents=True, exist_ok=True)
     backup_dir.chmod(0o700)
-    if path.exists():
-        backup = backup_dir / backup_name(path)
+    backups = [(path, backup_dir / backup_name(path)) for path in paths if path.exists()]
+    if len({backup for _path, backup in backups}) != len(backups):
+        raise RuntimeError("Codex config backup identity collision")
+    for path, backup in backups:
         shutil.copy2(path, backup)
-    write_atomic(path, content)
+
+
+def apply_changes(changed: list[tuple[Path, str, str]], backup_dir: Path) -> None:
+    """Create every backup before the first target replacement."""
+
+    prepare_backups([path for path, _old, _new in changed], backup_dir)
+    for path, _old, new in changed:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        write_atomic(path, new)
 
 
 def desired_files(repo_root: Path, codex_home: Path) -> dict[Path, str]:
@@ -376,8 +389,8 @@ def main() -> int:
 
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     backup_dir = codex_home / "backups" / f"{plugin_name(repo_root)}-codex-sync-{stamp}"
+    apply_changes(changed, backup_dir)
     for path, _old, new in changed:
-        write_with_backup(path, new, backup_dir)
         print(f"wrote {path}")
     if changed:
         print(f"backup dir: {backup_dir}")

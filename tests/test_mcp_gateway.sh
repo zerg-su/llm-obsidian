@@ -542,6 +542,70 @@ expect_exit "H14 fork apply exits 0" "$?" 0
 expect_grep "H15 fork default profile name" "$SANDBOX/fork-home/llm-obsidian-fork-mcp.config.toml" "context7/mcp"
 expect_grep "H16 fork extra profile name" "$SANDBOX/fork-home/llm-obsidian-fork-research.config.toml" "paper-search/mcp"
 
+LONG_A="long-$(python3 -c 'print("a" * 100)')"
+LONG_B="long-$(python3 -c 'print("b" * 100)')"
+LONG_BASE="$SANDBOX/$LONG_A/$LONG_B"
+mkdir -p "$LONG_BASE"
+cp -R "$SANDBOX/codex-repo" "$LONG_BASE/repo"
+mkdir -p "$LONG_BASE/home"
+cp "$SANDBOX/codex-home/"*.toml "$LONG_BASE/home/"
+python3 - "$LONG_BASE/repo" "$LONG_BASE/home" <<'PYEOF'
+import pathlib, sys
+for root in map(pathlib.Path, sys.argv[1:]):
+    for path in root.rglob("*.toml"):
+        path.write_text(path.read_text().replace("context7/mcp", "context7/stale"))
+PYEOF
+python3 "$GW/codex-sync.py" --repo-root "$LONG_BASE/repo" --codex-home "$LONG_BASE/home" --apply >"$OUT" 2>&1
+expect_exit "H17 long-path apply exits 0" "$?" 0
+python3 - "$LONG_BASE/home" >"$OUT" 2>&1 <<'PYEOF'
+import pathlib, sys
+home = pathlib.Path(sys.argv[1])
+backups = list((home / "backups").rglob("*"))
+assert backups and max(len(path.name.encode()) for path in backups) <= 255
+assert (home / "llm-obsidian-mcp.config.toml").is_file()
+assert (home / "llm-obsidian-research.config.toml").is_file()
+print("LONG_BACKUP_OK")
+PYEOF
+expect_grep "H18 long-path backups are bounded and complete" "$OUT" "LONG_BACKUP_OK"
+python3 "$GW/codex-sync.py" --repo-root "$LONG_BASE/repo" --codex-home "$LONG_BASE/home" --check >"$OUT" 2>&1
+expect_exit "H19 long-path second check clean" "$?" 0
+expect_grep "H20 long-path no changes message" "$OUT" "codex-sync: no changes"
+
+python3 - "$GW/codex-sync.py" "$SANDBOX/codex-preflight" >"$OUT" 2>&1 <<'PYEOF'
+import importlib.util, pathlib, sys
+spec = importlib.util.spec_from_file_location("codex_sync_preflight", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+assert spec and spec.loader
+spec.loader.exec_module(module)
+root = pathlib.Path(sys.argv[2])
+root.mkdir()
+first, second = root / "first.toml", root / "second.toml"
+first.write_text("first-old\n")
+second.write_text("second-old\n")
+real_copy = module.shutil.copy2
+calls = 0
+def fail_second(source, target):
+    global calls
+    calls += 1
+    if calls == 2:
+        raise OSError("injected second backup failure")
+    return real_copy(source, target)
+module.shutil.copy2 = fail_second
+try:
+    module.apply_changes(
+        [(first, "first-old\n", "first-new\n"), (second, "second-old\n", "second-new\n")],
+        root / "backups",
+    )
+except OSError:
+    pass
+else:
+    raise AssertionError("injected backup failure must escape")
+assert first.read_text() == "first-old\n"
+assert second.read_text() == "second-old\n"
+print("BACKUP_PREFLIGHT_OK")
+PYEOF
+expect_grep "H21 backup failure precedes every target mutation" "$OUT" "BACKUP_PREFLIGHT_OK"
+
 # ---------- I. clean-machine dry run ----------
 echo "I. clean-machine dry run"
 mkdir -p "$SANDBOX/fake-missing-clt"
