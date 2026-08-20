@@ -23,13 +23,23 @@ from .runtime_session_continuation import (
 
 
 DELIVERY_STAGES = frozenset(
-    {"paste-reserved", "transport-accepted", "submit-reserved", "submit-accepted"}
+    {
+        "paste-reserved",
+        "transport-accepted",
+        "submit-reserved",
+        "submit-accepted",
+        "superseded",
+    }
 )
 _PROCESS_NOTIFICATION_LOCK = threading.Lock()
 
 
 class RetainedNotificationError(RuntimeError):
     pass
+
+
+class RetainedNotificationPending(RetainedNotificationError):
+    """The notification is safely retained and needs another observation."""
 
 
 class _NotificationSubmitted(RuntimeError):
@@ -206,6 +216,7 @@ def _deliver_new_notification(
     message: str,
     receipt_path: Path,
     identity: Mapping[str, object],
+    successor_ready: Callable[[], bool],
 ) -> None:
     """Run one write-ahead notification delivery under its effect lock."""
 
@@ -224,7 +235,7 @@ def _deliver_new_notification(
             raise RetainedNotificationError(
                 "notification delivery effect is uncertain"
             )
-        if stage == "submit-accepted":
+        if stage in {"submit-accepted", "superseded"}:
             return
 
         def observe_stage(
@@ -256,7 +267,7 @@ def _deliver_new_notification(
                 surface_id=surface_id,
                 prompt=message,
                 runtime=runtime,
-                artifact_ready=lambda: False,
+                artifact_ready=successor_ready,
                 ownership_ready=lambda: True,
                 reserve_retry=lambda: False,
                 observe_stage=observe_stage,
@@ -275,7 +286,32 @@ def _deliver_new_notification(
         settled = _read_receipt(receipt_path, expected)
         if settled is not None and settled.get("stage") == "submit-accepted":
             return
-        raise RetainedNotificationError(
+        if result.acknowledged and result.evidence == "artifact":
+            _atomic_json(
+                receipt_path,
+                {
+                    **expected,
+                    "stage": "superseded",
+                    "submit_count": result.submit_count,
+                    "pre_screen_sha256": (
+                        str(settled.get("pre_screen_sha256") or "")
+                        if settled
+                        else ""
+                    ),
+                    "pre_editor_sha256": (
+                        str(settled.get("pre_editor_sha256") or "")
+                        if settled
+                        else ""
+                    ),
+                    "paste_screen_sha256": (
+                        str(settled.get("paste_screen_sha256") or "")
+                        if settled
+                        else ""
+                    ),
+                },
+            )
+            return
+        raise RetainedNotificationPending(
             f"retained notification delivery is incomplete: {result.evidence}"
         )
 
@@ -286,6 +322,7 @@ def deliver_worker_notification(
     notify_path: Path,
     marker: Mapping[str, object],
     message: str,
+    successor_ready: Callable[[], bool] | None = None,
 ) -> None:
     """Deliver or recover one worker-owned retained-session notification."""
 
@@ -293,6 +330,7 @@ def deliver_worker_notification(
     port = getattr(worker, "cmux_adapter", None)
     if not isinstance(spec, dict) or port is None:
         raise RetainedNotificationError("notification worker is incomplete")
+    ready = successor_ready or (lambda: False)
     existing: object | None = None
     if notify_path.is_symlink():
         raise RetainedNotificationError("notification marker cannot be a symlink")
@@ -317,6 +355,19 @@ def deliver_worker_notification(
             "message_sha256": hashlib.sha256(message.encode()).hexdigest(),
             "notification": notify_path.name,
         }
+        if ready():
+            _deliver_new_notification(
+                port,
+                surface_id=str(spec["surface_id"]),
+                runtime=str(spec["runtime"]),
+                message=message,
+                receipt_path=notify_path.with_name(
+                    f"{notify_path.stem}-delivery.json"
+                ),
+                identity=identity,
+                successor_ready=ready,
+            )
+            return
         recover_visible_notification(
             port,
             surface_id=str(spec["surface_id"]),
@@ -345,5 +396,6 @@ def deliver_worker_notification(
         message=message,
         receipt_path=delivery_path,
         identity=identity,
+        successor_ready=ready,
     )
     writer(notify_path, dict(marker))

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import fcntl
 from contextlib import contextmanager
+from typing import Callable
 
 MODEL_JSON_BOUNDARIES = ("pipeline-step-result",)
 from .runtime_worker import *
@@ -34,6 +35,7 @@ from .review_continuation_recovery import (
 from .state_machine import transition as transition_operation
 from .retained_notification import (
     RetainedNotificationError,
+    RetainedNotificationPending,
     deliver_worker_notification,
 )
 
@@ -97,6 +99,8 @@ class RuntimeWorkerCustomMixin:
         notify_path: Path,
         marker: dict[str, object],
         message: str,
+        *,
+        successor_ready: Callable[[], bool] | None = None,
     ) -> None:
         try:
             deliver_worker_notification(
@@ -104,7 +108,10 @@ class RuntimeWorkerCustomMixin:
                 notify_path=notify_path,
                 marker=marker,
                 message=message,
+                successor_ready=successor_ready,
             )
+        except RetainedNotificationPending:
+            return
         except RetainedNotificationError as exc:
             raise RuntimeWorkerError(
                 "custom notification delivery or recovery failed"
@@ -131,7 +138,15 @@ class RuntimeWorkerCustomMixin:
         message = f"Typed custom step {request['step_id']} visit {request['visit']} is ready in .task-pipeline-step-request.json. Complete only this registered step, write its exact evidence/result, choose one of these outcomes: {', '.join((str(item) for item in allowed))}; then publish with pipeline-step-submit.py. Remain in this same session for the next harness-owned transition."
         if len(message.encode()) > 4096:
             raise RuntimeWorkerError("custom step notification exceeds its bound")
-        self._deliver_custom_notification(notify_path, marker, message)
+        self._deliver_custom_notification(
+            notify_path,
+            marker,
+            message,
+            successor_ready=lambda: self.pipeline_step_callback_ready(
+                operation_id=operation_id,
+                run_id=str(request["run_id"]),
+            ),
+        )
 
     def notify_custom_finalization(self, receipt_count: int) -> None:
         notify_path = (

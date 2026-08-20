@@ -16,6 +16,33 @@
 внутренними контрольными точками и вошли в следующие публичные релизы; тегов и
 пакетов с этими номерами не выпускалось.
 
+## [2.8.7] — 2026-08-20
+
+### Исправлено
+
+- Точный текущий callback шага pipeline теперь отменяет retained-уведомление,
+  которое было вставлено, но ещё не отправлено. Harness записывает durable
+  delivery `superseded` и продолжает без лишнего `Enter`, provider turn или
+  replay модели.
+- Безопасно ожидающая retained-доставка остаётся наблюдаемой и больше не
+  переводит занятую custom- или engineering/fix-сессию сразу в
+  `attention-required`. Неопределённые эффекты paste/submit по-прежнему
+  fail-closed.
+- Liveness выполняет reconcile один раз для точной пары «revision операции +
+  result», после чего существующая лестница idle, nudge, restart и attention
+  снова нормально набирает время вместо бесконечного reconcile неизменного
+  summary.
+
+### Проверка
+
+- Добавлена provider-free матрица переходов dispatch, built-in summary,
+  custom, engineering/fix, verification retry, summary refresh, review
+  callback и reap по 50 повторений. Обычная retained-доставка даёт ровно один
+  `Enter`, гонка с successor — ни одного.
+- Контур active authority зафиксирован ровно на 28 файлах / 16 493 LOC, а
+  полный контур scripts — на 297 файлах / 113 856 строках; оба без
+  спекулятивного запаса.
+
 ## [2.8.6] — 2026-08-20
 
 ### Изменено

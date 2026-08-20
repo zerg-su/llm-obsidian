@@ -394,6 +394,7 @@ There is no speculative roadmap in this README. The repository describes what is
 
 | Topic | Document |
 |---|---|
+| v2.8.7 transition-liveness stabilization | [v2.8.7 release notes](docs/releases/v2.8.7.md) |
 | v2.8.6 task-centric cmux workspace topology | [v2.8.6 release notes](docs/releases/v2.8.6.md) |
 | v2.8.5 Codex trust-transition repair | [v2.8.5 release notes](docs/releases/v2.8.5.md) |
 | v2.8.4 custom initial-delivery repair | [v2.8.4 release notes](docs/releases/v2.8.4.md) |

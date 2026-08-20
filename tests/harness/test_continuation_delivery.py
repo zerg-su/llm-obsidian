@@ -9,6 +9,7 @@ import json
 import multiprocessing
 import os
 import threading
+import hashlib
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -23,10 +24,16 @@ from harness.runtime_session_continuation import (  # noqa: E402
 )
 from harness.retained_notification import (  # noqa: E402
     RetainedNotificationError,
+    RetainedNotificationPending,
     deliver_worker_notification,
     recover_visible_notification,
     send_visible_notification,
 )
+from harness.contracts import CallbackEnvelope, to_dict  # noqa: E402
+from harness.runtime_worker_control import RuntimeWorkerControlMixin  # noqa: E402
+from harness.runtime_worker_custom import RuntimeWorkerCustomMixin  # noqa: E402
+import harness.runtime_worker_control as worker_control_module  # noqa: E402
+import harness.runtime_worker_custom as worker_custom_module  # noqa: E402
 
 
 SURFACE = "11111111-1111-1111-1111-111111111111"
@@ -387,6 +394,124 @@ with tempfile.TemporaryDirectory(prefix="notification-delayed-paste.") as raw:
     )
     assert port.sent == [PROMPT] and port.keys == ["Enter"] and notify.is_file()
 print("OK   delayed paste resumes without a second paste")
+
+
+with tempfile.TemporaryDirectory(prefix="notification-successor-wins.") as raw:
+    notify = Path(raw) / "notify.json"
+    port = CodexSemanticPort(["› old", "› old"])
+    worker = FakeWorker(port)
+    marker = {"schema_version": 1, "operation_id": "successor-wins"}
+    successor_reads = iter((False, True))
+    deliver_worker_notification(
+        worker,
+        notify_path=notify,
+        marker=marker,
+        message=PROMPT,
+        successor_ready=lambda: next(successor_reads, True),
+    )
+    delivery = json.loads(
+        notify.with_name("notify-delivery.json").read_text(encoding="utf-8")
+    )
+    assert port.sent == [PROMPT] and port.keys == []
+    assert notify.is_file() and delivery["stage"] == "superseded"
+    deliver_worker_notification(
+        worker,
+        notify_path=notify,
+        marker=marker,
+        message=PROMPT,
+        successor_ready=lambda: True,
+    )
+    assert port.sent == [PROMPT] and port.keys == []
+print("OK   exact successor artifact supersedes an unsubmitted notification")
+
+
+with tempfile.TemporaryDirectory(prefix="notification-successor-identity.") as raw:
+    root = Path(raw)
+    callback = root / ".task-pipeline-step-callback.json"
+    registration = root / "callback-target.json"
+    operation_id = "successor-operation"
+    run_id = "successor-run"
+    payload = {"schema_version": 1, "status": "complete"}
+    payload_sha256 = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    envelope = CallbackEnvelope(
+        callback_id="successor-callback",
+        operation_id=operation_id,
+        run_id=run_id,
+        kind="result",
+        payload=payload,
+        payload_sha256=payload_sha256,
+    )
+    callback.write_text(
+        json.dumps(to_dict(envelope), sort_keys=True) + "\n", encoding="utf-8"
+    )
+    registration.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "generation": 2,
+                "operation_id": operation_id,
+                "run_id": run_id,
+                "callback_pointer": callback.name,
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    owner = RuntimeWorkerControlMixin()
+    owner.spec = {"cwd": root, "callback_registration": registration}
+    assert owner.pipeline_step_callback_ready(
+        operation_id=operation_id, run_id=run_id
+    )
+    assert not owner.pipeline_step_callback_ready(
+        operation_id=operation_id, run_id="foreign-run"
+    )
+    callback.write_text("{}\n", encoding="utf-8")
+    assert not owner.pipeline_step_callback_ready(
+        operation_id=operation_id, run_id=run_id
+    )
+print("OK   notification supersession requires the exact callback identity")
+
+
+def retained_pending(*_args: object, **_kwargs: object) -> None:
+    raise RetainedNotificationPending("safe pending notification")
+
+
+original_control_delivery = worker_control_module.deliver_worker_notification
+original_custom_delivery = worker_custom_module.deliver_worker_notification
+worker_control_module.deliver_worker_notification = retained_pending
+worker_custom_module.deliver_worker_notification = retained_pending
+try:
+    with tempfile.TemporaryDirectory(prefix="notification-wrapper-pending.") as raw:
+        state = Path(raw)
+        fix_owner = RuntimeWorkerControlMixin()
+        fix_owner.spec_path = state / "runtime" / "spec.json"
+        fix_owner.spec = {"operation_id": "fix-root"}
+        fix_owner.notify_fix_phase(
+            {
+                "operation_id": "fix-operation",
+                "run_id": "fix-run",
+                "step_id": "reproduce",
+                "iteration": 0,
+                "output_pointer": "evidence.md",
+                "result_pointer": "result.json",
+            }
+        )
+        assert fix_owner.notify_fix_finalization(0) is False
+        custom_owner = RuntimeWorkerCustomMixin()
+        custom_owner.spec_path = state / "runtime" / "spec.json"
+        custom_owner.spec = {}
+        custom_owner._deliver_custom_notification(
+            state / "custom.json",
+            {"schema_version": 1, "operation_id": "custom-operation"},
+            PROMPT,
+        )
+finally:
+    worker_control_module.deliver_worker_notification = original_control_delivery
+    worker_custom_module.deliver_worker_notification = original_custom_delivery
+print("OK   fix and custom workers keep safe pending delivery out of attention")
 
 
 class CrashAfterPastePort(CodexSemanticPort):
@@ -767,8 +892,8 @@ result, port, retries, _stages = run_case(
     artifacts=[False, False, True],
 )
 assert result.acknowledged and result.evidence == "artifact"
-assert port.sent == [PROMPT] and port.keys == ["Enter"] and not retries
-print("OK   callback artifact wins the delivery race")
+assert port.sent == [PROMPT] and port.keys == [] and not retries
+print("OK   callback artifact wins the pre-submit delivery race without Enter")
 
 transport_baseline = "› previous editor"
 result, port, retries, _stages = run_case(

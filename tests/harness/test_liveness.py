@@ -180,13 +180,47 @@ result = replace(
 )
 decision, pending = observe_liveness(state, result, policy)
 check("first typed result read waits for stability", decision.action == "observe")
-decision, _ = observe_liveness(
+decision, reconciled = observe_liveness(
     pending,
     replace(result, observed_at=1460),
     policy,
 )
 check(
     "stable result without callback selects model-free reconcile",
+    decision.action == "reconcile-result" and decision.model_call is False,
+)
+decision, after_reconcile = observe_liveness(
+    reconciled,
+    replace(result, observed_at=2301),
+    policy,
+)
+check(
+    "one result identity reconciles once before idle recovery resumes",
+    decision.action == "nudge"
+    and decision.model_call is True
+    and after_reconcile.nudge_count == 1,
+)
+next_revision = replace(
+    result,
+    observed_at=2360,
+    operation_revision=result.operation_revision + 1,
+)
+decision, next_revision_pending = observe_liveness(
+    after_reconcile,
+    next_revision,
+    policy,
+)
+check(
+    "changed operation revision requires a fresh stable result read",
+    decision.action == "observe",
+)
+decision, _ = observe_liveness(
+    next_revision_pending,
+    replace(next_revision, observed_at=2420),
+    policy,
+)
+check(
+    "changed operation revision opens one fresh reconciliation identity",
     decision.action == "reconcile-result" and decision.model_call is False,
 )
 

@@ -465,6 +465,8 @@ def deliver_continuation(
 
     submit_count = accepted_submit_count
     for submit_attempt in range(2):
+        if artifact_ready():
+            return ContinuationDelivery(True, "artifact", submit_count)
         if submit_attempt and not reserve_retry():
             return ContinuationDelivery(
                 False, "submit-retry-budget-unavailable", submit_count
