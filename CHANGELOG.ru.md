@@ -27,6 +27,10 @@
 - Continuation delivery Codex теперь пережидает status repaint до отправки и
   краткий idle после неё до появления реальной provider activity, не посылая
   второй prompt или `Enter`.
+- Coordinator escalation и decision relay теперь используют тот же fail-closed
+  editor preflight: native dialogs блокируют любой input effect, delayed
+  repaint ожидает точный message anchor, а фиксированный sleep больше не даёт
+  authority для `Enter`.
 - Синхронизация профиля Codex теперь формирует ограниченные имена backup из
   читаемого префикса и полного SHA-256 канонического пути, проверяет все backup
   до первой замены target и не создаёт backup directory при чистом no-op apply.
@@ -34,11 +38,12 @@
 ### Проверка
 
 - Provider-free real-cmux gate выполнил 50 доставок Codex и 50 Claude без
-  хвостов и provider/model calls. Девять registered production transition
+  хвостов и provider/model calls. Десять registered production transition
   corridors прошли по 50 повторов, затем прошёл полный repository test gate.
-- Codex MCP gateway suite прошёл все 126 проверок. Exact-HEAD implementation
-  review на Sol XHigh одобрил исправление без оставшихся замечаний.
-- Контур scripts зафиксирован по точному live tree: 297 файлов / 114 086 строк
+- Codex MCP gateway suite прошёл все 126 проверок. Review на Sol XHigh
+  независимо подтвердил gates и нашёл omission coordinator relay, закрытый в
+  этом descendant.
+- Контур scripts зафиксирован по точному live tree: 297 файлов / 114 174 строки
   без спекулятивного запаса.
 
 ## [2.8.9] — 2026-08-20

@@ -44,6 +44,7 @@ from harness.workflows.dispatch import (  # noqa: E402
     run_dispatch,
 )
 from harness.workflows.reap import run_reap  # noqa: E402
+import task_escalation as task_escalation_cli  # noqa: E402
 
 
 REPETITIONS = 50
@@ -84,6 +85,27 @@ class Port:
     def agent_status(self, workspace_id: str, runtime: str) -> str:
         assert workspace_id == WORKSPACE and runtime == self.runtime
         return "idle"
+
+
+class CoordinatorRelayPort(Port):
+    def __init__(self, runtime: str) -> None:
+        super().__init__(runtime)
+        self.repaint = ""
+
+    def read(self, surface_id: str) -> str:
+        assert surface_id == SURFACE
+        if self.repaint:
+            screen, self.repaint = self.repaint, ""
+            return screen
+        return self.screen
+
+    def send(self, surface_id: str, text: str) -> None:
+        assert surface_id == SURFACE
+        self.sent.append(text)
+        marker = "›" if self.runtime == "codex" else "❯"
+        anchor = " ".join(text.splitlines()[0].strip().split())[:96]
+        self.repaint = f"• Status repaint\n{marker} old"
+        self.screen = f"• Status settled\n{marker} {anchor}"
 
 
 class PipelineWorkerBase:
@@ -242,6 +264,25 @@ def built_in_summary_liveness(repetition: int) -> None:
         reconciled, replace(base, observed_at=1901), LivenessPolicy.default()
     )
     assert decision.action == "nudge" and recovered.nudge_count == 1
+
+
+def coordinator_relay_handoff(repetition: int) -> None:
+    runtime = "codex" if repetition % 2 == 0 else "claude"
+    port = CoordinatorRelayPort(runtime)
+    original = task_escalation_cli.CmuxAdapter
+    task_escalation_cli.CmuxAdapter = lambda: port
+    try:
+        task_escalation_cli.send(
+            SURFACE,
+            f"Typed coordinator relay {repetition:03d}",
+            runtime=runtime,
+            observation_limit=2,
+            wait=lambda _seconds: None,
+        )
+    finally:
+        task_escalation_cli.CmuxAdapter = original
+    assert port.sent == [f"Typed coordinator relay {repetition:03d}"]
+    assert port.keys == ["Enter"]
 
 
 def claude_initial_input_handoff(repetition: int) -> None:
@@ -540,6 +581,7 @@ with tempfile.TemporaryDirectory(prefix="transition-transport-stress.") as raw:
     for repetition in range(REPETITIONS):
         dispatch_handoff(root / f"dispatch-{repetition:03d}", repetition)
         built_in_summary_liveness(repetition)
+        coordinator_relay_handoff(repetition)
         claude_initial_input_handoff(repetition)
         pipeline_notification_race(
             root / f"custom-{repetition:03d}",
@@ -580,6 +622,6 @@ with tempfile.TemporaryDirectory(prefix="transition-transport-stress.") as raw:
         reap_handoff(root / f"reap-{repetition:03d}", repetition)
 
 print(
-    "Transition transport stress passed: 9 registered production corridors x "
+    "Transition transport stress passed: 10 registered production corridors x "
     f"{REPETITIONS} repetitions"
 )

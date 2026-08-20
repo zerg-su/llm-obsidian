@@ -540,9 +540,10 @@ exactly 297 files / 114,118 lines with no speculative headroom.
 The 2.8.10 transport stabilization removes the obsolete ordered-paste
 capability and implicit-submit path while adding bounded Codex repaint
 containment, transactional config-backup preflight, and a clean no-op guard.
-No script is added; the net candidate is exactly 297 files / 114,086 lines, so
-the ceiling decreases by 32 lines and remains pinned with no speculative
-headroom.
+Final review also routes coordinator escalation through the shared fail-closed
+editor preflight and adds no-sleep delayed-repaint and dialog coverage. No
+script is added; relative to 2.8.9 the net candidate grows by exactly 56 lines
+to 297 files / 114,174 lines with no speculative headroom.
 """
 
 from __future__ import annotations
@@ -560,10 +561,11 @@ from pathlib import Path
 SCRIPT_FILE_CEILING = 297
 
 #: Maximum total lines across those files for the 2.8.10 lifecycle candidate.
-#: The net 32-line reduction removes the implicit-submit transport and adds
-#: bounded repaint containment plus transactional config-sync guards. No
-#: script is added and the measured candidate has zero headroom.
-SCRIPT_LINE_CEILING = 114_086
+#: The exact 56-line increase over 2.8.9 removes implicit-submit transport and
+#: adds bounded repaint containment, transactional config-sync guards, and the
+#: shared coordinator editor preflight. No script is added and the measured
+#: candidate has zero headroom.
+SCRIPT_LINE_CEILING = 114_174
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

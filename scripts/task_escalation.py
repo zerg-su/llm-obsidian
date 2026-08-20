@@ -29,6 +29,7 @@ from task_escalation_records import (
 from task_plan_authority import PlanAuthorityError, record_plan_amendment
 from harness.adapters.cmux import run_cmux
 from harness.adapters.cmux import CmuxAdapter, CmuxError
+from harness.runtime_session_continuation import submit_editor_message_once
 from harness.artifact_repair import (
     VERIFICATION_BASELINE_GAP_DECISIONS,
     VERIFICATION_MECHANISM_FLAKE_DECISIONS,
@@ -94,15 +95,28 @@ def read_surface(worktree: Path, meta: dict[str, Any], key: str, fallback: str) 
     return value
 
 
-def send(surface: str, message: str, *, clear_codex: bool = False) -> None:
+def send(
+    surface: str,
+    message: str,
+    *,
+    runtime: str,
+    clear_codex: bool = False,
+    observation_limit: int = 40,
+    wait=time.sleep,
+) -> None:
     cmux = CmuxAdapter()
     try:
-        if clear_codex:
-            for _ in range(40):
-                cmux.send_key(surface, "Backspace")
-        cmux.send(surface, message)
-        time.sleep(0.2)
-        cmux.send_key(surface, "Enter")
+        delivery = submit_editor_message_once(
+            cmux,
+            surface_id=surface,
+            runtime=runtime,
+            text=message,
+            clear_editor=clear_codex,
+            observation_limit=observation_limit,
+            wait=wait,
+        )
+        if not delivery.submitted:
+            raise CmuxError(f"coordinator relay {delivery.evidence}")
     except (CmuxError, OSError, ValueError) as exc:
         die(str(exc) or "cmux ordered relay failed", 3)
 
@@ -276,7 +290,7 @@ def raise_escalation(
     except SystemExit:
         toast_failed = True
     try:
-        send(coordinator, wake)
+        send(coordinator, wake, runtime=str(meta.get("wiki_runtime") or ""))
     except SystemExit:
         try:
             append_delivery_failure(
@@ -375,7 +389,9 @@ def resolve_escalation(worktree: Path, decision: str) -> int:
         f"[Coordinator decision for escalation {marker.get('id')}] {answer} "
         f"{retry_note}"
         "Continue only within this decision and the approved plan; escalate again on further drift.",
-        clear_codex=str(meta.get("executor_runtime") or meta.get("runtime") or "") == "codex",
+        runtime=str(meta.get("executor_runtime") or meta.get("runtime") or ""),
+        clear_codex=str(meta.get("executor_runtime") or meta.get("runtime") or "")
+        == "codex",
     )
     duration = elapsed_ms(
         resolved.payload.get("raised_at"), resolved.payload.get("resolved_at")

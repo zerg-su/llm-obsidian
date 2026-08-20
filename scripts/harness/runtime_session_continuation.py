@@ -52,6 +52,12 @@ class ContinuationDelivery:
     submit_count: int
 
 
+@dataclass(frozen=True)
+class EditorMessageDelivery:
+    submitted: bool
+    evidence: str
+
+
 def _prompt_anchor(prompt: str) -> str:
     for line in prompt.splitlines():
         normalized = " ".join(line.strip().split())
@@ -194,6 +200,72 @@ def classify_continuation_screen(runtime: str, screen: str, anchor: str) -> str:
     if editor_lines:
         return "idle"
     return "unknown"
+
+
+def _interactive_evidence(runtime: str, screen: str) -> str:
+    prompt = classify(runtime, screen)
+    if not prompt.interactive:
+        return ""
+    return "permission" if prompt.recognized else "unknown"
+
+
+def submit_editor_message_once(
+    port: ContinuationPort,
+    *,
+    surface_id: str,
+    runtime: str,
+    text: str,
+    clear_editor: bool = False,
+    observation_limit: int = 40,
+    observation_interval_seconds: float = 0.05,
+    wait: Waiter = sleep,
+) -> EditorMessageDelivery:
+    """Write one provider editor message and submit only after exact visibility."""
+
+    anchor = _prompt_anchor(text)
+    if runtime not in {"claude", "codex"}:
+        raise ValueError("editor message runtime is invalid")
+    if not anchor:
+        raise ValueError("editor message has no visible anchor")
+    if observation_limit < 1:
+        raise ValueError("editor message observation limit must be positive")
+    if observation_interval_seconds < 0:
+        raise ValueError("editor message observation interval cannot be negative")
+
+    screen = port.read(surface_id)
+    interactive = _interactive_evidence(runtime, screen)
+    if interactive:
+        return EditorMessageDelivery(False, interactive)
+    if classify_continuation_screen(runtime, screen, "") != "idle":
+        return EditorMessageDelivery(False, "editor-unavailable")
+
+    if clear_editor:
+        for _ in range(40):
+            port.send_key(surface_id, "Backspace")
+        screen = port.read(surface_id)
+        interactive = _interactive_evidence(runtime, screen)
+        if interactive:
+            return EditorMessageDelivery(False, interactive)
+        if classify_continuation_screen(runtime, screen, "") != "idle":
+            return EditorMessageDelivery(False, "editor-unavailable")
+
+    before_editor_sha256 = _editor_digest(runtime, screen)
+    paste_editor_text(port, surface_id=surface_id, text=text)
+    for observation in range(observation_limit):
+        screen = port.read(surface_id)
+        interactive = _interactive_evidence(runtime, screen)
+        if interactive:
+            return EditorMessageDelivery(False, interactive)
+        state = classify_continuation_screen(runtime, screen, anchor)
+        if (
+            state == "input-ready"
+            and _editor_digest(runtime, screen, anchor) != before_editor_sha256
+        ):
+            port.send_key(surface_id, "Enter")
+            return EditorMessageDelivery(True, "submitted")
+        if observation + 1 < observation_limit:
+            wait(observation_interval_seconds)
+    return EditorMessageDelivery(False, "visibility-unconfirmed")
 
 
 def await_surface_transport_ready(

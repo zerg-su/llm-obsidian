@@ -848,8 +848,13 @@ with tempfile.TemporaryDirectory(prefix="task-escalation-stale-self-heal.") as r
 
 
 class SeparateSubmitProbe:
-    def __init__(self) -> None:
+    def __init__(self, screens: list[str]) -> None:
+        self.screens = list(screens)
         self.calls: list[tuple[str, str, str]] = []
+
+    def read(self, surface: str) -> str:
+        self.calls.append(("read", surface, ""))
+        return self.screens.pop(0)
 
     def send(self, surface: str, message: str) -> None:
         self.calls.append(("send", surface, message))
@@ -861,29 +866,87 @@ class SeparateSubmitProbe:
         self.calls.append(("send-key", surface, key))
 
 
-separate_submit = SeparateSubmitProbe()
+relay_surface = "00000000-0000-0000-0000-000000000123"
+separate_submit = SeparateSubmitProbe(
+    [
+        "• Status 0\n›",
+        "• Status 1\n›",
+        "• Status 2\n› continue exact recovery",
+    ]
+)
 with patch.object(
     task_escalation_cli, "CmuxAdapter", return_value=separate_submit
 ):
     task_escalation_cli.send(
-        "00000000-0000-0000-0000-000000000123",
+        relay_surface,
         "continue exact recovery",
+        runtime="codex",
+        observation_limit=3,
+        wait=lambda _seconds: None,
     )
 check(
-    "coordinator relay keeps one editor write before one submit",
+    "coordinator relay waits through repaint before one submit",
     separate_submit.calls
     == [
+        ("read", relay_surface, ""),
         (
             "send",
-            "00000000-0000-0000-0000-000000000123",
+            relay_surface,
             "continue exact recovery",
         ),
-        (
-            "send-key",
-            "00000000-0000-0000-0000-000000000123",
-            "Enter",
-        ),
+        ("read", relay_surface, ""),
+        ("read", relay_surface, ""),
+        ("send-key", relay_surface, "Enter"),
     ],
+)
+
+known_dialog = SeparateSubmitProbe(
+    [
+        "Set up auto mode for your environment?\n"
+        "1. Set it up\n2. Not now\n3. Don't show again\n"
+        "Enter to confirm · Esc to cancel\n"
+    ]
+)
+with patch.object(task_escalation_cli, "CmuxAdapter", return_value=known_dialog):
+    try:
+        task_escalation_cli.send(
+            relay_surface,
+            "continue exact recovery",
+            runtime="claude",
+            wait=lambda _seconds: None,
+        )
+    except SystemExit as exc:
+        known_dialog_exit = exc.code
+    else:
+        known_dialog_exit = 0
+check(
+    "known coordinator dialog blocks every editor and submit effect",
+    known_dialog_exit == 3
+    and known_dialog.calls == [("read", relay_surface, "")],
+)
+
+unknown_dialog = SeparateSubmitProbe(
+    [
+        "A new provider decision appeared\n"
+        "1. Enable experimental behavior\n2. Stop\nEnter to proceed\n"
+    ]
+)
+with patch.object(task_escalation_cli, "CmuxAdapter", return_value=unknown_dialog):
+    try:
+        task_escalation_cli.send(
+            relay_surface,
+            "continue exact recovery",
+            runtime="claude",
+            wait=lambda _seconds: None,
+        )
+    except SystemExit as exc:
+        unknown_dialog_exit = exc.code
+    else:
+        unknown_dialog_exit = 0
+check(
+    "unknown coordinator dialog blocks every editor and submit effect",
+    unknown_dialog_exit == 3
+    and unknown_dialog.calls == [("read", relay_surface, "")],
 )
 
 
