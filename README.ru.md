@@ -12,6 +12,8 @@
 История релизов: [English](CHANGELOG.md) · [Русский](CHANGELOG.ru.md)
 
 Полный технический handbook 2.6.3: [начать чтение](docs/ru/index.md).
+Проектирование от идеи до Harness в 2.8.0+: [Architecture Workflow v1 на
+примере браузерной игры](docs/architecture-workflow-v1.ru.md).
 
 LLM Obsidian — одновременно Obsidian-вольт и набор инструментов для LLM-агентов. Он превращает разговоры, планы, документы, решения, команды, исследования и завершённые задачи в связанный Markdown, который не исчезает вместе с окном модели. Этот же репозиторий даёт обоим поддерживаемым CLI версионируемые скиллы, детерминированные скрипты, retrieval, защитные проверки и полный жизненный цикл dispatch → review → reap.
 
@@ -399,6 +401,7 @@ Acceptance heartbeat хранит только stage/status/counters/timestamps.
 
 | Тема | Документ |
 |---|---|
+| Полный путь от идеи и архитектуры до Work Item DAG и Harness | [Architecture Workflow v1](docs/architecture-workflow-v1.ru.md) |
 | Исправление trust-transition Codex в v2.8.5 | [Release notes v2.8.5](docs/releases/v2.8.5.md) |
 | Исправление первой доставки custom pipeline в v2.8.4 | [Release notes v2.8.4](docs/releases/v2.8.4.md) |
 | Восстановление переходов в v2.8.3 | [Release notes v2.8.3](docs/releases/v2.8.3.md) |

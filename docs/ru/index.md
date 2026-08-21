@@ -7,6 +7,10 @@
 ## Маршруты чтения
 
 - Новый пользователь: [быстрый старт](getting-started.md) → [ментальная модель](mental-model.md) → [первый проект](first-project.md).
+- Архитектор нового проекта: [Architecture Workflow v1](../architecture-workflow-v1.ru.md)
+  ведёт от clarify и Vision через Design/Spec/Contract к Work Item DAG,
+  implementation plan и Harness на полном примере Neon Snake. Этот маршрут
+  описывает поведение 2.8.0+ и дополняет handbook 2.6.3.
 - Постоянный пользователь и оператор: [skills](skills.md) → [wiki и память](wiki-memory.md) → [операции](operations.md) → [устранение неполадок](troubleshooting.md).
 - Координатор крупной работы: [планирование](planning.md) → [ручная декомпозиция и параллельные задачи](parallel-tasks.md) → [сессии и задачи](sessions-and-tasks.md).
 - Автор pipeline: [pipeline](pipelines.md) → [PipelineSpec DSL](pipeline-dsl.md) → [документационный pipeline](documentation-pipeline.md).
@@ -14,6 +18,7 @@
 
 ## Полное содержание
 
+- [Architecture Workflow v1: от идеи до проверенной реализации](../architecture-workflow-v1.ru.md)
 - [Установка и первый результат](getting-started.md)
 - [Ментальная модель](mental-model.md)
 - [Первый проект от идеи до reap](first-project.md)

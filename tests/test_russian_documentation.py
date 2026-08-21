@@ -14,6 +14,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs" / "ru"
+ARCHITECTURE_GUIDE = ROOT / "docs" / "architecture-workflow-v1.ru.md"
 PIPELINE = ROOT / "examples" / "pipelines" / "document-project-v1.json"
 sys.path.insert(0, str(ROOT / "scripts"))
 
@@ -254,10 +255,20 @@ for relative in REQUIRED_PAGES:
         failures.append(f"missing page: docs/ru/{relative}")
 
 files = markdown_files()
+if not ARCHITECTURE_GUIDE.is_file():
+    failures.append("missing page: docs/architecture-workflow-v1.ru.md")
+else:
+    files += (ARCHITECTURE_GUIDE,)
 index = (DOCS / "index.md").read_text(encoding="utf-8") if (DOCS / "index.md").is_file() else ""
 for relative in REQUIRED_PAGES[1:]:
     if f"]({relative})" not in index:
         failures.append(f"index does not reach: {relative}")
+if "../architecture-workflow-v1.ru.md" not in index:
+    failures.append("docs/ru/index.md does not reach architecture workflow guide")
+if "docs/architecture-workflow-v1.ru.md" not in (
+    ROOT / "README.ru.md"
+).read_text(encoding="utf-8"):
+    failures.append("README.ru.md does not reach architecture workflow guide")
 
 failures.extend(f"broken relative link: {item}" for item in broken_relative_links(files))
 failures.extend(f"invalid fenced data: {item}" for item in fenced_data_failures(files))
