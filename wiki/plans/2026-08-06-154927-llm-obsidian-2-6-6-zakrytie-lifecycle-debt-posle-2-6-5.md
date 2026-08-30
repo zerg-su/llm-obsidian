@@ -6,10 +6,12 @@ session_id: 019fab00-3160-7380-8920-4b20183afb76
 sessions:
   - id: 019fab00-3160-7380-8920-4b20183afb76
     date: 2026-08-06
+  - id: 01a0537e-85f6-7012-9c47-c0f4b34fe1c0
+    date: 2026-08-30
 source_cwd: "/Users/zak/Projects/worktrees/llm-obsidian-2-6-5-coordinator"
 status: pending
 created: 2026-08-06
-updated: 2026-08-06
+updated: 2026-08-30
 tags:
   - plan
   - manual-save
@@ -115,7 +117,7 @@ tags:
 | F9. Skill governance gap | `intent-e9-tdd-skill-verdict-missing` | minor | Семантическое prototype-first правило в `tdd` не имеет отдельного baseline/final verdict record | Выполнить improve-skills + skill-creator audit и сохранить пяти-проходный verdict; не менять skill ad hoc |
 | F10. Evidence subject drift | `intent-e14-gate-not-run-at-reviewed-head`, `eng-receipt-subject-is-parent-commit` | minor | Полный receipt относится к parent candidate, а reviewed descendant содержит evidence/docs; корректность выводится из docs-only diff | Определить механически проверяемую candidate/evidence binding и короткий exact-descendant docs gate без бесконечной цепи receipts |
 | F11. Outcome overclaim | `OI.E14.outcome-proof-invalid` | important | Зеленые команды 2.6.5 не доказывают contradicted E3/E4b/E6/E9; live dogfood пропустил review | 2.6.6 readiness строится по отдельным outcome observables; каждое review finding получает fixed/deferred/accepted decision |
-| F12. Swarm-only UTF-8 review packet fix | semantic diff `llm-obsidian-swarm@15bd971` против ordinary `v2.6.5` | minor | Ordinary 2.6.5 режет `git show` как произвольные bytes после locale-dependent text encoding; граница может попасть внутрь multibyte UTF-8. Swarm уже нормализует invalid bytes, режет по character boundary и имеет два focused regressions | Портировать `_bounded_review_diff` и тесты в ordinary 2.6.6; сохранить Swarm branding отдельно; зарегистрировать тест прямым path в Makefile |
+| F12. Swarm-only UTF-8 review packet fix | semantic diff `llm-obsidian-swarm@15bd971` против ordinary `v2.6.5` | minor | Ordinary 2.6.5 режет `git show` как произвольные bytes после locale-dependent text encoding; граница может попасть внутрь multibyte UTF-8. Swarm уже нормализует invalid bytes, режет по character boundary и имеет два focused regressions | Fixed в exact commit `46e9f014198238dd4214748a9bb36f280d5877e8`: `_bounded_review_diff`, focused tests и прямая Makefile registration перенесены в ordinary; Swarm branding остаётся отдельно |
 
 ## 3. Целевая минимальная архитектура
 
@@ -164,7 +166,7 @@ Simulator вызывает те же production reducer/policy functions чер�
 
 - `files/responsibility`: `docs/acceptance/v2.6.6-deferred-findings-baseline.md`, `config/harness-audit-manifest.json`, новый machine-readable finding ledger under `docs/acceptance/`; одна причина — зафиксировать исходный active surface и exact review IDs.
 - `consumes`: таблица findings этого плана, exact 2.6.5 review callbacks и current module map.
-- `produces`: baseline с production lines/modules, active call graph и deletion target; все 11 root classes имеют owner и evidence ID.
+- `produces`: baseline с production lines/modules, active call graph и deletion target; все 12 root classes имеют owner и evidence ID.
 - `failing evidence`: audit показывает hard-coded incident identities/prose parsing/private writers и активные legacy calls.
 - `minimal green`: только ledger/baseline и deterministic detector tests; production ещё не меняется.
 - `refactor seam`: отсутствует.
@@ -202,6 +204,7 @@ Simulator вызывает те же production reducer/policy functions чер�
 
 ### Slice D0 — перенос portable review-context boundary из Swarm
 
+- `status/evidence`: completed в exact commit `46e9f014198238dd4214748a9bb36f280d5877e8`; дальнейшая работа ограничена сохранением focused regressions и direct suite registration.
 - `files/responsibility`: `scripts/task_review_context.py`, `tests/harness/test_task_review_context.py`, совместимый seam в `tests/test_workstream_c_review_reap.py` и одна прямая строка регистрации в `Makefile`; причина — не терять универсальный dogfood-фикс при сохранении ordinary 2.6.5 как источника истины.
 - `consumes`: semantic diff Swarm `15bd971` против ordinary `v2.6.5`; Swarm branding и пользовательские данные явно исключены.
 - `produces`: `_head_diff_input` получает raw Git bytes, нормализует invalid UTF-8 replacement character и ограничивает payload только на валидной UTF-8 boundary.
@@ -287,20 +290,21 @@ Simulator вызывает те же production reducer/policy functions чер�
 
 ```text
 A baseline
-  ↓
-B typed authority → C public transaction
-                    ├─ D exact-HEAD lifecycle ─┐
+  ├─ D0 portable review context ───────────────────────────────────────┐
+  ↓                                                                  │
+B typed authority → C public transaction                              │
+                    ├─ D exact-HEAD lifecycle ─┐                      │
                     ├─ E execution profiles ─ F event-only recovery ─ G availability
                     └─ H sealed Split base ────────────────────────────┤
                                                                       ↓
-                                                              I simulator
+                                                              I simulator ← D0
                                                                       ↓
                                                               J governance/evidence
                                                                       ↓
                                                               K release gate
 ```
 
-Параллельность разрешена только после freeze interfaces. D и H независимы. F и G зависят от E, но могут исполняться параллельно после frozen provider event/capability contracts. Shared files (`Makefile`, audit manifest, release acceptance, skill baselines) принадлежат Join/K, а не отдельным workstreams.
+Параллельность разрешена только после freeze interfaces. D и H независимы. F и G зависят от E, но могут исполняться параллельно после frozen provider event/capability contracts. Shared files (audit manifest, release acceptance, skill baselines и все прочие `Makefile` edits) принадлежат Join/K. Единственное исключение — exact direct test registration, уже owned и выполненная Slice D0 в commit `46e9f014198238dd4214748a9bb36f280d5877e8`.
 
 ## 6. Stop rules и budget
 
@@ -320,7 +324,8 @@ B typed authority → C public transaction
 
 ## 8. Definition of done
 
-- Все 11 root classes F1–F11 имеют fixed evidence либо явно отдельный user-approved defer; ни один исходный finding ID не исчез.
+- Все 12 root classes F1–F12 имеют fixed evidence либо явно отдельный user-approved defer; ни один исходный finding ID не исчез.
+- Plan consistency assertion: каждая finding row F1–F12 представлена ровно одним owning slice и входит в completion gate; число строк, owners и gated classes совпадает.
 - Production diff по active recovery/authorization contour отрицательный по сравнению с 2.6.5 baseline; исключения объяснены module map.
 - Нет hard-coded incident identity/prose authorization и private durable writes вне owning modules.
 - Bounded production review реально проходит ephemeral route без cmux, а interactive route остаётся явным.
