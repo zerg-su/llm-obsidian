@@ -185,6 +185,32 @@ def resolve(
     }
 
 
+def resolve_light_review_route(
+    config: RoutingConfig,
+    session: dict[str, str],
+    *,
+    explicit_model: str = "",
+    explicit_effort: str = "",
+) -> dict[str, Any]:
+    """Resolve one native child without ever crossing the parent runtime."""
+
+    parent_runtime = str(session.get("runtime") or "")
+    route = resolve(
+        config,
+        "review",
+        session=session,
+        explicit_model=explicit_model,
+        explicit_effort=explicit_effort,
+        same_model=True,
+    )
+    if route["runtime"] != parent_runtime:
+        raise RoutingError(
+            "Light Review model override must stay on the same runtime as "
+            f"the current {parent_runtime} session"
+        )
+    return {**route, "isolation": "native-subagent"}
+
+
 def session_path(root: Path, session_id: str) -> Path:
     if not SESSION_ID_RE.fullmatch(session_id):
         raise RoutingError("session id contains unsupported characters")
