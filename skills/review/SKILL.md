@@ -62,6 +62,25 @@ target writes or extra permission is `not-run` and a coverage gap. Without `--ve
 run no test suite. Never write target files, Harness records, archives, or wiki pages;
 the user may separately invoke `/save`.
 
+## Lifecycle coordinator selection
+
+Lifecycle Review separates the state-owning LLM Obsidian coordinator from the Git
+target. Resolve the coordinator in this order: explicit `--vault-root`, verified
+`LLM_OBSIDIAN_PROJECT_ROOT`, an LLM Obsidian ancestor of the current directory, then
+one explicitly registered default. Invalid higher-priority input fails closed; never
+fall through to a plugin cache or guess a sibling vault.
+
+From the intended coordinator root, register the default only on an explicit user
+action:
+
+```bash
+python3 scripts/review_coordinator.py register --vault-root "$PWD"
+```
+
+Registration writes only `~/.config/llm-obsidian/coordinators-v1.json` with private
+permissions. Re-register the prior root or explicitly remove that file to roll back;
+review never deletes or rewrites the registry automatically.
+
 ## Presets
 
 - `review`: one holistic session on the selected model;
