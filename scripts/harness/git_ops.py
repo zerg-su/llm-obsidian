@@ -83,6 +83,81 @@ class GitAdapter:
             raise GitError((result.stderr or result.stdout).strip()[:2000])
         return result.stdout.strip()
 
+    @classmethod
+    def resolve(cls, path: Path | str, runner: Runner = subprocess.run) -> "GitAdapter":
+        """Resolve any path inside a non-bare worktree to its exact Git root."""
+
+        candidate = Path(path).expanduser().resolve()
+        cwd = candidate if candidate.is_dir() else candidate.parent
+        result = runner(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=cwd,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode or not result.stdout.strip():
+            raise GitError("review target is not inside a Git worktree")
+        return cls(Path(result.stdout.strip()).resolve(), runner)
+
+    def revision(self, ref: str) -> str:
+        """Resolve one commit-ish without accepting a tree, blob, or ambiguity."""
+
+        if not ref or "\x00" in ref:
+            raise GitError("Git revision is invalid")
+        return self._run(["rev-parse", "--verify", f"{ref}^{{commit}}"])
+
+    def optional_revision(self, ref: str) -> str:
+        result = self._result(["rev-parse", "--verify", f"{ref}^{{commit}}"])
+        return result.stdout.strip() if result.returncode == 0 else ""
+
+    def merge_base(self, left: str, right: str) -> str:
+        return self._run(["merge-base", left, right])
+
+    def diff_text(
+        self,
+        *revisions: str,
+        cached: bool = False,
+        name_only: bool = False,
+        paths: Sequence[str] = (),
+    ) -> str:
+        args = ["diff", "--no-ext-diff"]
+        if cached:
+            args.append("--cached")
+        args.append("--name-only" if name_only else "--binary")
+        if name_only:
+            args.append("-z")
+        args.extend(revisions)
+        args.append("--")
+        args.extend(paths)
+        return self._run(args)
+
+    def root_commit_text(
+        self,
+        head: str,
+        *,
+        name_only: bool = False,
+        paths: Sequence[str] = (),
+    ) -> str:
+        args = ["show", "--no-ext-diff", "--format="]
+        args.extend(("--name-only", "-z") if name_only else ("--binary",))
+        args.append(head)
+        args.append("--")
+        args.extend(paths)
+        return self._run(args)
+
+    def status_porcelain(self) -> str:
+        return self._run(
+            ["status", "--porcelain=v1", "-z", "--untracked-files=all"]
+        )
+
+    def untracked_paths(self, paths: Sequence[str] = ()) -> tuple[str, ...]:
+        args = ["ls-files", "--others", "--exclude-standard", "-z", "--"]
+        args.extend(paths)
+        return tuple(
+            sorted(path for path in self._run(args).split("\x00") if path)
+        )
+
     @staticmethod
     def _paths(porcelain: str) -> tuple[str, ...]:
         paths: list[str] = []
