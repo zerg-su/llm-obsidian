@@ -40,7 +40,7 @@ tags:
     },
     {
       "evidence_id": "E3-production-execution-profile",
-      "observable": "Frozen execution profile проходит через ReviewOperationRequest и production launcher: bounded ephemeral review использует зарегистрированный Claude-print либо Codex-exec adapter, выполняет auth/billing preflight, публикует schema-valid result и закрывается без cmux/workspace; interactive profile создаёт workspace только при явном выборе."
+      "observable": "Frozen execution profile проходит через ReviewOperationRequest и production launcher: bounded ephemeral review использует зарегистрированный Claude-print либо Codex-exec adapter, выполняет auth/billing preflight, публикует schema-valid result и закрывается без cmux/workspace; interactive profile создаёт workspace только при явном выборе; inline head-diff всегда bounded и валиден UTF-8."
     },
     {
       "evidence_id": "E4-event-only-review-recovery",
@@ -94,6 +94,10 @@ tags:
 
 Главный принцип 2.6.6 — evolutionary deletion before addition. Мы не строим новый Harness. Сначала выводим одноразовые incident-specific механизмы из active authority, затем соединяем уже существующие generic компоненты с production path и только после этого усиливаем simulator/evidence.
 
+### 1.1. Источники истины между LLM Obsidian и Swarm
+
+Обычный LLM Obsidian является каноничным источником кода, контрактов, тестов и skills. Swarm является каноничным источником пользовательской wiki, `.obsidian` и локального контекста. При обновлении Swarm код по умолчанию берётся из опубликованного ordinary release; универсальные Swarm-only улучшения разрешено сохранить только после отдельного semantic diff-аудита и одновременной постановки их переноса в ближайший план обычного LLM Obsidian. Swarm-specific branding и пользовательские данные обратно в ordinary repository не переносятся.
+
 ## 2. Полный реестр перенесённых findings
 
 Дубликаты двух моделей объединены по корневой причине, но каждый исходный ID сохранён, чтобы ни одно замечание не потерялось.
@@ -111,6 +115,7 @@ tags:
 | F9. Skill governance gap | `intent-e9-tdd-skill-verdict-missing` | minor | Семантическое prototype-first правило в `tdd` не имеет отдельного baseline/final verdict record | Выполнить improve-skills + skill-creator audit и сохранить пяти-проходный verdict; не менять skill ad hoc |
 | F10. Evidence subject drift | `intent-e14-gate-not-run-at-reviewed-head`, `eng-receipt-subject-is-parent-commit` | minor | Полный receipt относится к parent candidate, а reviewed descendant содержит evidence/docs; корректность выводится из docs-only diff | Определить механически проверяемую candidate/evidence binding и короткий exact-descendant docs gate без бесконечной цепи receipts |
 | F11. Outcome overclaim | `OI.E14.outcome-proof-invalid` | important | Зеленые команды 2.6.5 не доказывают contradicted E3/E4b/E6/E9; live dogfood пропустил review | 2.6.6 readiness строится по отдельным outcome observables; каждое review finding получает fixed/deferred/accepted decision |
+| F12. Swarm-only UTF-8 review packet fix | semantic diff `llm-obsidian-swarm@15bd971` против ordinary `v2.6.5` | minor | Ordinary 2.6.5 режет `git show` как произвольные bytes после locale-dependent text encoding; граница может попасть внутрь multibyte UTF-8. Swarm уже нормализует invalid bytes, режет по character boundary и имеет два focused regressions | Портировать `_bounded_review_diff` и тесты в ordinary 2.6.6; сохранить Swarm branding отдельно; зарегистрировать тест прямым path в Makefile |
 
 ## 3. Целевая минимальная архитектура
 
@@ -194,6 +199,16 @@ Simulator вызывает те же production reducer/policy functions чер�
 - `minimal green`: block executable legacy branches and route changed HEAD through existing next-cycle reservation; no new recovery state.
 - `refactor seam`: delete now-unreachable rearm/continuation/checkpoint code and scenario expectations; preserve inspect/archive/cleanup adapters.
 - `verification`: zero-effect legacy matrix, changed-HEAD new-cycle test, sixth-cycle zero-effect, crash/idempotency cleanup; E2, E10.
+
+### Slice D0 — перенос portable review-context boundary из Swarm
+
+- `files/responsibility`: `scripts/task_review_context.py`, `tests/harness/test_task_review_context.py`, совместимый seam в `tests/test_workstream_c_review_reap.py` и одна прямая строка регистрации в `Makefile`; причина — не терять универсальный dogfood-фикс при сохранении ordinary 2.6.5 как источника истины.
+- `consumes`: semantic diff Swarm `15bd971` против ordinary `v2.6.5`; Swarm branding и пользовательские данные явно исключены.
+- `produces`: `_head_diff_input` получает raw Git bytes, нормализует invalid UTF-8 replacement character и ограничивает payload только на валидной UTF-8 boundary.
+- `failing evidence`: multibyte символ пересекает byte ceiling либо Git output содержит invalid byte; получившийся `head-diff.patch` не декодируется строго как UTF-8.
+- `minimal green`: портировать существующий Swarm helper без дополнительной transport architecture.
+- `refactor seam`: не объединять этот срез с chunked fix-delta transport и не менять review identity.
+- `verification`: два focused boundary regressions, существующий workstream-C context test, suite registration, full harness; входит в E3 и E11.
 
 ### Slice E — production ephemeral execution
 
