@@ -147,9 +147,12 @@ class GitAdapter:
         return self._run(args)
 
     def status_porcelain(self) -> str:
-        return self._run(
+        result = self._result(
             ["status", "--porcelain=v1", "-z", "--untracked-files=all"]
         )
+        if result.returncode:
+            raise GitError((result.stderr or result.stdout).strip()[:2000])
+        return result.stdout
 
     def untracked_paths(self, paths: Sequence[str] = ()) -> tuple[str, ...]:
         args = ["ls-files", "--others", "--exclude-standard", "-z", "--"]

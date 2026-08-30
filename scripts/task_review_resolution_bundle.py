@@ -32,6 +32,7 @@ from review_contract import axis_finding_id
 from review_zero_effect import zero_effect_gate_shape
 from task_review_delta_packet import build_delta_packet
 from task_review_request import _callback_path
+from task_review_identity import _gate_root, _review_resolution_path
 from task_review_shared import (
     ResolutionBundle,
     TaskReviewError,
@@ -624,6 +625,22 @@ def _resolution_origin_head(
     return cursor
 
 
+def _resolution_input_path(
+    worktree: Path,
+    meta: Mapping[str, Any] | None,
+    explicit: Path | None,
+) -> Path:
+    if explicit is not None:
+        return explicit
+    if meta is None:
+        return worktree / ".task-review-resolution.json"
+    return _review_resolution_path(
+        meta,
+        worktree,
+        Path(str(meta.get("runtime_root") or "")),
+    )
+
+
 def _resolution_bundle(
     worktree: Path,
     gate_root: Path,
@@ -631,6 +648,8 @@ def _resolution_bundle(
     awaiting: Mapping[str, object],
     resolved_head: str,
     *,
+    meta: Mapping[str, Any] | None = None,
+    resolution_path: Path | None = None,
     persisted_identity_sha256: str = "",
     persisted_resolution_pointers: Mapping[str, object] | None = None,
 ) -> ResolutionBundle:
@@ -746,7 +765,9 @@ def _resolution_bundle(
                 f"review resolution boundary identity is invalid: {exc}"
             ) from exc
     reviewed_head = next(iter(reviewed_heads))
-    resolution_path = worktree / ".task-review-resolution.json"
+    resolution_path = _resolution_input_path(
+        worktree, meta, resolution_path
+    )
     if not resolution_path.is_file() or resolution_path.is_symlink():
         raise TaskReviewError("review resolution evidence is unavailable")
     raw_resolution = _read_json(resolution_path, "review resolution evidence")
@@ -827,6 +848,23 @@ def _resolution_bundle(
         by_axis,
         review_identity_sha256,
         origin_reviewed_head_sha,
+        resolution_path,
+    )
+
+
+def _owned_resolution_bundle(
+    meta: Mapping[str, Any],
+    awaiting: Mapping[str, object],
+    resolved_head: str,
+) -> ResolutionBundle:
+    task_id = str(meta.get("task_id") or "")
+    return _resolution_bundle(
+        Path(str(meta.get("worktree") or "")),
+        _gate_root(Path(str(meta.get("vault_root") or "")), task_id),
+        task_id,
+        awaiting,
+        resolved_head,
+        meta=meta,
     )
 
 
@@ -836,10 +874,11 @@ def _recovery_resolution_bundle(
     persisted: ReviewResolutionEvidence,
     resolved_head: str,
     review_identity_sha256: str = "",
+    resolution_path: Path | None = None,
 ) -> ResolutionBundle:
     """Rebuild recovery evidence from the durable reviewer-seen finding set."""
 
-    resolution_path = worktree / ".task-review-resolution.json"
+    resolution_path = resolution_path or worktree / ".task-review-resolution.json"
     if not resolution_path.is_file() or resolution_path.is_symlink():
         raise TaskReviewError("review resolution evidence is unavailable")
     try:
@@ -903,6 +942,8 @@ def _recovery_resolution_bundle(
         fix_delta,
         {persisted.axis: evidence},
         resolution.review_identity_sha256,
+        "",
+        resolution_path,
     )
 
 

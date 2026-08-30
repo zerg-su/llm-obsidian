@@ -23,6 +23,7 @@ from task_review_shared import (
     _load_review_boundary_input,
     _read_json,
 )
+from task_review_identity import _review_resolution_path
 from task_review_plan_rebind import (
     advance_stage as _advance_rebind_stage,
     canonical_json_bytes as _canonical_json_bytes,
@@ -745,7 +746,11 @@ def rebind_active_plan_review(
         resolved_head=requested_head_sha,
     )
     resolution = _read_json(
-        worktree / ".task-review-resolution.json",
+        _review_resolution_path(
+            candidate,
+            worktree,
+            Path(str(candidate.get("runtime_root") or "")),
+        ),
         "plan review resolution",
     )
     if (

@@ -115,6 +115,7 @@ with tempfile.TemporaryDirectory(prefix="external-current-review.") as raw:
     check("coordinator and product roots remain distinct", first_result["vault_root"] == str(vault) and first_result["worktree"] == str(first))
     first_meta, captured_vault, captured_target, _, first_runtime = captures[0]
     check("current metadata binds both roots", first_meta["vault_root"] == str(vault) and first_meta["worktree"] == str(first))
+    check("current metadata carries a clean exact-HEAD lease", first_meta["review_lease"]["head"] == subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=first, text=True).strip())
     check("Harness state is coordinator-owned", captured_vault == vault and captured_target == first)
     check("scratch remains outside coordinator and target", first_runtime.is_relative_to(scratch) and not first_runtime.is_relative_to(first) and not first_runtime.is_relative_to(vault))
     check("external target receives no review metadata", not (first / ".task-meta.json").exists() and not (first / ".vault-meta").exists())
@@ -142,5 +143,25 @@ with tempfile.TemporaryDirectory(prefix="external-current-review.") as raw:
         ["current", "--vault-root", str(vault)]
     )
     check("current facade permits the current Git root default", defaulted.target is None and defaulted.worktree is None)
+
+    dirty = product(base / "products/dirty", 3)
+    (dirty / "app.py").write_text("VALUE = 4\n", encoding="utf-8")
+    dirty_key = resolve_target(dirty).target_key
+    captures_before_dirty = len(captures)
+    task_review_current._run_review = stop_before_provider
+    try:
+        task_review_runner.run_current_review(
+            dirty,
+            vault_root=vault,
+            origin_surface="11111111-1111-4111-8111-111111111111",
+            scratch_root=scratch,
+        )
+    except task_review_runner.TaskReviewError as exc:
+        check("dirty target is rejected before provider effect", "clean" in str(exc))
+    else:
+        check("dirty target is rejected before provider effect", False)
+    finally:
+        task_review_current._run_review = original
+    check("dirty rejection creates no active pointer", len(captures) == captures_before_dirty and not (vault / ".vault-meta/harness/current-review" / dirty_key / "active.json").exists())
 
 print("\nAll external current-review tests passed.")

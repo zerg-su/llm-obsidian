@@ -2705,6 +2705,9 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
     (product / "AGENTS.md").write_text(
         "# Product instructions\n", encoding="utf-8"
     )
+    (product / ".gitignore").write_text(
+        ".vault-meta/\n", encoding="utf-8"
+    )
     review_plan = product / "wiki/review-plan.md"
     review_plan.write_text(
         """# Review plan
@@ -2764,6 +2767,23 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
         boundary_artifacts["verification"],
         initial_current_head,
     )
+    subprocess.run(
+        ["git", "add", "wiki/verification.md"], cwd=product, check=True
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "record verification evidence"],
+        cwd=product,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    initial_current_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=product,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
     current_boundary = ReviewBoundaryInput(
         purpose="implementation",
         outcome_contract_sha256=extract_from_bytes(
@@ -3653,6 +3673,9 @@ with tempfile.TemporaryDirectory(prefix="review-iteration-facade.") as raw:
     evidence = product / "wiki/verification.md"
     evidence.write_text("# Verification\n\nExact fixture evidence.\n", encoding="utf-8")
     (product / "product.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (product / ".gitignore").write_text(
+        ".vault-meta/\n", encoding="utf-8"
+    )
     subprocess.run(
         ["git", "init", "-b", "main"],
         cwd=product,
@@ -3686,6 +3709,23 @@ with tempfile.TemporaryDirectory(prefix="review-iteration-facade.") as raw:
         text=True,
     ).stdout.strip()
     write_scoped_verification(product, evidence, reviewed_head)
+    subprocess.run(
+        ["git", "add", "wiki/verification.md"], cwd=product, check=True
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "record verification evidence"],
+        cwd=product,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    reviewed_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=product,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
     boundary = ReviewBoundaryInput(
         purpose="implementation",
         outcome_contract_sha256=extract_from_bytes(plan.read_bytes()).sha256,
@@ -3772,6 +3812,9 @@ with tempfile.TemporaryDirectory(prefix="review-iteration-facade.") as raw:
             scratch_root=scratch,
             runtime_manager=runtime,
         )
+        awaiting_state = ReviewGateController(
+            gate_root, runtime, store
+        ).read()
         (product / "product.py").write_text("VALUE = 2\n", encoding="utf-8")
         subprocess.run(["git", "add", "product.py"], cwd=product, check=True)
         subprocess.run(
@@ -3796,7 +3839,57 @@ with tempfile.TemporaryDirectory(prefix="review-iteration-facade.") as raw:
             + "\n",
             encoding="utf-8",
         )
-        gate = ReviewGateController(gate_root, runtime, store)
+        boundaries = awaiting_state["review_notification_evidence"]
+        callbacks = [
+            {
+                "axis": axis,
+                "round_operation_id": row["round_operation_id"],
+                "round_run_id": row["round_run_id"],
+                "callback_id": row["callback_id"],
+                "callback_sha256": row["callback_sha256"],
+            }
+            for axis, row in sorted(boundaries.items())
+        ]
+        resolution_path = Path(str(awaiting["resolution_path"]))
+        resolution_path.parent.mkdir(parents=True, exist_ok=True)
+        resolution_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "operation_id": started["task_id"],
+                    "reviewed_head_sha": awaiting_state["attempt"]["identity"][
+                        "exact_head_sha"
+                    ],
+                    "resolved_head_sha": resolved_head,
+                    "review_identity_sha256": review_transport_identity_sha256(
+                        next(
+                            iter(
+                                {
+                                    row["review_operation_id"]
+                                    for row in boundaries.values()
+                                }
+                            )
+                        ),
+                        callbacks,
+                    ),
+                    "resolutions": [
+                        {
+                            "finding_id": finding_id,
+                            "disposition": "applied",
+                            "rationale": (
+                                "The exact current-review repair is committed."
+                            ),
+                            "follow_up": "",
+                        }
+                        for row in boundaries.values()
+                        for finding_id in row["material_finding_ids"]
+                    ],
+                },
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
         verifying = task_review_runner.run_current_review(
             product,
             deep=True,
@@ -3848,14 +3941,17 @@ with tempfile.TemporaryDirectory(prefix="review-iteration-facade.") as raw:
             for pointer in final_state["final_results"].values()
         }
         check(
-            "Deep facade seals the terminal HEAD and starts one fresh attempt",
+            "Deep facade rebinds one owned task to the clean resolved HEAD",
             awaiting["status"] == "changes-requested"
             and verifying["status"] == "reviewing"
+            and verifying["task_id"] == started["task_id"]
             and approved["status"] == "approved"
             and final_iterations == {0}
             and len(final_state["final_results"]) == 2
+            and final_state["attempt"]["identity"]["cycle"] == 2
             and len(runtime.started) == 4
-            and not runtime.continued,
+            and not runtime.continued
+            and not (product / ".task-review-resolution.json").exists(),
         )
     finally:
         for name, value in saved_route.items():

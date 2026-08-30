@@ -23,6 +23,7 @@ from task_review_shared import (
     TaskReviewError,
     _atomic_json,
 )
+from task_review_identity import _review_resolution_path
 
 
 def _write_round_meta(
@@ -214,6 +215,15 @@ def _receipt(
         "vault_root": str(vault),
         "context_manifest": str(context_manifest),
         "lanes": lanes,
+        **(
+            {
+                "resolution_path": str(
+                    _review_resolution_path(meta, worktree, runtime_root)
+                )
+            }
+            if meta.get("lifecycle") == "current-checkout"
+            else {}
+        ),
         **(
             {"dashboard": dashboard.__dict__}
             if dashboard is not None

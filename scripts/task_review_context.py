@@ -881,7 +881,7 @@ def _context(
         inputs.append(
             ContextInput(
                 "resolution-evidence.json",
-                str(worktree / ".task-review-resolution.json"),
+                str(resolution_bundle.resolution_path),
                 (
                     json.dumps(
                         resolution_payload,

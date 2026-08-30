@@ -20,6 +20,7 @@ from task_review_shared import (
     _atomic_json,
     _read_json,
 )
+from task_review_identity import _review_resolution_path
 from task_review_verification_resubmit import _durable_verification_resubmit
 from review_contract import review_axis_responsibility
 
@@ -67,7 +68,7 @@ def _finalizing_resubmit_recovery(
     if previous_context.head_sha == current_context.head_sha:
         return None
     summary_path = worktree / ".task-summary.json"
-    resolution_path = worktree / ".task-review-resolution.json"
+    resolution_path = _review_resolution_path(meta, worktree, runtime_root)
     callback_path = _callback_path(runtime_root, simple_axis)
     for path, label in (
         (summary_path, "task summary"),
@@ -147,6 +148,7 @@ def _finalizing_resubmit_recovery(
         persisted_resolution,
         current_context.head_sha,
         str(state.get("resolution_transport_identity_sha256") or ""),
+        resolution_path=resolution_path,
     )
     rebuilt_resolution = bundle.by_axis.get(simple_axis)
     if (

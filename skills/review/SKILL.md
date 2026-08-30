@@ -81,6 +81,28 @@ Registration writes only `~/.config/llm-obsidian/coordinators-v1.json` with priv
 permissions. Re-register the prior root or explicitly remove that file to roll back;
 review never deletes or rewrites the registry automatically.
 
+## Lifecycle target lease
+
+Current-checkout Lifecycle Review starts only when the target is on a commit, has no
+Git operation in progress, and its index, tracked worktree, and non-ignored untracked
+set are clean. It records an observational lease over that exact target key, HEAD,
+index tree, tracked worktree diff, and untracked-file content. Recheck the lease before
+consuming callbacks and immediately before every provider effect. Any drift while the
+gate is active is `attention-required`; do not accept the stale result, stash, commit,
+reset, or create a worktree automatically.
+
+`changes-requested` is the one released boundary: the executor may edit and commit the
+fix, then resume only from a clean new HEAD with the same preset and purpose. Write the
+typed finding resolution to the owner-only `resolution_path` returned by the prior
+receipt. The coordinator rebinds the same task lineage and advances its bounded cycle;
+it never writes `.task-review-resolution.json` or other Harness metadata into an
+external target. If concurrent work is expected, recommend a user-created dedicated
+branch/worktree before starting review.
+
+This lease detects state at each observation boundary; a modify-and-revert that leaves
+identical observable Git state between checks cannot be proven. Treat the reviewed
+snapshot, not elapsed wall time, as the authority.
+
 ## Presets
 
 - `review`: one holistic session on the selected model;
@@ -147,8 +169,9 @@ contract; return it for amendment.
 3. Keep lanes independent. Before effect, `FinalizationLedger` reserves each
    fresh exact-HEAD attempt and immutable terminal result. Material
    `changes-requested`/`approved` consumes a product cycle; mechanism outcomes
-   release the slot into a bounded receipt. Changed HEAD advances the
-   cycle; cycle 4 needs the accepted pivot receipt. A fifth material failure
+   release the slot into a bounded receipt. A clean resolved HEAD plus owner-only
+   resolution evidence advances the same current-review cycle; cycle 4 needs the
+   accepted pivot receipt. A fifth material failure
    exhausts the lineage; a sixth cycle has zero effect. Standalone keeps preset
    budgets.
 4. The executor records typed rulings/checks and escalates protected boundaries.

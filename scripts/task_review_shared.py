@@ -37,6 +37,7 @@ class ResolutionBundle(NamedTuple):
     by_axis: Mapping[str, ReviewResolutionEvidence]
     review_identity_sha256: str
     origin_reviewed_head_sha: str = ""
+    resolution_path: Path | None = None
 
 
 class FinalizingRecovery(NamedTuple):

@@ -70,6 +70,7 @@ from harness.workflows.review_gate_attempt import (
 )
 from review_telemetry import emit_review_event
 from review_zero_effect import zero_effect_terminal_attempt
+from current_review_lease import enforce_current_review_lease
 from task_review_context import (
     _assert_frozen_topology,
     _callback_path,
@@ -91,14 +92,13 @@ from task_review_resolution_bundle import (
     _archive_changed_head_callback,
     _archive_prior_terminal_callbacks,
     _archive_resolution_callbacks,
-    _resolution_bundle,
+    _owned_resolution_bundle,
     _resolution_source_state,
 )
 from task_review_shared import (
     ActiveReviewRound,
     StaleRoundCallbackError,
     TaskReviewError,
-    _atomic_json,
     _git,
     _read_json,
 )
@@ -1195,10 +1195,8 @@ def _run_exact_head_review(
                     raise ReviewAttemptError(
                         "review resolution boundary is unavailable"
                     )
-                resolution_bundle = _resolution_bundle(
-                    worktree,
-                    gate_root,
-                    task_id,
+                resolution_bundle = _owned_resolution_bundle(
+                    meta,
                     boundaries,
                     current_head,
                 )
@@ -1403,6 +1401,7 @@ def _run_exact_head_review(
             reserved_attempt_id = prior_attempt.identity.attempt_id
 
     def admit_launch() -> None:
+        enforce_current_review_lease(meta, worktree, gate.state_path, task_id)
         _admitted_review_launch(
             meta, vault, runtime_root, worktree, task_id, context
         )
@@ -1538,6 +1537,7 @@ def _run_review(
     apply_finalizing_recovery: Callable[..., dict[str, Any]],
 ) -> dict[str, Any]:
     gate_path = _gate_root(vault, task_id) / "review-gate.json"
+    enforce_current_review_lease(meta, worktree, gate_path, task_id)
     exact_enabled = _exact_head_attempt_enabled(meta)
     if exact_enabled and gate_path.exists():
         try:

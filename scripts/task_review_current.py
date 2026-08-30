@@ -22,8 +22,14 @@ from harness.verification import load_profiles
 from harness.workflows.review import ReviewContext
 from harness.workflows.review_gate import ReviewPreset
 from model_routing import load_config, routing_from_environment
+from current_review_lease import (
+    CurrentReviewLeaseError,
+    create_review_lease,
+    evaluate_review_lease,
+    lease_attention_payload,
+)
 from review_coordinator import CoordinatorError, resolve_coordinator
-from review_target import ReviewTargetError, resolve_target
+from review_target import ReviewTarget, ReviewTargetError, resolve_target
 from task_review_context import (
     _current_review_is_quiescent,
     _zero_effect_attention_is_quiescent,
@@ -125,6 +131,8 @@ def _current_policy(
 def _same_requested_policy(
     stored: Mapping[str, Any],
     requested: Mapping[str, Any],
+    *,
+    allow_boundary_rebind: bool = False,
 ) -> bool:
     base_matches = all(
         stored.get(name) == requested.get(name)
@@ -143,8 +151,11 @@ def _same_requested_policy(
         base_matches
         and str(stored.get("purpose") or "implementation")
         == str(requested.get("purpose") or "implementation")
-        and str(stored.get("boundary_input_sha256") or "")
-        == str(requested.get("boundary_input_sha256") or "")
+        and (
+            allow_boundary_rebind
+            or str(stored.get("boundary_input_sha256") or "")
+            == str(requested.get("boundary_input_sha256") or "")
+        )
     )
 
 
@@ -414,6 +425,18 @@ def _active_current_review(
             raise TaskReviewError(
                 "zero-effect current review retains operation ownership"
             )
+        bounded_current_resolution = (
+            status == "changes-requested"
+            and isinstance(candidate.get("finalization_policy"), Mapping)
+        )
+        if bounded_current_resolution and not same_policy:
+            same_policy = isinstance(
+                stored_policy, Mapping
+            ) and _same_requested_policy(
+                stored_policy,
+                requested_policy,
+                allow_boundary_rebind=True,
+            )
         terminal_stale = approved_stale or skipped_stale or (
             status == "stopped"
             and _stopped_release_enters_implementation(
@@ -429,11 +452,14 @@ def _active_current_review(
             and not gate_state.get("final_results")
             and _same_review_purpose(stored_policy, requested_policy)
             and quiescent
-        ) or stale_resolution_boundary(
-            status,
-            bound_head,
-            current_head,
-            quiescent,
+        ) or (
+            not bounded_current_resolution
+            and stale_resolution_boundary(
+                status,
+                bound_head,
+                current_head,
+                quiescent,
+            )
         )
     elif gate_state_path.exists():
         raise TaskReviewError("current review gate is not a regular file")
@@ -470,6 +496,91 @@ def _active_current_review(
 
         candidate = finalize_active_plan_rebind(candidate, active_path)
     return candidate
+
+
+def _resume_current_review(
+    meta: Mapping[str, Any],
+    target: ReviewTarget,
+    vault: Path,
+    worktree: Path,
+    active_path: Path,
+    scratch_root: Path | None,
+    boundary_input: ReviewBoundaryInput | None,
+    requested_policy: Mapping[str, Any],
+) -> tuple[dict[str, Any], str, Path]:
+    task_id = str(meta["task_id"])
+    runtime_root = Path(str(meta.get("runtime_root") or "")).resolve()
+    expected_root = _current_runtime_root(worktree, task_id, scratch_root)
+    if runtime_root != expected_root:
+        raise TaskReviewError(
+            "current review scratch root changed during an active gate"
+        )
+    if (
+        runtime_root == worktree
+        or worktree in runtime_root.parents
+        or not (runtime_root / "current-review.json").is_file()
+    ):
+        raise TaskReviewError("current review scratch is unavailable")
+    gate_path = _gate_root(vault, task_id) / "review-gate.json"
+    gate_status = ""
+    gate_context: Mapping[str, Any] | None = None
+    if gate_path.is_file() and not gate_path.is_symlink():
+        gate_state = _read_json(gate_path, "current review gate")
+        gate_status = str(gate_state.get("status") or "")
+        raw_context = gate_state.get("context")
+        gate_context = raw_context if isinstance(raw_context, Mapping) else None
+    raw_lease = meta.get("review_lease")
+    if not isinstance(raw_lease, Mapping):
+        try:
+            review_lease = create_review_lease(target)
+        except CurrentReviewLeaseError as exc:
+            raise TaskReviewError(str(exc)) from exc
+        bound_head = str(gate_context.get("head_sha") or "") if gate_context else ""
+        if (
+            bound_head
+            and bound_head != review_lease["head"]
+            and gate_status != "changes-requested"
+        ):
+            raise TaskReviewError(
+                "legacy current review target drifted from its bound HEAD"
+            )
+        lease_changed = True
+    else:
+        try:
+            review_lease, lease_changed = evaluate_review_lease(
+                raw_lease, target, gate_status=gate_status
+            )
+        except CurrentReviewLeaseError as exc:
+            if gate_status != "changes-requested" and gate_path.parent.exists():
+                _atomic_json(
+                    gate_path.parent / "review-lease-attention.json",
+                    lease_attention_payload(
+                        task_id=task_id,
+                        lease=raw_lease,
+                        reasons=exc.reasons,
+                        observed_head=exc.observed_head,
+                    ),
+                )
+            raise TaskReviewError(str(exc)) from exc
+    if lease_changed:
+        updates: dict[str, Any] = {"review_lease": review_lease}
+        if boundary_input is not None and gate_status == "changes-requested":
+            stored_boundary = runtime_root / "inputs/review-boundary-input.json"
+            _atomic_json(stored_boundary, boundary_input.payload())
+            updates.update(
+                {
+                    "review_policy": requested_policy,
+                    "review_boundary_input_file": str(stored_boundary),
+                    "approved_plan_sha256": boundary_input.plan_sha256,
+                    "outcome_contract_sha256": (
+                        boundary_input.outcome_contract_sha256
+                    ),
+                }
+            )
+        meta = {**meta, **updates}
+        _atomic_json(runtime_root / "current-review.json", meta)
+        _atomic_json(active_path, meta)
+    return dict(meta), task_id, runtime_root
 
 
 def run_current_review(
@@ -570,6 +681,10 @@ def run_current_review(
     )
 
     if meta is None:
+        try:
+            review_lease = create_review_lease(target)
+        except CurrentReviewLeaseError as exc:
+            raise TaskReviewError(str(exc)) from exc
         current_head = _git(worktree, "rev-parse", "HEAD")
         if boundary_input is not None and (
             (
@@ -628,6 +743,7 @@ def run_current_review(
             "worktree": str(worktree),
             "vault_root": str(vault),
             "target_key": target.target_key,
+            "review_lease": review_lease,
             "plan_file": str(plan),
             "routing": {"session": session},
             "review_policy": requested_policy,
@@ -695,21 +811,16 @@ def run_current_review(
         _atomic_json(runtime_root / "current-review.json", meta)
         _atomic_json(active_path, meta)
     else:
-        task_id = str(meta["task_id"])
-        runtime_root = Path(str(meta.get("runtime_root") or "")).resolve()
-        expected_root = _current_runtime_root(
-            worktree, task_id, scratch_root
+        meta, task_id, runtime_root = _resume_current_review(
+            meta,
+            target,
+            vault,
+            worktree,
+            active_path,
+            scratch_root,
+            boundary_input,
+            requested_policy,
         )
-        if runtime_root != expected_root:
-            raise TaskReviewError(
-                "current review scratch root changed during an active gate"
-            )
-        if (
-            runtime_root == worktree
-            or worktree in runtime_root.parents
-            or not (runtime_root / "current-review.json").is_file()
-        ):
-            raise TaskReviewError("current review scratch is unavailable")
 
     return _run_review(
         meta,

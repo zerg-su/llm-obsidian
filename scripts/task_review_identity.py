@@ -159,6 +159,18 @@ def _legacy_current_review_active_path(vault: Path) -> Path:
     ).resolve()
 
 
+def _review_resolution_path(
+    meta: Mapping[str, Any], worktree: Path, runtime_root: Path
+) -> Path:
+    if meta.get("lifecycle") == "current-checkout":
+        return (
+            runtime_root.expanduser().resolve()
+            / "inputs"
+            / "task-review-resolution.json"
+        )
+    return worktree.expanduser().resolve() / ".task-review-resolution.json"
+
+
 def _gate_root(vault: Path, task_id: str) -> Path:
     return (
         vault
