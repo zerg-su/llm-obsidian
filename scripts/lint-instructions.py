@@ -93,6 +93,30 @@ def daily_runtime_repo_issues(root: Path) -> list[str]:
     return issues
 
 
+def light_review_repo_issues(root: Path) -> list[str]:
+    issues: list[str] = []
+    skill_path = root / "skills" / "review" / "SKILL.md"
+    claude_agent = root / "agents" / "light-reviewer.md"
+    codex_agent = root / ".codex" / "agents" / "light-reviewer.toml"
+    for path in (skill_path, claude_agent, codex_agent):
+        if not path.is_file():
+            issues.append(f"missing {path.relative_to(root)}")
+    if not skill_path.is_file():
+        return issues
+    skill = skill_path.read_text(encoding="utf-8")
+    required = (
+        "review --light",
+        "native-subagent",
+        "light_review_contract.py",
+        "same child thread",
+        "never an automatic coordinator vault",
+    )
+    for value in required:
+        if value not in skill:
+            issues.append(f"skills/review: missing Light Review invariant {value!r}")
+    return issues
+
+
 def legacy_skill_issues(root: Path) -> list[str]:
     issues: list[str] = []
     for name in LEGACY_PUBLIC_SKILLS:
@@ -397,6 +421,7 @@ def check_repo(root: Path) -> list[str]:
         issues.extend(writer_path_issues(name, path.read_text(encoding="utf-8")))
 
     issues.extend(daily_runtime_repo_issues(root))
+    issues.extend(light_review_repo_issues(root))
     issues.extend(legacy_skill_issues(root))
     memory_path = root / ".claude-memory" / "feedback_no_claude_p_headless.md"
     issues.extend(

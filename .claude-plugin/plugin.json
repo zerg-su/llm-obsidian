@@ -21,6 +21,7 @@
     "macos"
   ],
   "agents": [
-    "./agents/daily-summarizer.md"
+    "./agents/daily-summarizer.md",
+    "./agents/light-reviewer.md"
   ]
 }

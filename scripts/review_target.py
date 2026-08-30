@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import os
 import stat
+import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
 from typing import Iterable
@@ -310,3 +312,31 @@ def snapshot_payload(snapshot: LightSnapshot | CleanHeadSnapshot) -> dict[str, o
     payload["root"] = str(snapshot.root)
     payload["schema_version"] = 1
     return payload
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    sub = parser.add_subparsers(dest="command", required=True)
+    light = sub.add_parser("light")
+    light.add_argument("--target", type=Path, default=Path.cwd())
+    light.add_argument("--base", default="")
+    light.add_argument("--path", action="append", default=[])
+    light.add_argument("--include-untracked", action="store_true")
+    args = parser.parse_args()
+    try:
+        target = resolve_target(args.target)
+        snapshot = snapshot_light(
+            target,
+            base=args.base,
+            paths=args.path,
+            include_untracked=args.include_untracked,
+        )
+    except ReviewTargetError as exc:
+        print(f"review-target: {exc}", file=sys.stderr)
+        return 3
+    print(json.dumps(snapshot_payload(snapshot), ensure_ascii=False, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

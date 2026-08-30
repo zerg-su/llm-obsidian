@@ -48,7 +48,7 @@ from pipeline_stats_sources import (
 )
 
 # Kept literal here as part of the static bounded-agent registration contract.
-CUSTOM_AGENTS: set[str] = {"daily-summarizer"}
+CUSTOM_AGENTS: set[str] = {"daily-summarizer", "light-reviewer"}
 
 
 def main() -> int:

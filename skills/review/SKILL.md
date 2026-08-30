@@ -1,6 +1,7 @@
 ---
 name: review
 description: Review outcomes, code, architecture, security, or specs through harness-owned Simple, Deep, or Full presets. Use before finalization.
+allowed-tools: Read Glob Grep Bash Agent
 ---
 
 # Review
@@ -11,6 +12,55 @@ resolves findings.
 
 Summary/reap unlock only when approval matches exact HEAD/profile and v4 summary
 bytes. Only `--no-review` persists a typed bypass.
+
+## Light Review
+
+`review --light` is a separate, advisory path. It delegates one read-only
+`native-subagent` on the current host and returns its result only in the current conversation.
+It never starts Harness, writes review state, approves/finalizes a HEAD, or enters a
+fix loop. `review`, `review --deep`, and `review --full` remain Lifecycle Review.
+
+Accepted Light options are `--target`, `--base`, repeatable `--paths`,
+`--include-untracked`, `--verify`, `--model`, and `--effort`. The target defaults to
+the current Git root. Untracked files are excluded unless explicitly included.
+
+Use the installed package root that owns this skill as `TOOL_ROOT`. It is read-only
+tool/config authority, never an automatic coordinator vault. Build the snapshot with
+`python3 "$TOOL_ROOT/scripts/review_target.py" light`; pass `--target`, `--base`, each
+path as `--path`, and `--include-untracked` exactly as requested. The command emits
+JSON to stdout and writes nothing. Stop before delegation on invalid Git/base/scope.
+
+Resolve the child with:
+
+```bash
+python3 "$TOOL_ROOT/scripts/model_routing.py" --root "$TOOL_ROOT" \
+  light-review --session-id "$("$TOOL_ROOT/scripts/current-session-id.sh")" \
+  --model MODEL --effort EFFORT
+```
+
+Omit absent overrides and omit `--session-id` when the confirmed route is already in
+the runtime environment. Default is exact current model and effort. Overrides must
+stay on the current runtime: Claude aliases include Fable/Opus; Codex aliases include
+Sol/Terra. A cross-runtime alias or a host that cannot enforce the resolved child
+model/effort fails visibly before delegation; never silently substitute another
+model, parent synthesis, shell-launched Claude/Codex, or Lifecycle Review.
+
+On Codex, delegate through built-in Agent to project agent `light_reviewer`. On
+Claude, delegate through Agent to plugin agent `llm-obsidian:light-reviewer`. Give it
+the exact snapshot JSON, route JSON, target root, and `verify` boolean. Keep the same
+child thread for one correction only. Do not open another window or agent.
+
+Pipe the JSON-only result through `scripts/light_review_contract.py` with the exact
+snapshot digest/runtime/model/effort. On one validation failure, paste the validator
+error into the same child thread and validate its single correction. A second failure
+returns an incomplete advisory result; never weaken the schema or fall back.
+
+After validation, repeat the same snapshot command. If its digest differs, return
+`incomplete` with a snapshot-drift coverage gap and do not auto-rerun. With `--verify`,
+the child may run only safe, bounded, directly relevant checks. A check that needs
+target writes or extra permission is `not-run` and a coverage gap. Without `--verify`,
+run no test suite. Never write target files, Harness records, archives, or wiki pages;
+the user may separately invoke `/save`.
 
 ## Presets
 

@@ -45,7 +45,7 @@ ASSIST_MARKERS = [
     ("bm25-query", "bm25-index.py query"),
 ]
 SKILL_ROOTS = [VAULT_ROOT / "skills"]
-CUSTOM_AGENTS: set[str] = {"daily-summarizer"}
+CUSTOM_AGENTS: set[str] = {"daily-summarizer", "light-reviewer"}
 
 
 def installed_skills() -> set[str]:

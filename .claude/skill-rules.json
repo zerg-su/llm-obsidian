@@ -58,7 +58,7 @@
         "(?i)\\bревью другой моделью\\b",
         "(?i)\\bл[её]гк\\w* ревью\\b"
       ],
-      "hint": "Harness-owned simple/deep review; same-model default, cross-model only when requested"
+      "hint": "Light is one native advisory subagent; Simple/Deep/Full use the exact-HEAD Harness lifecycle"
     },
     {
       "skill": "research",

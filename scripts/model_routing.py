@@ -366,6 +366,10 @@ def main() -> int:
     res.add_argument("--effort", default="")
     res.add_argument("--same-model", action="store_true")
     res.add_argument("--review-profile", choices=("simple", "deep"), default="simple")
+    light = sub.add_parser("light-review")
+    light.add_argument("--session-id", default="")
+    light.add_argument("--model", default="")
+    light.add_argument("--effort", default="")
     args = parser.parse_args()
     try:
         config = load_config(args.root)
@@ -382,9 +386,30 @@ def main() -> int:
         elif args.command == "capture-session":
             route, source = routing_from_environment(config, args.runtime, args.model, args.effort)
             print(json.dumps(capture_session(config, args.session_id, **route, source=source), sort_keys=True))
-        else:
+        elif args.command == "resolve":
             session = load_session(config, args.session_id) if args.session_id else None
             print(json.dumps(resolve(config, args.role, session=session, explicit_runtime=args.runtime, explicit_model=args.model, explicit_effort=args.effort, same_model=args.same_model, review_profile=args.review_profile), sort_keys=True))
+        else:
+            if args.session_id:
+                session = load_session(config, args.session_id)
+            else:
+                session, source = routing_from_environment(config)
+                if source == "tracked-default":
+                    raise RoutingError(
+                        "Light Review requires a host-confirmed current session route"
+                    )
+                session = {**session, "source": source}
+            print(
+                json.dumps(
+                    resolve_light_review_route(
+                        config,
+                        session,
+                        explicit_model=args.model,
+                        explicit_effort=args.effort,
+                    ),
+                    sort_keys=True,
+                )
+            )
         return 0
     except RoutingError as exc:
         die(str(exc), 3)

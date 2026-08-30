@@ -168,10 +168,14 @@ check(
 )
 check("daily forbids Claude parent fallback", "Never fall back to the parent Claude model" in skill)
 stats = (ROOT / "scripts" / "pipeline-stats.py").read_text(encoding="utf-8")
-check("Claude agent telemetry registered", 'CUSTOM_AGENTS: set[str] = {"daily-summarizer"}' in stats)
+check(
+    "Claude agent telemetry registered",
+    'CUSTOM_AGENTS: set[str] = {"daily-summarizer", "light-reviewer"}' in stats,
+)
 check(
     "Claude plugin explicitly registers the bounded daily agent",
-    plugin.get("agents") == ["./agents/daily-summarizer.md"],
+    plugin.get("agents")
+    == ["./agents/daily-summarizer.md", "./agents/light-reviewer.md"],
 )
 check(
     "Claude plugin author uses the current manifest schema",
