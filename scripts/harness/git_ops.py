@@ -66,6 +66,7 @@ class GitAdapter:
             ["git", *args],
             cwd=cwd or self.root,
             text=True,
+            errors="surrogateescape",
             capture_output=True,
             check=False,
             env=env,
@@ -93,6 +94,7 @@ class GitAdapter:
             ["git", "rev-parse", "--show-toplevel"],
             cwd=cwd,
             text=True,
+            errors="surrogateescape",
             capture_output=True,
             check=False,
         )

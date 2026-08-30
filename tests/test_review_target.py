@@ -76,9 +76,11 @@ with tempfile.TemporaryDirectory(prefix="review-target-test.") as raw:
         repr(without_untracked.changed_paths),
     )
     check("untracked files are excluded by default", without_untracked.untracked_paths == ())
+    check("snapshot records the excluded-untracked request", not without_untracked.include_untracked)
 
     with_untracked = snapshot_light(target, base=initial, include_untracked=True)
     check("untracked files require explicit inclusion", with_untracked.untracked_paths == ("notes.txt",))
+    check("snapshot records the included-untracked request", with_untracked.include_untracked)
     check("untracked bytes affect the snapshot identity", with_untracked.snapshot_sha256 != without_untracked.snapshot_sha256)
 
     scoped = snapshot_light(
@@ -123,5 +125,33 @@ with tempfile.TemporaryDirectory(prefix="review-target-test.") as raw:
         check("invalid explicit base fails closed", "base" in str(exc))
     else:
         check("invalid explicit base fails closed", False)
+
+    byte_repo = Path(raw) / "byte-product"
+    byte_repo.mkdir()
+    git(byte_repo, "init", "-b", "main")
+    git(byte_repo, "config", "user.email", "review@example.invalid")
+    git(byte_repo, "config", "user.name", "Review Target Byte Test")
+    (byte_repo / "payload.txt").write_bytes(b"before-\xff\n")
+    git(byte_repo, "add", "payload.txt")
+    git(byte_repo, "commit", "-m", "byte baseline")
+    byte_base = git(byte_repo, "rev-parse", "HEAD")
+    (byte_repo / "payload.txt").write_bytes(b"after-\xfe\n")
+    non_utf_name = b"untracked-\xff.txt".decode("utf-8", "surrogateescape")
+    try:
+        (byte_repo / non_utf_name).write_bytes(b"untracked\n")
+    except OSError:
+        non_utf_name = ""
+    byte_snapshot = snapshot_light(
+        resolve_target(byte_repo),
+        base=byte_base,
+        include_untracked=bool(non_utf_name),
+    )
+    check(
+        "Light snapshot preserves arbitrary Git bytes without a decode crash",
+        byte_snapshot.changed_paths == ("payload.txt",)
+        and byte_snapshot.untracked_paths
+        == ((non_utf_name,) if non_utf_name else ()),
+        repr(byte_snapshot),
+    )
 
 print("\nAll review target tests passed.")

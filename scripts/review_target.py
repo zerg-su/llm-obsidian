@@ -38,6 +38,7 @@ class LightSnapshot:
     paths: tuple[str, ...]
     changed_paths: tuple[str, ...]
     untracked_paths: tuple[str, ...]
+    include_untracked: bool
     committed_sha256: str
     index_sha256: str
     worktree_sha256: str
@@ -240,6 +241,7 @@ def snapshot_light(
         "paths": path_scope,
         "changed_paths": changed,
         "untracked_paths": untracked,
+        "include_untracked": include_untracked,
         "committed_sha256": _sha256(committed),
         "index_sha256": _sha256(staged),
         "worktree_sha256": _sha256(worktree),
@@ -295,6 +297,7 @@ def compare_snapshot(
         for field, reason in (
             ("base", "base"),
             ("paths", "scope"),
+            ("include_untracked", "scope"),
             ("committed_sha256", "committed"),
             ("index_sha256", "index"),
             ("worktree_sha256", "worktree"),
@@ -334,7 +337,7 @@ def main() -> int:
     except ReviewTargetError as exc:
         print(f"review-target: {exc}", file=sys.stderr)
         return 3
-    print(json.dumps(snapshot_payload(snapshot), ensure_ascii=False, sort_keys=True))
+    print(json.dumps(snapshot_payload(snapshot), ensure_ascii=True, sort_keys=True))
     return 0
 
 

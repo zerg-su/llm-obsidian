@@ -193,6 +193,13 @@ def _prompt(
             *(f"- `{command}`" for command in commands),
         )
     pointer = f"prompts/{name}"
+    inspect_command = shlex.join(
+        (
+            str(vault / "scripts/review-inspect.py"),
+            "--worktree",
+            str(worktree),
+        )
+    )
     submit = shlex.join(
         (
             str(Path(sys.executable).resolve()),
@@ -254,7 +261,7 @@ def _prompt(
     engineering_instructions = (
         (
             "Use the authoritative engineering contract at "
-            f"`{worktree / 'docs/skill-references/engineering-quality-contract.md'}`."
+            f"`{vault / 'docs/skill-references/engineering-quality-contract.md'}`."
         ),
         (
             "Cover its Review denominator in full and report each section "
@@ -298,8 +305,9 @@ def _prompt(
                 ),
                 "Use Read, Glob, and Grep with absolute paths for inspection.",
                 (
-                    "Use the product's scripts/review-inspect.py facade for every "
-                    "Git query; direct Git or shell composition is not permitted."
+                    f"Use the coordinator-owned `{inspect_command}` facade for "
+                    "every Git query; direct Git or shell composition is not "
+                    "permitted."
                 ),
                 "Do not run cd or copy packet files; they are readable in place.",
                 *round_schema_lines(

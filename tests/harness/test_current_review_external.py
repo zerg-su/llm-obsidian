@@ -19,6 +19,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import task_review_current  # noqa: E402
 from review_target import resolve_target  # noqa: E402
 from task_review_context import _context  # noqa: E402
+from task_review_request import _prompt  # noqa: E402
 from task_review_transport import _callback_wake  # noqa: E402
 
 
@@ -41,7 +42,13 @@ def coordinator(path: Path) -> Path:
     (path / "scripts").mkdir()
     (path / "skills/review").mkdir(parents=True)
     (path / "config").mkdir()
+    (path / "docs/skill-references").mkdir(parents=True)
     (path / "scripts/task-review-runner.py").write_text("# fixture\n", encoding="utf-8")
+    shutil.copy2(ROOT / "scripts/review-inspect.py", path / "scripts/review-inspect.py")
+    shutil.copy2(
+        ROOT / "docs/skill-references/engineering-quality-contract.md",
+        path / "docs/skill-references/engineering-quality-contract.md",
+    )
     shutil.copy2(ROOT / "skills/review/SKILL.md", path / "skills/review/SKILL.md")
     shutil.copy2(ROOT / "config/model-routing.toml", path / "config/model-routing.toml")
     shutil.copy2(ROOT / "config/verification-profiles.toml", path / "config/verification-profiles.toml")
@@ -142,7 +149,7 @@ with tempfile.TemporaryDirectory(prefix="external-current-review.") as raw:
         first_meta["review_policy"]["base_sha"] == review_base
         and first_meta["review_lease"]["base"] == review_base,
     )
-    _review, manifest_path = _context(
+    review_context, manifest_path = _context(
         first_meta,
         vault,
         first,
@@ -167,6 +174,33 @@ with tempfile.TemporaryDirectory(prefix="external-current-review.") as raw:
         manifest["metadata"]["base_sha"] == review_base
         and packet_inputs["head-diff.patch"]["source"]
         == f"git:diff:{review_base}..HEAD",
+    )
+    prompt_pointer = _prompt(
+        vault=vault,
+        worktree=first,
+        runtime_root=first_runtime,
+        context=review_context,
+        axis="openai-holistic",
+        verification=False,
+    )
+    prompt = (first_runtime / prompt_pointer).read_text(encoding="utf-8")
+    coordinator_contract = (
+        vault / "docs/skill-references/engineering-quality-contract.md"
+    )
+    coordinator_inspect = vault / "scripts/review-inspect.py"
+    check(
+        "external prompt uses existing coordinator-owned review authority",
+        str(coordinator_contract) in prompt
+        and str(coordinator_inspect) in prompt
+        and coordinator_contract.is_file()
+        and coordinator_inspect.is_file(),
+        prompt,
+    )
+    check(
+        "external prompt binds the coordinator facade to the product",
+        f"{coordinator_inspect} --worktree {first}" in prompt
+        and str(first / "scripts/review-inspect.py") not in prompt,
+        prompt,
     )
     check("Harness state is coordinator-owned", captured_vault == vault and captured_target == first)
     check("scratch remains outside coordinator and target", first_runtime.is_relative_to(scratch) and not first_runtime.is_relative_to(first) and not first_runtime.is_relative_to(vault))

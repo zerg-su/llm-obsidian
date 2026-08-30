@@ -7,7 +7,7 @@ import argparse
 import json
 import re
 import sys
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Any, Mapping, NoReturn, Sequence
 
 
@@ -67,12 +67,67 @@ def _relative_path(value: object, label: str, *, allow_empty: bool = False) -> s
     return text
 
 
+def _origin_scope(
+    snapshot_value: Mapping[str, Any],
+) -> tuple[str, dict[str, Any]]:
+    snapshot = _mapping(snapshot_value, "expected Light Review snapshot")
+    snapshot_sha256 = str(snapshot.get("snapshot_sha256") or "")
+    raw_paths = snapshot.get("paths")
+    if (
+        not HEX_64.fullmatch(snapshot_sha256)
+        or not isinstance(raw_paths, (list, tuple))
+        or type(snapshot.get("include_untracked")) is not bool
+    ):
+        raise LightReviewError("expected Light Review snapshot is invalid")
+    paths = [
+        _relative_path(item, f"expected Light Review path {index}")
+        for index, item in enumerate(raw_paths)
+    ]
+    return snapshot_sha256, {
+        "target_key": str(snapshot.get("target_key") or ""),
+        "head": str(snapshot.get("head") or ""),
+        "base": str(snapshot.get("base") or ""),
+        "paths": paths,
+        "included_untracked": snapshot["include_untracked"],
+    }
+
+
+def _verification_incomplete(
+    value: object,
+    *,
+    requested: bool,
+    coverage_gaps: list[str],
+) -> bool:
+    if not isinstance(value, list) or len(value) > 20:
+        raise LightReviewError("Light Review verification must be a bounded array")
+    if not requested and value:
+        raise LightReviewError("Light Review includes unrequested verification")
+    statuses: list[str] = []
+    for raw in value:
+        item = _mapping(raw, "Light Review verification item")
+        _exact(item, {"command", "status", "detail"}, "Light Review verification item")
+        _text(item["command"], "Light Review verification command")
+        _text(item["detail"], "Light Review verification detail", allow_empty=True)
+        if item["status"] not in VERIFY_STATUSES:
+            raise LightReviewError("Light Review verification status is invalid")
+        statuses.append(str(item["status"]))
+    if "not-run" in statuses and not coverage_gaps:
+        raise LightReviewError(
+            "Light Review not-run verification requires a coverage gap"
+        )
+    return requested and (
+        not statuses or any(value != "passed" for value in statuses)
+    )
+
+
 def validate_light_review(
     payload: object,
     *,
-    expected_snapshot_sha256: str,
+    expected_snapshot: Mapping[str, Any],
     expected_route: Mapping[str, Any],
+    verification_requested: bool,
 ) -> dict[str, Any]:
+    expected_snapshot_sha256, expected_scope = _origin_scope(expected_snapshot)
     result = _mapping(payload, "Light Review result")
     _exact(
         result,
@@ -125,6 +180,10 @@ def validate_light_review(
         _relative_path(path, f"Light Review path {index}")
     if not isinstance(scope["included_untracked"], bool):
         raise LightReviewError("Light Review untracked scope must be boolean")
+    if dict(scope) != expected_scope:
+        raise LightReviewError(
+            "Light Review scope does not match its originating snapshot"
+        )
 
     raw_findings = result["findings"]
     if not isinstance(raw_findings, list) or len(raw_findings) > 100:
@@ -171,26 +230,20 @@ def validate_light_review(
         section_incomplete = section_incomplete or section["status"] == "incomplete"
 
     gaps = _strings(result["coverage_gaps"], "Light Review coverage gaps")
+    verification_incomplete = _verification_incomplete(
+        result["verification"],
+        requested=verification_requested,
+        coverage_gaps=gaps,
+    )
     expected_status = (
         "incomplete"
-        if gaps or section_incomplete
+        if gaps or section_incomplete or verification_incomplete
         else "findings-observed"
         if finding_ids
         else "no-findings-observed"
     )
     if status != expected_status:
         raise LightReviewError("Light Review status contradicts its evidence")
-
-    verification = result["verification"]
-    if not isinstance(verification, list) or len(verification) > 20:
-        raise LightReviewError("Light Review verification must be a bounded array")
-    for raw in verification:
-        item = _mapping(raw, "Light Review verification item")
-        _exact(item, {"command", "status", "detail"}, "Light Review verification item")
-        _text(item["command"], "Light Review verification command")
-        _text(item["detail"], "Light Review verification detail", allow_empty=True)
-        if item["status"] not in VERIFY_STATUSES:
-            raise LightReviewError("Light Review verification status is invalid")
     return dict(result)
 
 
@@ -201,25 +254,32 @@ def die(message: str) -> NoReturn:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--snapshot-sha256", required=True)
+    parser.add_argument("--snapshot-file", type=Path, required=True)
+    parser.add_argument("--verify", action="store_true")
     parser.add_argument("--runtime", required=True)
     parser.add_argument("--model", required=True)
     parser.add_argument("--effort", required=True)
     args = parser.parse_args(argv)
     try:
+        if args.snapshot_file.is_symlink() or not args.snapshot_file.is_file():
+            raise LightReviewError("expected Light Review snapshot file is invalid")
+        expected_snapshot = json.loads(
+            args.snapshot_file.read_text(encoding="utf-8")
+        )
         payload = json.load(sys.stdin)
         validated = validate_light_review(
             payload,
-            expected_snapshot_sha256=args.snapshot_sha256,
+            expected_snapshot=expected_snapshot,
             expected_route={
                 "runtime": args.runtime,
                 "model": args.model,
                 "effort": args.effort,
             },
+            verification_requested=args.verify,
         )
-    except (json.JSONDecodeError, LightReviewError) as exc:
+    except (OSError, UnicodeError, json.JSONDecodeError, LightReviewError) as exc:
         die(str(exc))
-    print(json.dumps(validated, ensure_ascii=False, sort_keys=True))
+    print(json.dumps(validated, ensure_ascii=True, sort_keys=True))
     return 0
 
 
