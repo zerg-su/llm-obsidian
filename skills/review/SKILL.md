@@ -137,8 +137,10 @@ contract; return it for amendment.
 
 1. Dispatched v3/v4 tasks use `task-review-runner.py run --worktree <worktree>`.
    Plans use `plan --worktree <checkout> --plan <plan>` (add exact `--base`
-   unless one parent changes it); otherwise use `current --worktree <checkout>`
-   with compatible preset, purpose, and boundary. Facade starts/resumes/
+   unless one parent changes it); otherwise use `current --target <checkout>
+   --vault-root <coordinator>` with compatible preset, purpose, and boundary.
+   Generated callbacks retain the exact low-level `--worktree` target plus
+   `--vault-root`. Facade starts/resumes/
    returns a receipt; `review-runner.py` is low-level.
 2. Keep ContextPacket/outbox owner-only and product read-only. Submit
    axis JSON only through its generated `harness/review_submit.py` command.

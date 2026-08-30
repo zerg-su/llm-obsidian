@@ -95,6 +95,7 @@ from review_resolution import (
 )
 from review_contract import axis_finding_id
 from outcome_contract import extract_from_bytes
+from review_target import resolve_target
 from task_review_current import _current_review_artifact_root
 from task_review_identity import _zero_effect_attention_is_quiescent
 
@@ -103,6 +104,16 @@ def check(label: str, value: bool) -> None:
     if not value:
         raise AssertionError(label)
     print(f"OK   {label}")
+
+
+def current_active_path(vault: Path, target: Path | None = None) -> Path:
+    reviewed = target or vault
+    return (
+        vault
+        / ".vault-meta/harness/current-review"
+        / resolve_target(reviewed).target_key
+        / "active.json"
+    )
 
 
 def write_scoped_verification(product: Path, summary: Path, head: str) -> None:
@@ -2682,6 +2693,9 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
     (product / "scripts/harness/review_submit.py").write_text(
         "# test fixture\n", encoding="utf-8"
     )
+    (product / "scripts/task-review-runner.py").write_text(
+        "# test fixture\n", encoding="utf-8"
+    )
     (product / "config/model-routing.toml").write_bytes(
         (ROOT / "config/model-routing.toml").read_bytes()
     )
@@ -2912,10 +2926,7 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
         else:
             raise AssertionError("pre-provider fixture failure was swallowed")
         first_active = json.loads(
-            (
-                retry_product
-                / ".vault-meta/harness/current-review/active.json"
-            ).read_text(encoding="utf-8")
+            current_active_path(retry_product).read_text(encoding="utf-8")
         )
         first_task_id = first_active["task_id"]
         first_gate = json.loads(
@@ -2963,10 +2974,7 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
         else:
             raise AssertionError("pre-provider fixture failure was swallowed")
         retained_task_id = json.loads(
-            (
-                retained_product
-                / ".vault-meta/harness/current-review/active.json"
-            ).read_text(encoding="utf-8")
+            current_active_path(retained_product).read_text(encoding="utf-8")
         )["task_id"]
         retained_store.create(
             OperationSpec(
@@ -2998,10 +3006,7 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
         except task_review_runner.TaskReviewError:
             retained_result = None
         retained_active = json.loads(
-            (
-                retained_product
-                / ".vault-meta/harness/current-review/active.json"
-            ).read_text(encoding="utf-8")
+            current_active_path(retained_product).read_text(encoding="utf-8")
         )
         check(
             "durable current-review interface keeps any operation row fail closed",
@@ -3042,10 +3047,9 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
             finally:
                 current_review_module._run_review = original_run_review
             interrupted_task_id = json.loads(
-                (
-                    interrupted_product
-                    / ".vault-meta/harness/current-review/active.json"
-                ).read_text(encoding="utf-8")
+                current_active_path(interrupted_product).read_text(
+                    encoding="utf-8"
+                )
             )["task_id"]
             interrupted_gate = (
                 interrupted_product
@@ -3117,10 +3121,7 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
         except task_review_runner.TaskReviewError:
             owned_gate_result = None
         owned_gate_active = json.loads(
-            (
-                owned_gate_product
-                / ".vault-meta/harness/current-review/active.json"
-            ).read_text(encoding="utf-8")
+            current_active_path(owned_gate_product).read_text(encoding="utf-8")
         )
         check(
             "active pointer without a gate retains any operation row fail closed",
@@ -3256,10 +3257,7 @@ with tempfile.TemporaryDirectory(prefix="current-release-artifacts.") as raw:
         product, evidence_root, _boundary_path, _scratch = valid
         started, runtime = start_release(valid)
         active = json.loads(
-            (
-                product
-                / ".vault-meta/harness/current-review/active.json"
-            ).read_text(encoding="utf-8")
+            current_active_path(product).read_text(encoding="utf-8")
         )
         check(
             "current release review binds one external artifact root",
@@ -3635,6 +3633,9 @@ with tempfile.TemporaryDirectory(prefix="review-iteration-facade.") as raw:
         encoding="utf-8",
     )
     (product / "scripts/harness/review_submit.py").write_text(
+        "# test fixture\n", encoding="utf-8"
+    )
+    (product / "scripts/task-review-runner.py").write_text(
         "# test fixture\n", encoding="utf-8"
     )
     for name in ("model-routing.toml", "verification-profiles.toml"):

@@ -22,6 +22,8 @@ from harness.verification import load_profiles
 from harness.workflows.review import ReviewContext
 from harness.workflows.review_gate import ReviewPreset
 from model_routing import load_config, routing_from_environment
+from review_coordinator import CoordinatorError, resolve_coordinator
+from review_target import ReviewTargetError, resolve_target
 from task_review_context import (
     _current_review_is_quiescent,
     _zero_effect_attention_is_quiescent,
@@ -29,6 +31,10 @@ from task_review_context import (
     _current_runtime_root,
     _gate_root,
     _request,
+)
+from task_review_identity import (
+    _current_review_active_path,
+    _legacy_current_review_active_path,
 )
 from task_review_flow import _run_review
 from task_review_shared import (
@@ -45,23 +51,27 @@ if TYPE_CHECKING:
 
 
 def _validate_current_checkout(worktree: Path) -> Path:
-    worktree = worktree.expanduser().resolve()
-    required = (
-        worktree / "wiki",
-        worktree / "scripts",
-        worktree / "skills/review/SKILL.md",
-        worktree / "config/model-routing.toml",
-        worktree / "config/verification-profiles.toml",
-    )
-    if (
-        not worktree.is_dir()
-        or any(not path.exists() for path in required)
-        or _git(worktree, "rev-parse", "--show-toplevel") != str(worktree)
-    ):
+    try:
+        return resolve_target(worktree).root
+    except ReviewTargetError as exc:
         raise TaskReviewError(
-            "current review requires an exact llm-obsidian checkout root"
-        )
-    return worktree
+            f"current review requires a Git worktree target: {exc}"
+        ) from exc
+
+
+def _active_path(vault: Path, worktree: Path, target_key: str) -> Path:
+    scoped = _current_review_active_path(vault, target_key)
+    if scoped.exists() or scoped.is_symlink():
+        return scoped
+    legacy = _legacy_current_review_active_path(vault)
+    if legacy.is_file() and not legacy.is_symlink():
+        candidate = _read_json(legacy, "legacy current review state")
+        if (
+            candidate.get("lifecycle") == "current-checkout"
+            and candidate.get("worktree") == str(worktree)
+        ):
+            return legacy
+    return scoped
 
 
 def _current_policy(
@@ -465,6 +475,7 @@ def _active_current_review(
 def run_current_review(
     worktree: Path,
     *,
+    vault_root: Path | None = None,
     deep: bool = False,
     full: bool = False,
     cross_model: bool = False,
@@ -485,6 +496,14 @@ def run_current_review(
     plan_head_sha: str = "",
 ) -> dict[str, Any]:
     worktree = _validate_current_checkout(worktree)
+    target = resolve_target(worktree)
+    try:
+        vault = resolve_coordinator(
+            explicit=vault_root,
+            cwd=worktree,
+        ).root
+    except CoordinatorError as exc:
+        raise TaskReviewError(str(exc)) from exc
     artifact_root = _current_review_artifact_root(
         worktree,
         purpose=purpose,
@@ -506,7 +525,6 @@ def run_current_review(
             or _git(worktree, "rev-parse", "HEAD") != plan_head_sha
         ):
             raise TaskReviewError("plan facade boundary is invalid")
-    vault = worktree
     profiles = load_profiles(vault / "config/verification-profiles.toml")
     profile = profiles.get("scoped")
     if profile is None:
@@ -536,13 +554,7 @@ def run_current_review(
             boundary_input.input_sha256 if boundary_input else ""
         ),
     )
-    active_path = (
-        vault
-        / ".vault-meta"
-        / "harness"
-        / "current-review"
-        / "active.json"
-    )
+    active_path = _active_path(vault, worktree, target.target_key)
     meta = _active_current_review(
         worktree,
         vault,
@@ -615,6 +627,7 @@ def run_current_review(
             "task_surface": surface,
             "worktree": str(worktree),
             "vault_root": str(vault),
+            "target_key": target.target_key,
             "plan_file": str(plan),
             "routing": {"session": session},
             "review_policy": requested_policy,

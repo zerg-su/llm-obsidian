@@ -259,6 +259,7 @@ def run_task_review(
 def run_current_review(
     worktree: Path,
     *,
+    vault_root: Path | None = None,
     deep: bool = False,
     full: bool = False,
     cross_model: bool = False,
@@ -276,6 +277,7 @@ def run_current_review(
 ) -> dict[str, Any]:
     return _run_current_review(
         worktree,
+        vault_root=vault_root,
         deep=deep,
         full=full,
         cross_model=cross_model,
@@ -343,7 +345,10 @@ def parser() -> argparse.ArgumentParser:
     continuation.add_argument("--verification-profile-sha256", required=True)
     continuation.add_argument("--outcome-contract-sha256", required=True)
     current = sub.add_parser("current")
-    current.add_argument("--worktree", type=Path, required=True)
+    current_target = current.add_mutually_exclusive_group()
+    current_target.add_argument("--target", type=Path)
+    current_target.add_argument("--worktree", type=Path)
+    current.add_argument("--vault-root", type=Path)
     current.add_argument("--deep", action="store_true")
     current.add_argument("--full", action="store_true")
     current.add_argument("--cross-model", action="store_true")
@@ -409,7 +414,8 @@ def main(
                     "or pass an explicit compatible purpose and boundary"
                 )
             result = run_current_review(
-                args.worktree,
+                args.target or args.worktree or Path.cwd(),
+                vault_root=args.vault_root,
                 deep=args.deep,
                 full=args.full,
                 cross_model=args.cross_model,

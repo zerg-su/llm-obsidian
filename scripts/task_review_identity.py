@@ -133,6 +133,32 @@ def _current_runtime_root(
     return root
 
 
+def _current_review_active_path(vault: Path, target_key: str) -> Path:
+    if (
+        len(target_key) != 32
+        or any(character not in "0123456789abcdef" for character in target_key)
+    ):
+        raise TaskReviewError("current review target identity is invalid")
+    return (
+        vault
+        / ".vault-meta"
+        / "harness"
+        / "current-review"
+        / target_key
+        / "active.json"
+    ).resolve()
+
+
+def _legacy_current_review_active_path(vault: Path) -> Path:
+    return (
+        vault
+        / ".vault-meta"
+        / "harness"
+        / "current-review"
+        / "active.json"
+    ).resolve()
+
+
 def _gate_root(vault: Path, task_id: str) -> Path:
     return (
         vault

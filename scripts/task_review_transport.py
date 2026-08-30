@@ -234,6 +234,8 @@ def _callback_wake(
         "current",
         "--worktree",
         str(worktree),
+        "--vault-root",
+        str(vault),
     ]
     if raw_policy["mode"] == "deep":
         wake_argv.append("--deep")

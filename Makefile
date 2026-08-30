@@ -3,7 +3,7 @@
 
 .DEFAULT_GOAL := help
 
-.PHONY: test-lifecycle-simulator test-lifecycle-simulator-body test-lifecycle-simulator-extended test-harness test-harness-coverage test-code-quality code-quality-audit test-model-routing test-session-preflight test-model-literal-lint test-upgrade-preflight test-task-sessions test-docs
+.PHONY: test-lifecycle-simulator test-lifecycle-simulator-body test-lifecycle-simulator-extended test-harness test-harness-coverage test-code-quality code-quality-audit test-model-routing test-review-modes test-session-preflight test-model-literal-lint test-upgrade-preflight test-task-sessions test-docs
 
 test-lifecycle-simulator:
 	@./scripts/with-timeout 60 $(MAKE) --no-print-directory test-lifecycle-simulator-body
@@ -97,6 +97,7 @@ test-harness:
 	@python3 tests/harness/test_review_program.py
 	@python3 tests/harness/test_review_topology.py
 	@python3 tests/harness/test_review_vertical.py
+	@python3 tests/harness/test_current_review_external.py
 	@python3 tests/harness/test_review_gate.py
 	@python3 tests/harness/test_runtime_sessions.py
 	@python3 tests/harness/test_runtime_task_summary.py
@@ -143,6 +144,13 @@ test-task-sessions:
 test-model-routing:
 	@echo "=== test_model_routing.py ==="
 	@python3 tests/test_model_routing.py
+
+test-review-modes:
+	@echo "=== generic Light and Lifecycle review seams ==="
+	@python3 tests/test_review_target.py
+	@python3 tests/test_light_review_contract.py
+	@python3 tests/test_light_review_hosts.py
+	@python3 tests/test_review_coordinator.py
 
 test-session-preflight:
 	@echo "=== test_session_preflight.py ==="
@@ -213,7 +221,7 @@ help:
 	@echo "  make setup-dragonscale Run bin/setup-dragonscale.sh against this vault"
 	@echo "  make clean-test-state Remove runtime lockfiles and tiling cache"
 
-test: test-harness test-code-quality test-docs test-task-sessions test-model-routing test-session-preflight test-model-literal-lint test-upgrade-preflight test-release-acceptance test-v267-stabilization test-release-secret-check test-live-acceptance-runner test-pipeline-runners test-agent-evals test-paired-evals test-daily-pipeline test-session-map test-claude-subscription test-journal-write test-agenda test-dense-worker test-document-normalize test-research-isolation test-runtime-hooks test-command-evidence test-runtime-detection test-skill-workstreams test-skill-budget test-improve-skills test-outcome-contract test-contract-schemas test-task-lifecycle test-instruction-lint test-ci-workflow test-mcp-schema-lock test-address test-schema test-tiling test-boundary test-vault test-vault-link-repair test-plan-capture test-stop-hook test-memory-backup test-setup-vault test-pipeline-events test-pipeline-stats test-review-callback-evidence test-custom-pipeline-report test-bm25 test-retrieve test-bench test-retrieval-experiment test-fold test-router test-gateway test-codex-adapter test-dcg-assets test-with-timeout
+test: test-harness test-code-quality test-docs test-task-sessions test-model-routing test-review-modes test-session-preflight test-model-literal-lint test-upgrade-preflight test-release-acceptance test-v267-stabilization test-release-secret-check test-live-acceptance-runner test-pipeline-runners test-agent-evals test-paired-evals test-daily-pipeline test-session-map test-claude-subscription test-journal-write test-agenda test-dense-worker test-document-normalize test-research-isolation test-runtime-hooks test-command-evidence test-runtime-detection test-skill-workstreams test-skill-budget test-improve-skills test-outcome-contract test-contract-schemas test-task-lifecycle test-instruction-lint test-ci-workflow test-mcp-schema-lock test-address test-schema test-tiling test-boundary test-vault test-vault-link-repair test-plan-capture test-stop-hook test-memory-backup test-setup-vault test-pipeline-events test-pipeline-stats test-review-callback-evidence test-custom-pipeline-report test-bm25 test-retrieve test-bench test-retrieval-experiment test-fold test-router test-gateway test-codex-adapter test-dcg-assets test-with-timeout
 	@echo ""
 	@echo "All tests passed."
 
