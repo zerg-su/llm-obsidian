@@ -444,6 +444,7 @@ test-memory-backup:
 test-setup-vault:
 	@echo "=== test_setup_vault.sh ==="
 	@bash tests/test_setup_vault.sh
+	@bash tests/test_setup_clean_machine.sh
 
 test-pipeline-events:
 	@echo "=== test_pipeline_events.py ==="
