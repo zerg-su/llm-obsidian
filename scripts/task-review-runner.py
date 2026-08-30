@@ -260,6 +260,7 @@ def run_current_review(
     worktree: Path,
     *,
     vault_root: Path | None = None,
+    base: str = "",
     deep: bool = False,
     full: bool = False,
     cross_model: bool = False,
@@ -278,6 +279,7 @@ def run_current_review(
     return _run_current_review(
         worktree,
         vault_root=vault_root,
+        base=base,
         deep=deep,
         full=full,
         cross_model=cross_model,
@@ -349,6 +351,7 @@ def parser() -> argparse.ArgumentParser:
     current_target.add_argument("--target", type=Path)
     current_target.add_argument("--worktree", type=Path)
     current.add_argument("--vault-root", type=Path)
+    current.add_argument("--base", default="")
     current.add_argument("--deep", action="store_true")
     current.add_argument("--full", action="store_true")
     current.add_argument("--cross-model", action="store_true")
@@ -416,6 +419,7 @@ def main(
             result = run_current_review(
                 args.target or args.worktree or Path.cwd(),
                 vault_root=args.vault_root,
+                base=args.base,
                 deep=args.deep,
                 full=args.full,
                 cross_model=args.cross_model,

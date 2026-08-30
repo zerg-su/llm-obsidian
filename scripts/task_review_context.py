@@ -469,19 +469,17 @@ def _purpose_boundary_inputs(
     return tuple(inputs)
 
 
-def _head_diff_input(worktree: Path) -> ContextInput:
-    diff = _bounded_review_diff(
-        _git_bytes(
-            worktree,
-            "show",
-            "--format=fuller",
-            "--stat",
-            "--patch",
-            "--find-renames",
-            "HEAD",
+def _head_diff_input(worktree: Path, *, base_sha: str = "") -> ContextInput:
+    command = (
+        ("diff", "--stat", "--patch", "--find-renames", f"{base_sha}..HEAD")
+        if base_sha
+        else (
+            "show", "--format=fuller", "--stat", "--patch", "--find-renames", "HEAD"
         )
     )
-    return ContextInput("head-diff.patch", "git:show:HEAD", diff, role="diff")
+    source = f"git:diff:{base_sha}..HEAD" if base_sha else "git:show:HEAD"
+    diff = _bounded_review_diff(_git_bytes(worktree, *command))
+    return ContextInput("head-diff.patch", source, diff, role="diff")
 
 
 def _delta_inputs(
@@ -672,6 +670,7 @@ def _context(
     policy = meta["review_policy"]
     purpose = str(policy.get("purpose") or "implementation")
     boundary_input_sha256 = str(policy.get("boundary_input_sha256") or "")
+    base_sha = str(policy.get("base_sha") or "")
     plan, authority = _review_plan_authority(meta, worktree)
     (
         plan_artifact_root,
@@ -679,6 +678,7 @@ def _context(
         plan_review_inputs,
         packet_metadata,
     ) = _plan_review_context(meta, runtime_root, task_id, head, authority)
+    packet_metadata.update({"base_sha": base_sha} if base_sha else {})
     amendment_inputs: list[ContextInput] = []
     amendment = _amendment_evidence(meta, worktree, authority)
     if amendment is not None:
@@ -835,7 +835,7 @@ def _context(
                 pointer_root=runtime_root / "pointers",
             )
         )
-    inputs.append(_head_diff_input(worktree))
+    inputs.append(_head_diff_input(worktree, base_sha=base_sha))
     if resolution_bundle is not None:
         delta_packet = build_delta_packet(
             resolution_bundle.fix_delta,

@@ -257,6 +257,9 @@ def _callback_wake(
         value = str(raw_policy.get(option) or "")
         if value:
             wake_argv.extend((f"--{option}", value))
+    base_sha = str(raw_policy.get("base_sha") or "")
+    if base_sha:
+        wake_argv.extend(("--base", base_sha))
     purpose = str(raw_policy.get("purpose") or "implementation")
     boundary_file = str(
         (

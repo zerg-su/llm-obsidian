@@ -18,6 +18,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 import task_review_current  # noqa: E402
 from review_target import resolve_target  # noqa: E402
+from task_review_context import _context  # noqa: E402
 from task_review_transport import _callback_wake  # noqa: E402
 
 
@@ -63,6 +64,25 @@ with tempfile.TemporaryDirectory(prefix="external-current-review.") as raw:
     base = Path(raw)
     vault = coordinator(base / "coordinator")
     first = product(base / "products/first", 1)
+    review_base = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=first, text=True
+    ).strip()
+    (first / "app.py").write_text("VALUE = 10\n", encoding="utf-8")
+    subprocess.run(["git", "add", "app.py"], cwd=first, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "change app"],
+        cwd=first,
+        check=True,
+        capture_output=True,
+    )
+    (first / "feature.py").write_text("FEATURE = True\n", encoding="utf-8")
+    subprocess.run(["git", "add", "feature.py"], cwd=first, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "add feature"],
+        cwd=first,
+        check=True,
+        capture_output=True,
+    )
     second = product(base / "products/second", 2)
     scratch = (base / "scratch").resolve()
     captures: list[tuple[dict, Path, Path, str, Path]] = []
@@ -94,6 +114,7 @@ with tempfile.TemporaryDirectory(prefix="external-current-review.") as raw:
         first_result = task_review_runner.run_current_review(
             first,
             vault_root=vault,
+            base=review_base,
             origin_surface="11111111-1111-4111-8111-111111111111",
             scratch_root=scratch,
         )
@@ -116,6 +137,37 @@ with tempfile.TemporaryDirectory(prefix="external-current-review.") as raw:
     first_meta, captured_vault, captured_target, _, first_runtime = captures[0]
     check("current metadata binds both roots", first_meta["vault_root"] == str(vault) and first_meta["worktree"] == str(first))
     check("current metadata carries a clean exact-HEAD lease", first_meta["review_lease"]["head"] == subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=first, text=True).strip())
+    check(
+        "current metadata binds the exact review base",
+        first_meta["review_policy"]["base_sha"] == review_base
+        and first_meta["review_lease"]["base"] == review_base,
+    )
+    _review, manifest_path = _context(
+        first_meta,
+        vault,
+        first,
+        first_runtime,
+        str(first_meta["task_id"]),
+    )
+    packet = manifest_path.parent
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    packet_inputs = {item["name"]: item for item in manifest["inputs"]}
+    diff = next(packet.glob("*-diff-head-diff.patch")).read_text(
+        encoding="utf-8"
+    )
+    check(
+        "explicit base packages the complete committed range",
+        "-VALUE = 1" in diff
+        and "+VALUE = 10" in diff
+        and "+FEATURE = True" in diff,
+        diff,
+    )
+    check(
+        "range identity is reviewer-observable",
+        manifest["metadata"]["base_sha"] == review_base
+        and packet_inputs["head-diff.patch"]["source"]
+        == f"git:diff:{review_base}..HEAD",
+    )
     check("Harness state is coordinator-owned", captured_vault == vault and captured_target == first)
     check("scratch remains outside coordinator and target", first_runtime.is_relative_to(scratch) and not first_runtime.is_relative_to(first) and not first_runtime.is_relative_to(vault))
     check("external target receives no review metadata", not (first / ".task-meta.json").exists() and not (first / ".vault-meta").exists())
@@ -131,14 +183,26 @@ with tempfile.TemporaryDirectory(prefix="external-current-review.") as raw:
     wake = _callback_wake(first_meta, vault, first)
     check("callback binds the exact coordinator", f"--vault-root {vault}" in wake, wake)
     check("callback binds the exact target", f"--worktree {first}" in wake, wake)
+    check("callback retains the exact review base", f"--base {review_base}" in wake, wake)
 
     public = task_review_runner.parser().parse_args(
-        ["current", "--target", str(first), "--vault-root", str(vault)]
+        [
+            "current",
+            "--target",
+            str(first),
+            "--vault-root",
+            str(vault),
+            "--base",
+            review_base,
+        ]
     )
     legacy = task_review_runner.parser().parse_args(
         ["current", "--worktree", str(first), "--vault-root", str(vault)]
     )
-    check("public target and legacy worktree forms resolve identically", public.target == legacy.worktree == first)
+    check(
+        "public target and legacy worktree forms resolve identically",
+        public.target == legacy.worktree == first and public.base == review_base,
+    )
     defaulted = task_review_runner.parser().parse_args(
         ["current", "--vault-root", str(vault)]
     )

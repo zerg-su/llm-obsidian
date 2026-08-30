@@ -58,9 +58,11 @@ bytes. Purpose-bound checkpoints are:
 
 Dispatched v3/v4 tasks use `task-review-runner.py run --worktree <worktree>`.
 External/current review uses `current --target <checkout> --vault-root
-<coordinator>`. It requires a clean target lease and keeps Harness state and
-resolution input owner-only. Never stash, commit, reset, create a worktree,
-push, publish, or edit the product on the reviewer's behalf.
+<coordinator>`. For a multi-commit task, pass explicit `--base <ref>`; omitted
+base intentionally reviews only HEAD. It requires a clean target lease and
+keeps Harness state and resolution input owner-only. Never stash, commit,
+reset, create a worktree, push, publish, or edit the product on the reviewer's
+behalf.
 
 The executor records typed rulings and checks. Material findings consume the
 bounded product-cycle lineage; mechanism failures do not. After accepted

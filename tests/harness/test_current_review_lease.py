@@ -87,6 +87,41 @@ with tempfile.TemporaryDirectory(prefix="current-review-lease.") as raw:
     else:
         check("clean HEAD drift is stale during active review", False)
 
+    range_product = repo(base / "range-product")
+    range_base = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=range_product, text=True
+    ).strip()
+    (range_product / "app.py").write_text("VALUE = 20\n", encoding="utf-8")
+    subprocess.run(["git", "add", "app.py"], cwd=range_product, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "range change"],
+        cwd=range_product,
+        check=True,
+        capture_output=True,
+    )
+    range_target = resolve_target(range_product)
+    range_lease = create_review_lease(range_target, base_sha=range_base)
+    check(
+        "range lease binds an immutable exact base",
+        range_lease["schema_version"] == 2
+        and range_lease["base"] == range_base,
+    )
+    (range_product / "app.py").write_text("VALUE = 21\n", encoding="utf-8")
+    subprocess.run(["git", "add", "app.py"], cwd=range_product, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "range resolution"],
+        cwd=range_product,
+        check=True,
+        capture_output=True,
+    )
+    rebound_range, range_changed = evaluate_review_lease(
+        range_lease, range_target, gate_status="changes-requested"
+    )
+    check(
+        "committed resolution retains the original review base",
+        range_changed and rebound_range["base"] == range_base,
+    )
+
     attention = lease_attention_payload(
         task_id="11111111-1111-4111-8111-111111111111",
         lease=lease,

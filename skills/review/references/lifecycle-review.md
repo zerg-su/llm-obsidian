@@ -21,6 +21,13 @@ binds target key, HEAD, index/worktree, and untracked content. Recheck before
 callbacks and every provider effect. Active drift rejects stale results and
 writes typed attention; never stash, commit, reset, or create a worktree.
 
+Without `--base`, current review deliberately packages only `git show HEAD`.
+For a multi-commit task, pass `current --base <ref>`: Harness resolves the
+merge-base to an exact commit, binds it in policy and lease, packages the
+cumulative `base..HEAD` diff plus both exact object IDs, and repeats the exact
+resolved base in callback wake commands. The base must remain an ancestor after
+a committed resolution; never infer a branch base for approval-capable review.
+
 `changes-requested` releases the executor boundary. Resume only after the fix is
 committed to a clean new HEAD with the same preset/purpose. Write typed finding
 resolution to the receipt's owner-only `resolution_path`. The coordinator

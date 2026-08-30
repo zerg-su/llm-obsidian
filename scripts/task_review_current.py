@@ -27,6 +27,7 @@ from current_review_lease import (
     create_review_lease,
     evaluate_review_lease,
     lease_attention_payload,
+    resolve_review_base,
 )
 from review_coordinator import CoordinatorError, resolve_coordinator
 from review_target import ReviewTarget, ReviewTargetError, resolve_target
@@ -92,6 +93,7 @@ def _current_policy(
     profile_sha256: str,
     purpose: str = "implementation",
     boundary_input_sha256: str = "",
+    base_sha: str = "",
 ) -> dict[str, Any]:
     if purpose not in REVIEW_PURPOSES:
         raise TaskReviewError("current review purpose is invalid")
@@ -125,6 +127,7 @@ def _current_policy(
         "verification_profile_sha256": profile_sha256,
         "purpose": purpose,
         "boundary_input_sha256": boundary_input_sha256,
+        "base_sha": base_sha,
     }
 
 
@@ -151,6 +154,8 @@ def _same_requested_policy(
         base_matches
         and str(stored.get("purpose") or "implementation")
         == str(requested.get("purpose") or "implementation")
+        and str(stored.get("base_sha") or "")
+        == str(requested.get("base_sha") or "")
         and (
             allow_boundary_rebind
             or str(stored.get("boundary_input_sha256") or "")
@@ -532,7 +537,10 @@ def _resume_current_review(
     raw_lease = meta.get("review_lease")
     if not isinstance(raw_lease, Mapping):
         try:
-            review_lease = create_review_lease(target)
+            review_lease = create_review_lease(
+                target,
+                base_sha=str(requested_policy.get("base_sha") or ""),
+            )
         except CurrentReviewLeaseError as exc:
             raise TaskReviewError(str(exc)) from exc
         bound_head = str(gate_context.get("head_sha") or "") if gate_context else ""
@@ -587,6 +595,7 @@ def run_current_review(
     worktree: Path,
     *,
     vault_root: Path | None = None,
+    base: str = "",
     deep: bool = False,
     full: bool = False,
     cross_model: bool = False,
@@ -608,6 +617,14 @@ def run_current_review(
 ) -> dict[str, Any]:
     worktree = _validate_current_checkout(worktree)
     target = resolve_target(worktree)
+    if base and purpose != "implementation":
+        raise TaskReviewError(
+            "--base applies only to current implementation review"
+        )
+    try:
+        base_sha = resolve_review_base(target, base)
+    except CurrentReviewLeaseError as exc:
+        raise TaskReviewError(str(exc)) from exc
     try:
         vault = resolve_coordinator(
             explicit=vault_root,
@@ -664,6 +681,7 @@ def run_current_review(
         boundary_input_sha256=(
             boundary_input.input_sha256 if boundary_input else ""
         ),
+        base_sha=base_sha,
     )
     active_path = _active_path(vault, worktree, target.target_key)
     meta = _active_current_review(
@@ -682,7 +700,7 @@ def run_current_review(
 
     if meta is None:
         try:
-            review_lease = create_review_lease(target)
+            review_lease = create_review_lease(target, base_sha=base_sha)
         except CurrentReviewLeaseError as exc:
             raise TaskReviewError(str(exc)) from exc
         current_head = _git(worktree, "rev-parse", "HEAD")
@@ -718,14 +736,21 @@ def run_current_review(
         session = {**session, "source": source}
         if plan_file is None:
             plan = runtime_root / "inputs/current-review-scope.md"
+            scope = (
+                "Review the exact committed range "
+                f"{base_sha}..{current_head}. Treat the cumulative range "
+                "diff as the review denominator."
+                if base_sha
+                else "Review the exact current checkout and HEAD against its "
+                "repository instructions, tests, and public contract."
+            )
             _atomic_text(
                 plan,
                 "\n".join(
                     (
                         "# Current checkout review scope",
                         "",
-                        "Review the exact current checkout and HEAD against its "
-                        "repository instructions, tests, and public contract.",
+                        scope,
                         "",
                     )
                 ),
