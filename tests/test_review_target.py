@@ -154,4 +154,47 @@ with tempfile.TemporaryDirectory(prefix="review-target-test.") as raw:
         repr(byte_snapshot),
     )
 
+    whitespace_repo = Path(raw) / "whitespace-product"
+    whitespace_repo.mkdir()
+    git(whitespace_repo, "init", "-b", "main")
+    git(whitespace_repo, "config", "user.email", "review@example.invalid")
+    git(whitespace_repo, "config", "user.name", "Review Target Path Test")
+    (whitespace_repo / " committed.txt").write_text("before\n", encoding="utf-8")
+    (whitespace_repo / " worktree.txt").write_text("before\n", encoding="utf-8")
+    git(whitespace_repo, "add", " committed.txt", " worktree.txt")
+    git(whitespace_repo, "commit", "-m", "whitespace baseline")
+    whitespace_base = git(whitespace_repo, "rev-parse", "HEAD")
+    (whitespace_repo / " committed.txt").write_text("after\n", encoding="utf-8")
+    git(whitespace_repo, "add", " committed.txt")
+    git(whitespace_repo, "commit", "-m", "whitespace committed")
+    (whitespace_repo / " staged.txt").write_text("staged\n", encoding="utf-8")
+    git(whitespace_repo, "add", " staged.txt")
+    (whitespace_repo / " worktree.txt").write_text("worktree\n", encoding="utf-8")
+    (whitespace_repo / " untracked.txt").write_text("untracked\n", encoding="utf-8")
+    whitespace_target = resolve_target(whitespace_repo)
+    whitespace_snapshot = snapshot_light(
+        whitespace_target,
+        base=whitespace_base,
+        include_untracked=True,
+    )
+    check(
+        "Light overlays preserve leading-whitespace Git paths",
+        whitespace_snapshot.changed_paths
+        == (" committed.txt", " staged.txt", " worktree.txt")
+        and whitespace_snapshot.untracked_paths == (" untracked.txt",),
+        repr(whitespace_snapshot),
+    )
+    whitespace_scoped = snapshot_light(
+        whitespace_target,
+        base=whitespace_base,
+        paths=(" committed.txt",),
+        include_untracked=True,
+    )
+    check(
+        "Light explicit scope preserves leading-whitespace path text",
+        whitespace_scoped.paths == (" committed.txt",)
+        and whitespace_scoped.changed_paths == (" committed.txt",),
+        repr(whitespace_scoped),
+    )
+
 print("\nAll review target tests passed.")

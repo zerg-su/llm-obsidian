@@ -78,11 +78,12 @@ class GitAdapter:
         *,
         cwd: Path | None = None,
         env: dict[str, str] | None = None,
+        strip: bool = True,
     ) -> str:
         result = self._result(args, cwd=cwd, env=env)
         if result.returncode:
             raise GitError((result.stderr or result.stdout).strip()[:2000])
-        return result.stdout.strip()
+        return result.stdout.strip() if strip else result.stdout
 
     @classmethod
     def resolve(cls, path: Path | str, runner: Runner = subprocess.run) -> "GitAdapter":
@@ -132,7 +133,7 @@ class GitAdapter:
         args.extend(revisions)
         args.append("--")
         args.extend(paths)
-        return self._run(args)
+        return self._run(args, strip=not name_only)
 
     def root_commit_text(
         self,
@@ -146,7 +147,7 @@ class GitAdapter:
         args.append(head)
         args.append("--")
         args.extend(paths)
-        return self._run(args)
+        return self._run(args, strip=not name_only)
 
     def status_porcelain(self) -> str:
         result = self._result(
@@ -160,7 +161,11 @@ class GitAdapter:
         args = ["ls-files", "--others", "--exclude-standard", "-z", "--"]
         args.extend(paths)
         return tuple(
-            sorted(path for path in self._run(args).split("\x00") if path)
+            sorted(
+                path
+                for path in self._run(args, strip=False).split("\x00")
+                if path
+            )
         )
 
     @staticmethod

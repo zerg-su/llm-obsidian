@@ -29,6 +29,10 @@ from current_review_lease import (
     lease_attention_payload,
     resolve_review_base,
 )
+from current_review_scope import (
+    compile_current_review_scope,
+    current_plan_outcome_sha256,
+)
 from review_coordinator import CoordinatorError, resolve_coordinator
 from review_target import ReviewTarget, ReviewTargetError, resolve_target
 from task_review_context import (
@@ -585,6 +589,21 @@ def _resume_current_review(
                     ),
                 }
             )
+        elif boundary_input is None and gate_status == "changes-requested":
+            plan = Path(str(meta.get("plan_file") or "")).resolve()
+            synthetic_plan = runtime_root / "inputs/current-review-scope.md"
+            if plan == synthetic_plan:
+                scope = compile_current_review_scope(
+                    base_sha=str(requested_policy.get("base_sha") or ""),
+                    head_sha=str(review_lease["head"]),
+                )
+                _atomic_text(plan, scope.text)
+                updates.update(
+                    {
+                        "approved_plan_sha256": scope.plan_sha256,
+                        "outcome_contract_sha256": scope.outcome_sha256,
+                    }
+                )
         meta = {**meta, **updates}
         _atomic_json(runtime_root / "current-review.json", meta)
         _atomic_json(active_path, meta)
@@ -715,6 +734,15 @@ def run_current_review(
             )
         ):
             raise TaskReviewError("review boundary input targets another HEAD")
+        plan: Path | None = None
+        approved_plan_sha256 = ""
+        outcome_contract_sha256 = ""
+        if plan_file is not None:
+            plan = plan_file.expanduser().resolve()
+            if not plan.is_file() or plan.is_symlink():
+                raise TaskReviewError("current review plan is unavailable")
+            approved_plan_sha256 = hashlib.sha256(plan.read_bytes()).hexdigest()
+            outcome_contract_sha256 = current_plan_outcome_sha256(plan)
         task_id = str(uuid.uuid4())
         runtime_root = _current_runtime_root(
             worktree, task_id, scratch_root
@@ -734,31 +762,15 @@ def run_current_review(
                 "current review requires a host-confirmed current session route"
             )
         session = {**session, "source": source}
-        if plan_file is None:
+        if plan is None:
             plan = runtime_root / "inputs/current-review-scope.md"
-            scope = (
-                "Review the exact committed range "
-                f"{base_sha}..{current_head}. Treat the cumulative range "
-                "diff as the review denominator."
-                if base_sha
-                else "Review the exact current checkout and HEAD against its "
-                "repository instructions, tests, and public contract."
+            current_scope = compile_current_review_scope(
+                base_sha=base_sha,
+                head_sha=current_head,
             )
-            _atomic_text(
-                plan,
-                "\n".join(
-                    (
-                        "# Current checkout review scope",
-                        "",
-                        scope,
-                        "",
-                    )
-                ),
-            )
-        else:
-            plan = plan_file.expanduser().resolve()
-            if not plan.is_file() or plan.is_symlink():
-                raise TaskReviewError("current review plan is unavailable")
+            _atomic_text(plan, current_scope.text)
+            approved_plan_sha256 = current_scope.plan_sha256
+            outcome_contract_sha256 = current_scope.outcome_sha256
         meta = {
             "version": 4,
             "lifecycle": "current-checkout",
@@ -776,12 +788,12 @@ def run_current_review(
             "approved_plan_sha256": (
                 boundary_input.plan_sha256
                 if boundary_input is not None
-                else hashlib.sha256(plan.read_bytes()).hexdigest()
+                else approved_plan_sha256
             ),
             "outcome_contract_sha256": (
                 boundary_input.outcome_contract_sha256
                 if boundary_input is not None
-                else hashlib.sha256(b"current-checkout-review").hexdigest()
+                else outcome_contract_sha256
             ),
             "finalization_policy": {
                 "max_cycles": 5,

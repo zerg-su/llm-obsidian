@@ -103,7 +103,7 @@ def resolve_target(path: Path | str) -> ReviewTarget:
 def _normalize_paths(paths: Iterable[str]) -> tuple[str, ...]:
     normalized: list[str] = []
     for raw in paths:
-        value = str(raw).strip().replace(os.sep, "/")
+        value = str(raw).replace(os.sep, "/")
         candidate = PurePosixPath(value)
         if (
             not value
@@ -113,7 +113,7 @@ def _normalize_paths(paths: Iterable[str]) -> tuple[str, ...]:
             or value.startswith(":")
         ):
             raise ReviewTargetError(f"review path scope is invalid: {raw!r}")
-        normalized.append(candidate.as_posix().rstrip("/"))
+        normalized.append(value.rstrip("/"))
     return tuple(sorted(set(normalized)))
 
 

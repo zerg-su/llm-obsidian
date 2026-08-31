@@ -33,15 +33,14 @@ from harness.workflows.review import (
 )
 from harness.workflows.review_gate import ReviewPreset
 from model_routing import load_config, resolve, session_from_meta
+from current_review_scope import current_review_outcome_inputs
 from outcome_contract import OutcomeContractError, extract_from_bytes
 from task_contract import normalize
 from task_review_delta_packet import DeltaPacket, build_delta_packet
 from task_escalation_records import EscalationRecordError, load_amendments
 from task_plan_authority import PlanAuthorityError, TaskPlanAuthority, resolve_plan_authority
 from task_review_resolution_bundle import _bounded_input
-from task_review_authorized_continuation import (
-    _authorized_continuation_inputs,
-)
+from task_review_authorized_continuation import _authorized_continuation_inputs
 from task_review_identity import (
     _current_review_is_quiescent,
     _zero_effect_attention_is_quiescent,
@@ -722,6 +721,7 @@ def _context(
         ),
         *amendment_inputs,
         *plan_review_inputs,
+        *current_review_outcome_inputs(meta, plan, boundary_input_sha256),
     ]
     inputs.extend(
         _authorized_continuation_inputs(meta, worktree, runtime_root, head)
