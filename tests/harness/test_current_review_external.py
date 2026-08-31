@@ -26,7 +26,7 @@ from harness.store import OperationStore  # noqa: E402
 from review_target import resolve_target  # noqa: E402
 from outcome_contract import extract_from_bytes  # noqa: E402
 from task_review_context import _context  # noqa: E402
-from task_review_request import _prompt  # noqa: E402
+from task_review_request import _prompt, _request as compile_review_request  # noqa: E402
 from task_review_transport import _callback_wake  # noqa: E402
 
 
@@ -635,6 +635,129 @@ with tempfile.TemporaryDirectory(prefix="external-current-review.") as raw:
         ["current", "--vault-root", str(vault)]
     )
     check("current facade permits the current Git root default", defaulted.target is None and defaulted.worktree is None)
+
+    full_target = product(base / "products/full-target", 28)
+    full_plan = review_plan(
+        base / "full-review-plan.md",
+        desired_outcome="The exact external checkout supports Full review.",
+        evidence_id="full-target-behavior",
+        observable="Full review binds four independent XHigh lanes.",
+    )
+    task_review_current._run_review = stop_before_provider
+    for name, value in (
+        ("LLM_OBSIDIAN_SESSION_RUNTIME", "codex"),
+        ("LLM_OBSIDIAN_SESSION_MODEL", "gpt-5.6-sol"),
+        ("LLM_OBSIDIAN_SESSION_EFFORT", "high"),
+    ):
+        os.environ[name] = value
+    try:
+        full_result = task_review_runner.run_current_review(
+            full_target,
+            vault_root=vault,
+            full=True,
+            plan_file=full_plan,
+            origin_surface="11111111-1111-4111-8111-111111111111",
+            scratch_root=scratch,
+        )
+        full_meta, _, _, full_task_id, full_runtime = captures[-1]
+        full_context, _ = _context(
+            full_meta,
+            vault,
+            full_target,
+            full_runtime,
+            full_task_id,
+        )
+        _, full_request = compile_review_request(
+            full_meta,
+            vault,
+            full_task_id,
+            full_context,
+        )
+    finally:
+        task_review_current._run_review = original
+        for name, value in previous.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+    check(
+        "external Full review compiles four XHigh provider lanes",
+        full_result["status"] == "prepared"
+        and full_request is not None
+        and full_request.policy.axes
+        == (
+            "anthropic-intent",
+            "anthropic-engineering",
+            "openai-intent",
+            "openai-engineering",
+        )
+        and {
+            full_request.route_for(axis).effort
+            for axis in full_request.policy.axes
+        }
+        == {"xhigh"},
+    )
+
+    for label, override in (
+        ("effort", {"effort": "low"}),
+        ("cross-model", {"cross_model": True}),
+    ):
+        override_target = product(
+            base / f"products/full-{label}-override",
+            40,
+        )
+        override_plan = review_plan(
+            base / f"full-{label}-override-plan.md",
+            desired_outcome="Full review retains its fixed topology.",
+            evidence_id=f"full-{label}-override",
+            observable="Full review rejects every explicit override.",
+        )
+        override_key = resolve_target(override_target).target_key
+        captures_before_override = len(captures)
+        scratch_entries_before = set(scratch.iterdir())
+        task_review_current._run_review = stop_before_provider
+        for name, value in (
+            ("LLM_OBSIDIAN_SESSION_RUNTIME", "codex"),
+            ("LLM_OBSIDIAN_SESSION_MODEL", "gpt-5.6-sol"),
+            ("LLM_OBSIDIAN_SESSION_EFFORT", "high"),
+        ):
+            os.environ[name] = value
+        try:
+            task_review_runner.run_current_review(
+                override_target,
+                vault_root=vault,
+                full=True,
+                plan_file=override_plan,
+                origin_surface="11111111-1111-4111-8111-111111111111",
+                scratch_root=scratch,
+                **override,
+            )
+        except (task_review_runner.TaskReviewError, ValueError) as exc:
+            check(
+                f"current Full review rejects {label} override",
+                "Full review" in str(exc),
+                str(exc),
+            )
+        else:
+            check(f"current Full review rejects {label} override", False)
+        finally:
+            task_review_current._run_review = original
+            for name, value in previous.items():
+                if value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = value
+        check(
+            f"Full {label} rejection precedes owner, scratch, and provider effects",
+            len(captures) == captures_before_override
+            and set(scratch.iterdir()) == scratch_entries_before
+            and not (
+                vault
+                / ".vault-meta/harness/current-review"
+                / override_key
+                / "active.json"
+            ).exists(),
+        )
 
     missing_parent = product(base / "products/missing-target-parent", 29)
     missing_target = missing_parent / "intended-external-product"

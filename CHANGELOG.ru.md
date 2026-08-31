@@ -30,6 +30,10 @@
 
 ### Исправлено
 
+- Approval-capable `current --full` теперь до ownership и provider effects
+  отклоняет явные cross-model, runtime, model и effort overrides. Full для
+  внешнего target по-прежнему компилирует ровно четыре Anthropic/OpenAI
+  intent/engineering lane на XHigh.
 - Light и current Lifecycle Review теперь до Git discovery и provider effects
   отклоняют отсутствующий exact target или broken target symlink вместо тихого
   ревью существующего родительского репозитория.
@@ -76,8 +80,9 @@
   typed Outcome evidence, scratch-safe same-target admission, zero-effect
   callback recovery, exact plan-byte binding, scoped advisory findings и
   propagation fallback gaps, frozen owner-scoped plans и staggered replacement
-  convergence, frozen callback resume, durable active-pointer rollback и
-  exact-target existence validation без спекулятивного запаса.
+  convergence, frozen callback resume, durable active-pointer rollback,
+  exact-target existence validation и fail-closed current Full overrides.
+  Точный contour — 304 файла / 115 870 строк без спекулятивного запаса.
 
 ## [2.8.5] — 2026-08-19
 

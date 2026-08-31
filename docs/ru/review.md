@@ -10,10 +10,13 @@ context, пишет только typed outbox/callback и не может исп
 | Simple | Одна выбранная holistic lane | Малый локальный риск |
 | Deep по умолчанию | Независимые Anthropic и OpenAI holistic lanes | Обычный outcome + engineering review |
 | Deep single-model | Intent и engineering lanes одной явно выбранной модели | Один provider недоступен или так запросил пользователь |
-| Full | Четыре provider × responsibility lanes | Только явный запрос для высокого denominator |
+| Full | Четыре provider × responsibility lanes на XHigh | Только явный запрос без routing/effort overrides |
 
 Risk policy не включает Full автоматически. Model alias разрешается через
 `config/model-routing.toml`; hardcoded model names в skills и runners запрещены.
+Approval-capable `current --full` отклоняет явные `--cross-model`, `--runtime`,
+`--model` и `--effort` до ownership: Full уже фиксирует обе модели, обе
+responsibility и XHigh, а для настраиваемого topology используется Deep.
 
 Advisory Light Review сохраняет каждый `coverage_gaps` из исходного snapshot в
 начале child result и добавляет собственные gaps после них. Любой origin или

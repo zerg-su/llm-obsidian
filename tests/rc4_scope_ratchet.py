@@ -572,6 +572,12 @@ Light and current Lifecycle public boundaries cover the zero-effect rejection.
 The existing Git adapter grows by six measured lines and no new production
 file. The exact candidate is therefore 304 files / 115,866 lines, with no
 speculative headroom.
+
+The current Full-policy follow-up rejects cross-model, runtime, model, and
+effort overrides before admission while preserving its four configured XHigh
+lanes for external targets. The existing current-review policy owner grows by
+four measured lines and no new production file. The exact candidate is
+therefore 304 files / 115,870 lines, with no speculative headroom.
 """
 
 from __future__ import annotations
@@ -585,8 +591,8 @@ from pathlib import Path
 SCRIPT_FILE_CEILING = 304
 
 #: Maximum total lines across those files. This is the measured exact candidate
-#: after exact-target existence hardening, with zero headroom.
-SCRIPT_LINE_CEILING = 115_866
+#: after current Full-policy hardening, with zero headroom.
+SCRIPT_LINE_CEILING = 115_870
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

@@ -415,7 +415,11 @@ check(
         "openai-engineering",
     )
     and [full_request.route_for(axis).runtime for axis in full_request.policy.axes]
-    == ["claude", "claude", "codex", "codex"],
+    == ["claude", "claude", "codex", "codex"]
+    and {
+        full_request.route_for(axis).effort for axis in full_request.policy.axes
+    }
+    == {"xhigh"},
 )
 check(
     "every runtime request carries the canonical effective topology digest",

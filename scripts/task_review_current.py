@@ -111,6 +111,10 @@ def _current_policy(
         raise TaskReviewError("current review purpose is invalid")
     if no_review and (purpose != "implementation" or boundary_input_sha256):
         raise TaskReviewError("a purpose-bound review cannot be skipped")
+    if full and any((cross_model, runtime, model, effort)):
+        raise TaskReviewError(
+            "current Full review rejects routing and effort overrides"
+        )
     preset = ReviewPreset.from_flags(
         deep=deep,
         full=full,

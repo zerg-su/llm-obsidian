@@ -24,6 +24,10 @@ packages were published for them.
 
 ### Fixed
 
+- Approval-capable `current --full` now rejects explicit cross-model, runtime,
+  model, and effort overrides before ownership or provider effects. An external
+  Full target still compiles the exact four Anthropic/OpenAI intent/engineering
+  lanes at XHigh.
 - Light and current Lifecycle Review now reject a missing exact target or broken
   target symlink before Git discovery and provider effects, rather than silently
   reviewing an existing parent repository.
@@ -72,8 +76,9 @@ packages were published for them.
   admission, zero-effect callback recovery, exact plan-byte binding, and scoped
   advisory findings, fallback-gap propagation, frozen owner-scoped plans, and
   staggered replacement convergence, frozen callback resume, durable
-  active-pointer rollback, and exact-target existence validation with no
-  speculative headroom.
+  active-pointer rollback, exact-target existence validation, and fail-closed
+  current Full overrides. The exact contour is 304 files / 115,870 lines with
+  no speculative headroom.
 
 ## [2.8.5] - 2026-08-19
 
