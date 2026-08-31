@@ -30,6 +30,9 @@ from task_review_request import _prompt  # noqa: E402
 from task_review_transport import _callback_wake  # noqa: E402
 
 
+ORIGINAL_ADMISSION_ATOMIC_JSON = current_review_admission._atomic_json
+
+
 spec = importlib.util.spec_from_file_location(
     "external_task_review_runner", ROOT / "scripts/task-review-runner.py"
 )
@@ -124,6 +127,18 @@ def review_plan(
         encoding="utf-8",
     )
     return path.resolve()
+
+
+def fail_after_uuid_root_setup(
+    worktree: Path,
+    task_id: str,
+    scratch_root: Path | None,
+) -> Path:
+    runtime_root = current_review_admission._current_runtime_path(
+        worktree, task_id, scratch_root
+    )
+    runtime_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    raise RuntimeError("uuid-root-setup fixture")
 
 
 with tempfile.TemporaryDirectory(prefix="external-current-review.") as raw:
@@ -443,6 +458,13 @@ with tempfile.TemporaryDirectory(prefix="external-current-review.") as raw:
         store.transition(old_task_id, operation_id, state)
     old_gate_bytes = gate_path.read_bytes()
     old_ledger_bytes = ledger.path.read_bytes()
+    exhausted_active_path = (
+        vault
+        / ".vault-meta/harness/current-review"
+        / resolve_target(first).target_key
+        / "active.json"
+    )
+    exhausted_active_bytes = exhausted_active_path.read_bytes()
     task_review_current._run_review = stop_before_provider
     try:
         amended_plan_bytes = amended_plan.read_bytes()
@@ -457,6 +479,91 @@ with tempfile.TemporaryDirectory(prefix="external-current-review.") as raw:
             )
         finally:
             amended_plan.write_bytes(amended_plan_bytes)
+
+        scratch_before_root_failure = set(scratch.iterdir())
+        original_runtime_root = current_review_admission._current_runtime_root
+        current_review_admission._current_runtime_root = fail_after_uuid_root_setup
+        try:
+            try:
+                task_review_runner.run_current_review(
+                    first,
+                    vault_root=vault,
+                    base=review_base,
+                    plan_file=amended_plan,
+                    new_lineage=True,
+                    origin_surface="11111111-1111-4111-8111-111111111111",
+                    scratch_root=scratch,
+                )
+            except RuntimeError as exc:
+                check(
+                    "replacement root-setup failure is observable",
+                    "uuid-root-setup fixture" in str(exc),
+                    str(exc),
+                )
+            else:
+                check("replacement root-setup failure is observable", False)
+        finally:
+            current_review_admission._current_runtime_root = original_runtime_root
+        check(
+            "replacement root-setup failure preserves predecessor and scratch",
+            exhausted_active_path.read_bytes() == exhausted_active_bytes
+            and set(scratch.iterdir()) == scratch_before_root_failure,
+        )
+
+        scratch_before_pointer_failure = set(scratch.iterdir())
+
+        def fail_replacement_directory_fsync(
+            path: Path, value: object
+        ) -> None:
+            if path != exhausted_active_path:
+                ORIGINAL_ADMISSION_ATOMIC_JSON(path, value)
+                return
+            original_fsync = os.fsync
+            calls = 0
+
+            def fail_second_fsync(descriptor: int) -> None:
+                nonlocal calls
+                calls += 1
+                if calls == 2:
+                    raise OSError("replacement-directory-fsync fixture")
+                original_fsync(descriptor)
+
+            os.fsync = fail_second_fsync
+            try:
+                ORIGINAL_ADMISSION_ATOMIC_JSON(path, value)
+            finally:
+                os.fsync = original_fsync
+
+        current_review_admission._atomic_json = fail_replacement_directory_fsync
+        try:
+            try:
+                task_review_runner.run_current_review(
+                    first,
+                    vault_root=vault,
+                    base=review_base,
+                    plan_file=amended_plan,
+                    new_lineage=True,
+                    origin_surface="11111111-1111-4111-8111-111111111111",
+                    scratch_root=scratch,
+                )
+            except task_review_runner.TaskReviewError as exc:
+                check(
+                    "replacement active publication failure is typed",
+                    "active pointer publication failed" in str(exc),
+                    str(exc),
+                )
+            else:
+                check("replacement active publication failure is typed", False)
+        finally:
+            current_review_admission._atomic_json = (
+                ORIGINAL_ADMISSION_ATOMIC_JSON
+            )
+        check(
+            "replacement publication failure restores predecessor and scratch",
+            exhausted_active_path.read_bytes() == exhausted_active_bytes
+            and set(scratch.iterdir()) == scratch_before_pointer_failure,
+        )
+
         fresh_lineage = task_review_runner.run_current_review(
             first,
             vault_root=vault,
@@ -829,7 +936,14 @@ with tempfile.TemporaryDirectory(prefix="external-current-review.") as raw:
     preflight_products = {
         name: product(base / f"products/preflight-{name}", 30 + index)
         for index, name in enumerate(
-            ("missing-surface", "tracked-default", "request", "publication")
+            (
+                "missing-surface",
+                "tracked-default",
+                "request",
+                "publication",
+                "root-setup",
+                "active-publication",
+            )
         )
     }
     preflight_plans = {
@@ -957,6 +1071,68 @@ with tempfile.TemporaryDirectory(prefix="external-current-review.") as raw:
                 scratch_root=scratch,
             ),
             "unpublished-metadata fixture",
+        )
+    finally:
+        current_review_admission._atomic_json = original_atomic_json
+
+    original_runtime_root = current_review_admission._current_runtime_root
+
+    current_review_admission._current_runtime_root = fail_after_uuid_root_setup
+    try:
+        preflight_rejection(
+            "root-setup",
+            lambda target, plan: task_review_runner.run_current_review(
+                target,
+                vault_root=vault,
+                plan_file=plan,
+                origin_surface="11111111-1111-4111-8111-111111111111",
+                scratch_root=scratch,
+            ),
+            "uuid-root-setup fixture",
+        )
+    finally:
+        current_review_admission._current_runtime_root = original_runtime_root
+
+    active_publication_target = preflight_products["active-publication"]
+    active_publication_path = (
+        vault
+        / ".vault-meta/harness/current-review"
+        / resolve_target(active_publication_target).target_key
+        / "active.json"
+    )
+
+    def fail_active_directory_fsync(path: Path, value: object) -> None:
+        if path != active_publication_path:
+            original_atomic_json(path, value)
+            return
+        original_fsync = os.fsync
+        calls = 0
+
+        def fail_second_fsync(descriptor: int) -> None:
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise OSError("active-directory-fsync fixture")
+            original_fsync(descriptor)
+
+        os.fsync = fail_second_fsync
+        try:
+            original_atomic_json(path, value)
+        finally:
+            os.fsync = original_fsync
+
+    current_review_admission._atomic_json = fail_active_directory_fsync
+    try:
+        preflight_rejection(
+            "active-publication",
+            lambda target, plan: task_review_runner.run_current_review(
+                target,
+                vault_root=vault,
+                plan_file=plan,
+                origin_surface="11111111-1111-4111-8111-111111111111",
+                scratch_root=scratch,
+            ),
+            "active pointer publication failed",
         )
     finally:
         current_review_admission._atomic_json = original_atomic_json

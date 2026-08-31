@@ -36,6 +36,10 @@ from task_review_shared import (
 )
 
 
+class _RetainCurrentReviewScratch(TaskReviewError):
+    """Pointer durability is uncertain, so deleting its scratch is unsafe."""
+
+
 @contextmanager
 def current_admission_lock(scoped_active_path: Path) -> Iterator[None]:
     """Serialize one target from active-pointer read through provider admission."""
@@ -88,6 +92,95 @@ def publish_current_plan_snapshot(
     )
     _atomic_bytes(path, content)
     return path
+
+
+def _active_pointer_snapshot(active_path: Path) -> bytes | None:
+    """Capture the predecessor pointer before any owner scratch exists."""
+
+    if active_path.is_symlink():
+        raise TaskReviewError("current review active pointer is not a regular file")
+    if active_path.is_file():
+        try:
+            return active_path.read_bytes()
+        except OSError as exc:
+            raise TaskReviewError(
+                "current review active pointer is unavailable"
+            ) from exc
+    if active_path.exists():
+        raise TaskReviewError("current review active pointer is not a regular file")
+    return None
+
+
+def _durable_unlink(path: Path) -> None:
+    path.unlink()
+    directory = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+
+
+def _rollback_active_pointer(
+    active_path: Path,
+    predecessor: bytes | None,
+    *,
+    published: bytes,
+) -> bool:
+    """Restore the predecessor only while the pointer still names this owner."""
+
+    if _active_pointer_snapshot(active_path) != published:
+        return False
+    if predecessor is None:
+        _durable_unlink(active_path)
+    else:
+        _atomic_bytes(active_path, predecessor)
+    return _active_pointer_snapshot(active_path) == predecessor
+
+
+def _publish_active_pointer(
+    active_path: Path,
+    meta: Mapping[str, Any],
+    predecessor: bytes | None,
+    *,
+    published: bytes,
+) -> None:
+    """Publish the commit point or restore its exact predecessor durably."""
+
+    try:
+        _atomic_json(active_path, meta)
+    except BaseException as publication_error:
+        try:
+            current = _active_pointer_snapshot(active_path)
+        except TaskReviewError as inspection_error:
+            raise _RetainCurrentReviewScratch(
+                "current review active pointer publication is uncertain; "
+                "scratch retained for recovery"
+            ) from inspection_error
+        if current == published:
+            try:
+                restored = _rollback_active_pointer(
+                    active_path,
+                    predecessor,
+                    published=published,
+                )
+            except BaseException as rollback_error:
+                raise _RetainCurrentReviewScratch(
+                    "current review active pointer rollback failed; "
+                    "scratch retained for recovery"
+                ) from rollback_error
+            if not restored:
+                raise _RetainCurrentReviewScratch(
+                    "current review active pointer rollback is uncertain; "
+                    "scratch retained for recovery"
+                ) from publication_error
+        elif current != predecessor:
+            raise _RetainCurrentReviewScratch(
+                "current review active pointer publication is uncertain; "
+                "scratch retained for recovery"
+            ) from publication_error
+        raise TaskReviewError(
+            "current review active pointer publication failed"
+        ) from publication_error
 
 
 def plan_rebind_allowed(
@@ -304,8 +397,10 @@ def start_current_review(
             boundary_input.input_sha256 if boundary_input else "",
         ),
     )
-    runtime_root = _current_runtime_root(worktree, task_id, scratch_root)
+    predecessor_pointer = _active_pointer_snapshot(active_path)
+    runtime_root = runtime_path
     try:
+        runtime_root = _current_runtime_root(worktree, task_id, scratch_root)
         published_plan = publish_current_plan_snapshot(
             runtime_root, frozen_plan_bytes, bound_plan_sha256
         )
@@ -335,8 +430,16 @@ def start_current_review(
             stored_boundary = runtime_root / "inputs" / "review-boundary-input.json"
             _atomic_json(stored_boundary, boundary_input.payload())
             meta["review_boundary_input_file"] = str(stored_boundary)
-        _atomic_json(runtime_root / "current-review.json", meta)
-        _atomic_json(active_path, meta)
+        owner_meta_path = runtime_root / "current-review.json"
+        _atomic_json(owner_meta_path, meta)
+        _publish_active_pointer(
+            active_path,
+            meta,
+            predecessor_pointer,
+            published=owner_meta_path.read_bytes(),
+        )
+    except _RetainCurrentReviewScratch:
+        raise
     except BaseException:
         try:
             if runtime_root.is_dir() and not runtime_root.is_symlink():

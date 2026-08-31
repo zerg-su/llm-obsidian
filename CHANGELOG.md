@@ -38,7 +38,11 @@ packages were published for them.
   hash, Outcome Contract, and reviewer packet. Implicit callback resume now
   validates and reads that frozen snapshot even when the mutable source plan was
   changed or removed; only an explicit changed-HEAD amendment reopens source
-  bytes. A late overlapping
+  bytes. UUID scratch materialization and active-pointer publication now share
+  one cleanup-aware transaction: a post-replace directory-fsync failure
+  durably restores the exhausted predecessor (or removes an initial pointer)
+  before deleting scratch, while an uncertain rollback retains scratch for
+  typed recovery. A late overlapping
   `--new-lineage` caller now joins the already-published matching replacement
   instead of rejecting it or creating another provider effect.
 - Clean-machine setup no longer installs an unused PyYAML package or mutates
@@ -60,12 +64,12 @@ packages were published for them.
   `incomplete` advisory status.
 - The live scripts ratchet moves to the exact measured candidate: six cohesive
   review owners plus the extracted admission owner raise the contour from 296
-  files / 113,215 lines to 304 files / 115,757 lines, including the explicit
+  files / 113,215 lines to 304 files / 115,860 lines, including the explicit
   exhausted-lineage, typed Outcome evidence, scratch-safe same-target
   admission, zero-effect callback recovery, exact plan-byte binding, and scoped
   advisory findings, fallback-gap propagation, frozen owner-scoped plans, and
-  staggered replacement convergence and frozen callback resume with no
-  speculative headroom.
+  staggered replacement convergence, frozen callback resume, and durable
+  active-pointer rollback with no speculative headroom.
 
 ## [2.8.5] - 2026-08-19
 

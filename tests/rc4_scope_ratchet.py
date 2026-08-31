@@ -556,6 +556,15 @@ The exhausted-lineage follow-up makes implicit implementation callbacks read
 the already-confined frozen plan snapshot instead of reopening a mutable source
 plan. It reuses the context authority validator, adds no file, and moves the
 exact measured candidate by two lines to 304 files / 115,757 lines.
+
+The admission durability follow-up moves UUID-root materialization inside its
+cleanup transaction and makes active-pointer replacement a recoverable commit
+point. Exact predecessor bytes are captured before scratch exists; a
+post-replace failure restores or removes that pointer durably before scratch
+cleanup, while an unprovable rollback retains the named scratch. The bounded
+repair adds 103 measured lines to the existing admission owner and no new
+production file. The exact candidate is therefore 304 files / 115,860 lines,
+with no speculative headroom.
 """
 
 from __future__ import annotations
@@ -569,8 +578,8 @@ from pathlib import Path
 SCRIPT_FILE_CEILING = 304
 
 #: Maximum total lines across those files. This is the measured exact candidate
-#: after frozen plan callback resume, with zero headroom.
-SCRIPT_LINE_CEILING = 115_757
+#: after active-pointer rollback hardening, with zero headroom.
+SCRIPT_LINE_CEILING = 115_860
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

@@ -61,6 +61,12 @@ Concurrent-запуски одной цели сериализуются и по
 Поздний `--new-lineage`, увидевший уже опубликованный replacement, также
 присоединяется к нему, но только если target, policy, plan identity и exhausted
 predecessor совпадают.
+Создание UUID scratch входит в ту же cleanup-транзакцию, что и публикация
+owner. `active.json` является commit point: ошибка после `os.replace`, но до
+directory fsync, под admission lock восстанавливает прежний pointer (либо
+удаляет первичный) до удаления нового scratch. Если точный rollback доказать
+нельзя, scratch сохраняется и возвращается typed recovery error — active
+pointer никогда сознательно не оставляется ссылаться на удалённый owner.
 
 ## Жизненный цикл finding
 
