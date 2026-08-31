@@ -67,6 +67,19 @@ with tempfile.TemporaryDirectory(prefix="review-target-test.") as raw:
     check("nested path resolves the exact Git root", target.root == repo.resolve())
     check("target identity binds common dir and worktree", len(target.target_key) == 32)
 
+    broken_target = Path(raw) / "broken-review-target"
+    broken_target.symlink_to(Path(raw) / "missing-review-target")
+    try:
+        resolve_target(broken_target)
+    except ReviewTargetError as exc:
+        check(
+            "broken target symlinks fail before Git root discovery",
+            "does not exist" in str(exc),
+            str(exc),
+        )
+    else:
+        check("broken target symlinks fail before Git root discovery", False)
+
     without_untracked = snapshot_light(target, base=initial)
     check("explicit base resolves to the requested merge base", without_untracked.base == initial)
     check("snapshot binds exact HEAD", without_untracked.head == feature_head)

@@ -19,6 +19,9 @@ Advisory Light Review сохраняет каждый `coverage_gaps` из ис�
 начале child result и добавляет собственные gaps после них. Любой origin или
 observed gap требует `incomplete`; `no-findings-observed` допустим только при
 полном покрытии snapshot.
+Exact target для Light и Lifecycle Review обязан существовать; отсутствующий
+путь и broken symlink отклоняются до Git discovery, ownership и provider effect,
+а не подменяются существующим родительским репозиторием.
 
 ## Review плана
 

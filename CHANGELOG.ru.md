@@ -30,6 +30,9 @@
 
 ### Исправлено
 
+- Light и current Lifecycle Review теперь до Git discovery и provider effects
+  отклоняют отсутствующий exact target или broken target symlink вместо тихого
+  ревью существующего родительского репозитория.
 - Current Lifecycle Review теперь требует positive behavior evidence,
   связанный typed-полями `evidence_kind` и `subject`, вместо denylist generic
   evidence names или синтетического циклического контракта о корректности.
@@ -69,12 +72,12 @@
   child result и принудительно давать advisory-статус `incomplete`.
 - Live ratchet scripts сдвинут к точно измеренному кандидату: шесть cohesive
   review-owner'ов и выделенный admission owner увеличивают contour с 296 файлов
-  / 113 215 строк до 304 файлов / 115 860 строк с explicit exhausted-lineage,
+  / 113 215 строк до 304 файлов / 115 866 строк с explicit exhausted-lineage,
   typed Outcome evidence, scratch-safe same-target admission, zero-effect
   callback recovery, exact plan-byte binding, scoped advisory findings и
   propagation fallback gaps, frozen owner-scoped plans и staggered replacement
-  convergence, frozen callback resume и durable active-pointer rollback без
-  спекулятивного запаса.
+  convergence, frozen callback resume, durable active-pointer rollback и
+  exact-target existence validation без спекулятивного запаса.
 
 ## [2.8.5] — 2026-08-19
 

@@ -77,6 +77,33 @@ with tempfile.TemporaryDirectory(prefix="light-review-host-test.") as raw:
     check("Light snapshot CLI succeeds without target writes", snapshot.returncode == 0 and before == after, snapshot.stderr)
     check("Light snapshot CLI emits its exact target", snapshot_payload.get("root") == str(repo.resolve()))
 
+    missing_target = repo / "intended-external-product"
+    missing_snapshot = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts/review_target.py"),
+            "light",
+            "--target",
+            str(missing_target),
+        ],
+        cwd=repo,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    check(
+        "Light snapshot CLI rejects a missing exact target",
+        missing_snapshot.returncode == 3
+        and "does not exist" in missing_snapshot.stderr,
+        repr(
+            {
+                "returncode": missing_snapshot.returncode,
+                "stdout": missing_snapshot.stdout,
+                "stderr": missing_snapshot.stderr,
+            }
+        ),
+    )
+
 env = dict(
     os.environ,
     LLM_OBSIDIAN_SESSION_RUNTIME="codex",

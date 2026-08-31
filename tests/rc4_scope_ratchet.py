@@ -565,6 +565,13 @@ cleanup, while an unprovable rollback retains the named scratch. The bounded
 repair adds 103 measured lines to the existing admission owner and no new
 production file. The exact candidate is therefore 304 files / 115,860 lines,
 with no speculative headroom.
+
+The exact-target follow-up makes shared Git discovery reject missing paths and
+broken target symlinks before it can select an existing parent repository.
+Light and current Lifecycle public boundaries cover the zero-effect rejection.
+The existing Git adapter grows by six measured lines and no new production
+file. The exact candidate is therefore 304 files / 115,866 lines, with no
+speculative headroom.
 """
 
 from __future__ import annotations
@@ -578,8 +585,8 @@ from pathlib import Path
 SCRIPT_FILE_CEILING = 304
 
 #: Maximum total lines across those files. This is the measured exact candidate
-#: after active-pointer rollback hardening, with zero headroom.
-SCRIPT_LINE_CEILING = 115_860
+#: after exact-target existence hardening, with zero headroom.
+SCRIPT_LINE_CEILING = 115_866
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

@@ -636,6 +636,59 @@ with tempfile.TemporaryDirectory(prefix="external-current-review.") as raw:
     )
     check("current facade permits the current Git root default", defaulted.target is None and defaulted.worktree is None)
 
+    missing_parent = product(base / "products/missing-target-parent", 29)
+    missing_target = missing_parent / "intended-external-product"
+    missing_target_plan = review_plan(
+        base / "missing-target-review-plan.md",
+        desired_outcome="The exact requested external checkout is reviewed.",
+        evidence_id="missing-target-behavior",
+        observable="Only the exact existing target may enter current review.",
+    )
+    captures_before_missing_target = len(captures)
+    scratch_entries_before = set(scratch.iterdir())
+    active_entries_before = set(
+        (vault / ".vault-meta/harness/current-review").glob("*/active.json")
+    )
+    task_review_current._run_review = stop_before_provider
+    for name, value in (
+        ("LLM_OBSIDIAN_SESSION_RUNTIME", "codex"),
+        ("LLM_OBSIDIAN_SESSION_MODEL", "gpt-5.6-sol"),
+        ("LLM_OBSIDIAN_SESSION_EFFORT", "high"),
+    ):
+        os.environ[name] = value
+    try:
+        task_review_runner.run_current_review(
+            missing_target,
+            vault_root=vault,
+            plan_file=missing_target_plan,
+            origin_surface="11111111-1111-4111-8111-111111111111",
+            scratch_root=scratch,
+        )
+    except task_review_runner.TaskReviewError as exc:
+        check(
+            "current review rejects a missing exact target",
+            "does not exist" in str(exc),
+            str(exc),
+        )
+    else:
+        check("current review rejects a missing exact target", False)
+    finally:
+        task_review_current._run_review = original
+        for name, value in previous.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+    check(
+        "missing target rejection precedes owner, scratch, and provider effects",
+        len(captures) == captures_before_missing_target
+        and set(scratch.iterdir()) == scratch_entries_before
+        and set(
+            (vault / ".vault-meta/harness/current-review").glob("*/active.json")
+        )
+        == active_entries_before,
+    )
+
     dirty = product(base / "products/dirty", 3)
     dirty_plan = review_plan(
         base / "dirty-review-plan.md",

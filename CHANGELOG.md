@@ -24,6 +24,9 @@ packages were published for them.
 
 ### Fixed
 
+- Light and current Lifecycle Review now reject a missing exact target or broken
+  target symlink before Git discovery and provider effects, rather than silently
+  reviewing an existing parent repository.
 - Current Lifecycle Review now requires positive behavior evidence bound by
   typed `evidence_kind` and `subject` fields instead of trusting a denylist of
   generic evidence names or manufacturing a circular correctness contract.
@@ -64,12 +67,13 @@ packages were published for them.
   `incomplete` advisory status.
 - The live scripts ratchet moves to the exact measured candidate: six cohesive
   review owners plus the extracted admission owner raise the contour from 296
-  files / 113,215 lines to 304 files / 115,860 lines, including the explicit
+  files / 113,215 lines to 304 files / 115,866 lines, including the explicit
   exhausted-lineage, typed Outcome evidence, scratch-safe same-target
   admission, zero-effect callback recovery, exact plan-byte binding, and scoped
   advisory findings, fallback-gap propagation, frozen owner-scoped plans, and
-  staggered replacement convergence, frozen callback resume, and durable
-  active-pointer rollback with no speculative headroom.
+  staggered replacement convergence, frozen callback resume, durable
+  active-pointer rollback, and exact-target existence validation with no
+  speculative headroom.
 
 ## [2.8.5] - 2026-08-19
 

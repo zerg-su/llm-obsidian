@@ -89,7 +89,13 @@ class GitAdapter:
     def resolve(cls, path: Path | str, runner: Runner = subprocess.run) -> "GitAdapter":
         """Resolve any path inside a non-bare worktree to its exact Git root."""
 
-        candidate = Path(path).expanduser().resolve()
+        supplied = Path(path).expanduser()
+        try:
+            candidate = supplied.resolve(strict=True)
+        except FileNotFoundError as exc:
+            raise GitError(f"review target does not exist: {supplied}") from exc
+        except (OSError, RuntimeError) as exc:
+            raise GitError(f"review target is unavailable: {supplied}") from exc
         cwd = candidate if candidate.is_dir() else candidate.parent
         result = runner(
             ["git", "rev-parse", "--show-toplevel"],
