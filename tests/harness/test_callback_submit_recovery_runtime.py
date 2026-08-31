@@ -349,7 +349,10 @@ while True:
         if str(exc) != "stale operation writer" or time.monotonic() >= bind_deadline:
             raise
         time.sleep(0.01)
-worker.join(timeout=3)
+# The frozen v2.6.3 worker crosses a real subprocess boundary and can take
+# longer than three seconds on a loaded host.  Keep this below the outer
+# fifteen-second subprocess deadline while avoiding a scheduler-speed flake.
+worker.join(timeout=8)
 assert not worker.is_alive()
 exit_code = worker_results[0]
 record = store.read("v263-review-owner", "review-parent-1")
