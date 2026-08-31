@@ -5,8 +5,37 @@ from __future__ import annotations
 import json
 import stat
 from pathlib import Path
+from typing import Mapping
 
 from harness.finalization_ledger import FinalizationLedger, FinalizationLedgerError
+
+
+def current_pivot_scratch(meta: Mapping[str, object]) -> Path | None:
+    """Resolve the current review's existing external scratch authority."""
+
+    if meta.get("lifecycle") != "current-checkout":
+        return None
+    raw = meta.get("runtime_root")
+    if not isinstance(raw, str) or not raw:
+        raise FinalizationLedgerError(
+            "current review pivot scratch authority is invalid"
+        )
+    candidate = Path(raw).expanduser()
+    if not candidate.is_absolute() or candidate.is_symlink():
+        raise FinalizationLedgerError(
+            "current review pivot scratch authority is invalid"
+        )
+    try:
+        resolved = candidate.resolve(strict=True)
+    except OSError as exc:
+        raise FinalizationLedgerError(
+            "current review pivot scratch authority is unavailable"
+        ) from exc
+    if not resolved.is_dir():
+        raise FinalizationLedgerError(
+            "current review pivot scratch authority is invalid"
+        )
+    return resolved
 
 
 def bound_finalization_ledger(

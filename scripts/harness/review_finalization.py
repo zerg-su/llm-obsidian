@@ -35,6 +35,7 @@ from .runtime_sessions import RuntimeSessionManager
 from .store import OperationStore
 from .verification import VerificationError, load_profiles
 from .workflows.structural_pivot import StructuralPivotWorkflow
+from current_review_finalization import current_pivot_scratch
 from .workflows.review_gate import (
     ReviewGateAuthorization,
     authorize_task_finalization,
@@ -211,10 +212,9 @@ def reserve_task_finalization_cycle(
                 review.get("verification_profile_sha256") or ""
             ),
             ledger_root=ledger.root,
+            scratch_root=current_pivot_scratch(meta),
         )
-        runtime = pivot_runtime or RuntimeSessionManager.for_root(
-            vault, store_root=store_root
-        )
+        runtime = pivot_runtime or RuntimeSessionManager.for_root(vault, store_root=store_root)
         try:
             result = workflow.reconcile(
                 snapshot,

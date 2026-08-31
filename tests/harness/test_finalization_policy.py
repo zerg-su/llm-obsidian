@@ -63,8 +63,10 @@ class PivotRuntime:
         self.starts = 0
         self.exits = 0
         self.cleanups = 0
+        self.requests: list[object] = []
 
     def start(self, request: object) -> object:
+        self.requests.append(request)
         record = self.store.read(self.owner, request.spec.operation_id)
         if record.state == "created":
             self.starts += 1
@@ -408,10 +410,13 @@ with tempfile.TemporaryDirectory(prefix="finalization-pivot-reserve.") as raw:
 
 
 # Production wiring: real workflow construction, store, callback, and continuation.
-with tempfile.TemporaryDirectory(prefix="finalization-pivot-wiring.") as raw:
+with (
+    tempfile.TemporaryDirectory(prefix="finalization-pivot-wiring.") as raw,
+    tempfile.TemporaryDirectory(prefix="finalization-pivot-scratch.") as scratch_raw,
+):
     vault = Path(raw)
-    product = vault / "product"
-    product.mkdir()
+    product = vault
+    pivot_scratch = Path(scratch_raw).resolve()
     store_root = vault / ".vault-meta" / "harness"
     lineage = identity(900)
     wired_ledger = FinalizationLedger(
@@ -428,6 +433,8 @@ with tempfile.TemporaryDirectory(prefix="finalization-pivot-wiring.") as raw:
         "task_surface": "11111111-1111-4111-8111-111111111111",
         "approved_plan_sha256": "e" * 64,
         "outcome_contract_sha256": "f" * 64,
+        "lifecycle": "current-checkout",
+        "runtime_root": str(pivot_scratch),
     }
     for number in (1, 2, 3):
         attempt = identity(920 + number)
@@ -484,7 +491,7 @@ with tempfile.TemporaryDirectory(prefix="finalization-pivot-wiring.") as raw:
         round_, ReviewResult("openai-holistic", "approve", ())
     )
     callback = (
-        store_root
+        pivot_scratch
         / "structural-pivots"
         / lineage
         / "callbacks"
@@ -525,6 +532,8 @@ with tempfile.TemporaryDirectory(prefix="finalization-pivot-wiring.") as raw:
         and repeated is not None
         and repeated.cycle.reason == "already-reserved"
         and runtime.starts == 1
+        and len(runtime.requests) == 1
+        and runtime.requests[0].cwd == pivot_scratch
         and runtime.exits == 1
         and runtime.cleanups == 1,
     )

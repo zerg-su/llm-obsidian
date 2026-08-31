@@ -176,6 +176,7 @@ class StructuralPivotWorkflow:
         verification_profile: str,
         verification_profile_sha256: str,
         ledger_root: Path | None = None,
+        scratch_root: Path | None = None,
         fault_observer: Callable[[str], None] | None = None,
     ) -> None:
         if not SHA256.fullmatch(verification_profile_sha256):
@@ -186,11 +187,10 @@ class StructuralPivotWorkflow:
         self.config = config
         self.verification_profile = verification_profile
         self.verification_profile_sha256 = verification_profile_sha256
-        self.ledger_root = (
-            Path(ledger_root).expanduser().resolve()
-            if ledger_root is not None
-            else self.store.root / "finalization-ledger"
-        )
+        self.ledger_root = Path(ledger_root or self.store.root / "finalization-ledger").expanduser().resolve()
+        self.scratch_root = Path(
+            scratch_root or self.store.root
+        ).expanduser().resolve()
         self._fault_observer = fault_observer
 
     def _observe(self, boundary: str) -> None:
@@ -292,7 +292,7 @@ class StructuralPivotWorkflow:
             return StructuralPivotResult("attention", reason=str(exc))
 
     def _pivot_root(self, lineage_id: str) -> Path:
-        return self.store.root / "structural-pivots" / lineage_id
+        return self.scratch_root / "structural-pivots" / lineage_id
 
     @staticmethod
     def _record(value: object) -> OperationRecord:
@@ -396,8 +396,8 @@ class StructuralPivotWorkflow:
         prompt_path = pivot_root / "prompt.md"
         _atomic_publish(prompt_path, prompt)
         return (
-            prompt_path.relative_to(self.store.root).as_posix(),
-            callback_path.relative_to(self.store.root).as_posix(),
+            prompt_path.relative_to(self.scratch_root).as_posix(),
+            callback_path.relative_to(self.scratch_root).as_posix(),
         )
 
     def start(
@@ -438,7 +438,7 @@ class StructuralPivotWorkflow:
                 lane_id=parent.lane_id,
                 run_id=parent.run_id,
                 origin_surface=origin_surface,
-                cwd=self.store.root,
+                cwd=self.scratch_root,
                 prompt_pointer=prompt_pointer,
                 callback_pointer=callback_pointer,
                 placement="workspace",
