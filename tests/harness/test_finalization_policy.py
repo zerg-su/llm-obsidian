@@ -416,7 +416,8 @@ with (
     tempfile.TemporaryDirectory(prefix="finalization-pivot-scratch.") as scratch_raw,
 ):
     vault = Path(raw)
-    product = vault
+    product = vault / "external-product"
+    product.mkdir()
     pivot_scratch = Path(scratch_raw).resolve()
     store_root = vault / ".vault-meta" / "harness"
     lineage = identity(900)
@@ -481,6 +482,9 @@ with (
     records = store.list(lineage)
     parent = next(row for row in records if row.spec.kind == "structural-pivot")
     child = next(row for row in records if row.spec.kind == "review-round")
+    pivot_prompt = (
+        pivot_scratch / "structural-pivots" / lineage / "prompt.md"
+    ).read_text(encoding="utf-8")
     round_ = ReviewRound(
         parent.spec.operation_id,
         child.spec.operation_id,
@@ -538,6 +542,8 @@ with (
         and runtime.starts == 1
         and len(runtime.requests) == 1
         and runtime.requests[0].callback_wake == current_callback_wake
+        and str(config.root / "scripts/harness/review_submit.py") in pivot_prompt
+        and str(product / "scripts/harness/review_submit.py") not in pivot_prompt
         and runtime.requests[0].cwd == pivot_scratch
         and runtime.exits == 1
         and runtime.cleanups == 1,

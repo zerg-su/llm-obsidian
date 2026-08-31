@@ -378,6 +378,10 @@ with tempfile.TemporaryDirectory(prefix="structural-pivot-route.") as raw:
 
 with tempfile.TemporaryDirectory(prefix="structural-pivot-runtime.") as raw:
     state = Path(raw) / "store"
+    product = Path(raw) / "external-product"
+    conflicting_submit = product / "scripts/harness/review_submit.py"
+    conflicting_submit.parent.mkdir(parents=True)
+    conflicting_submit.write_text("raise SystemExit('untrusted')\n", encoding="utf-8")
     store = OperationStore(state)
     runtime = FakeRuntime(store)
     flow = workflow(state)
@@ -387,13 +391,16 @@ with tempfile.TemporaryDirectory(prefix="structural-pivot-runtime.") as raw:
         root_operation_id=owner,
         runtime=runtime,
         origin_surface="11111111-1111-1111-1111-111111111111",
-        worktree=ROOT,
+        worktree=product,
     )
     records = store.list(owner)
     parent = next(row for row in records if row.spec.kind == "structural-pivot")
     child = next(row for row in records if row.spec.kind == "review-round")
     callback_dir = state / "structural-pivots" / owner / "callbacks"
     meta = json.loads((callback_dir / ".review-meta.json").read_text(encoding="utf-8"))
+    prompt = (state / "structural-pivots" / owner / "prompt.md").read_text(
+        encoding="utf-8"
+    )
     check(
         "start uses one registered read-only review-input session and child round",
         started.status == "in-flight"
@@ -405,6 +412,8 @@ with tempfile.TemporaryDirectory(prefix="structural-pivot-runtime.") as raw:
         and meta["run_id"] == child.run_id
         and meta["parent_session_operation_id"] == parent.spec.operation_id
         and meta["axis"] == "openai-holistic"
+        and str(ROOT / "scripts/harness/review_submit.py") in prompt
+        and str(conflicting_submit) not in prompt
         and (callback_dir / ".review-input.json").is_file(),
         started,
     )
@@ -413,7 +422,7 @@ with tempfile.TemporaryDirectory(prefix="structural-pivot-runtime.") as raw:
         root_operation_id=owner,
         runtime=runtime,
         origin_surface="11111111-1111-1111-1111-111111111111",
-        worktree=ROOT,
+        worktree=product,
     )
     check(
         "repeated start observes the same operation without another provider effect",

@@ -367,7 +367,7 @@ class StructuralPivotWorkflow:
         submit = shlex.join(
             (
                 str(Path(sys.executable).resolve()),
-                str(worktree / "scripts/harness/review_submit.py"),
+                str(self.config.root / "scripts/harness/review_submit.py"),
                 "--worktree",
                 str(worktree),
                 "--state-dir",
