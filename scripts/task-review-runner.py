@@ -273,6 +273,7 @@ def run_current_review(
     artifact_root: Path | None = None,
     plan_file: Path | None = None,
     origin_surface: str = "",
+    new_lineage: bool = False,
     scratch_root: Path | None = None,
     runtime_manager: object | None = None,
 ) -> dict[str, Any]:
@@ -292,6 +293,7 @@ def run_current_review(
         artifact_root=artifact_root,
         plan_file=plan_file,
         origin_surface=origin_surface,
+        new_lineage=new_lineage,
         scratch_root=scratch_root,
         runtime_manager=runtime_manager,
         apply_finalizing_recovery=_apply_finalizing_recovery,
@@ -366,6 +368,7 @@ def parser() -> argparse.ArgumentParser:
     current.add_argument("--artifact-root", type=Path)
     current.add_argument("--plan", type=Path)
     current.add_argument("--origin-surface", default="")
+    current.add_argument("--new-lineage", action="store_true")
     plan = sub.add_parser("plan")
     plan.add_argument("--worktree", type=Path, required=True)
     plan.add_argument("--plan", type=Path, required=True)
@@ -432,6 +435,7 @@ def main(
                 artifact_root=args.artifact_root,
                 plan_file=args.plan,
                 origin_surface=args.origin_surface,
+                new_lineage=args.new_lineage,
                 runtime_manager=runtime_manager,
             )
         else:

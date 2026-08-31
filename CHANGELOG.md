@@ -18,6 +18,9 @@ packages were published for them.
   and clean exact-commit Lifecycle Review through coordinator-owned authority,
   immutable scope/lease evidence, and explicit Codex or Claude model/effort
   selection.
+- Explicit `current --new-lineage` authorization can start a separate review
+  task after the prior five-cycle lineage is exhausted and quiescent, while
+  preserving its gate, ledger, and zero-effect ordinary callbacks.
 
 ### Fixed
 
@@ -30,7 +33,8 @@ packages were published for them.
   traceback.
 - The live scripts ratchet moves to the exact measured candidate: six cohesive
   review owners raise the contour from 296 files / 113,215 lines to 302 files /
-  115,078 lines, with no speculative headroom.
+  115,156 lines, including the explicit exhausted-lineage boundary and no
+  speculative headroom.
 
 ## [2.8.5] - 2026-08-19
 

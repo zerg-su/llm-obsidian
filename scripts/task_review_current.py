@@ -319,6 +319,57 @@ def _approved_implementation_enters_release(
     )
 
 
+def _require_new_lineage_source(new_lineage: bool, message: str) -> None:
+    if new_lineage:
+        raise TaskReviewError(message)
+
+
+def _new_lineage_supersedes_active(
+    candidate: Mapping[str, Any],
+    vault: Path,
+    worktree: Path,
+    task_id: str,
+    *,
+    new_lineage: bool,
+    same_policy: bool,
+    status: str,
+    bound_head: str,
+    current_head: str,
+    operation_quiescent: bool,
+) -> bool:
+    if not new_lineage:
+        return False
+    if not same_policy:
+        raise TaskReviewError(
+            "an exhausted current review uses another preset or override"
+        )
+    if status != "changes-requested":
+        raise TaskReviewError(
+            "--new-lineage requires an exhausted changes-requested review"
+        )
+    if not bound_head or bound_head == current_head:
+        raise TaskReviewError(
+            "--new-lineage requires a committed resolution HEAD"
+        )
+    if not operation_quiescent:
+        raise TaskReviewError(
+            "--new-lineage requires quiescent review operations"
+        )
+    from task_review_finalization_attempt import finalization_ledger
+
+    exhausted = finalization_ledger(
+        candidate, vault, task_id, worktree
+    ).snapshot()
+    if (
+        exhausted.get("terminal_disposition")
+        != "finalization-budget-exhausted"
+    ):
+        raise TaskReviewError(
+            "--new-lineage requires an exhausted finalization ledger"
+        )
+    return True
+
+
 def _active_current_review(
     worktree: Path,
     vault: Path,
@@ -332,8 +383,13 @@ def _active_current_review(
     plan_head_sha: str,
     scratch_root: Path | None,
     artifact_root: Path | None,
+    new_lineage: bool,
 ) -> dict[str, Any] | None:
     if not active_path.is_file() or active_path.is_symlink():
+        _require_new_lineage_source(
+            new_lineage,
+            "--new-lineage requires an exhausted active current review",
+        )
         return None
     candidate = _read_json(active_path, "current review state")
     if (
@@ -427,6 +483,18 @@ def _active_current_review(
             vault, task_id, gate_state
         )
         quiescent = operation_quiescent or zero_effect_quiescent
+        terminal_stale = _new_lineage_supersedes_active(
+            candidate,
+            vault,
+            worktree,
+            task_id,
+            new_lineage=new_lineage,
+            same_policy=same_policy,
+            status=status,
+            bound_head=bound_head,
+            current_head=current_head,
+            operation_quiescent=operation_quiescent,
+        )
         if (
             _zero_effect_attention_shape(gate_state)
             and not quiescent
@@ -446,7 +514,7 @@ def _active_current_review(
                 requested_policy,
                 allow_boundary_rebind=True,
             )
-        terminal_stale = approved_stale or skipped_stale or (
+        terminal_stale = terminal_stale or approved_stale or skipped_stale or (
             status == "stopped"
             and _stopped_release_enters_implementation(
                 stored_policy,
@@ -482,6 +550,10 @@ def _active_current_review(
             raise TaskReviewError(
                 "current review ownership exists before gate materialization"
             )
+        _require_new_lineage_source(
+            new_lineage,
+            "--new-lineage requires an exhausted material review",
+        )
         terminal_stale = True
     if terminal_stale:
         return None
@@ -627,6 +699,7 @@ def run_current_review(
     artifact_root: Path | None = None,
     plan_file: Path | None = None,
     origin_surface: str = "",
+    new_lineage: bool = False,
     scratch_root: Path | None = None,
     runtime_manager: object | None = None,
     apply_finalizing_recovery: Callable[..., dict[str, Any]],
@@ -715,6 +788,7 @@ def run_current_review(
         plan_head_sha=plan_head_sha,
         scratch_root=scratch_root,
         artifact_root=artifact_root,
+        new_lineage=new_lineage,
     )
 
     if meta is None:

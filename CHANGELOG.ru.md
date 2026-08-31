@@ -24,6 +24,9 @@
   текущего runtime и Lifecycle Review чистого точного commit: coordinator
   владеет authority, scope/lease evidence неизменяемы, а в Codex и Claude можно
   явно выбрать model/effort.
+- Явная авторизация `current --new-lineage` запускает отдельную review-задачу
+  после исчерпания и quiescence прежней пятицикловой lineage, сохраняя её gate,
+  ledger и zero-effect обычных callback'ов.
 
 ### Исправлено
 
@@ -35,7 +38,8 @@
   неверных типов enum/schema вместо traceback.
 - Live ratchet scripts сдвинут к точно измеренному кандидату: шесть cohesive
   review-owner'ов увеличивают contour с 296 файлов / 113 215 строк до 302 файлов
-  / 115 078 строк без спекулятивного запаса.
+  / 115 156 строк с explicit exhausted-lineage boundary и без спекулятивного
+  запаса.
 
 ## [2.8.5] — 2026-08-19
 

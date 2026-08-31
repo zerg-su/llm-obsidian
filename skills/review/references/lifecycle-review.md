@@ -36,6 +36,13 @@ into an external target. For concurrent work, recommend a user-created dedicated
 branch/worktree before review. Modify-and-revert between observations cannot be
 proven; the observed snapshot is authority.
 
+The fifth material failure exhausts that lineage; ordinary callbacks remain
+zero-effect afterward. Once the user explicitly authorizes a separate review
+task, `current --new-lineage` may replace only the active pointer of an
+exhausted `changes-requested` review whose operations are quiescent and whose
+fix is a clean committed new HEAD. The old gate and ledger remain immutable.
+The one-shot flag is never copied into generated callbacks.
+
 ## Presets and routing
 
 - Simple: one holistic session on the selected model.

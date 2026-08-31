@@ -496,6 +496,14 @@ also bind structural-pivot submit authority to the coordinator, isolate its
 scratch, reject escaping changed symlinks, and normalize malformed Light Review
 enum types. The measured candidate is exactly 302 files / 115,078 lines; both
 ceilings move to those values with no speculative headroom.
+
+The explicit exhausted-current-lineage boundary and its branch-complexity
+extraction add exactly 78 lines to the existing current-review coordinator and
+CLI facade. They require a changed committed HEAD, the same review policy,
+quiescent old operations, and a validated ``finalization-budget-exhausted``
+ledger before replacing only the active pointer; the old gate and ledger remain
+immutable. No production owner is added, so the measured candidate is exactly
+302 files / 115,156 lines with no speculative headroom.
 """
 
 from __future__ import annotations
@@ -509,9 +517,9 @@ from pathlib import Path
 SCRIPT_FILE_CEILING = 302
 
 #: Maximum total lines across those files. This is the measured exact candidate
-#: after the escaping-symlink and malformed-enum review fixes, with zero
-#: headroom.
-SCRIPT_LINE_CEILING = 115_078
+#: after the escaping-symlink, malformed-enum, and exhausted-lineage review
+#: fixes, with zero headroom.
+SCRIPT_LINE_CEILING = 115_156
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

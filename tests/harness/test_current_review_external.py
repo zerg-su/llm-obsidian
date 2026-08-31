@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import uuid
 from pathlib import Path
 
 
@@ -18,6 +19,9 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import task_review_current  # noqa: E402
+from harness.contracts import OperationSpec, RuntimeRoute  # noqa: E402
+from harness.finalization_ledger import FinalizationLedger  # noqa: E402
+from harness.store import OperationStore  # noqa: E402
 from review_target import resolve_target  # noqa: E402
 from outcome_contract import extract_from_bytes  # noqa: E402
 from task_review_context import _context  # noqa: E402
@@ -303,6 +307,92 @@ with tempfile.TemporaryDirectory(prefix="external-current-review.") as raw:
         and rebound_inputs["outcome-contract.json"]["sha256"]
         == rebound_contract.sha256,
     )
+
+    old_task_id = str(rebound_meta["task_id"])
+    ledger = FinalizationLedger(
+        vault / ".vault-meta/harness/finalization-ledger",
+        lineage_id=old_task_id,
+        origin_task_id=old_task_id,
+        plan_sha256=str(first_meta["approved_plan_sha256"]),
+        outcome_contract_sha256=str(first_meta["outcome_contract_sha256"]),
+    )
+    for number in range(1, 6):
+        attempt_id = str(uuid.UUID(int=number))
+        ledger.reserve(
+            attempt_id=attempt_id,
+            exact_head=f"{number:040x}",
+            task_id=old_task_id,
+            worktree=str(first),
+            provider_policy={
+                "routes": ["finalization-primary"],
+                "reason": "explicit-single-model",
+            },
+        )
+        ledger.record_terminal(
+            attempt_id=attempt_id,
+            terminal_result="changes-requested",
+        )
+    store = OperationStore(vault / ".vault-meta/harness")
+    operation_id = str(uuid.UUID(int=10))
+    store.create(
+        OperationSpec(
+            operation_id,
+            "a" * 64,
+            "simple-review-holistic",
+            old_task_id,
+            RuntimeRoute(
+                "codex",
+                "gpt-5.6-sol",
+                "xhigh",
+                "reviewer-callback",
+                "b" * 64,
+            ),
+            "packets/review/manifest.json",
+            "scoped",
+        ),
+        lane_id="c" * 32,
+        run_id="d" * 32,
+    )
+    for state in (
+        "preflight",
+        "starting",
+        "running",
+        "finalizing",
+        "exiting",
+        "complete",
+    ):
+        store.transition(old_task_id, operation_id, state)
+    old_gate_bytes = gate_path.read_bytes()
+    old_ledger_bytes = ledger.path.read_bytes()
+    task_review_current._run_review = stop_before_provider
+    try:
+        same_lineage = task_review_runner.run_current_review(
+            first,
+            vault_root=vault,
+            base=review_base,
+            origin_surface="11111111-1111-4111-8111-111111111111",
+            scratch_root=scratch,
+        )
+        fresh_lineage = task_review_runner.run_current_review(
+            first,
+            vault_root=vault,
+            base=review_base,
+            new_lineage=True,
+            origin_surface="11111111-1111-4111-8111-111111111111",
+            scratch_root=scratch,
+        )
+    finally:
+        task_review_current._run_review = original
+    check(
+        "fresh current review requires an explicit exhausted-lineage opt-in",
+        same_lineage["task_id"] == old_task_id
+        and fresh_lineage["task_id"] != old_task_id,
+    )
+    check(
+        "fresh current review preserves exhausted lineage evidence",
+        gate_path.read_bytes() == old_gate_bytes
+        and ledger.path.read_bytes() == old_ledger_bytes,
+    )
     check("Harness state is coordinator-owned", captured_vault == vault and captured_target == first)
     check("scratch remains outside coordinator and target", first_runtime.is_relative_to(scratch) and not first_runtime.is_relative_to(first) and not first_runtime.is_relative_to(vault))
     check("external target receives no review metadata", not (first / ".task-meta.json").exists() and not (first / ".vault-meta").exists())
@@ -318,7 +408,11 @@ with tempfile.TemporaryDirectory(prefix="external-current-review.") as raw:
     wake = _callback_wake(first_meta, vault, first)
     check("callback binds the exact coordinator", f"--vault-root {vault}" in wake, wake)
     check("callback binds the exact target", f"--worktree {first}" in wake, wake)
-    check("callback retains the exact review base", f"--base {review_base}" in wake, wake)
+    check(
+        "callback retains the exact review base without repeating fresh authorization",
+        f"--base {review_base}" in wake and "--new-lineage" not in wake,
+        wake,
+    )
 
     public = task_review_runner.parser().parse_args(
         [
@@ -329,6 +423,7 @@ with tempfile.TemporaryDirectory(prefix="external-current-review.") as raw:
             str(vault),
             "--base",
             review_base,
+            "--new-lineage",
         ]
     )
     legacy = task_review_runner.parser().parse_args(
@@ -336,7 +431,9 @@ with tempfile.TemporaryDirectory(prefix="external-current-review.") as raw:
     )
     check(
         "public target and legacy worktree forms resolve identically",
-        public.target == legacy.worktree == first and public.base == review_base,
+        public.target == legacy.worktree == first
+        and public.base == review_base
+        and public.new_lineage,
     )
     defaulted = task_review_runner.parser().parse_args(
         ["current", "--vault-root", str(vault)]
