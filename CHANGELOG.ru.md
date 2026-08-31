@@ -42,7 +42,8 @@
 - Immutable verification receipt получил сфокусированный профиль
   `implementation-full`: exact HEAD, полный `make test`, `git diff --check` и
   финальный clean status без привязки implementation review к посторонним
-  release checks.
+  release checks. Локальные reviewer-readable bundle хранятся как ignored
+  derived state в `.vault-meta/current-review-evidence/`.
 - Structural-pivot callback и submit сохраняют lineage current-review,
   authority coordinator'а и изолированный scratch, даже если product находится
   в другом репозитории.

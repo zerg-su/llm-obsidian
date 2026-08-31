@@ -36,6 +36,8 @@ packages were published for them.
 - Immutable verification receipts now expose a focused `implementation-full`
   profile: exact HEAD, complete `make test`, `git diff --check`, and final clean
   status, without coupling implementation review to unrelated release checks.
+  Its local reviewer-readable bundles are ignored derived state under
+  `.vault-meta/current-review-evidence/`.
 - Structural-pivot callbacks and submit commands retain current-review lineage,
   coordinator authority, and isolated scratch even when the reviewed product is
   a different repository.

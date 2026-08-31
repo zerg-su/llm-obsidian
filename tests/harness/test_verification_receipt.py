@@ -19,6 +19,15 @@ import verification_receipt as receipts  # noqa: E402
 import verification_staging as staging_module  # noqa: E402
 
 
+assert subprocess.run(
+    ["git", "check-ignore", ".vault-meta/current-review-evidence/probe"],
+    cwd=ROOT,
+    check=False,
+    capture_output=True,
+).returncode == 0
+print("OK   current-review verification bundles are local derived state")
+
+
 PASS_ATTEMPT = "11111111-1111-4111-8111-111111111111"
 FAIL_ATTEMPT = "22222222-2222-4222-8222-222222222222"
 ISOLATED_ATTEMPT = "33333333-3333-4333-8333-333333333333"
