@@ -35,7 +35,10 @@ packages were published for them.
   concrete plan instead of asking for `--plan`. Context materialization reads
   the exact plan bytes before owner allocation, publishes their digest-named
   snapshot inside external owner scratch, and binds that snapshot to the full
-  hash, Outcome Contract, and reviewer packet. A late overlapping
+  hash, Outcome Contract, and reviewer packet. Implicit callback resume now
+  validates and reads that frozen snapshot even when the mutable source plan was
+  changed or removed; only an explicit changed-HEAD amendment reopens source
+  bytes. A late overlapping
   `--new-lineage` caller now joins the already-published matching replacement
   instead of rejecting it or creating another provider effect.
 - Clean-machine setup no longer installs an unused PyYAML package or mutates
@@ -57,11 +60,12 @@ packages were published for them.
   `incomplete` advisory status.
 - The live scripts ratchet moves to the exact measured candidate: six cohesive
   review owners plus the extracted admission owner raise the contour from 296
-  files / 113,215 lines to 304 files / 115,755 lines, including the explicit
+  files / 113,215 lines to 304 files / 115,757 lines, including the explicit
   exhausted-lineage, typed Outcome evidence, scratch-safe same-target
   admission, zero-effect callback recovery, exact plan-byte binding, and scoped
   advisory findings, fallback-gap propagation, frozen owner-scoped plans, and
-  staggered replacement convergence with no speculative headroom.
+  staggered replacement convergence and frozen callback resume with no
+  speculative headroom.
 
 ## [2.8.5] - 2026-08-19
 

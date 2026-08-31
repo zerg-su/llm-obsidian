@@ -50,6 +50,7 @@ from task_review_context import (
     _zero_effect_attention_shape,
     _current_runtime_root,
     _gate_root,
+    _review_plan_authority,
 )
 from task_review_identity import (
     _current_review_active_path,
@@ -554,9 +555,10 @@ def _resume_current_review(
         gate_status = str(gate_state.get("status") or "")
         raw_context = gate_state.get("context")
         gate_context = raw_context if isinstance(raw_context, Mapping) else None
-    stored_plan = Path(str(meta.get("plan_file") or "")).resolve()
     effective_plan = (
-        plan_file.expanduser().resolve() if plan_file is not None else stored_plan
+        plan_file.expanduser().resolve()
+        if plan_file is not None
+        else _review_plan_authority(meta, worktree)[0]
     )
     plan_sha256, outcome_sha256 = current_plan_identity(effective_plan)
     raw_lease = meta.get("review_lease")

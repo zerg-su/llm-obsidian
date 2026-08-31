@@ -551,6 +551,11 @@ winner. Fresh-lineage policy moves out of the oversized lifecycle coordinator
 into one cohesive owner; the measured candidate adds one file and 42 net lines.
 The exact candidate is therefore 304 files / 115,755 lines, with no speculative
 headroom.
+
+The exhausted-lineage follow-up makes implicit implementation callbacks read
+the already-confined frozen plan snapshot instead of reopening a mutable source
+plan. It reuses the context authority validator, adds no file, and moves the
+exact measured candidate by two lines to 304 files / 115,757 lines.
 """
 
 from __future__ import annotations
@@ -564,8 +569,8 @@ from pathlib import Path
 SCRIPT_FILE_CEILING = 304
 
 #: Maximum total lines across those files. This is the measured exact candidate
-#: after frozen plan ownership and late-lineage convergence, with zero headroom.
-SCRIPT_LINE_CEILING = 115_755
+#: after frozen plan callback resume, with zero headroom.
+SCRIPT_LINE_CEILING = 115_757
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

@@ -41,7 +41,10 @@
   concrete plan предшественника и не запрашивает `--plan`. Exact bytes плана
   захватываются до allocation owner'а, публикуются как digest-named snapshot
   во внешнем owner scratch и связываются с full hash, Outcome Contract и
-  reviewer packet. Поздний конкурентный `--new-lineage` теперь присоединяется
+  reviewer packet. Implicit callback-resume теперь валидирует и читает этот
+  frozen snapshot даже после изменения или удаления mutable source plan;
+  source bytes повторно открываются только для явного changed-HEAD amendment.
+  Поздний конкурентный `--new-lineage` теперь присоединяется
   к уже опубликованному совпадающему replacement без второго provider effect.
 - Clean-machine setup больше не устанавливает неиспользуемый PyYAML и не
   изменяет host Python/network state без consumer'а в репозитории.
@@ -61,11 +64,11 @@
   child result и принудительно давать advisory-статус `incomplete`.
 - Live ratchet scripts сдвинут к точно измеренному кандидату: шесть cohesive
   review-owner'ов и выделенный admission owner увеличивают contour с 296 файлов
-  / 113 215 строк до 304 файлов / 115 755 строк с explicit exhausted-lineage,
+  / 113 215 строк до 304 файлов / 115 757 строк с explicit exhausted-lineage,
   typed Outcome evidence, scratch-safe same-target admission, zero-effect
   callback recovery, exact plan-byte binding, scoped advisory findings и
   propagation fallback gaps, frozen owner-scoped plans и staggered replacement
-  convergence без спекулятивного запаса.
+  convergence и frozen callback resume без спекулятивного запаса.
 
 ## [2.8.5] — 2026-08-19
 

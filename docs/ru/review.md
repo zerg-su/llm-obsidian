@@ -54,7 +54,9 @@ Exact bytes plan захватываются до allocation UUID/owner, зате
 digest-named snapshot во внешнем owner scratch. Full plan hash, Outcome
 Contract и reviewer ContextPacket читают этот snapshot, поэтому изменение
 исходного plan после публикации owner не оставляет orphan scratch и не меняет
-review boundary.
+review boundary. Implicit callback-resume также строго валидирует и читает этот
+snapshot, даже если исходный plan изменён или удалён; mutable source снова
+читается только для явно переданного changed-HEAD amendment.
 Concurrent-запуски одной цели сериализуются и получают task ID победителя.
 Поздний `--new-lineage`, увидевший уже опубликованный replacement, также
 присоединяется к нему, но только если target, policy, plan identity и exhausted

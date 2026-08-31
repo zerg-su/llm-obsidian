@@ -445,13 +445,18 @@ with tempfile.TemporaryDirectory(prefix="external-current-review.") as raw:
     old_ledger_bytes = ledger.path.read_bytes()
     task_review_current._run_review = stop_before_provider
     try:
-        same_lineage = task_review_runner.run_current_review(
-            first,
-            vault_root=vault,
-            base=review_base,
-            origin_surface="11111111-1111-4111-8111-111111111111",
-            scratch_root=scratch,
-        )
+        amended_plan_bytes = amended_plan.read_bytes()
+        amended_plan.unlink()
+        try:
+            same_lineage = task_review_runner.run_current_review(
+                first,
+                vault_root=vault,
+                base=review_base,
+                origin_surface="11111111-1111-4111-8111-111111111111",
+                scratch_root=scratch,
+            )
+        finally:
+            amended_plan.write_bytes(amended_plan_bytes)
         fresh_lineage = task_review_runner.run_current_review(
             first,
             vault_root=vault,
@@ -467,6 +472,10 @@ with tempfile.TemporaryDirectory(prefix="external-current-review.") as raw:
         "fresh current review requires an explicit exhausted-lineage opt-in",
         same_lineage["task_id"] == old_task_id
         and fresh_lineage["task_id"] != old_task_id,
+    )
+    check(
+        "implementation callback resumes from frozen plan after source removal",
+        same_lineage["task_id"] == old_task_id,
     )
     check(
         "fresh current review preserves exhausted lineage evidence",
