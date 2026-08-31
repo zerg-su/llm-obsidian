@@ -10,6 +10,28 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [Unreleased]
+
+### Added
+
+- Generic external Git targets now support advisory same-runtime Light Review
+  and clean exact-commit Lifecycle Review through coordinator-owned authority,
+  immutable scope/lease evidence, and explicit Codex or Claude model/effort
+  selection.
+
+### Fixed
+
+- Structural-pivot callbacks and submit commands retain current-review lineage,
+  coordinator authority, and isolated scratch even when the reviewed product is
+  a different repository.
+- Light Review rejects changed symlinks that resolve outside the target, tells
+  both native reviewers never to dereference escaping links, and returns typed
+  validation errors for malformed enum/schema field types instead of a
+  traceback.
+- The live scripts ratchet moves to the exact measured candidate: six cohesive
+  review owners raise the contour from 296 files / 113,215 lines to 302 files /
+  115,078 lines, with no speculative headroom.
+
 ## [2.8.5] - 2026-08-19
 
 ### Fixed

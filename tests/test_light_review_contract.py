@@ -176,6 +176,26 @@ rejected("path scope mismatch is rejected", lambda value: value["scope"].__setit
 rejected("untracked scope mismatch is rejected", lambda value: value["scope"].__setitem__("included_untracked", True))
 rejected("requested verification cannot disappear behind a success status", lambda value: value.__setitem__("verification", []))
 
+malformed_enum_values = ([], {}, True, None, 7)
+enum_mutations = (
+    ("result status", lambda value, malformed: value.__setitem__("status", malformed)),
+    ("finding section", lambda value, malformed: value["findings"][0].__setitem__("section", malformed)),
+    ("finding severity", lambda value, malformed: value["findings"][0].__setitem__("severity", malformed)),
+    ("section name", lambda value, malformed: value["sections"][0].__setitem__("name", malformed)),
+    ("section status", lambda value, malformed: value["sections"][0].__setitem__("status", malformed)),
+    ("verification status", lambda value, malformed: value["verification"][0].__setitem__("status", malformed)),
+)
+for field_label, mutate in enum_mutations:
+    for malformed in malformed_enum_values:
+        rejected(
+            f"{field_label} rejects malformed {type(malformed).__name__}",
+            lambda value, mutate=mutate, malformed=malformed: mutate(value, malformed),
+        )
+rejected(
+    "boolean schema versions are not integer schema versions",
+    lambda value: value.__setitem__("schema_version", True),
+)
+
 no_verify = copy.deepcopy(payload)
 no_verify["verification"] = []
 validated_no_verify = validate_light_review(
@@ -232,5 +252,33 @@ with tempfile.TemporaryDirectory(prefix="light-review-contract.") as raw:
         check=False,
     )
     check("Light Review CLI binds the canonical snapshot and verify request", cli.returncode == 0)
+
+    malformed_cli_payload = copy.deepcopy(payload)
+    malformed_cli_payload["verification"][0]["status"] = []
+    malformed_cli = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts/light_review_contract.py"),
+            "--snapshot-file",
+            str(snapshot_file),
+            "--runtime",
+            terra["runtime"],
+            "--model",
+            terra["model"],
+            "--effort",
+            terra["effort"],
+            "--verify",
+        ],
+        input=json.dumps(malformed_cli_payload),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    check(
+        "malformed enum types return the typed CLI rejection without a traceback",
+        malformed_cli.returncode == 3
+        and malformed_cli.stderr.startswith("light-review-contract:")
+        and "Traceback" not in malformed_cli.stderr,
+    )
 
 print("\nAll Light Review contract tests passed.")

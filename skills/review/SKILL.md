@@ -14,9 +14,9 @@ bypass.
 Choose one mode and read its reference completely before acting:
 
 - `review --light`: one same-runtime native subagent, advisory only. Read
-  [light-review.md](references/light-review.md).
+  [light-review.md](references/light-review.md). <!-- context:conditional -->
 - `review`, `review --deep`, or explicit `review --full`: approval-capable
-  Lifecycle Review. Read [lifecycle-review.md](references/lifecycle-review.md).
+  Lifecycle Review. Read [lifecycle-review.md](references/lifecycle-review.md). <!-- context:conditional -->
 
 Never silently substitute the other mode.
 

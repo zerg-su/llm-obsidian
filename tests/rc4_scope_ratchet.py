@@ -484,6 +484,18 @@ existing runtime continuation classifier. A footerless transient numbered
 choice remains unknown, and the real editor must stay stable for a bounded
 window before first delivery. No production file is added; the live ceiling is
 pinned to exactly 296 files / 113,215 lines with no speculative headroom.
+
+The generic review-target lifecycle adds six cohesive production owners:
+``current_review_finalization.py``, ``current_review_lease.py``,
+``current_review_scope.py``, ``light_review_contract.py``,
+``review_coordinator.py``, and ``review_target.py``. They separate exact-range
+scope, clean-target leases, finalization lineage, native advisory validation,
+coordinator authority, and Git target observation instead of concentrating
+those responsibilities in the existing task runner. The accepted review fixes
+also bind structural-pivot submit authority to the coordinator, isolate its
+scratch, reject escaping changed symlinks, and normalize malformed Light Review
+enum types. The measured candidate is exactly 302 files / 115,078 lines; both
+ceilings move to those values with no speculative headroom.
 """
 
 from __future__ import annotations
@@ -491,25 +503,15 @@ from __future__ import annotations
 from pathlib import Path
 
 
-#: Maximum tracked Python files under ``scripts/`` for the 2.8.5 candidate.
-#: Architecture Workflow v1 adds exactly the three production scripts its
-#: approved plan names: ``architecture_paths.py`` (the confined path/collision
-#: validator both carriers call), ``architecture_workflow_pressure.py`` and
-#: ``architecture_workflow_audit.py`` (the release-owned behavioral evidence
-#: runner and validator, kept out of the frozen legacy eval framework). The
-#: file ceiling therefore moves by exactly three.
-SCRIPT_FILE_CEILING = 296
+#: Maximum tracked Python files under ``scripts/`` for the generic review
+#: target candidate. The six new owners and their boundaries are justified in
+#: the module history above.
+SCRIPT_FILE_CEILING = 302
 
-#: Maximum total lines across those files for the 2.8.5 lifecycle candidate.
-#: The line ceiling moves to the measured candidate with zero headroom: those
-#: three modules plus the shared artifact-contract wiring in the existing
-#: carriers, the RC4 governing-source catalogue projection, the registered
-#: review fix-delta evidence exclusion, and the authorized-continuation
-#: failed-receipt attention handoff with its applied review findings. The
-#: accepted-callback archive adds the exact 17-line directory-fsync boundary
-#: required by the final 2.8.2 review plus one measured recovery branch line
-#: that re-establishes both barriers after an interrupted mutation.
-SCRIPT_LINE_CEILING = 113_215
+#: Maximum total lines across those files. This is the measured exact candidate
+#: after the escaping-symlink and malformed-enum review fixes, with zero
+#: headroom.
+SCRIPT_LINE_CEILING = 115_078
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

@@ -16,6 +16,27 @@
 внутренними контрольными точками и вошли в следующие публичные релизы; тегов и
 пакетов с этими номерами не выпускалось.
 
+## [Не выпущено]
+
+### Добавлено
+
+- Для внешних Git-репозиториев появились advisory Light Review на модели
+  текущего runtime и Lifecycle Review чистого точного commit: coordinator
+  владеет authority, scope/lease evidence неизменяемы, а в Codex и Claude можно
+  явно выбрать model/effort.
+
+### Исправлено
+
+- Structural-pivot callback и submit сохраняют lineage current-review,
+  authority coordinator'а и изолированный scratch, даже если product находится
+  в другом репозитории.
+- Light Review отклоняет changed symlink, ведущий за пределы target, запрещает
+  обоим native reviewer'ам dereference таких ссылок и возвращает typed error для
+  неверных типов enum/schema вместо traceback.
+- Live ratchet scripts сдвинут к точно измеренному кандидату: шесть cohesive
+  review-owner'ов увеличивают contour с 296 файлов / 113 215 строк до 302 файлов
+  / 115 078 строк без спекулятивного запаса.
+
 ## [2.8.5] — 2026-08-19
 
 ### Исправлено

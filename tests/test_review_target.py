@@ -197,4 +197,51 @@ with tempfile.TemporaryDirectory(prefix="review-target-test.") as raw:
         repr(whitespace_scoped),
     )
 
+    outside = Path(raw) / "outside-secret.txt"
+    outside.write_text("must stay outside provider context\n", encoding="utf-8")
+
+    tracked_link_repo = Path(raw) / "tracked-link-product"
+    tracked_link_repo.mkdir()
+    git(tracked_link_repo, "init", "-b", "main")
+    git(tracked_link_repo, "config", "user.email", "review@example.invalid")
+    git(tracked_link_repo, "config", "user.name", "Review Target Symlink Test")
+    (tracked_link_repo / "review-me").write_text("safe baseline\n", encoding="utf-8")
+    git(tracked_link_repo, "add", "review-me")
+    git(tracked_link_repo, "commit", "-m", "tracked link baseline")
+    tracked_link_base = git(tracked_link_repo, "rev-parse", "HEAD")
+    (tracked_link_repo / "review-me").unlink()
+    (tracked_link_repo / "review-me").symlink_to(outside)
+    git(tracked_link_repo, "add", "review-me")
+    git(tracked_link_repo, "commit", "-m", "replace file with absolute link")
+    try:
+        snapshot_light(resolve_target(tracked_link_repo), base=tracked_link_base)
+    except ReviewTargetError as exc:
+        check(
+            "tracked changed symlinks cannot escape the review target",
+            "symlink escapes" in str(exc),
+            str(exc),
+        )
+    else:
+        check("tracked changed symlinks cannot escape the review target", False)
+
+    untracked_link_repo = Path(raw) / "untracked-link-product"
+    untracked_link_repo.mkdir()
+    git(untracked_link_repo, "init", "-b", "main")
+    git(untracked_link_repo, "config", "user.email", "review@example.invalid")
+    git(untracked_link_repo, "config", "user.name", "Review Target Symlink Test")
+    (untracked_link_repo / "safe.txt").write_text("baseline\n", encoding="utf-8")
+    git(untracked_link_repo, "add", "safe.txt")
+    git(untracked_link_repo, "commit", "-m", "untracked link baseline")
+    (untracked_link_repo / "review-me").symlink_to("../outside-secret.txt")
+    try:
+        snapshot_light(resolve_target(untracked_link_repo), include_untracked=True)
+    except ReviewTargetError as exc:
+        check(
+            "explicit untracked symlinks cannot escape the review target",
+            "symlink escapes" in str(exc),
+            str(exc),
+        )
+    else:
+        check("explicit untracked symlinks cannot escape the review target", False)
+
 print("\nAll review target tests passed.")

@@ -26,11 +26,20 @@ frontmatter = claude_agent.split("---", 2)[1]
 check("Claude Light agent inherits its model", "model: inherit" in frontmatter)
 check("Claude Light agent has bounded read-only inspection tools", all(tool in frontmatter for tool in ("Read", "Grep", "Glob", "Bash")))
 check("Claude Light agent cannot delegate", "Agent" not in frontmatter and "Skill" not in frontmatter)
+check(
+    "Claude Light agent never dereferences escaping changed symlinks",
+    "Never dereference a changed" in claude_agent and "exact target root" in claude_agent,
+)
 
 codex_agent = tomllib.loads((ROOT / ".codex/agents/light-reviewer.toml").read_text(encoding="utf-8"))
 check("Codex Light agent is read-only and non-interactive", codex_agent["sandbox_mode"] == "read-only" and codex_agent["approval_policy"] == "never")
 check("Codex Light agent inherits model and effort", "model" not in codex_agent and "model_reasoning_effort" not in codex_agent)
 check("Codex Light agent disables nested capabilities", codex_agent["features"] == {"apps": False, "multi_agent": False, "memories": False, "hooks": False})
+check(
+    "Codex Light agent never dereferences escaping changed symlinks",
+    "Never dereference a changed" in codex_agent["developer_instructions"]
+    and "exact target root" in codex_agent["developer_instructions"],
+)
 
 plugin = json.loads((ROOT / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
 check("Claude plugin registers both bounded agents", plugin["agents"] == ["./agents/daily-summarizer.md", "./agents/light-reviewer.md"])

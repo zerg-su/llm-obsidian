@@ -13,6 +13,9 @@ one private temporary directory outside the target, and build `snapshot.json`
 there with `python3 "$TOOL_ROOT/scripts/review_target.py" light`, passing the
 requested target/base/path/include-untracked flags exactly. Stop on invalid
 Git/base/scope, and remove the temporary directory after validation.
+Snapshot admission rejects changed symlinks that resolve outside the target.
+Treat every remaining changed symlink as link metadata only and never dereference
+it outside the exact target root.
 
 Resolve the child route with:
 

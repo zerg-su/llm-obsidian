@@ -194,6 +194,32 @@ def _untracked_digest(root: Path, paths: tuple[str, ...]) -> str:
     return digest.hexdigest()
 
 
+def _reject_escaping_symlinks(root: Path, paths: tuple[str, ...]) -> None:
+    target_root = root.resolve()
+    for relative in paths:
+        candidate = root / relative
+        try:
+            mode = candidate.lstat().st_mode
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            raise ReviewTargetError(
+                f"changed review path is unavailable: {relative}"
+            ) from exc
+        if not stat.S_ISLNK(mode):
+            continue
+        try:
+            resolved = candidate.resolve(strict=False)
+        except (OSError, RuntimeError) as exc:
+            raise ReviewTargetError(
+                f"changed review symlink is invalid: {relative}"
+            ) from exc
+        if resolved != target_root and target_root not in resolved.parents:
+            raise ReviewTargetError(
+                f"changed review symlink escapes target: {relative}"
+            )
+
+
 def snapshot_light(
     target: ReviewTarget,
     *,
@@ -233,6 +259,10 @@ def snapshot_light(
         raise ReviewTargetError(f"review target snapshot failed: {exc}") from exc
 
     changed = tuple(sorted(set((*committed_paths, *staged_paths, *worktree_paths))))
+    _reject_escaping_symlinks(
+        target.root,
+        tuple(sorted(set((*changed, *untracked)))),
+    )
     components = {
         "target_key": target.target_key,
         "head": head,

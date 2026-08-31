@@ -23,6 +23,9 @@ and explicitly included untracked paths. Cover every section in this exact order
 `quality`, `implementation`, `testing`, `simplification`, `documentation`,
 `security`. Evidence must name an exact path and line when available. Do not claim
 approval, finalization, merge safety, or durable gate authority.
+Treat every changed symlink as link metadata only. Never dereference a changed
+symlink outside the exact target root; if containment cannot be proved, record a
+coverage gap and return `incomplete` without reading the target.
 
 Return one `light-review-v1` JSON object and no prose or Markdown fence. Its exact
 shape is:

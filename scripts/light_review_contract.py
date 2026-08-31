@@ -51,6 +51,12 @@ def _text(value: object, label: str, *, allow_empty: bool = False) -> str:
     return value
 
 
+def _enum(value: object, choices: set[str] | tuple[str, ...], label: str) -> str:
+    if not isinstance(value, str) or value not in choices:
+        raise LightReviewError(f"{label} is invalid")
+    return value
+
+
 def _strings(value: object, label: str, *, limit: int = 100) -> list[str]:
     if not isinstance(value, list) or len(value) > limit:
         raise LightReviewError(f"{label} must be a bounded array")
@@ -108,9 +114,13 @@ def _verification_incomplete(
         _exact(item, {"command", "status", "detail"}, "Light Review verification item")
         _text(item["command"], "Light Review verification command")
         _text(item["detail"], "Light Review verification detail", allow_empty=True)
-        if item["status"] not in VERIFY_STATUSES:
-            raise LightReviewError("Light Review verification status is invalid")
-        statuses.append(str(item["status"]))
+        statuses.append(
+            _enum(
+                item["status"],
+                VERIFY_STATUSES,
+                "Light Review verification status",
+            )
+        )
     if "not-run" in statuses and not coverage_gaps:
         raise LightReviewError(
             "Light Review not-run verification requires a coverage gap"
@@ -145,14 +155,17 @@ def validate_light_review(
         },
         "Light Review result",
     )
-    if result["schema_version"] != 1 or result["kind"] != "light-review":
+    if (
+        type(result["schema_version"]) is not int
+        or result["schema_version"] != 1
+        or not isinstance(result["kind"], str)
+        or result["kind"] != "light-review"
+    ):
         raise LightReviewError("Light Review schema identity is invalid")
     snapshot_sha = str(result["snapshot_sha256"])
     if not HEX_64.fullmatch(snapshot_sha) or snapshot_sha != expected_snapshot_sha256:
         raise LightReviewError("Light Review snapshot identity is stale")
-    status = str(result["status"])
-    if status not in STATUSES:
-        raise LightReviewError("Light Review status is advisory-only")
+    status = _enum(result["status"], STATUSES, "Light Review status")
 
     route = _mapping(result["route"], "Light Review route")
     _exact(route, {"runtime", "model", "effort", "isolation"}, "Light Review route")
@@ -198,11 +211,18 @@ def validate_light_review(
             "Light Review finding",
         )
         finding_id = _text(finding["id"], "Light Review finding id")
-        section = str(finding["section"])
+        section = _enum(
+            finding["section"],
+            SECTIONS,
+            "Light Review finding section",
+        )
+        _enum(
+            finding["severity"],
+            SEVERITIES,
+            "Light Review finding severity",
+        )
         if finding_id in finding_ids or not re.fullmatch(r"L-[0-9]{3}", finding_id):
             raise LightReviewError("Light Review finding identity is invalid")
-        if section not in SECTIONS or finding["severity"] not in SEVERITIES:
-            raise LightReviewError("Light Review finding classification is invalid")
         _relative_path(finding["path"], "Light Review finding path", allow_empty=True)
         if finding["line"] is not None and (
             type(finding["line"]) is not int or finding["line"] < 1
@@ -220,14 +240,20 @@ def validate_light_review(
     for expected_name, raw in zip(SECTIONS, raw_sections, strict=True):
         section = _mapping(raw, "Light Review section")
         _exact(section, {"name", "status", "finding_ids"}, "Light Review section")
-        if section["name"] != expected_name or section["status"] not in SECTION_STATUSES:
+        name = _enum(section["name"], SECTIONS, "Light Review section name")
+        section_status = _enum(
+            section["status"],
+            SECTION_STATUSES,
+            "Light Review section status",
+        )
+        if name != expected_name:
             raise LightReviewError("Light Review section order or status is invalid")
         ids = _strings(section["finding_ids"], "Light Review section finding IDs")
         if ids != findings_by_section[expected_name]:
             raise LightReviewError("Light Review finding IDs are not section-owned")
-        if section["status"] == "clean" and ids or section["status"] == "findings" and not ids:
+        if section_status == "clean" and ids or section_status == "findings" and not ids:
             raise LightReviewError("Light Review section status contradicts its findings")
-        section_incomplete = section_incomplete or section["status"] == "incomplete"
+        section_incomplete = section_incomplete or section_status == "incomplete"
 
     gaps = _strings(result["coverage_gaps"], "Light Review coverage gaps")
     verification_incomplete = _verification_incomplete(
