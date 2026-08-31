@@ -24,6 +24,10 @@ packages were published for them.
 
 ### Fixed
 
+- Current Lifecycle Review now requires an explicit behavior-specific Outcome
+  Contract instead of manufacturing a circular correctness contract. Its
+  same-target admission is process-serialized, so concurrent initial and
+  exhausted-lineage starts share one task owner and one provider effect.
 - Structural-pivot callbacks and submit commands retain current-review lineage,
   coordinator authority, and isolated scratch even when the reviewed product is
   a different repository.
@@ -32,9 +36,10 @@ packages were published for them.
   validation errors for malformed enum/schema field types instead of a
   traceback.
 - The live scripts ratchet moves to the exact measured candidate: six cohesive
-  review owners raise the contour from 296 files / 113,215 lines to 302 files /
-  115,156 lines, including the explicit exhausted-lineage boundary and no
-  speculative headroom.
+  review owners plus the extracted admission owner raise the contour from 296
+  files / 113,215 lines to 303 files / 115,269 lines, including the explicit
+  exhausted-lineage, concrete Outcome, and same-target admission boundaries
+  with no speculative headroom.
 
 ## [2.8.5] - 2026-08-19
 

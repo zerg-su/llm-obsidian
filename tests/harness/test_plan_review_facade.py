@@ -467,15 +467,18 @@ with tempfile.TemporaryDirectory(prefix="plan-review-facade.") as raw:
             str(worktree),
             "--plan",
             str(plan),
+            "--vault-root",
+            str(tmp / "invalid-coordinator"),
         ],
         text=True,
         capture_output=True,
         check=False,
     )
     check(
-        "17 legacy current --plan rejects the ambiguous implementation default",
+        "17 current --plan enters the explicit current-review facade",
         legacy.returncode == 3
-        and "use the plan facade" in legacy.stderr
+        and "explicit coordinator root is unavailable" in legacy.stderr
+        and "use the plan facade" not in legacy.stderr
         and not (worktree / ".vault-meta").exists(),
         (legacy.stdout, legacy.stderr),
     )

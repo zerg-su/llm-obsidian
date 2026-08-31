@@ -30,6 +30,10 @@
 
 ### Исправлено
 
+- Current Lifecycle Review теперь требует явный behavior-specific Outcome
+  Contract вместо синтетического циклического контракта о корректности.
+  Admission одной цели сериализован между процессами: конкурентные initial и
+  exhausted-lineage запуски делят один task owner и один provider effect.
 - Structural-pivot callback и submit сохраняют lineage current-review,
   authority coordinator'а и изолированный scratch, даже если product находится
   в другом репозитории.
@@ -37,8 +41,9 @@
   обоим native reviewer'ам dereference таких ссылок и возвращает typed error для
   неверных типов enum/schema вместо traceback.
 - Live ratchet scripts сдвинут к точно измеренному кандидату: шесть cohesive
-  review-owner'ов увеличивают contour с 296 файлов / 113 215 строк до 302 файлов
-  / 115 156 строк с explicit exhausted-lineage boundary и без спекулятивного
+  review-owner'ов и выделенный admission owner увеличивают contour с 296 файлов
+  / 113 215 строк до 303 файлов / 115 269 строк с explicit exhausted-lineage,
+  concrete Outcome и same-target admission boundaries без спекулятивного
   запаса.
 
 ## [2.8.5] — 2026-08-19

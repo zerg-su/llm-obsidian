@@ -504,6 +504,14 @@ quiescent old operations, and a validated ``finalization-budget-exhausted``
 ledger before replacing only the active pointer; the old gate and ledger remain
 immutable. No production owner is added, so the measured candidate is exactly
 302 files / 115,156 lines with no speculative headroom.
+
+The first fresh-lineage review found two approval-boundary defects. The single
+new ``current_review_admission.py`` owner keeps target locking, explicit plan
+amendment, and fresh-owner publication outside the already large policy owner.
+Together with removing the synthetic generic Outcome compiler, the correction
+adds exactly one production file and 113 net lines. Concurrent fresh-lineage
+losers resume the winner. The measured candidate is therefore exactly 303
+files / 115,269 lines with no speculative headroom.
 """
 
 from __future__ import annotations
@@ -514,12 +522,12 @@ from pathlib import Path
 #: Maximum tracked Python files under ``scripts/`` for the generic review
 #: target candidate. The six new owners and their boundaries are justified in
 #: the module history above.
-SCRIPT_FILE_CEILING = 302
+SCRIPT_FILE_CEILING = 303
 
 #: Maximum total lines across those files. This is the measured exact candidate
 #: after the escaping-symlink, malformed-enum, and exhausted-lineage review
 #: fixes, with zero headroom.
-SCRIPT_LINE_CEILING = 115_156
+SCRIPT_LINE_CEILING = 115_269
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

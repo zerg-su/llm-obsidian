@@ -2944,6 +2944,7 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
         try:
             task_review_runner.run_current_review(
                 retry_product,
+                plan_file=retry_product / "wiki/review-plan.md",
                 origin_surface="33333333-3333-4333-8333-333333333333",
                 scratch_root=base / "zero-effect-retry-scratch",
                 runtime_manager=failed_runtime,
@@ -2976,6 +2977,7 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
         retry_runtime = EffectRecordingRuntime(retry_store)
         retried = task_review_runner.run_current_review(
             retry_product,
+            plan_file=retry_product / "wiki/review-plan.md",
             origin_surface="33333333-3333-4333-8333-333333333333",
             scratch_root=base / "zero-effect-retry-scratch",
             runtime_manager=retry_runtime,
@@ -2992,6 +2994,7 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
         try:
             task_review_runner.run_current_review(
                 retained_product,
+                plan_file=retained_product / "wiki/review-plan.md",
                 origin_surface="33333333-3333-4333-8333-333333333333",
                 scratch_root=base / "zero-effect-retained-row-scratch",
                 runtime_manager=PreStoreFailureRuntime(retained_store),
@@ -3059,6 +3062,7 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
             try:
                 task_review_runner.run_current_review(
                     interrupted_product,
+                    plan_file=interrupted_product / "wiki/review-plan.md",
                     origin_surface="33333333-3333-4333-8333-333333333333",
                     scratch_root=interrupted_scratch,
                     runtime_manager=EffectRecordingRuntime(
@@ -3100,6 +3104,7 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
         missing_gate_runtime = EffectRecordingRuntime(missing_gate_store)
         missing_gate_retry = task_review_runner.run_current_review(
             missing_gate_product,
+            plan_file=missing_gate_product / "wiki/review-plan.md",
             origin_surface="33333333-3333-4333-8333-333333333333",
             scratch_root=missing_gate_scratch,
             runtime_manager=missing_gate_runtime,

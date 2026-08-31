@@ -21,6 +21,15 @@ binds target key, HEAD, index/worktree, and untracked content. Recheck before
 callbacks and every provider effect. Active drift rejects stale results and
 writes typed attention; never stash, commit, reset, or create a worktree.
 
+A first current review requires `--plan <approved-plan>` with one valid Outcome
+Contract and at least one behavior-specific success-evidence ID. Harness never
+manufactures an approval outcome from generic correctness, completeness, or
+verification language. Invalid or generic-only plans fail before active
+ownership, request, scratch, or provider effects. Generated callbacks omit
+`--plan` and reuse the hash-bound stored plan. After `changes-requested`, an
+executor may pass `--plan` again with the clean committed resolution to make an
+explicit contract amendment; an unannounced plan-byte change fails closed.
+
 Without `--base`, current review deliberately packages only `git show HEAD`.
 For a multi-commit task, pass `current --base <ref>`: Harness resolves the
 merge-base to an exact commit, binds it in policy and lease, packages the
@@ -40,8 +49,11 @@ The fifth material failure exhausts that lineage; ordinary callbacks remain
 zero-effect afterward. Once the user explicitly authorizes a separate review
 task, `current --new-lineage` may replace only the active pointer of an
 exhausted `changes-requested` review whose operations are quiescent and whose
-fix is a clean committed new HEAD. The old gate and ledger remain immutable.
-The one-shot flag is never copied into generated callbacks.
+fix is a clean committed new HEAD. The new task also requires its explicit
+behavior plan. The old gate and ledger remain immutable. Same-target admission
+is serialized through the first gate/provider boundary; concurrent initial or
+fresh-lineage callers resume the winning task ID instead of creating another
+owner. The one-shot flag is never copied into generated callbacks.
 
 ## Presets and routing
 

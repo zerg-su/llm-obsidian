@@ -77,6 +77,47 @@ def product(path: Path, value: int) -> Path:
     return path.resolve()
 
 
+def review_plan(
+    path: Path,
+    *,
+    desired_outcome: str,
+    evidence_id: str,
+    observable: str,
+) -> Path:
+    path.write_text(
+        "\n".join(
+            (
+                "# Approved implementation review scope",
+                "",
+                "## Outcome Contract",
+                "",
+                "```json",
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "purpose": "Verify the declared product behavior.",
+                        "desired_outcome": desired_outcome,
+                        "success_evidence": [
+                            {
+                                "evidence_id": evidence_id,
+                                "observable": observable,
+                            }
+                        ],
+                        "non_goals": [
+                            "Do not assess uncommitted or out-of-range bytes."
+                        ],
+                    },
+                    sort_keys=True,
+                ),
+                "```",
+                "",
+            )
+        ),
+        encoding="utf-8",
+    )
+    return path.resolve()
+
+
 with tempfile.TemporaryDirectory(prefix="external-current-review.") as raw:
     base = Path(raw)
     vault = coordinator(base / "coordinator")
@@ -101,6 +142,23 @@ with tempfile.TemporaryDirectory(prefix="external-current-review.") as raw:
         capture_output=True,
     )
     second = product(base / "products/second", 2)
+    first_plan = review_plan(
+        base / "first-review-plan.md",
+        desired_outcome=(
+            "The reviewed checkout exports VALUE = 10 and enables FEATURE."
+        ),
+        evidence_id="external-feature-behavior",
+        observable=(
+            "The committed app.py contains VALUE = 10 and feature.py contains "
+            "FEATURE = True."
+        ),
+    )
+    second_plan = review_plan(
+        base / "second-review-plan.md",
+        desired_outcome="The reviewed checkout continues to export VALUE = 2.",
+        evidence_id="external-value-behavior",
+        observable="The committed app.py contains VALUE = 2.",
+    )
     scratch = (base / "scratch").resolve()
     captures: list[tuple[dict, Path, Path, str, Path]] = []
 
@@ -132,12 +190,14 @@ with tempfile.TemporaryDirectory(prefix="external-current-review.") as raw:
             first,
             vault_root=vault,
             base=review_base,
+            plan_file=first_plan,
             origin_surface="11111111-1111-4111-8111-111111111111",
             scratch_root=scratch,
         )
         second_result = task_review_runner.run_current_review(
             second,
             vault_root=vault,
+            plan_file=second_plan,
             origin_surface="11111111-1111-4111-8111-111111111111",
             scratch_root=scratch,
         )
@@ -189,16 +249,16 @@ with tempfile.TemporaryDirectory(prefix="external-current-review.") as raw:
     outcome_bytes = next(
         packet.glob("*-outcome-outcome-contract.json")
     ).read_bytes()
-    synthetic_plan = first_runtime / "inputs/current-review-scope.md"
     check(
-        "default current review packages its real Outcome Contract",
+        "current review packages behavior-specific Outcome evidence",
         outcome_input["role"] == "outcome"
         and outcome_input["sha256"] == first_meta["outcome_contract_sha256"]
         and hashlib.sha256(outcome_bytes).hexdigest()
         == first_meta["outcome_contract_sha256"]
-        and extract_from_bytes(synthetic_plan.read_bytes()).sha256
+        and extract_from_bytes(first_plan.read_bytes()).sha256
         == first_meta["outcome_contract_sha256"]
-        and bool(json.loads(outcome_bytes)["success_evidence"]),
+        and json.loads(outcome_bytes)["success_evidence"][0]["evidence_id"]
+        == "external-feature-behavior",
     )
     prompt_pointer = _prompt(
         vault=vault,
@@ -259,12 +319,25 @@ with tempfile.TemporaryDirectory(prefix="external-current-review.") as raw:
         check=True,
         capture_output=True,
     )
+    amended_plan = review_plan(
+        base / "amended-first-review-plan.md",
+        desired_outcome=(
+            "The reviewed checkout exports VALUE = 10, enables FEATURE, and "
+            "records the committed review resolution."
+        ),
+        evidence_id="external-resolution-behavior",
+        observable=(
+            "The committed range contains VALUE = 10, FEATURE = True, and "
+            "RESOLVED = True."
+        ),
+    )
     task_review_current._run_review = stop_before_provider
     try:
         rebound_result = task_review_runner.run_current_review(
             first,
             vault_root=vault,
             base=review_base,
+            plan_file=amended_plan,
             origin_surface="11111111-1111-4111-8111-111111111111",
             scratch_root=scratch,
         )
@@ -290,12 +363,10 @@ with tempfile.TemporaryDirectory(prefix="external-current-review.") as raw:
         item["name"]: item for item in rebound_manifest["inputs"]
     }
     check(
-        "committed resolution rebinds synthetic range scope and outcome",
+        "committed resolution may amend the explicit behavior contract",
         rebound_result["status"] == "prepared"
         and original_review_head != rebound_head
-        and f"{review_base}..{rebound_head}"
-        in rebound_plan.read_text(encoding="utf-8")
-        and original_review_head not in rebound_plan.read_text(encoding="utf-8")
+        and rebound_plan == amended_plan
         and rebound_meta["review_lease"]["head"] == rebound_head
         and hashlib.sha256(rebound_plan.read_bytes()).hexdigest()
         == rebound_meta["approved_plan_sha256"]
@@ -377,6 +448,7 @@ with tempfile.TemporaryDirectory(prefix="external-current-review.") as raw:
             first,
             vault_root=vault,
             base=review_base,
+            plan_file=amended_plan,
             new_lineage=True,
             origin_surface="11111111-1111-4111-8111-111111111111",
             scratch_root=scratch,
@@ -441,6 +513,12 @@ with tempfile.TemporaryDirectory(prefix="external-current-review.") as raw:
     check("current facade permits the current Git root default", defaulted.target is None and defaulted.worktree is None)
 
     dirty = product(base / "products/dirty", 3)
+    dirty_plan = review_plan(
+        base / "dirty-review-plan.md",
+        desired_outcome="The reviewed checkout exports VALUE = 3.",
+        evidence_id="dirty-value-behavior",
+        observable="The committed app.py contains VALUE = 3.",
+    )
     (dirty / "app.py").write_text("VALUE = 4\n", encoding="utf-8")
     dirty_key = resolve_target(dirty).target_key
     captures_before_dirty = len(captures)
@@ -449,6 +527,7 @@ with tempfile.TemporaryDirectory(prefix="external-current-review.") as raw:
         task_review_runner.run_current_review(
             dirty,
             vault_root=vault,
+            plan_file=dirty_plan,
             origin_surface="11111111-1111-4111-8111-111111111111",
             scratch_root=scratch,
         )
@@ -528,6 +607,92 @@ with tempfile.TemporaryDirectory(prefix="external-current-review.") as raw:
         ),
     )
 
+    missing_plan = product(base / "products/missing-plan", 6)
+    missing_plan_key = resolve_target(missing_plan).target_key
+    captures_before_missing_plan = len(captures)
+    scratch_entries_before = set(scratch.iterdir())
+    task_review_current._run_review = stop_before_provider
+    try:
+        task_review_runner.run_current_review(
+            missing_plan,
+            vault_root=vault,
+            origin_surface="11111111-1111-4111-8111-111111111111",
+            scratch_root=scratch,
+        )
+    except task_review_runner.TaskReviewError as exc:
+        check(
+            "first approval-capable current review requires an explicit plan",
+            "requires --plan" in str(exc),
+            str(exc),
+        )
+    else:
+        check(
+            "first approval-capable current review requires an explicit plan",
+            False,
+        )
+    finally:
+        task_review_current._run_review = original
+    check(
+        "missing-plan rejection has no ownership, scratch, or provider effect",
+        len(captures) == captures_before_missing_plan
+        and not (
+            vault
+            / ".vault-meta/harness/current-review"
+            / missing_plan_key
+            / "active.json"
+        ).exists()
+        and set(scratch.iterdir()) == scratch_entries_before,
+    )
+
+    circular = product(base / "products/circular", 7)
+    circular_plan = review_plan(
+        base / "circular-review-plan.md",
+        desired_outcome=(
+            "The committed review denominator is correct, complete, "
+            "maintainable, and ready for its intended use."
+        ),
+        evidence_id="verification",
+        observable=(
+            "Relevant deterministic verification passes or gaps are reported."
+        ),
+    )
+    circular_key = resolve_target(circular).target_key
+    captures_before_circular = len(captures)
+    scratch_entries_before = set(scratch.iterdir())
+    task_review_current._run_review = stop_before_provider
+    try:
+        task_review_runner.run_current_review(
+            circular,
+            vault_root=vault,
+            plan_file=circular_plan,
+            origin_surface="11111111-1111-4111-8111-111111111111",
+            scratch_root=scratch,
+        )
+    except task_review_runner.TaskReviewError as exc:
+        check(
+            "circular current-review contract is rejected before ownership",
+            "behavior-specific success evidence" in str(exc),
+            str(exc),
+        )
+    else:
+        check(
+            "circular current-review contract is rejected before ownership",
+            False,
+        )
+    finally:
+        task_review_current._run_review = original
+    check(
+        "circular rejection has no ownership, scratch, or provider effect",
+        len(captures) == captures_before_circular
+        and not (
+            vault
+            / ".vault-meta/harness/current-review"
+            / circular_key
+            / "active.json"
+        ).exists()
+        and set(scratch.iterdir()) == scratch_entries_before,
+    )
+
     mandatory_review_artifacts = (
         "scripts/review-inspect.py",
         "scripts/harness/review_submit.py",
@@ -545,6 +710,16 @@ with tempfile.TemporaryDirectory(prefix="external-current-review.") as raw:
             task_review_runner.run_current_review(
                 untouched,
                 vault_root=incomplete,
+                plan_file=review_plan(
+                    base / f"incomplete-review-plan-{index}.md",
+                    desired_outcome=(
+                        f"The reviewed checkout exports VALUE = {index + 20}."
+                    ),
+                    evidence_id=f"incomplete-value-{index}",
+                    observable=(
+                        f"The committed app.py contains VALUE = {index + 20}."
+                    ),
+                ),
                 origin_surface="11111111-1111-4111-8111-111111111111",
                 scratch_root=scratch,
             )

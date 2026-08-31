@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import os
 import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Mapping
@@ -19,9 +17,13 @@ from harness.review_program_authority import (
 )
 from harness.store import OperationStore
 from harness.verification import load_profiles
-from harness.workflows.review import ReviewContext
 from harness.workflows.review_gate import ReviewPreset
-from model_routing import load_config, routing_from_environment
+from current_review_admission import (
+    current_admission_lock,
+    guard_active_plan,
+    plan_rebind_allowed,
+    start_current_review,
+)
 from current_review_lease import (
     CurrentReviewLeaseError,
     create_review_lease,
@@ -30,8 +32,7 @@ from current_review_lease import (
     resolve_review_base,
 )
 from current_review_scope import (
-    compile_current_review_scope,
-    current_plan_outcome_sha256,
+    current_plan_identity,
 )
 from review_coordinator import CoordinatorError, resolve_coordinator
 from review_target import ReviewTarget, ReviewTargetError, resolve_target
@@ -41,7 +42,6 @@ from task_review_context import (
     _zero_effect_attention_shape,
     _current_runtime_root,
     _gate_root,
-    _request,
 )
 from task_review_identity import (
     _current_review_active_path,
@@ -51,7 +51,6 @@ from task_review_flow import _run_review
 from task_review_shared import (
     TaskReviewError,
     _atomic_json,
-    _atomic_text,
     _git,
     _load_review_boundary_input,
     _read_json,
@@ -407,6 +406,7 @@ def _active_current_review(
         stored_policy, requested_policy
     )
     terminal_stale = False
+    may_rebind_plan = False
     if gate_state_path.is_file() and not gate_state_path.is_symlink():
         gate_state = _read_json(gate_state_path, "current review gate")
         status = str(gate_state.get("status") or "")
@@ -514,6 +514,20 @@ def _active_current_review(
                 requested_policy,
                 allow_boundary_rebind=True,
             )
+        stored_plan = Path(str(candidate.get("plan_file") or "")).resolve()
+        requested_plan = (
+            plan_file.expanduser().resolve() if plan_file is not None else None
+        )
+        may_rebind_plan = plan_rebind_allowed(
+            stored_plan=stored_plan,
+            requested_plan=requested_plan,
+            requested_purpose=requested_purpose,
+            boundary_input=boundary_input,
+            status=status,
+            bound_head=bound_head,
+            current_head=current_head,
+            same_policy=same_policy,
+        )
         terminal_stale = terminal_stale or approved_stale or skipped_stale or (
             status == "stopped"
             and _stopped_release_enters_implementation(
@@ -567,11 +581,11 @@ def _active_current_review(
         raise TaskReviewError(
             "an active current review uses another artifact root"
         )
-    if plan_file is not None and (
-        Path(str(candidate.get("plan_file") or "")).resolve()
-        != plan_file.expanduser().resolve()
-    ):
-        raise TaskReviewError("an active current review uses another plan")
+    guard_active_plan(
+        candidate.get("plan_file"),
+        plan_file.expanduser().resolve() if plan_file is not None else None,
+        allow_rebind=may_rebind_plan,
+    )
     if isinstance(candidate.get("plan_review"), Mapping):
         from task_review_plan import finalize_active_plan_rebind
 
@@ -588,6 +602,7 @@ def _resume_current_review(
     scratch_root: Path | None,
     boundary_input: ReviewBoundaryInput | None,
     requested_policy: Mapping[str, Any],
+    plan_file: Path | None,
 ) -> tuple[dict[str, Any], str, Path]:
     task_id = str(meta["task_id"])
     runtime_root = Path(str(meta.get("runtime_root") or "")).resolve()
@@ -610,6 +625,11 @@ def _resume_current_review(
         gate_status = str(gate_state.get("status") or "")
         raw_context = gate_state.get("context")
         gate_context = raw_context if isinstance(raw_context, Mapping) else None
+    stored_plan = Path(str(meta.get("plan_file") or "")).resolve()
+    effective_plan = (
+        plan_file.expanduser().resolve() if plan_file is not None else stored_plan
+    )
+    plan_sha256, outcome_sha256 = current_plan_identity(effective_plan)
     raw_lease = meta.get("review_lease")
     if not isinstance(raw_lease, Mapping):
         try:
@@ -646,6 +666,17 @@ def _resume_current_review(
                     ),
                 )
             raise TaskReviewError(str(exc)) from exc
+    explicit_amendment = bool(
+        plan_file is not None
+        and gate_status == "changes-requested"
+        and lease_changed
+        and boundary_input is None
+    )
+    if not explicit_amendment and (
+        plan_sha256 != str(meta.get("approved_plan_sha256") or "")
+        or outcome_sha256 != str(meta.get("outcome_contract_sha256") or "")
+    ):
+        raise TaskReviewError("current review plan changed without amendment")
     if lease_changed:
         updates: dict[str, Any] = {"review_lease": review_lease}
         if boundary_input is not None and gate_status == "changes-requested":
@@ -662,24 +693,117 @@ def _resume_current_review(
                 }
             )
         elif boundary_input is None and gate_status == "changes-requested":
-            plan = Path(str(meta.get("plan_file") or "")).resolve()
-            synthetic_plan = runtime_root / "inputs/current-review-scope.md"
-            if plan == synthetic_plan:
-                scope = compile_current_review_scope(
-                    base_sha=str(requested_policy.get("base_sha") or ""),
-                    head_sha=str(review_lease["head"]),
-                )
-                _atomic_text(plan, scope.text)
-                updates.update(
-                    {
-                        "approved_plan_sha256": scope.plan_sha256,
-                        "outcome_contract_sha256": scope.outcome_sha256,
-                    }
-                )
+            updates.update(
+                {
+                    "plan_file": str(effective_plan),
+                    "approved_plan_sha256": plan_sha256,
+                    "outcome_contract_sha256": outcome_sha256,
+                }
+            )
         meta = {**meta, **updates}
         _atomic_json(runtime_root / "current-review.json", meta)
         _atomic_json(active_path, meta)
     return dict(meta), task_id, runtime_root
+
+
+def _admit_and_run_current_review(
+    worktree: Path,
+    target: ReviewTarget,
+    vault: Path,
+    scoped_active_path: Path,
+    requested_policy: Mapping[str, Any],
+    boundary_input: ReviewBoundaryInput | None,
+    *,
+    base_sha: str,
+    purpose: str,
+    boundary_input_file: Path | None,
+    plan_file: Path | None,
+    plan_identity: tuple[str, str] | None,
+    artifact_root: Path | None,
+    origin_surface: str,
+    new_lineage: bool,
+    scratch_root: Path | None,
+    runtime_manager: object | None,
+    apply_finalizing_recovery: Callable[..., dict[str, Any]],
+    plan_compilation: PlanReviewCompilation | None,
+    plan_base_sha: str,
+    plan_head_sha: str,
+) -> dict[str, Any]:
+    observed_path = _active_path(vault, worktree, target.target_key)
+    observed_task_id = ""
+    if observed_path.is_file() and not observed_path.is_symlink():
+        observed = _read_json(observed_path, "current review state")
+        observed_task_id = str(observed.get("task_id") or "")
+    with current_admission_lock(scoped_active_path):
+        active_path = _active_path(vault, worktree, target.target_key)
+        effective_new_lineage = new_lineage
+        if new_lineage and observed_task_id and active_path.is_file():
+            current = _read_json(active_path, "current review state")
+            current_task_id = str(current.get("task_id") or "")
+            if (
+                current_task_id != observed_task_id
+                and str(current.get("supersedes_task_id") or "")
+                == observed_task_id
+            ):
+                effective_new_lineage = False
+        meta = _active_current_review(
+            worktree,
+            vault,
+            active_path,
+            requested_policy,
+            boundary_input,
+            plan_file=plan_file,
+            plan_compilation=plan_compilation,
+            plan_base_sha=plan_base_sha,
+            plan_head_sha=plan_head_sha,
+            scratch_root=scratch_root,
+            artifact_root=artifact_root,
+            new_lineage=effective_new_lineage,
+        )
+        if meta is None:
+            meta, task_id, runtime_root = start_current_review(
+                worktree,
+                target,
+                vault,
+                active_path,
+                requested_policy,
+                boundary_input,
+                base_sha=base_sha,
+                purpose=purpose,
+                boundary_input_file=boundary_input_file,
+                plan_file=plan_file,
+                plan_identity=plan_identity,
+                artifact_root=artifact_root,
+                origin_surface=origin_surface,
+                supersedes_task_id=(
+                    observed_task_id if new_lineage else ""
+                ),
+                scratch_root=scratch_root,
+                plan_compilation=plan_compilation,
+                plan_base_sha=plan_base_sha,
+                plan_head_sha=plan_head_sha,
+            )
+        else:
+            meta, task_id, runtime_root = _resume_current_review(
+                meta,
+                target,
+                vault,
+                worktree,
+                active_path,
+                scratch_root,
+                boundary_input,
+                requested_policy,
+                plan_file,
+            )
+        return _run_review(
+            meta,
+            vault,
+            worktree,
+            task_id,
+            runtime_root,
+            runtime_manager=runtime_manager,
+            apply_finalizing_recovery=apply_finalizing_recovery,
+        )
 
 
 def run_current_review(
@@ -775,170 +899,33 @@ def run_current_review(
         ),
         base_sha=base_sha,
     )
-    active_path = _active_path(vault, worktree, target.target_key)
-    meta = _active_current_review(
+    resolved_plan: Path | None = None
+    plan_identity: tuple[str, str] | None = None
+    if plan_file is not None:
+        resolved_plan = plan_file.expanduser().resolve()
+        if not resolved_plan.is_file() or plan_file.expanduser().is_symlink():
+            raise TaskReviewError("current review plan is unavailable")
+        plan_identity = current_plan_identity(resolved_plan)
+    scoped_active_path = _current_review_active_path(vault, target.target_key)
+    return _admit_and_run_current_review(
         worktree,
+        target,
         vault,
-        active_path,
+        scoped_active_path,
         requested_policy,
         boundary_input,
-        plan_file=plan_file,
+        base_sha=base_sha,
+        purpose=purpose,
+        boundary_input_file=boundary_input_file,
+        plan_file=resolved_plan,
+        plan_identity=plan_identity,
+        artifact_root=artifact_root,
+        origin_surface=origin_surface,
+        new_lineage=new_lineage,
+        scratch_root=scratch_root,
+        runtime_manager=runtime_manager,
+        apply_finalizing_recovery=apply_finalizing_recovery,
         plan_compilation=plan_compilation,
         plan_base_sha=plan_base_sha,
         plan_head_sha=plan_head_sha,
-        scratch_root=scratch_root,
-        artifact_root=artifact_root,
-        new_lineage=new_lineage,
-    )
-
-    if meta is None:
-        try:
-            review_lease = create_review_lease(target, base_sha=base_sha)
-        except CurrentReviewLeaseError as exc:
-            raise TaskReviewError(str(exc)) from exc
-        current_head = _git(worktree, "rev-parse", "HEAD")
-        if boundary_input is not None and (
-            (
-                purpose == "implementation"
-                and boundary_input.product_head_sha != current_head
-            )
-            or (
-                purpose == "release"
-                and boundary_input.integration_head_sha != current_head
-            )
-        ):
-            raise TaskReviewError("review boundary input targets another HEAD")
-        plan: Path | None = None
-        approved_plan_sha256 = ""
-        outcome_contract_sha256 = ""
-        if plan_file is not None:
-            plan = plan_file.expanduser().resolve()
-            if not plan.is_file() or plan.is_symlink():
-                raise TaskReviewError("current review plan is unavailable")
-            approved_plan_sha256 = hashlib.sha256(plan.read_bytes()).hexdigest()
-            outcome_contract_sha256 = current_plan_outcome_sha256(plan)
-        task_id = str(uuid.uuid4())
-        runtime_root = _current_runtime_root(
-            worktree, task_id, scratch_root
-        )
-        surface = (
-            origin_surface.strip()
-            or str(os.environ.get("CMUX_SURFACE_ID") or "").strip()
-        )
-        if not surface:
-            raise TaskReviewError(
-                "current review requires an exact cmux origin surface"
-            )
-        config = load_config(vault)
-        session, source = routing_from_environment(config)
-        if source == "tracked-default":
-            raise TaskReviewError(
-                "current review requires a host-confirmed current session route"
-            )
-        session = {**session, "source": source}
-        if plan is None:
-            plan = runtime_root / "inputs/current-review-scope.md"
-            current_scope = compile_current_review_scope(
-                base_sha=base_sha,
-                head_sha=current_head,
-            )
-            _atomic_text(plan, current_scope.text)
-            approved_plan_sha256 = current_scope.plan_sha256
-            outcome_contract_sha256 = current_scope.outcome_sha256
-        meta = {
-            "version": 4,
-            "lifecycle": "current-checkout",
-            "task_id": task_id,
-            "task_name": "current checkout review",
-            "task_surface": surface,
-            "worktree": str(worktree),
-            "vault_root": str(vault),
-            "target_key": target.target_key,
-            "review_lease": review_lease,
-            "plan_file": str(plan),
-            "routing": {"session": session},
-            "review_policy": requested_policy,
-            "runtime_root": str(runtime_root),
-            "approved_plan_sha256": (
-                boundary_input.plan_sha256
-                if boundary_input is not None
-                else approved_plan_sha256
-            ),
-            "outcome_contract_sha256": (
-                boundary_input.outcome_contract_sha256
-                if boundary_input is not None
-                else outcome_contract_sha256
-            ),
-            "finalization_policy": {
-                "max_cycles": 5,
-                "add_independent_model_after": 3,
-                "primary_route_alias": "finalization-primary",
-                "independent_route_alias": "finalization-independent",
-                "execution": "ephemeral",
-            },
-        }
-        if artifact_root is not None:
-            meta["review_artifact_root"] = str(artifact_root)
-        if boundary_input is not None:
-            if purpose == "release" and boundary_input_file is not None:
-                meta["review_boundary_input_source_file"] = str(
-                    boundary_input_file.expanduser().resolve()
-                )
-            if plan_compilation is not None:
-                from task_review_plan import materialize_plan_review
-
-                boundary_input = materialize_plan_review(
-                    runtime_root,
-                    plan_compilation,
-                    base_sha=plan_base_sha,
-                    head_sha=plan_head_sha,
-                )
-                meta["plan_review"] = {
-                    "schema_version": 1,
-                    "base_sha": plan_base_sha,
-                    "head_sha": plan_head_sha,
-                    "plan_relative_path": plan_compilation.plan_relative_path,
-                    "artifact_root": "runtime",
-                }
-            stored_boundary = (
-                runtime_root / "inputs" / "review-boundary-input.json"
-            )
-            _atomic_json(stored_boundary, boundary_input.payload())
-            meta["review_boundary_input_file"] = str(stored_boundary)
-        _request(
-            meta,
-            vault,
-            task_id,
-            ReviewContext(
-                "pending/manifest.json",
-                _git(worktree, "rev-parse", "HEAD"),
-                "scoped",
-                profile.sha256,
-                "",
-                purpose,
-                boundary_input.input_sha256 if boundary_input else "",
-            ),
-        )
-        _atomic_json(runtime_root / "current-review.json", meta)
-        _atomic_json(active_path, meta)
-    else:
-        meta, task_id, runtime_root = _resume_current_review(
-            meta,
-            target,
-            vault,
-            worktree,
-            active_path,
-            scratch_root,
-            boundary_input,
-            requested_policy,
-        )
-
-    return _run_review(
-        meta,
-        vault,
-        worktree,
-        task_id,
-        runtime_root,
-        runtime_manager=runtime_manager,
-        apply_finalizing_recovery=apply_finalizing_recovery,
     )

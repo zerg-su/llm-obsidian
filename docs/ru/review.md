@@ -33,8 +33,15 @@ Outcome Contract и независимые design/dispositions/evidence-map arti
 
 Design-only исправление с typed resolution и exact Git delta продолжает retained
 lanes. Изменение Outcome, disposition или evidence map требует amendment и fresh
-boundary. Legacy `current --plan` без явных совместимых purpose/boundary
-отклоняется до запуска reviewer.
+boundary.
+
+Первый approval-capable review текущего checkout запускается через `current`
+с явным `--plan <approved-plan>`. Outcome Contract плана обязан содержать
+behavior-specific success evidence; Harness больше не синтезирует циклическое
+«scope корректен и готов» доказательство. Callback повторно использует
+сохранённый hash-bound plan без `--plan`, а после `changes-requested` executor
+может явно передать amended plan вместе с чистым committed resolution HEAD.
+Concurrent-запуски одной цели сериализуются и получают task ID победителя.
 
 ## Жизненный цикл finding
 

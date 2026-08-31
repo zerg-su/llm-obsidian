@@ -410,15 +410,6 @@ def main(
                 runtime_manager=runtime_manager,
             )
         elif args.command == "current":
-            if (
-                args.plan is not None
-                and args.purpose == "implementation"
-                and args.boundary_input is None
-            ):
-                raise TaskReviewError(
-                    "legacy current --plan is ambiguous; use the plan facade "
-                    "or pass an explicit compatible purpose and boundary"
-                )
             result = run_current_review(
                 args.target or args.worktree or Path.cwd(),
                 vault_root=args.vault_root,
