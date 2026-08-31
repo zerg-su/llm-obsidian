@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import fcntl
 import os
+import shutil
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
@@ -11,8 +12,8 @@ from typing import Any, Iterator, Mapping
 
 from current_review_lease import CurrentReviewLeaseError, create_review_lease
 from current_review_scope import current_plan_identity
-from harness.store import OperationStore
 from harness.review_program import ReviewBoundaryInput
+from harness.store import OperationStore
 from harness.workflows.review import ReviewContext
 from model_routing import load_config, routing_from_environment
 from review_target import ReviewTarget
@@ -24,6 +25,7 @@ from task_review_context import (
     _zero_effect_attention_is_quiescent,
     _zero_effect_attention_shape,
 )
+from task_review_identity import _current_runtime_path
 from task_review_shared import TaskReviewError, _atomic_json, _git, _read_json
 
 
@@ -169,7 +171,7 @@ def start_current_review(
 
     if plan_file is None or plan_identity is None:
         raise TaskReviewError(
-            "a new current review requires --plan with a behavior-specific "
+            "a new current review requires --plan with a behavior-bound "
             "Outcome Contract"
         )
     try:
@@ -188,10 +190,6 @@ def start_current_review(
         )
     ):
         raise TaskReviewError("review boundary input targets another HEAD")
-    plan = plan_file.expanduser().resolve()
-    approved_plan_sha256, outcome_contract_sha256 = plan_identity
-    task_id = str(uuid.uuid4())
-    runtime_root = _current_runtime_root(worktree, task_id, scratch_root)
     surface = (
         origin_surface.strip()
         or str(os.environ.get("CMUX_SURFACE_ID") or "").strip()
@@ -207,6 +205,10 @@ def start_current_review(
             "current review requires a host-confirmed current session route"
         )
     session = {**session, "source": source}
+    plan = plan_file.expanduser().resolve()
+    approved_plan_sha256, outcome_contract_sha256 = plan_identity
+    task_id = str(uuid.uuid4())
+    runtime_path = _current_runtime_path(worktree, task_id, scratch_root)
     meta: dict[str, Any] = {
         "version": 4,
         "lifecycle": "current-checkout",
@@ -220,7 +222,7 @@ def start_current_review(
         "plan_file": str(plan),
         "routing": {"session": session},
         "review_policy": requested_policy,
-        "runtime_root": str(runtime_root),
+        "runtime_root": str(runtime_path),
         "approved_plan_sha256": (
             boundary_input.plan_sha256
             if boundary_input is not None
@@ -243,30 +245,6 @@ def start_current_review(
         meta["review_artifact_root"] = str(artifact_root)
     if supersedes_task_id:
         meta["supersedes_task_id"] = supersedes_task_id
-    if boundary_input is not None:
-        if purpose == "release" and boundary_input_file is not None:
-            meta["review_boundary_input_source_file"] = str(
-                boundary_input_file.expanduser().resolve()
-            )
-        if plan_compilation is not None:
-            from task_review_plan import materialize_plan_review
-
-            boundary_input = materialize_plan_review(
-                runtime_root,
-                plan_compilation,
-                base_sha=plan_base_sha,
-                head_sha=plan_head_sha,
-            )
-            meta["plan_review"] = {
-                "schema_version": 1,
-                "base_sha": plan_base_sha,
-                "head_sha": plan_head_sha,
-                "plan_relative_path": plan_compilation.plan_relative_path,
-                "artifact_root": "runtime",
-            }
-        stored_boundary = runtime_root / "inputs" / "review-boundary-input.json"
-        _atomic_json(stored_boundary, boundary_input.payload())
-        meta["review_boundary_input_file"] = str(stored_boundary)
     _request(
         meta,
         vault,
@@ -281,6 +259,41 @@ def start_current_review(
             boundary_input.input_sha256 if boundary_input else "",
         ),
     )
-    _atomic_json(runtime_root / "current-review.json", meta)
-    _atomic_json(active_path, meta)
+    runtime_root = _current_runtime_root(worktree, task_id, scratch_root)
+    try:
+        if boundary_input is not None:
+            if purpose == "release" and boundary_input_file is not None:
+                meta["review_boundary_input_source_file"] = str(
+                    boundary_input_file.expanduser().resolve()
+                )
+            if plan_compilation is not None:
+                from task_review_plan import materialize_plan_review
+
+                boundary_input = materialize_plan_review(
+                    runtime_root,
+                    plan_compilation,
+                    base_sha=plan_base_sha,
+                    head_sha=plan_head_sha,
+                )
+                meta["plan_review"] = {
+                    "schema_version": 1,
+                    "base_sha": plan_base_sha,
+                    "head_sha": plan_head_sha,
+                    "plan_relative_path": plan_compilation.plan_relative_path,
+                    "artifact_root": "runtime",
+                }
+            stored_boundary = runtime_root / "inputs" / "review-boundary-input.json"
+            _atomic_json(stored_boundary, boundary_input.payload())
+            meta["review_boundary_input_file"] = str(stored_boundary)
+        _atomic_json(runtime_root / "current-review.json", meta)
+        _atomic_json(active_path, meta)
+    except BaseException:
+        try:
+            if runtime_root.is_dir() and not runtime_root.is_symlink():
+                shutil.rmtree(runtime_root)
+        except OSError as cleanup_error:
+            raise TaskReviewError(
+                "unpublished current review scratch cleanup failed"
+            ) from cleanup_error
+        raise
     return meta, task_id, runtime_root

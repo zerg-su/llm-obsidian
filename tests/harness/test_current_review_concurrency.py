@@ -131,10 +131,12 @@ def review_plan(path: Path) -> Path:
                         "success_evidence": [
                             {
                                 "evidence_id": "same-target-single-owner",
+                                "evidence_kind": "behavior",
                                 "observable": (
                                     "Concurrent starts return one task ID and "
                                     "materialize one provider launch."
                                 ),
+                                "subject": "current-review:same-target-admission",
                             }
                         ],
                         "non_goals": [

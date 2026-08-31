@@ -59,9 +59,10 @@ bytes. Purpose-bound checkpoints are:
 Dispatched v3/v4 tasks use `task-review-runner.py run --worktree <worktree>`.
 External/current review uses `current --target <checkout> --vault-root
 <coordinator> --plan <approved-plan>`. A first approval-capable current review
-requires an explicit plan whose Outcome Contract includes behavior-specific
-success evidence; generic scope/correctness evidence fails before ownership or
-provider effects. Generated callbacks reuse the stored plan and omit `--plan`.
+requires an explicit plan whose Outcome Contract includes behavior-bound
+success evidence, expressed as paired `evidence_kind: behavior` and a bounded
+`subject`; generic or unbound scope/correctness evidence fails before ownership
+or provider effects. Generated callbacks reuse the stored plan and omit `--plan`.
 For a multi-commit task, pass explicit `--base <ref>`; omitted base
 intentionally reviews only HEAD. It requires a clean target lease and keeps
 Harness state and resolution input owner-only. Never stash, commit, reset,

@@ -17,6 +17,7 @@ MAX_PURPOSE_CHARS = 2_000
 MAX_OUTCOME_CHARS = 4_000
 MAX_EVIDENCE_ITEMS = 32
 MAX_OBSERVABLE_CHARS = 2_000
+MAX_EVIDENCE_SUBJECT_CHARS = 256
 MAX_NON_GOALS = 32
 MAX_NON_GOAL_CHARS = 2_000
 FIELDS = frozenset(
@@ -31,7 +32,13 @@ FIELDS = frozenset(
 REQUIRED_FIELDS = frozenset(
     {"schema_version", "desired_outcome", "success_evidence", "non_goals"}
 )
-EVIDENCE_FIELDS = frozenset({"evidence_id", "observable"})
+EVIDENCE_REQUIRED_FIELDS = frozenset({"evidence_id", "observable"})
+EVIDENCE_FIELDS = frozenset(
+    {"evidence_id", "observable", "evidence_kind", "subject"}
+)
+EVIDENCE_KINDS = frozenset(
+    {"artifact", "behavior", "constraint", "verification"}
+)
 EVIDENCE_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 JSON_FENCE_RE = re.compile(
     r"(?ms)^[ \t]*```json[ \t]*\r?\n(.*?)[ \t]*^```[ \t]*$"
@@ -114,9 +121,15 @@ def validate(value: Any) -> dict[str, Any]:
     evidence: list[dict[str, str]] = []
     evidence_ids: list[str] = []
     for index, raw_item in enumerate(raw_evidence):
-        if not isinstance(raw_item, dict) or set(raw_item) != EVIDENCE_FIELDS:
+        if (
+            not isinstance(raw_item, dict)
+            or EVIDENCE_REQUIRED_FIELDS - set(raw_item)
+            or set(raw_item) - EVIDENCE_FIELDS
+            or (("evidence_kind" in raw_item) != ("subject" in raw_item))
+        ):
             raise OutcomeContractError(
-                f"success_evidence[{index}] must contain only evidence_id and observable"
+                f"success_evidence[{index}] must contain evidence_id and "
+                "observable, with optional paired evidence_kind and subject"
             )
         evidence_id = raw_item.get("evidence_id")
         if not isinstance(evidence_id, str) or not EVIDENCE_ID_RE.fullmatch(
@@ -126,16 +139,31 @@ def validate(value: Any) -> dict[str, Any]:
                 f"success_evidence[{index}].evidence_id must be a bounded identifier"
             )
         evidence_ids.append(evidence_id)
-        evidence.append(
-            {
-                "evidence_id": evidence_id,
-                "observable": _bounded_text(
-                    raw_item.get("observable"),
-                    f"success_evidence[{index}].observable",
-                    MAX_OBSERVABLE_CHARS,
-                ),
-            }
-        )
+        normalized_item = {
+            "evidence_id": evidence_id,
+            "observable": _bounded_text(
+                raw_item.get("observable"),
+                f"success_evidence[{index}].observable",
+                MAX_OBSERVABLE_CHARS,
+            ),
+        }
+        if "evidence_kind" in raw_item:
+            evidence_kind = raw_item.get("evidence_kind")
+            if evidence_kind not in EVIDENCE_KINDS:
+                raise OutcomeContractError(
+                    f"success_evidence[{index}].evidence_kind is invalid"
+                )
+            normalized_item.update(
+                {
+                    "evidence_kind": evidence_kind,
+                    "subject": _bounded_text(
+                        raw_item.get("subject"),
+                        f"success_evidence[{index}].subject",
+                        MAX_EVIDENCE_SUBJECT_CHARS,
+                    ),
+                }
+            )
+        evidence.append(normalized_item)
     if len(evidence_ids) != len(set(evidence_ids)):
         raise OutcomeContractError("success_evidence evidence_id values must be unique")
     normalized["success_evidence"] = evidence

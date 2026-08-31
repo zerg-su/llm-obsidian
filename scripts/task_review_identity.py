@@ -112,6 +112,19 @@ def _current_runtime_root(
     task_id: str,
     scratch_root: Path | None,
 ) -> Path:
+    root = _current_runtime_path(worktree, task_id, scratch_root)
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    root.chmod(0o700)
+    return root
+
+
+def _current_runtime_path(
+    worktree: Path,
+    task_id: str,
+    scratch_root: Path | None,
+) -> Path:
+    """Resolve owner scratch without materializing it."""
+
     if scratch_root is None:
         checkout_key = hashlib.sha256(
             str(worktree).encode("utf-8")
@@ -128,8 +141,6 @@ def _current_runtime_root(
         raise TaskReviewError(
             "current review scratch must stay outside the product checkout"
         )
-    root.mkdir(parents=True, exist_ok=True, mode=0o700)
-    root.chmod(0o700)
     return root
 
 

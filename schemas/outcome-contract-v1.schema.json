@@ -19,12 +19,20 @@
         "type": "object",
         "additionalProperties": false,
         "required": ["evidence_id", "observable"],
+        "dependentRequired": {
+          "evidence_kind": ["subject"],
+          "subject": ["evidence_kind"]
+        },
         "properties": {
           "evidence_id": {
             "type": "string",
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
           },
-          "observable": {"type": "string", "minLength": 1, "maxLength": 2000}
+          "observable": {"type": "string", "minLength": 1, "maxLength": 2000},
+          "evidence_kind": {
+            "enum": ["artifact", "behavior", "constraint", "verification"]
+          },
+          "subject": {"type": "string", "minLength": 1, "maxLength": 256}
         }
       }
     },

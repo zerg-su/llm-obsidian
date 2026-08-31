@@ -128,6 +128,38 @@ expect_error(
 )
 print("OK   evidence identifiers are bounded and unique")
 
+behavior_bound = json.loads(json.dumps(CONTRACT))
+behavior_bound["success_evidence"][0].update(
+    {
+        "evidence_kind": "behavior",
+        "subject": "current-review:same-target-admission",
+    }
+)
+bound = extract_from_plan(
+    plan(json.dumps(behavior_bound, separators=(",", ":")))
+)
+assert bound.value["success_evidence"][0]["evidence_kind"] == "behavior"
+assert (
+    bound.value["success_evidence"][0]["subject"]
+    == "current-review:same-target-admission"
+)
+for missing_pair in ("evidence_kind", "subject"):
+    invalid = json.loads(json.dumps(behavior_bound))
+    del invalid["success_evidence"][0][missing_pair]
+    expect_error(
+        f"missing paired behavior binding {missing_pair}",
+        plan(json.dumps(invalid, separators=(",", ":"))),
+        "optional paired evidence_kind and subject",
+    )
+invalid_kind = json.loads(json.dumps(behavior_bound))
+invalid_kind["success_evidence"][0]["evidence_kind"] = "claim"
+expect_error(
+    "unknown evidence kind",
+    plan(json.dumps(invalid_kind, separators=(",", ":"))),
+    "evidence_kind is invalid",
+)
+print("OK   typed evidence kinds bind one exact subject or fail closed")
+
 for boolean_version in (True, False):
     boolean_contract = dict(CONTRACT)
     boolean_contract["schema_version"] = boolean_version

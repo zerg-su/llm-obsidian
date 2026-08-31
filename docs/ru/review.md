@@ -37,10 +37,12 @@ boundary.
 
 Первый approval-capable review текущего checkout запускается через `current`
 с явным `--plan <approved-plan>`. Outcome Contract плана обязан содержать
-behavior-specific success evidence; Harness больше не синтезирует циклическое
-«scope корректен и готов» доказательство. Callback повторно использует
-сохранённый hash-bound plan без `--plan`, а после `changes-requested` executor
-может явно передать amended plan вместе с чистым committed resolution HEAD.
+хотя бы один success-evidence item с парой `evidence_kind: behavior` и
+ограниченным `subject`; generic или unbound evidence отклоняется до ownership,
+scratch и provider effect. Harness больше не синтезирует циклическое «scope
+корректен и готов» доказательство. Callback повторно использует сохранённый
+hash-bound plan без `--plan`, а после `changes-requested` executor может явно
+передать amended plan вместе с чистым committed resolution HEAD.
 После доказанного zero-effect preflight failure callback также переиспользует
 этот plan, но только для того же policy и того же HEAD с совпавшими hash.
 Concurrent-запуски одной цели сериализуются и получают task ID победителя.

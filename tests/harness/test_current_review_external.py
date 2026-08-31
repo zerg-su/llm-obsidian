@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import task_review_current  # noqa: E402
+import current_review_admission  # noqa: E402
 from harness.contracts import OperationSpec, RuntimeRoute  # noqa: E402
 from harness.finalization_ledger import FinalizationLedger  # noqa: E402
 from harness.store import OperationStore  # noqa: E402
@@ -83,7 +84,19 @@ def review_plan(
     desired_outcome: str,
     evidence_id: str,
     observable: str,
+    behavior_bound: bool = True,
 ) -> Path:
+    evidence = {
+        "evidence_id": evidence_id,
+        "observable": observable,
+    }
+    if behavior_bound:
+        evidence.update(
+            {
+                "evidence_kind": "behavior",
+                "subject": f"current-review:{evidence_id}",
+            }
+        )
     path.write_text(
         "\n".join(
             (
@@ -97,12 +110,7 @@ def review_plan(
                         "schema_version": 1,
                         "purpose": "Verify the declared product behavior.",
                         "desired_outcome": desired_outcome,
-                        "success_evidence": [
-                            {
-                                "evidence_id": evidence_id,
-                                "observable": observable,
-                            }
-                        ],
+                        "success_evidence": [evidence],
                         "non_goals": [
                             "Do not assess uncommitted or out-of-range bytes."
                         ],
@@ -655,6 +663,7 @@ with tempfile.TemporaryDirectory(prefix="external-current-review.") as raw:
         observable=(
             "Relevant deterministic verification passes or gaps are reported."
         ),
+        behavior_bound=False,
     )
     circular_key = resolve_target(circular).target_key
     captures_before_circular = len(captures)
@@ -671,7 +680,7 @@ with tempfile.TemporaryDirectory(prefix="external-current-review.") as raw:
     except task_review_runner.TaskReviewError as exc:
         check(
             "circular current-review contract is rejected before ownership",
-            "behavior-specific success evidence" in str(exc),
+            "behavior-bound success evidence" in str(exc),
             str(exc),
         )
     else:
@@ -692,6 +701,261 @@ with tempfile.TemporaryDirectory(prefix="external-current-review.") as raw:
         ).exists()
         and set(scratch.iterdir()) == scratch_entries_before,
     )
+
+    renamed_generic = product(base / "products/renamed-generic", 8)
+    renamed_generic_plan = review_plan(
+        base / "renamed-generic-review-plan.md",
+        desired_outcome=(
+            "The committed review denominator is correct, complete, "
+            "maintainable, and ready for its intended use."
+        ),
+        evidence_id="checks-pass",
+        observable=(
+            "Relevant deterministic verification passes or gaps are reported."
+        ),
+        behavior_bound=False,
+    )
+    renamed_generic_key = resolve_target(renamed_generic).target_key
+    captures_before_renamed = len(captures)
+    scratch_entries_before = set(scratch.iterdir())
+    task_review_current._run_review = stop_before_provider
+    try:
+        task_review_runner.run_current_review(
+            renamed_generic,
+            vault_root=vault,
+            plan_file=renamed_generic_plan,
+            origin_surface="11111111-1111-4111-8111-111111111111",
+            scratch_root=scratch,
+        )
+    except task_review_runner.TaskReviewError as exc:
+        check(
+            "renamed generic evidence is rejected before ownership",
+            "behavior-bound success evidence" in str(exc),
+            str(exc),
+        )
+    else:
+        check("renamed generic evidence is rejected before ownership", False)
+    finally:
+        task_review_current._run_review = original
+    check(
+        "renamed generic rejection has no ownership, scratch, or provider effect",
+        len(captures) == captures_before_renamed
+        and not (
+            vault
+            / ".vault-meta/harness/current-review"
+            / renamed_generic_key
+            / "active.json"
+        ).exists()
+        and set(scratch.iterdir()) == scratch_entries_before,
+    )
+
+    mixed_generic = product(base / "products/mixed-generic", 9)
+    mixed_generic_plan = base / "mixed-generic-review-plan.md"
+    mixed_generic_plan.write_text(
+        "\n".join(
+            (
+                "# Mixed generic review plan",
+                "",
+                "## Outcome Contract",
+                "",
+                "```json",
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "desired_outcome": "The reviewed change is ready.",
+                        "success_evidence": [
+                            {
+                                "evidence_id": "verification",
+                                "observable": "Verification passes.",
+                            },
+                            {
+                                "evidence_id": "checks-pass",
+                                "observable": "Relevant checks pass.",
+                            },
+                        ],
+                        "non_goals": ["Do not inspect unrelated changes."],
+                    },
+                    sort_keys=True,
+                ),
+                "```",
+                "",
+            )
+        ),
+        encoding="utf-8",
+    )
+    mixed_generic_key = resolve_target(mixed_generic).target_key
+    captures_before_mixed = len(captures)
+    scratch_entries_before = set(scratch.iterdir())
+    task_review_current._run_review = stop_before_provider
+    try:
+        task_review_runner.run_current_review(
+            mixed_generic,
+            vault_root=vault,
+            plan_file=mixed_generic_plan,
+            origin_surface="11111111-1111-4111-8111-111111111111",
+            scratch_root=scratch,
+        )
+    except task_review_runner.TaskReviewError as exc:
+        check(
+            "mixed renamed generic evidence is rejected before ownership",
+            "behavior-bound success evidence" in str(exc),
+            str(exc),
+        )
+    else:
+        check("mixed renamed generic evidence is rejected before ownership", False)
+    finally:
+        task_review_current._run_review = original
+    check(
+        "mixed generic rejection has no ownership, scratch, or provider effect",
+        len(captures) == captures_before_mixed
+        and not (
+            vault
+            / ".vault-meta/harness/current-review"
+            / mixed_generic_key
+            / "active.json"
+        ).exists()
+        and set(scratch.iterdir()) == scratch_entries_before,
+    )
+
+    preflight_products = {
+        name: product(base / f"products/preflight-{name}", 30 + index)
+        for index, name in enumerate(
+            ("missing-surface", "tracked-default", "request", "publication")
+        )
+    }
+    preflight_plans = {
+        name: review_plan(
+            base / f"preflight-{name}-plan.md",
+            desired_outcome=f"The checkout preserves preflight behavior {name}.",
+            evidence_id=f"preflight-{name}",
+            observable=f"The {name} preflight has no ownerless scratch.",
+        )
+        for name in preflight_products
+    }
+    session_environment = {
+        name: os.environ.get(name)
+        for name in (
+            "LLM_OBSIDIAN_SESSION_RUNTIME",
+            "LLM_OBSIDIAN_SESSION_MODEL",
+            "LLM_OBSIDIAN_SESSION_EFFORT",
+            "CMUX_SURFACE_ID",
+        )
+    }
+    os.environ["LLM_OBSIDIAN_SESSION_RUNTIME"] = "codex"
+    os.environ["LLM_OBSIDIAN_SESSION_MODEL"] = "gpt-5.6-sol"
+    os.environ["LLM_OBSIDIAN_SESSION_EFFORT"] = "high"
+    os.environ.pop("CMUX_SURFACE_ID", None)
+
+    def preflight_rejection(
+        name: str,
+        invoke,
+        needle: str,
+    ) -> None:
+        target = preflight_products[name]
+        target_key = resolve_target(target).target_key
+        scratch_before = set(scratch.iterdir())
+        captures_before = len(captures)
+        try:
+            invoke(target, preflight_plans[name])
+        except (task_review_runner.TaskReviewError, RuntimeError) as exc:
+            check(f"{name} preflight is typed", needle in str(exc), str(exc))
+        else:
+            check(f"{name} preflight is typed", False)
+        check(
+            f"{name} preflight leaves no owner or scratch",
+            len(captures) == captures_before
+            and not (
+                vault
+                / ".vault-meta/harness/current-review"
+                / target_key
+                / "active.json"
+            ).exists()
+            and set(scratch.iterdir()) == scratch_before,
+        )
+
+    preflight_rejection(
+        "missing-surface",
+        lambda target, plan: task_review_runner.run_current_review(
+            target,
+            vault_root=vault,
+            plan_file=plan,
+            scratch_root=scratch,
+        ),
+        "exact cmux origin surface",
+    )
+
+    original_routing = current_review_admission.routing_from_environment
+    current_review_admission.routing_from_environment = lambda _config: (
+        {
+            "runtime": "codex",
+            "model": "gpt-5.6-sol",
+            "effort": "high",
+        },
+        "tracked-default",
+    )
+    try:
+        preflight_rejection(
+            "tracked-default",
+            lambda target, plan: task_review_runner.run_current_review(
+                target,
+                vault_root=vault,
+                plan_file=plan,
+                origin_surface="11111111-1111-4111-8111-111111111111",
+                scratch_root=scratch,
+            ),
+            "host-confirmed current session route",
+        )
+    finally:
+        current_review_admission.routing_from_environment = original_routing
+
+    original_request = current_review_admission._request
+
+    def fail_request_preparation(*_args, **_kwargs):
+        raise RuntimeError("request-preparation fixture")
+
+    current_review_admission._request = fail_request_preparation
+    try:
+        preflight_rejection(
+            "request",
+            lambda target, plan: task_review_runner.run_current_review(
+                target,
+                vault_root=vault,
+                plan_file=plan,
+                origin_surface="11111111-1111-4111-8111-111111111111",
+                scratch_root=scratch,
+            ),
+            "request-preparation fixture",
+        )
+    finally:
+        current_review_admission._request = original_request
+
+    original_atomic_json = current_review_admission._atomic_json
+
+    def fail_unpublished_meta(path: Path, value: object) -> None:
+        if path.name == "current-review.json":
+            raise RuntimeError("unpublished-metadata fixture")
+        original_atomic_json(path, value)
+
+    current_review_admission._atomic_json = fail_unpublished_meta
+    try:
+        preflight_rejection(
+            "publication",
+            lambda target, plan: task_review_runner.run_current_review(
+                target,
+                vault_root=vault,
+                plan_file=plan,
+                origin_surface="11111111-1111-4111-8111-111111111111",
+                scratch_root=scratch,
+            ),
+            "unpublished-metadata fixture",
+        )
+    finally:
+        current_review_admission._atomic_json = original_atomic_json
+        for name, value in session_environment.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
 
     mandatory_review_artifacts = (
         "scripts/review-inspect.py",

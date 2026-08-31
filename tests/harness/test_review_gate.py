@@ -2720,7 +2720,7 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
         """# Review plan
 
 ```json
-{"schema_version":1,"desired_outcome":"Preserve the approved outcome through release review.","success_evidence":[{"evidence_id":"release-proof","observable":"Exact evidence is present in the review packet."}],"non_goals":["Changing product behavior during release review."]}
+{"schema_version":1,"desired_outcome":"Preserve the approved outcome through release review.","success_evidence":[{"evidence_id":"release-proof","evidence_kind":"behavior","observable":"Exact evidence is present in the review packet.","subject":"current-review:release-evidence"}],"non_goals":["Changing product behavior during release review."]}
 ```
 """,
         encoding="utf-8",
@@ -3204,7 +3204,7 @@ with tempfile.TemporaryDirectory(prefix="current-release-artifacts.") as raw:
             """# Release plan
 
 ```json
-{"schema_version":1,"desired_outcome":"Bind one external release evidence root.","success_evidence":[{"evidence_id":"release-root","observable":"The exact external artifacts enter review."}],"non_goals":["No release effect."]}
+{"schema_version":1,"desired_outcome":"Bind one external release evidence root.","success_evidence":[{"evidence_id":"release-root","evidence_kind":"behavior","observable":"The exact external artifacts enter review.","subject":"current-review:external-release-root"}],"non_goals":["No release effect."]}
 ```
 """,
             encoding="utf-8",
@@ -3686,7 +3686,7 @@ with tempfile.TemporaryDirectory(prefix="review-iteration-facade.") as raw:
         """# Iteration barrier plan
 
 ```json
-{"schema_version":1,"desired_outcome":"Persist the exact newer Deep review iteration.","success_evidence":[{"evidence_id":"iteration-two","observable":"Both verification callbacks are accepted once."}],"non_goals":["Changing review topology."]}
+{"schema_version":1,"desired_outcome":"Persist the exact newer Deep review iteration.","success_evidence":[{"evidence_id":"iteration-two","evidence_kind":"behavior","observable":"Both verification callbacks are accepted once.","subject":"current-review:deep-iteration"}],"non_goals":["Changing review topology."]}
 ```
 """,
         encoding="utf-8",

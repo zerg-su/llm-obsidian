@@ -22,10 +22,11 @@ callbacks and every provider effect. Active drift rejects stale results and
 writes typed attention; never stash, commit, reset, or create a worktree.
 
 A first current review requires `--plan <approved-plan>` with one valid Outcome
-Contract and at least one behavior-specific success-evidence ID. Harness never
-manufactures an approval outcome from generic correctness, completeness, or
-verification language. Invalid or generic-only plans fail before active
-ownership, request, scratch, or provider effects. Generated callbacks omit
+Contract and at least one success-evidence item carrying the paired typed fields
+`evidence_kind: behavior` and a bounded `subject`. Harness never manufactures an
+approval outcome from generic correctness, completeness, or verification
+language. Invalid, generic-only, or unbound plans fail before active ownership,
+request, scratch, or provider effects. Generated callbacks omit
 `--plan` and reuse the hash-bound stored plan. After `changes-requested`, an
 executor may pass `--plan` again with the clean committed resolution to make an
 explicit contract amendment; an unannounced plan-byte change fails closed.

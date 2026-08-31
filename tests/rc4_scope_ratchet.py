@@ -520,6 +520,14 @@ same HEAD, and a proven zero-effect/quiescent replacement; ordinary fresh
 reviews still require an explicit plan. This bounded recovery adds 81
 production lines. The measured candidate is therefore exactly 303 files /
 115,350 lines with no speculative headroom.
+
+Formal current-review stabilization replaces the name-based generic-evidence
+denylist with positive typed ``evidence_kind: behavior`` plus ``subject``
+authority and moves every fallible preflight ahead of UUID scratch
+materialization, removing unpublished scratch on later publication failure.
+The two existing owners grow by a measured net 50 production lines and no new
+production file. The exact candidate is therefore 303 files / 115,400 lines,
+with no speculative headroom.
 """
 
 from __future__ import annotations
@@ -535,7 +543,7 @@ SCRIPT_FILE_CEILING = 303
 #: Maximum total lines across those files. This is the measured exact candidate
 #: after the escaping-symlink, malformed-enum, and exhausted-lineage review
 #: fixes, with zero headroom.
-SCRIPT_LINE_CEILING = 115_350
+SCRIPT_LINE_CEILING = 115_400
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

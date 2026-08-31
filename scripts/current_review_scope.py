@@ -12,13 +12,8 @@ from outcome_contract import OutcomeContractError, extract_from_bytes
 from task_review_shared import TaskReviewError
 
 
-GENERIC_REVIEW_EVIDENCE_IDS = frozenset(
-    {"scope-integrity", "repository-contract", "verification"}
-)
-
-
 def current_plan_identity(path: Path) -> tuple[str, str]:
-    """Validate one behavior-specific plan before ownership effects."""
+    """Validate one behavior-bound plan before ownership effects."""
 
     try:
         raw = path.read_bytes()
@@ -27,9 +22,12 @@ def current_plan_identity(path: Path) -> tuple[str, str]:
         raise TaskReviewError(
             f"current review Outcome Contract is invalid: {exc}"
         ) from exc
-    if set(outcome.evidence_ids).issubset(GENERIC_REVIEW_EVIDENCE_IDS):
+    if not any(
+        item.get("evidence_kind") == "behavior" and item.get("subject")
+        for item in outcome.value["success_evidence"]
+    ):
         raise TaskReviewError(
-            "current review Outcome Contract requires behavior-specific "
+            "current review Outcome Contract requires behavior-bound "
             "success evidence"
         )
     return hashlib.sha256(raw).hexdigest(), outcome.sha256
