@@ -585,6 +585,45 @@ def _review_plan_authority(
     return authority.path, authority
 
 
+def _current_review_plan_inputs(
+    meta: Mapping[str, Any],
+    plan: Path,
+    boundary_input_sha256: str,
+    *,
+    pointer_root: Path,
+) -> tuple[ContextInput, tuple[ContextInput, ...]]:
+    """Capture and bind mutable current-review plan bytes exactly once."""
+
+    try:
+        raw = plan.read_bytes()
+    except OSError as exc:
+        raise TaskReviewError("current review plan is unavailable") from exc
+    digest = hashlib.sha256(raw).hexdigest()
+    if digest != str(meta.get("approved_plan_sha256") or ""):
+        raise TaskReviewError("current review plan digest changed")
+    outcome_inputs = current_review_outcome_inputs(
+        meta,
+        plan,
+        boundary_input_sha256,
+        plan_bytes=raw,
+    )
+    if len(raw) <= 65_536:
+        plan_input = ContextInput(
+            "approved-plan.md", str(plan), raw, role="plan"
+        )
+    else:
+        pointer = pointer_root / "approved-plan.md"
+        _atomic_bytes(pointer, raw)
+        plan_input = ContextInput.pointer(
+            "approved-plan.md",
+            str(pointer),
+            byte_count=len(raw),
+            content_sha256=digest,
+            role="plan",
+        )
+    return plan_input, outcome_inputs
+
+
 def _plan_review_context(
     meta: Mapping[str, Any],
     runtime_root: Path,
@@ -671,6 +710,21 @@ def _context(
     boundary_input_sha256 = str(policy.get("boundary_input_sha256") or "")
     base_sha = str(policy.get("base_sha") or "")
     plan, authority = _review_plan_authority(meta, worktree)
+    if meta.get("lifecycle") == "current-checkout":
+        plan_input, current_outcome_inputs = _current_review_plan_inputs(
+            meta,
+            plan,
+            boundary_input_sha256,
+            pointer_root=runtime_root / "pointers",
+        )
+    else:
+        plan_input = _bounded_input(
+            "approved-plan.md",
+            plan,
+            role="plan",
+            pointer_root=runtime_root / "pointers",
+        )
+        current_outcome_inputs = ()
     (
         plan_artifact_root,
         review_artifact_root,
@@ -685,12 +739,7 @@ def _context(
         amendment_inputs.extend(amendment_chain)
         packet_metadata.update(amendment_metadata)
     inputs = [
-        _bounded_input(
-            "approved-plan.md",
-            plan,
-            role="plan",
-            pointer_root=runtime_root / "pointers",
-        ),
+        plan_input,
         _bounded_input(
             "review-skill.md",
             vault / "skills/review/SKILL.md",
@@ -721,7 +770,7 @@ def _context(
         ),
         *amendment_inputs,
         *plan_review_inputs,
-        *current_review_outcome_inputs(meta, plan, boundary_input_sha256),
+        *current_outcome_inputs,
     ]
     inputs.extend(
         _authorized_continuation_inputs(meta, worktree, runtime_root, head)

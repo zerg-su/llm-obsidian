@@ -32,7 +32,9 @@ packages were published for them.
   fallible preflights now precede UUID scratch creation, and an unpublished
   root is removed if later publication fails. A callback that replaces a
   proven zero-effect preflight failure reuses the predecessor's hash-verified
-  concrete plan instead of asking for `--plan`.
+  concrete plan instead of asking for `--plan`. Context materialization reads
+  the mutable current plan once and binds the same bytes to its full hash,
+  Outcome Contract, and reviewer packet before provider effects.
 - Immutable verification receipts now expose a focused `implementation-full`
   profile: exact HEAD, complete `make test`, `git diff --check`, and final clean
   status, without coupling implementation review to unrelated release checks.
@@ -44,13 +46,14 @@ packages were published for them.
 - Light Review rejects changed symlinks that resolve outside the target, tells
   both native reviewers never to dereference escaping links, and returns typed
   validation errors for malformed enum/schema field types instead of a
-  traceback.
+  traceback. Non-empty finding paths must also equal or descend from the
+  requested path scope, without sibling-prefix aliases.
 - The live scripts ratchet moves to the exact measured candidate: six cohesive
   review owners plus the extracted admission owner raise the contour from 296
-  files / 113,215 lines to 303 files / 115,412 lines, including the explicit
+  files / 113,215 lines to 303 files / 115,495 lines, including the explicit
   exhausted-lineage, typed Outcome evidence, scratch-safe same-target
-  admission, and zero-effect callback-recovery boundaries with no speculative
-  headroom.
+  admission, zero-effect callback recovery, exact plan-byte binding, and scoped
+  advisory findings with no speculative headroom.
 
 ## [2.8.5] - 2026-08-19
 

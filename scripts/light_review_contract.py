@@ -98,6 +98,20 @@ def _origin_scope(
     }
 
 
+def _finding_is_in_scope(path: str, scope_paths: Sequence[str]) -> bool:
+    """Match exact or descendant paths without sibling-prefix ambiguity."""
+
+    if not path or not scope_paths:
+        return True
+    finding_parts = PurePosixPath(path).parts
+    return any(
+        finding_parts[: len(scope_parts)] == scope_parts
+        for scope_parts in (
+            PurePosixPath(scope_path).parts for scope_path in scope_paths
+        )
+    )
+
+
 def _verification_incomplete(
     value: object,
     *,
@@ -223,7 +237,13 @@ def validate_light_review(
         )
         if finding_id in finding_ids or not re.fullmatch(r"L-[0-9]{3}", finding_id):
             raise LightReviewError("Light Review finding identity is invalid")
-        _relative_path(finding["path"], "Light Review finding path", allow_empty=True)
+        finding_path = _relative_path(
+            finding["path"], "Light Review finding path", allow_empty=True
+        )
+        if not _finding_is_in_scope(finding_path, paths):
+            raise LightReviewError(
+                "Light Review finding path is outside its requested scope"
+            )
         if finding["line"] is not None and (
             type(finding["line"]) is not int or finding["line"] < 1
         ):

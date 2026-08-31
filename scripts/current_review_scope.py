@@ -6,8 +6,10 @@ import hashlib
 from pathlib import Path
 from typing import Any, Mapping
 
-from harness.context import ContextInput, outcome_contract_input
-from harness.contracts import ContractError as HarnessContractError
+from harness.context import (
+    OUTCOME_POINTER_ID,
+    ContextInput,
+)
 from outcome_contract import OutcomeContractError, extract_from_bytes
 from task_review_shared import TaskReviewError
 
@@ -34,7 +36,11 @@ def current_plan_identity(path: Path) -> tuple[str, str]:
 
 
 def current_review_outcome_inputs(
-    meta: Mapping[str, Any], plan: Path, boundary_input_sha256: str
+    meta: Mapping[str, Any],
+    plan: Path,
+    boundary_input_sha256: str,
+    *,
+    plan_bytes: bytes,
 ) -> tuple[ContextInput, ...]:
     """Package the synthetic/explicit contract on the legacy current path."""
 
@@ -45,13 +51,21 @@ def current_review_outcome_inputs(
     ):
         return ()
     try:
-        return (
-            outcome_contract_input(
-                plan,
-                expected_sha256=str(meta.get("outcome_contract_sha256") or ""),
-            ),
-        )
-    except HarnessContractError as exc:
+        contract = extract_from_bytes(plan_bytes)
+    except OutcomeContractError as exc:
         raise TaskReviewError(
             f"review Outcome Contract is invalid: {exc}"
         ) from exc
+    if contract.sha256 != str(meta.get("outcome_contract_sha256") or ""):
+        raise TaskReviewError(
+            "review Outcome Contract input digest changed"
+        )
+    return (
+        ContextInput(
+            "outcome-contract.json",
+            str(plan),
+            contract.canonical,
+            role="outcome",
+            pointer_id=OUTCOME_POINTER_ID,
+        ),
+    )

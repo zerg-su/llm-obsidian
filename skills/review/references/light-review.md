@@ -38,10 +38,12 @@ JSON, target root, and `verify`. Do not open another window or nested agent.
 Validate JSON-only output through `scripts/light_review_contract.py` with
 `--snapshot-file snapshot.json`, exact runtime/model/effort, and `--verify` iff
 verification was requested. The validator binds digest, target, HEAD, base,
-paths, untracked inclusion, and verification mode. On failure, give the error
-to the same child for one correction. A second failure returns `incomplete`;
-never weaken the schema. Repeat the same snapshot afterward. Digest drift
-returns `incomplete` with a coverage gap and no automatic rerun.
+paths, untracked inclusion, and verification mode. Every non-empty finding path
+must equal or descend from one requested path; empty path scope remains
+repository-wide. On failure, give the error to the same child for one
+correction. A second failure returns `incomplete`; never weaken the schema.
+Repeat the same snapshot afterward. Digest drift returns `incomplete` with a
+coverage gap and no automatic rerun.
 
 With `--verify`, run only safe, bounded, directly relevant checks. Anything
 requiring writes or permission is `not-run` plus a coverage gap. Without it,

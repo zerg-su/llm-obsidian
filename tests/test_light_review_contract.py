@@ -147,6 +147,46 @@ validated = validate_light_review(
 check("valid Light Review contract is accepted", validated["status"] == "findings-observed")
 
 
+def scoped_result(scope_path: str, finding_path: str) -> tuple[dict, dict]:
+    scoped_snapshot = copy.deepcopy(expected_snapshot)
+    scoped_snapshot["paths"] = [scope_path]
+    scoped_payload = copy.deepcopy(payload)
+    scoped_payload["scope"]["paths"] = [scope_path]
+    scoped_payload["findings"][0]["path"] = finding_path
+    return scoped_snapshot, scoped_payload
+
+
+for label, scope_path, finding_path in (
+    ("file scope accepts its exact file", "src/app.py", "src/app.py"),
+    ("directory scope accepts a descendant", "src", "src/app.py"),
+):
+    scoped_snapshot, scoped_payload = scoped_result(scope_path, finding_path)
+    scoped = validate_light_review(
+        scoped_payload,
+        expected_snapshot=scoped_snapshot,
+        expected_route=terra,
+        verification_requested=True,
+    )
+    check(label, scoped["findings"][0]["path"] == finding_path)
+
+for label, scope_path, finding_path in (
+    ("directory scope rejects a sibling-prefix path", "src", "src-other/app.py"),
+    ("path scope rejects an unrelated finding", "src", "README.md"),
+):
+    scoped_snapshot, scoped_payload = scoped_result(scope_path, finding_path)
+    try:
+        validate_light_review(
+            scoped_payload,
+            expected_snapshot=scoped_snapshot,
+            expected_route=terra,
+            verification_requested=True,
+        )
+    except LightReviewError:
+        check(label, True)
+    else:
+        check(label, False)
+
+
 def rejected(label: str, mutate) -> None:
     candidate = copy.deepcopy(payload)
     mutate(candidate)

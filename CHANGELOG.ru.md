@@ -38,7 +38,9 @@
   fallible preflight выполняются до создания UUID scratch, а неопубликованный
   root удаляется при последующей ошибке публикации. Callback, заменяющий
   доказанный zero-effect preflight failure, переиспользует hash-verified
-  concrete plan предшественника и не запрашивает `--plan`.
+  concrete plan предшественника и не запрашивает `--plan`. Materialization
+  читает mutable current plan один раз и связывает одни exact bytes с full
+  hash, Outcome Contract и reviewer packet до provider effects.
 - Immutable verification receipt получил сфокусированный профиль
   `implementation-full`: exact HEAD, полный `make test`, `git diff --check` и
   финальный clean status без привязки implementation review к посторонним
@@ -49,12 +51,15 @@
   в другом репозитории.
 - Light Review отклоняет changed symlink, ведущий за пределы target, запрещает
   обоим native reviewer'ам dereference таких ссылок и возвращает typed error для
-  неверных типов enum/schema вместо traceback.
+  неверных типов enum/schema вместо traceback. Непустой finding path обязан
+  совпадать с requested path scope или быть его потомком без sibling-prefix
+  подмены.
 - Live ratchet scripts сдвинут к точно измеренному кандидату: шесть cohesive
   review-owner'ов и выделенный admission owner увеличивают contour с 296 файлов
-  / 113 215 строк до 303 файлов / 115 412 строк с explicit exhausted-lineage,
-  typed Outcome evidence, scratch-safe same-target admission и zero-effect
-  callback-recovery boundaries без спекулятивного запаса.
+  / 113 215 строк до 303 файлов / 115 495 строк с explicit exhausted-lineage,
+  typed Outcome evidence, scratch-safe same-target admission, zero-effect
+  callback recovery, exact plan-byte binding и scoped advisory findings без
+  спекулятивного запаса.
 
 ## [2.8.5] — 2026-08-19
 

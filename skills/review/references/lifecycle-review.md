@@ -30,6 +30,9 @@ request, scratch, or provider effects. Generated callbacks omit
 `--plan` and reuse the hash-bound stored plan. After `changes-requested`, an
 executor may pass `--plan` again with the clean committed resolution to make an
 explicit contract amendment; an unannounced plan-byte change fails closed.
+Context materialization captures the current plan once and binds those exact
+bytes simultaneously to the full plan hash, Outcome Contract, and reviewer
+packet before any provider effect.
 The same callback rule applies when a proven zero-effect preflight failure is
 replaced: only the same-policy, same-HEAD, hash-verified stored plan is reused.
 

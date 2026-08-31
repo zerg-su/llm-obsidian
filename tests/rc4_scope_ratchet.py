@@ -531,6 +531,14 @@ validation, and final clean status to one exact HEAD without unrelated release
 checks. The three existing owners grow by a measured net 62 production lines
 and no new production file. The exact candidate is therefore 303 files /
 115,412 lines, with no speculative headroom.
+
+The next formal review binds mutable current-plan bytes once across the full
+plan digest, Outcome Contract, and reviewer packet before provider effects. It
+also confines every non-empty advisory finding path to the requested Light
+Review path scope using component-aware ancestry. The three existing owners
+grow by a measured net 83 production lines and no new production file. The
+exact candidate is therefore 303 files / 115,495 lines, with no speculative
+headroom.
 """
 
 from __future__ import annotations
@@ -544,9 +552,9 @@ from pathlib import Path
 SCRIPT_FILE_CEILING = 303
 
 #: Maximum total lines across those files. This is the measured exact candidate
-#: after the escaping-symlink, malformed-enum, and exhausted-lineage review
-#: fixes, with zero headroom.
-SCRIPT_LINE_CEILING = 115_412
+#: after exact current-plan byte binding and scoped Light Review findings, with
+#: zero headroom.
+SCRIPT_LINE_CEILING = 115_495
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

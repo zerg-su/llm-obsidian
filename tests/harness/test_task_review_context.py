@@ -44,6 +44,62 @@ class ReviewDiffBoundaryTest(unittest.TestCase):
         )
 
 
+class CurrentReviewPlanBindingTest(unittest.TestCase):
+    def test_non_outcome_plan_mutation_is_rejected_before_context_publication(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="current-plan-binding.") as raw:
+            root = Path(raw).resolve()
+            vault = root / "vault"
+            worktree = root / "worktree"
+            runtime = root / "runtime"
+            (vault / "skills/review").mkdir(parents=True)
+            worktree.mkdir()
+            runtime.mkdir()
+            (vault / "skills/review/SKILL.md").write_text(
+                "# Review\n", encoding="utf-8"
+            )
+            plan = root / "approved-plan.md"
+            original = (
+                b"# Original plan prose\n\n```json\n"
+                b'{"schema_version":1,"desired_outcome":"Keep it exact.",'
+                b'"success_evidence":[{"evidence_id":"behavior",'
+                b'"observable":"The behavior is visible.",'
+                b'"evidence_kind":"behavior",'
+                b'"subject":"current-review:behavior"}],'
+                b'"non_goals":["No unrelated scope."]}\n```\n'
+            )
+            plan.write_bytes(original)
+            contract = extract_from_bytes(original)
+            meta = {
+                "version": 4,
+                "lifecycle": "current-checkout",
+                "task_name": "fixture",
+                "task_id": "task",
+                "plan_file": str(plan),
+                "approved_plan_sha256": hashlib.sha256(original).hexdigest(),
+                "outcome_contract_sha256": contract.sha256,
+                "review_policy": {
+                    "purpose": "implementation",
+                    "base_sha": "",
+                    "boundary_input_sha256": "",
+                    "verification_profile": "scoped",
+                    "verification_profile_sha256": "a" * 64,
+                },
+            }
+
+            plan.write_bytes(original.replace(b"Original", b"Mutated ", 1))
+
+            with mock.patch(
+                "task_review_context._git", return_value="b" * 40
+            ), mock.patch(
+                "task_review_context._git_bytes", return_value=b"bounded diff\n"
+            ), self.assertRaisesRegex(
+                TaskReviewError, "plan.*digest|plan.*changed"
+            ):
+                _context(meta, vault, worktree, runtime, "task")
+
+            self.assertFalse(runtime.joinpath("packets").exists())
+
+
 class ReviewAmendmentEvidenceTest(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory(prefix="review-amendment.")
