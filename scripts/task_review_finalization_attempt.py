@@ -13,11 +13,10 @@ from harness.finalization_ledger import (
     FinalizationLedger,
     predecessor_bound_attempt_id,
 )
-from harness.review_finalization import (
-    reserve_task_finalization_cycle,
-    task_finalization_policy,
-)
+from harness.review_finalization import reserve_task_finalization_cycle, task_finalization_policy
 from harness.workflows.review import ReviewOperationRequest
+
+from current_review_finalization import bound_finalization_ledger
 from model_routing import load_config
 from review_contract import (
     compile_effective_review_topology,
@@ -80,13 +79,14 @@ def finalization_ledger(meta: Mapping[str, Any], vault: Path, task_id: str, work
             "exact-HEAD finalization policy is unavailable"
         )
     plan_sha256, outcome_sha256 = _lineage_plan_identities(meta)
-    return FinalizationLedger(
+    return bound_finalization_ledger(
         vault / ".vault-meta" / "harness" / "finalization-ledger",
         lineage_id=task_id,
         origin_task_id=task_id,
         plan_sha256=plan_sha256,
         outcome_contract_sha256=outcome_sha256,
         max_cycles=policy.max_cycles,
+        reopen_existing=meta.get("lifecycle") == "current-checkout",
     )
 
 

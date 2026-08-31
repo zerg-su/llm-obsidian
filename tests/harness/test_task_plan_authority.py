@@ -244,6 +244,45 @@ class TaskPlanAuthorityTest(unittest.TestCase):
         self.assertEqual(active_plan, hashlib.sha256(amended).hexdigest())
         self.assertEqual(active_outcome, extract_from_bytes(amended).sha256)
 
+    def test_current_scope_rebind_preserves_ledger_lineage(self) -> None:
+        current = {**self.meta, "lifecycle": "current-checkout"}
+        ledger = finalization_ledger(
+            current, self.vault, TASK_ID, self.worktree
+        )
+        attempt_id = "33333333-3333-4333-8333-333333333333"
+        ledger.reserve(
+            attempt_id=attempt_id,
+            exact_head="a" * 40,
+            task_id=TASK_ID,
+            worktree=str(self.worktree),
+            provider_policy={
+                "routes": ["finalization-primary"],
+                "reason": "primary-only",
+            },
+        )
+        rebound = {
+            **current,
+            "approved_plan_sha256": "c" * 64,
+            "outcome_contract_sha256": "d" * 64,
+        }
+
+        reopened = finalization_ledger(
+            rebound, self.vault, TASK_ID, self.worktree
+        )
+        lineage = reopened.snapshot()
+        _, cycle, active_plan, active_outcome = attempt_binding(
+            rebound, TASK_ID, self.worktree, cycle=2
+        )
+
+        self.assertEqual(lineage["plan_sha256"], current["approved_plan_sha256"])
+        self.assertEqual(
+            lineage["outcome_contract_sha256"],
+            current["outcome_contract_sha256"],
+        )
+        self.assertEqual(cycle, 2)
+        self.assertEqual(active_plan, rebound["approved_plan_sha256"])
+        self.assertEqual(active_outcome, rebound["outcome_contract_sha256"])
+
     def test_stale_predecessor_and_mixed_outcome_fail_closed(self) -> None:
         changed = plan("Changed outcome.", "changed")
         record = record_plan_amendment(
