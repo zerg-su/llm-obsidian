@@ -30,6 +30,11 @@ check(
     "Claude Light agent never dereferences escaping changed symlinks",
     "Never dereference a changed" in claude_agent and "exact target root" in claude_agent,
 )
+check(
+    "Claude Light agent preserves snapshot-origin coverage gaps",
+    "LightSnapshot.coverage_gaps" in claude_agent
+    and "Never drop or rewrite" in claude_agent,
+)
 
 codex_agent = tomllib.loads((ROOT / ".codex/agents/light-reviewer.toml").read_text(encoding="utf-8"))
 check("Codex Light agent is read-only and non-interactive", codex_agent["sandbox_mode"] == "read-only" and codex_agent["approval_policy"] == "never")
@@ -39,6 +44,11 @@ check(
     "Codex Light agent never dereferences escaping changed symlinks",
     "Never dereference a changed" in codex_agent["developer_instructions"]
     and "exact target root" in codex_agent["developer_instructions"],
+)
+check(
+    "Codex Light agent preserves snapshot-origin coverage gaps",
+    "LightSnapshot.coverage_gaps" in codex_agent["developer_instructions"]
+    and "Never drop or rewrite" in codex_agent["developer_instructions"],
 )
 
 plugin = json.loads((ROOT / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))

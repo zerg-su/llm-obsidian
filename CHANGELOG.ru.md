@@ -53,13 +53,14 @@
   обоим native reviewer'ам dereference таких ссылок и возвращает typed error для
   неверных типов enum/schema вместо traceback. Непустой finding path обязан
   совпадать с requested path scope или быть его потомком без sibling-prefix
-  подмены.
+  подмены. Origin gap покрытия base из snapshot обязан первым сохраняться в
+  child result и принудительно давать advisory-статус `incomplete`.
 - Live ratchet scripts сдвинут к точно измеренному кандидату: шесть cohesive
   review-owner'ов и выделенный admission owner увеличивают contour с 296 файлов
-  / 113 215 строк до 303 файлов / 115 495 строк с explicit exhausted-lineage,
+  / 113 215 строк до 303 файлов / 115 512 строк с explicit exhausted-lineage,
   typed Outcome evidence, scratch-safe same-target admission, zero-effect
-  callback recovery, exact plan-byte binding и scoped advisory findings без
-  спекулятивного запаса.
+  callback recovery, exact plan-byte binding, scoped advisory findings и
+  propagation fallback gaps без спекулятивного запаса.
 
 ## [2.8.5] — 2026-08-19
 

@@ -126,6 +126,33 @@ with tempfile.TemporaryDirectory(prefix="review-target-test.") as raw:
     else:
         check("invalid explicit base fails closed", False)
 
+    fallback_repo = Path(raw) / "fallback-product"
+    fallback_repo.mkdir()
+    git(fallback_repo, "init", "-b", "main")
+    git(fallback_repo, "config", "user.email", "review@example.invalid")
+    git(fallback_repo, "config", "user.name", "Review Fallback Test")
+    (fallback_repo / "app.py").write_text("VALUE = 1\n", encoding="utf-8")
+    git(fallback_repo, "add", "app.py")
+    git(fallback_repo, "commit", "-m", "root")
+    fallback_target = resolve_target(fallback_repo)
+    root_fallback = snapshot_light(fallback_target)
+    check(
+        "root commit fallback records its mandatory coverage gap",
+        root_fallback.base_source == "root-commit-fallback"
+        and root_fallback.coverage_gaps
+        == ("No branch base was resolved; coverage starts at the root commit.",),
+    )
+    (fallback_repo / "app.py").write_text("VALUE = 2\n", encoding="utf-8")
+    git(fallback_repo, "add", "app.py")
+    git(fallback_repo, "commit", "-m", "second")
+    latest_fallback = snapshot_light(fallback_target)
+    check(
+        "latest commit fallback records its mandatory coverage gap",
+        latest_fallback.base_source == "latest-commit-fallback"
+        and latest_fallback.coverage_gaps
+        == ("No branch base was resolved; coverage starts at the latest commit.",),
+    )
+
     byte_repo = Path(raw) / "byte-product"
     byte_repo.mkdir()
     git(byte_repo, "init", "-b", "main")

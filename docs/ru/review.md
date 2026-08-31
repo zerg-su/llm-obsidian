@@ -15,6 +15,11 @@ context, пишет только typed outbox/callback и не может исп
 Risk policy не включает Full автоматически. Model alias разрешается через
 `config/model-routing.toml`; hardcoded model names в skills и runners запрещены.
 
+Advisory Light Review сохраняет каждый `coverage_gaps` из исходного snapshot в
+начале child result и добавляет собственные gaps после них. Любой origin или
+observed gap требует `incomplete`; `no-findings-observed` допустим только при
+полном покрытии snapshot.
+
 ## Review плана
 
 План запускается только через code-owned facade:

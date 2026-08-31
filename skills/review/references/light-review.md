@@ -40,10 +40,11 @@ Validate JSON-only output through `scripts/light_review_contract.py` with
 verification was requested. The validator binds digest, target, HEAD, base,
 paths, untracked inclusion, and verification mode. Every non-empty finding path
 must equal or descend from one requested path; empty path scope remains
-repository-wide. On failure, give the error to the same child for one
-correction. A second failure returns `incomplete`; never weaken the schema.
-Repeat the same snapshot afterward. Digest drift returns `incomplete` with a
-coverage gap and no automatic rerun.
+repository-wide. The child must copy every snapshot-origin `coverage_gaps` item
+first and append its own gaps; any gap forces `incomplete`. On failure, give the
+error to the same child for one correction. A second failure returns
+`incomplete`; never weaken the schema. Repeat the same snapshot afterward.
+Digest drift returns `incomplete` with a coverage gap and no automatic rerun.
 
 With `--verify`, run only safe, bounded, directly relevant checks. Anything
 requiring writes or permission is `not-run` plus a coverage gap. Without it,

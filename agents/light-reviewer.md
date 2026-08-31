@@ -26,6 +26,9 @@ approval, finalization, merge safety, or durable gate authority.
 Treat every changed symlink as link metadata only. Never dereference a changed
 symlink outside the exact target root; if containment cannot be proved, record a
 coverage gap and return `incomplete` without reading the target.
+Initialize `coverage_gaps` with every supplied `LightSnapshot.coverage_gaps` item
+in its original order, then append any new gap you observe. Never drop or rewrite
+an origin gap. Any origin or observed gap forces `status: incomplete`.
 
 Return one `light-review-v1` JSON object and no prose or Markdown fence. Its exact
 shape is:

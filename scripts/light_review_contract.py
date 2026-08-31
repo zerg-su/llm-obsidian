@@ -75,7 +75,7 @@ def _relative_path(value: object, label: str, *, allow_empty: bool = False) -> s
 
 def _origin_scope(
     snapshot_value: Mapping[str, Any],
-) -> tuple[str, dict[str, Any]]:
+) -> tuple[str, dict[str, Any], list[str]]:
     snapshot = _mapping(snapshot_value, "expected Light Review snapshot")
     snapshot_sha256 = str(snapshot.get("snapshot_sha256") or "")
     raw_paths = snapshot.get("paths")
@@ -89,13 +89,22 @@ def _origin_scope(
         _relative_path(item, f"expected Light Review path {index}")
         for index, item in enumerate(raw_paths)
     ]
-    return snapshot_sha256, {
-        "target_key": str(snapshot.get("target_key") or ""),
-        "head": str(snapshot.get("head") or ""),
-        "base": str(snapshot.get("base") or ""),
-        "paths": paths,
-        "included_untracked": snapshot["include_untracked"],
-    }
+    origin_gaps = _strings(
+        snapshot.get("coverage_gaps"),
+        "expected Light Review coverage gaps",
+        limit=20,
+    )
+    return (
+        snapshot_sha256,
+        {
+            "target_key": str(snapshot.get("target_key") or ""),
+            "head": str(snapshot.get("head") or ""),
+            "base": str(snapshot.get("base") or ""),
+            "paths": paths,
+            "included_untracked": snapshot["include_untracked"],
+        },
+        origin_gaps,
+    )
 
 
 def _finding_is_in_scope(path: str, scope_paths: Sequence[str]) -> bool:
@@ -151,7 +160,11 @@ def validate_light_review(
     expected_route: Mapping[str, Any],
     verification_requested: bool,
 ) -> dict[str, Any]:
-    expected_snapshot_sha256, expected_scope = _origin_scope(expected_snapshot)
+    (
+        expected_snapshot_sha256,
+        expected_scope,
+        origin_coverage_gaps,
+    ) = _origin_scope(expected_snapshot)
     result = _mapping(payload, "Light Review result")
     _exact(
         result,
@@ -276,6 +289,10 @@ def validate_light_review(
         section_incomplete = section_incomplete or section_status == "incomplete"
 
     gaps = _strings(result["coverage_gaps"], "Light Review coverage gaps")
+    if gaps[: len(origin_coverage_gaps)] != origin_coverage_gaps:
+        raise LightReviewError(
+            "Light Review dropped its originating coverage gaps"
+        )
     verification_incomplete = _verification_incomplete(
         result["verification"],
         requested=verification_requested,

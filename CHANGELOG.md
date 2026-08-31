@@ -47,13 +47,15 @@ packages were published for them.
   both native reviewers never to dereference escaping links, and returns typed
   validation errors for malformed enum/schema field types instead of a
   traceback. Non-empty finding paths must also equal or descend from the
-  requested path scope, without sibling-prefix aliases.
+  requested path scope, without sibling-prefix aliases. Snapshot-origin base
+  coverage gaps must be preserved first in the child result and force an
+  `incomplete` advisory status.
 - The live scripts ratchet moves to the exact measured candidate: six cohesive
   review owners plus the extracted admission owner raise the contour from 296
-  files / 113,215 lines to 303 files / 115,495 lines, including the explicit
+  files / 113,215 lines to 303 files / 115,512 lines, including the explicit
   exhausted-lineage, typed Outcome evidence, scratch-safe same-target
   admission, zero-effect callback recovery, exact plan-byte binding, and scoped
-  advisory findings with no speculative headroom.
+  advisory findings and fallback-gap propagation with no speculative headroom.
 
 ## [2.8.5] - 2026-08-19
 

@@ -89,6 +89,7 @@ expected_snapshot = {
     "base": "d" * 40,
     "paths": [],
     "include_untracked": False,
+    "coverage_gaps": [],
 }
 payload = {
     "schema_version": 1,
@@ -185,6 +186,57 @@ for label, scope_path, finding_path in (
         check(label, True)
     else:
         check(label, False)
+
+
+def clean_result() -> dict:
+    candidate = copy.deepcopy(payload)
+    candidate["status"] = "no-findings-observed"
+    candidate["findings"] = []
+    candidate["coverage_gaps"] = []
+    for section in candidate["sections"]:
+        section["status"] = "clean"
+        section["finding_ids"] = []
+    return candidate
+
+
+for label, origin_gap in (
+    (
+        "latest-commit fallback gap cannot become no findings",
+        "No branch base was resolved; coverage starts at the latest commit.",
+    ),
+    (
+        "root-commit fallback gap cannot become no findings",
+        "No branch base was resolved; coverage starts at the root commit.",
+    ),
+):
+    fallback_snapshot = copy.deepcopy(expected_snapshot)
+    fallback_snapshot["coverage_gaps"] = [origin_gap]
+    missing_gap = clean_result()
+    try:
+        validate_light_review(
+            missing_gap,
+            expected_snapshot=fallback_snapshot,
+            expected_route=terra,
+            verification_requested=True,
+        )
+    except LightReviewError:
+        check(label, True)
+    else:
+        check(label, False)
+
+    preserved_gap = clean_result()
+    preserved_gap["coverage_gaps"] = [origin_gap]
+    preserved_gap["status"] = "incomplete"
+    validated_gap = validate_light_review(
+        preserved_gap,
+        expected_snapshot=fallback_snapshot,
+        expected_route=terra,
+        verification_requested=True,
+    )
+    check(
+        f"{label} is accepted only when preserved",
+        validated_gap["status"] == "incomplete",
+    )
 
 
 def rejected(label: str, mutate) -> None:
