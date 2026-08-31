@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import json
-import shlex
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -24,6 +22,7 @@ from task_review_shared import (
     _atomic_json,
 )
 from task_review_identity import _review_resolution_path
+from current_review_finalization import current_review_callback_wake as _callback_wake
 
 
 def _write_round_meta(
@@ -230,63 +229,6 @@ def _receipt(
             else {}
         ),
     }
-
-
-def _callback_wake(
-    meta: Mapping[str, Any], vault: Path, worktree: Path
-) -> str:
-    if meta.get("lifecycle") != "current-checkout":
-        return ""
-    raw_policy = meta["review_policy"]
-    wake_argv = [
-        str(Path(sys.executable).resolve()),
-        str(vault / "scripts" / "task-review-runner.py"),
-        "current",
-        "--worktree",
-        str(worktree),
-        "--vault-root",
-        str(vault),
-    ]
-    if raw_policy["mode"] == "deep":
-        wake_argv.append("--deep")
-    elif raw_policy["mode"] == "full":
-        wake_argv.append("--full")
-    if raw_policy["cross_model"]:
-        wake_argv.append("--cross-model")
-    for option in ("runtime", "model", "effort"):
-        value = str(raw_policy.get(option) or "")
-        if value:
-            wake_argv.extend((f"--{option}", value))
-    base_sha = str(raw_policy.get("base_sha") or "")
-    if base_sha:
-        wake_argv.extend(("--base", base_sha))
-    purpose = str(raw_policy.get("purpose") or "implementation")
-    boundary_file = str(
-        (
-            meta.get("review_boundary_input_source_file")
-            if purpose == "release"
-            else meta.get("review_boundary_input_file")
-        )
-        or ""
-    )
-    if purpose != "implementation" or boundary_file:
-        wake_argv.extend(("--purpose", purpose))
-    if boundary_file:
-        wake_argv.extend(("--boundary-input", boundary_file))
-    artifact_root = str(meta.get("review_artifact_root") or "")
-    if artifact_root:
-        wake_argv.extend(("--artifact-root", artifact_root))
-    if purpose == "release":
-        plan_file = str(meta.get("plan_file") or "")
-        if not plan_file:
-            raise TaskReviewError(
-                "current release review callback has no bound plan"
-            )
-        wake_argv.extend(("--plan", plan_file))
-    return (
-        "Typed current-review callback is ready. Run this exact command: "
-        + shlex.join(wake_argv)
-    )
 
 
 def _collect_ready_results(

@@ -5,9 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import shlex
 import subprocess
-import sys
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -35,7 +33,7 @@ from .runtime_sessions import RuntimeSessionManager
 from .store import OperationStore
 from .verification import VerificationError, load_profiles
 from .workflows.structural_pivot import StructuralPivotWorkflow
-from current_review_finalization import current_pivot_scratch
+from current_review_finalization import current_pivot_scratch, structural_pivot_callback_wake
 from .workflows.review_gate import (
     ReviewGateAuthorization,
     authorize_task_finalization,
@@ -155,6 +153,19 @@ class TaskFinalizationReservation:
     routes: FinalizationRouteDecision | None
 
 
+def _pivot_callback_wake(
+    meta: Mapping[str, object], vault: Path, worktree: Path) -> str:
+    wake = structural_pivot_callback_wake(meta, vault, worktree)
+    prefix = (
+        "Typed current-review callback is ready. "
+        if meta.get("lifecycle") == "current-checkout"
+        else "Structural pivot callback is ready. "
+    )
+    if not wake.startswith(prefix):
+        raise ValueError("structural pivot callback wake is invalid")
+    return wake
+
+
 def reserve_task_finalization_cycle(
     meta: Mapping[str, object],
     *,
@@ -222,18 +233,7 @@ def reserve_task_finalization_cycle(
                 runtime=runtime,
             )
             if result.status == "reserved":
-                wake = (
-                    "Structural pivot callback is ready. Run this exact command: "
-                    + shlex.join(
-                        (
-                            str(Path(sys.executable).resolve()),
-                            str(vault / "scripts/task-review-runner.py"),
-                            "run",
-                            "--worktree",
-                            str(Path(worktree).expanduser().resolve()),
-                        )
-                    )
-                )
+                wake = _pivot_callback_wake(meta, vault, Path(worktree))
                 result = workflow.start(
                     snapshot,
                     root_operation_id=task_id,

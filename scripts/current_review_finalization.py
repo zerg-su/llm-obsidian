@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import shlex
 import stat
+import sys
 from pathlib import Path
 from typing import Mapping
 
 from harness.finalization_ledger import FinalizationLedger, FinalizationLedgerError
+from task_review_shared import TaskReviewError
 
 
 def current_pivot_scratch(meta: Mapping[str, object]) -> Path | None:
@@ -36,6 +39,90 @@ def current_pivot_scratch(meta: Mapping[str, object]) -> Path | None:
             "current review pivot scratch authority is invalid"
         )
     return resolved
+
+
+def current_review_callback_wake(
+    meta: Mapping[str, object], vault: Path, worktree: Path
+) -> str:
+    """Compile the exact idempotent callback for a current review."""
+
+    if meta.get("lifecycle") != "current-checkout":
+        return ""
+    raw_policy = meta["review_policy"]
+    if not isinstance(raw_policy, Mapping):
+        raise TaskReviewError("current review callback policy is invalid")
+    wake_argv = [
+        str(Path(sys.executable).resolve()),
+        str(vault / "scripts" / "task-review-runner.py"),
+        "current",
+        "--worktree",
+        str(worktree),
+        "--vault-root",
+        str(vault),
+    ]
+    mode = str(raw_policy.get("mode") or "")
+    if mode == "deep":
+        wake_argv.append("--deep")
+    elif mode == "full":
+        wake_argv.append("--full")
+    if raw_policy.get("cross_model") is True:
+        wake_argv.append("--cross-model")
+    for option in ("runtime", "model", "effort"):
+        value = str(raw_policy.get(option) or "")
+        if value:
+            wake_argv.extend((f"--{option}", value))
+    base_sha = str(raw_policy.get("base_sha") or "")
+    if base_sha:
+        wake_argv.extend(("--base", base_sha))
+    purpose = str(raw_policy.get("purpose") or "implementation")
+    boundary_file = str(
+        (
+            meta.get("review_boundary_input_source_file")
+            if purpose == "release"
+            else meta.get("review_boundary_input_file")
+        )
+        or ""
+    )
+    if purpose != "implementation" or boundary_file:
+        wake_argv.extend(("--purpose", purpose))
+    if boundary_file:
+        wake_argv.extend(("--boundary-input", boundary_file))
+    artifact_root = str(meta.get("review_artifact_root") or "")
+    if artifact_root:
+        wake_argv.extend(("--artifact-root", artifact_root))
+    if purpose == "release":
+        plan_file = str(meta.get("plan_file") or "")
+        if not plan_file:
+            raise TaskReviewError(
+                "current release review callback has no bound plan"
+            )
+        wake_argv.extend(("--plan", plan_file))
+    return (
+        "Typed current-review callback is ready. Run this exact command: "
+        + shlex.join(wake_argv)
+    )
+
+
+def structural_pivot_callback_wake(
+    meta: Mapping[str, object], vault: Path, worktree: Path
+) -> str:
+    """Preserve the owning lifecycle when a structural callback wakes it."""
+
+    current = current_review_callback_wake(meta, vault, worktree)
+    if current:
+        return current
+    return (
+        "Structural pivot callback is ready. Run this exact command: "
+        + shlex.join(
+            (
+                str(Path(sys.executable).resolve()),
+                str(vault / "scripts/task-review-runner.py"),
+                "run",
+                "--worktree",
+                str(worktree.expanduser().resolve()),
+            )
+        )
+    )
 
 
 def bound_finalization_ledger(

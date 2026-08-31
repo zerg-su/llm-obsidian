@@ -42,6 +42,7 @@ from harness.workflows.review import (  # noqa: E402
 )
 from model_routing_config import load_tracked_config  # noqa: E402
 from outcome_contract import extract_from_bytes  # noqa: E402
+from current_review_finalization import current_review_callback_wake  # noqa: E402
 
 
 def check(label: str, value: bool) -> None:
@@ -456,6 +457,9 @@ with (
         )
     store = OperationStore(store_root)
     runtime = PivotRuntime(store, lineage)
+    current_callback_wake = current_review_callback_wake(
+        wired_meta, vault, product
+    )
     try:
         reserve_task_finalization_cycle(
             wired_meta,
@@ -533,6 +537,7 @@ with (
         and repeated.cycle.reason == "already-reserved"
         and runtime.starts == 1
         and len(runtime.requests) == 1
+        and runtime.requests[0].callback_wake == current_callback_wake
         and runtime.requests[0].cwd == pivot_scratch
         and runtime.exits == 1
         and runtime.cleanups == 1,
