@@ -104,6 +104,18 @@ COMMON_GATE = (
 
 
 PROFILES = {
+    "implementation-full": GateProfile(
+        "implementation-full",
+        (
+            GateCommand("full-tests", ("make", "test")),
+            GateCommand("diff-check", ("git", "diff", "--check")),
+            GateCommand(
+                "clean-status",
+                ("git", "status", "--short"),
+                "empty-output",
+            ),
+        ),
+    ),
     "stability-gate": GateProfile(
         "stability-gate",
         (

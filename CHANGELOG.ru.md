@@ -39,6 +39,10 @@
   root удаляется при последующей ошибке публикации. Callback, заменяющий
   доказанный zero-effect preflight failure, переиспользует hash-verified
   concrete plan предшественника и не запрашивает `--plan`.
+- Immutable verification receipt получил сфокусированный профиль
+  `implementation-full`: exact HEAD, полный `make test`, `git diff --check` и
+  финальный clean status без привязки implementation review к посторонним
+  release checks.
 - Structural-pivot callback и submit сохраняют lineage current-review,
   authority coordinator'а и изолированный scratch, даже если product находится
   в другом репозитории.
@@ -47,7 +51,7 @@
   неверных типов enum/schema вместо traceback.
 - Live ratchet scripts сдвинут к точно измеренному кандидату: шесть cohesive
   review-owner'ов и выделенный admission owner увеличивают contour с 296 файлов
-  / 113 215 строк до 303 файлов / 115 400 строк с explicit exhausted-lineage,
+  / 113 215 строк до 303 файлов / 115 412 строк с explicit exhausted-lineage,
   typed Outcome evidence, scratch-safe same-target admission и zero-effect
   callback-recovery boundaries без спекулятивного запаса.
 

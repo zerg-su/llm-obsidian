@@ -358,6 +358,20 @@ with tempfile.TemporaryDirectory(prefix="verification-receipt.") as raw:
         "mcp-sync-config",
         "codex-mcp-sync",
     )
+    implementation = receipts.PROFILES["implementation-full"]
+    assert tuple(
+        (item.command_id, item.argv, item.validator)
+        for item in implementation.commands
+    ) == (
+        ("full-tests", ("make", "test"), "exit-zero"),
+        ("diff-check", ("git", "diff", "--check"), "exit-zero"),
+        (
+            "clean-status",
+            ("git", "status", "--short"),
+            "empty-output",
+        ),
+    )
+    print("OK   implementation-full proves exact clean HEAD with the full suite")
     release_ids = tuple(
         item.command_id for item in receipts.PROFILES["release-final"].commands
     )
