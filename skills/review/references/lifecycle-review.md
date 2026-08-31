@@ -29,6 +29,8 @@ ownership, request, scratch, or provider effects. Generated callbacks omit
 `--plan` and reuse the hash-bound stored plan. After `changes-requested`, an
 executor may pass `--plan` again with the clean committed resolution to make an
 explicit contract amendment; an unannounced plan-byte change fails closed.
+The same callback rule applies when a proven zero-effect preflight failure is
+replaced: only the same-policy, same-HEAD, hash-verified stored plan is reused.
 
 Without `--base`, current review deliberately packages only `git show HEAD`.
 For a multi-commit task, pass `current --base <ref>`: Harness resolves the

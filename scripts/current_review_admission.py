@@ -10,12 +10,21 @@ from pathlib import Path
 from typing import Any, Iterator, Mapping
 
 from current_review_lease import CurrentReviewLeaseError, create_review_lease
+from current_review_scope import current_plan_identity
+from harness.store import OperationStore
 from harness.review_program import ReviewBoundaryInput
 from harness.workflows.review import ReviewContext
 from model_routing import load_config, routing_from_environment
 from review_target import ReviewTarget
-from task_review_context import _current_runtime_root, _request
-from task_review_shared import TaskReviewError, _atomic_json, _git
+from task_review_context import (
+    _current_review_is_quiescent,
+    _current_runtime_root,
+    _gate_root,
+    _request,
+    _zero_effect_attention_is_quiescent,
+    _zero_effect_attention_shape,
+)
+from task_review_shared import TaskReviewError, _atomic_json, _git, _read_json
 
 
 @contextmanager
@@ -83,6 +92,56 @@ def guard_active_plan(
     ):
         return
     raise TaskReviewError("an active current review uses another plan")
+
+
+def zero_effect_replacement_plan(
+    predecessor: Mapping[str, Any],
+    vault: Path,
+    *,
+    current_head: str,
+    same_policy: bool,
+) -> tuple[Path, tuple[str, str]] | None:
+    """Reuse the exact stored plan only for a same-HEAD zero-effect retry."""
+
+    lease = predecessor.get("review_lease")
+    if (
+        not same_policy
+        or not isinstance(lease, Mapping)
+        or str(lease.get("head") or "") != current_head
+    ):
+        return None
+    try:
+        task_id = str(uuid.UUID(str(predecessor.get("task_id") or "")))
+    except (ValueError, TypeError, AttributeError):
+        return None
+    gate_path = _gate_root(vault, task_id) / "review-gate.json"
+    if gate_path.is_file() and not gate_path.is_symlink():
+        gate = _read_json(gate_path, "current review gate")
+        if (
+            str(gate.get("status") or "") != "attention-required"
+            or not _zero_effect_attention_shape(gate)
+            or not (
+                _current_review_is_quiescent(vault, task_id)
+                or _zero_effect_attention_is_quiescent(vault, task_id, gate)
+            )
+        ):
+            return None
+    elif gate_path.exists() or gate_path.is_symlink():
+        raise TaskReviewError("current review gate is not a regular file")
+    elif OperationStore(vault / ".vault-meta" / "harness").list(task_id):
+        return None
+    stored_plan = Path(str(predecessor.get("plan_file") or "")).expanduser()
+    if not stored_plan.is_file() or stored_plan.is_symlink():
+        raise TaskReviewError("stored current review plan is unavailable")
+    resolved_plan = stored_plan.resolve()
+    identity = current_plan_identity(resolved_plan)
+    if (
+        str(predecessor.get("approved_plan_sha256") or "") != identity[0]
+        or str(predecessor.get("outcome_contract_sha256") or "")
+        != identity[1]
+    ):
+        raise TaskReviewError("stored current review plan identity changed")
+    return resolved_plan, identity
 
 
 def start_current_review(

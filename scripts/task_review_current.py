@@ -23,6 +23,7 @@ from current_review_admission import (
     guard_active_plan,
     plan_rebind_allowed,
     start_current_review,
+    zero_effect_replacement_plan,
 )
 from current_review_lease import (
     CurrentReviewLeaseError,
@@ -736,6 +737,9 @@ def _admit_and_run_current_review(
         observed_task_id = str(observed.get("task_id") or "")
     with current_admission_lock(scoped_active_path):
         active_path = _active_path(vault, worktree, target.target_key)
+        predecessor: dict[str, Any] | None = None
+        if active_path.is_file() and not active_path.is_symlink():
+            predecessor = _read_json(active_path, "current review state")
         effective_new_lineage = new_lineage
         if new_lineage and observed_task_id and active_path.is_file():
             current = _read_json(active_path, "current review state")
@@ -761,6 +765,24 @@ def _admit_and_run_current_review(
             new_lineage=effective_new_lineage,
         )
         if meta is None:
+            effective_plan_file = plan_file
+            effective_plan_identity = plan_identity
+            if effective_plan_file is None and predecessor is not None:
+                stored_policy = predecessor.get("review_policy")
+                inherited = zero_effect_replacement_plan(
+                    predecessor,
+                    vault,
+                    current_head=_git(worktree, "rev-parse", "HEAD"),
+                    same_policy=(
+                        isinstance(stored_policy, Mapping)
+                        and _same_requested_policy(
+                            stored_policy,
+                            requested_policy,
+                        )
+                    ),
+                )
+                if inherited is not None:
+                    effective_plan_file, effective_plan_identity = inherited
             meta, task_id, runtime_root = start_current_review(
                 worktree,
                 target,
@@ -771,8 +793,8 @@ def _admit_and_run_current_review(
                 base_sha=base_sha,
                 purpose=purpose,
                 boundary_input_file=boundary_input_file,
-                plan_file=plan_file,
-                plan_identity=plan_identity,
+                plan_file=effective_plan_file,
+                plan_identity=effective_plan_identity,
                 artifact_root=artifact_root,
                 origin_surface=origin_surface,
                 supersedes_task_id=(

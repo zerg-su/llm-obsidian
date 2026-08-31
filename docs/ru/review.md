@@ -41,6 +41,8 @@ behavior-specific success evidence; Harness больше не синтезиру
 «scope корректен и готов» доказательство. Callback повторно использует
 сохранённый hash-bound plan без `--plan`, а после `changes-requested` executor
 может явно передать amended plan вместе с чистым committed resolution HEAD.
+После доказанного zero-effect preflight failure callback также переиспользует
+этот plan, но только для того же policy и того же HEAD с совпавшими hash.
 Concurrent-запуски одной цели сериализуются и получают task ID победителя.
 
 ## Жизненный цикл finding

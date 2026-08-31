@@ -34,6 +34,8 @@
   Contract вместо синтетического циклического контракта о корректности.
   Admission одной цели сериализован между процессами: конкурентные initial и
   exhausted-lineage запуски делят один task owner и один provider effect.
+  Callback, заменяющий доказанный zero-effect preflight failure, переиспользует
+  hash-verified concrete plan предшественника и не запрашивает `--plan`.
 - Structural-pivot callback и submit сохраняют lineage current-review,
   authority coordinator'а и изолированный scratch, даже если product находится
   в другом репозитории.
@@ -42,9 +44,9 @@
   неверных типов enum/schema вместо traceback.
 - Live ratchet scripts сдвинут к точно измеренному кандидату: шесть cohesive
   review-owner'ов и выделенный admission owner увеличивают contour с 296 файлов
-  / 113 215 строк до 303 файлов / 115 269 строк с explicit exhausted-lineage,
-  concrete Outcome и same-target admission boundaries без спекулятивного
-  запаса.
+  / 113 215 строк до 303 файлов / 115 350 строк с explicit exhausted-lineage,
+  concrete Outcome, same-target admission и zero-effect callback-recovery
+  boundaries без спекулятивного запаса.
 
 ## [2.8.5] — 2026-08-19
 

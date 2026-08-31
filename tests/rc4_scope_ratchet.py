@@ -512,6 +512,14 @@ Together with removing the synthetic generic Outcome compiler, the correction
 adds exactly one production file and 113 net lines. Concurrent fresh-lineage
 losers resume the winner. The measured candidate is therefore exactly 303
 files / 115,269 lines with no speculative headroom.
+
+Live dogfood then exposed the callback edge after a provider capability
+preflight fails without launching a review lane. The admission owner now
+reuses the predecessor's hash-verified concrete plan only for the same policy,
+same HEAD, and a proven zero-effect/quiescent replacement; ordinary fresh
+reviews still require an explicit plan. This bounded recovery adds 81
+production lines. The measured candidate is therefore exactly 303 files /
+115,350 lines with no speculative headroom.
 """
 
 from __future__ import annotations
@@ -527,7 +535,7 @@ SCRIPT_FILE_CEILING = 303
 #: Maximum total lines across those files. This is the measured exact candidate
 #: after the escaping-symlink, malformed-enum, and exhausted-lineage review
 #: fixes, with zero headroom.
-SCRIPT_LINE_CEILING = 115_269
+SCRIPT_LINE_CEILING = 115_350
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

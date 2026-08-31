@@ -2977,7 +2977,6 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
         retry_runtime = EffectRecordingRuntime(retry_store)
         retried = task_review_runner.run_current_review(
             retry_product,
-            plan_file=retry_product / "wiki/review-plan.md",
             origin_surface="33333333-3333-4333-8333-333333333333",
             scratch_root=base / "zero-effect-retry-scratch",
             runtime_manager=retry_runtime,
@@ -2986,6 +2985,10 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
             "durable current-review interface supersedes a zero-effect failure",
             retried["status"] == "reviewing"
             and retried["task_id"] != first_task_id
+            and json.loads(
+                current_active_path(retry_product).read_text(encoding="utf-8")
+            )["plan_file"]
+            == first_active["plan_file"]
             and len(retry_runtime.started) == 1,
         )
 
@@ -3104,7 +3107,6 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
         missing_gate_runtime = EffectRecordingRuntime(missing_gate_store)
         missing_gate_retry = task_review_runner.run_current_review(
             missing_gate_product,
-            plan_file=missing_gate_product / "wiki/review-plan.md",
             origin_surface="33333333-3333-4333-8333-333333333333",
             scratch_root=missing_gate_scratch,
             runtime_manager=missing_gate_runtime,
