@@ -9,11 +9,23 @@ import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping, NoReturn, Sequence
+from typing import Mapping, Sequence
 
 
 class CoordinatorError(ValueError):
     pass
+
+
+COORDINATOR_MARKERS = (
+    ("wiki", True),
+    ("scripts/task-review-runner.py", False),
+    ("scripts/review-inspect.py", False),
+    ("scripts/harness/review_submit.py", False),
+    ("skills/review/SKILL.md", False),
+    ("config/model-routing.toml", False),
+    ("config/verification-profiles.toml", False),
+    ("docs/skill-references/engineering-quality-contract.md", False),
+)
 
 
 @dataclass(frozen=True)
@@ -37,6 +49,19 @@ def _plugin_cache(path: Path) -> bool:
     )
 
 
+def _has_coordinator_markers(root: Path) -> bool:
+    for relative, directory in COORDINATOR_MARKERS:
+        marker = root / relative
+        try:
+            resolved = marker.resolve(strict=True)
+        except OSError:
+            return False
+        expected_type = marker.is_dir() if directory else marker.is_file()
+        if resolved != marker or marker.is_symlink() or not expected_type:
+            return False
+    return True
+
+
 def validate_coordinator(path: Path | str, *, label: str = "coordinator") -> Path:
     raw = Path(path).expanduser()
     if not raw.is_absolute() or raw.is_symlink():
@@ -47,17 +72,8 @@ def validate_coordinator(path: Path | str, *, label: str = "coordinator") -> Pat
         raise CoordinatorError(f"{label} coordinator root is unavailable") from exc
     if _plugin_cache(root):
         raise CoordinatorError(f"{label} coordinator root cannot be a plugin cache")
-    required = (
-        root / "wiki",
-        root / "scripts/task-review-runner.py",
-        root / "skills/review/SKILL.md",
-        root / "config/model-routing.toml",
-        root / "config/verification-profiles.toml",
-    )
-    if not root.is_dir() or any(not item.exists() or item.is_symlink() for item in required):
+    if not root.is_dir() or not _has_coordinator_markers(root):
         raise CoordinatorError(f"{label} coordinator root is not a verified LLM Obsidian vault")
-    if not required[0].is_dir() or any(not item.is_file() for item in required[1:]):
-        raise CoordinatorError(f"{label} coordinator markers are invalid")
     return root
 
 
@@ -67,11 +83,7 @@ def _ancestor_candidates(cwd: Path) -> list[Path]:
         current = current.parent
     matches: list[Path] = []
     for candidate in (current, *current.parents):
-        if (
-            (candidate / "wiki").is_dir()
-            and (candidate / "scripts/task-review-runner.py").is_file()
-            and (candidate / "skills/review/SKILL.md").is_file()
-        ):
+        if _has_coordinator_markers(candidate):
             matches.append(candidate)
     return matches
 
@@ -90,9 +102,7 @@ def _registry_root(path: Path) -> Path:
         or not isinstance(payload.get("default_vault_root"), str)
     ):
         raise CoordinatorError("coordinator registry fields are not exact")
-    return validate_coordinator(
-        payload["default_vault_root"], label="registry"
-    )
+    return validate_coordinator(payload["default_vault_root"], label="registry")
 
 
 def resolve_coordinator(
@@ -104,22 +114,18 @@ def resolve_coordinator(
 ) -> CoordinatorResolution:
     values = os.environ if environment is None else environment
     if explicit is not None and str(explicit):
-        return CoordinatorResolution(
-            validate_coordinator(explicit, label="explicit"), "explicit"
-        )
+        root = validate_coordinator(explicit, label="explicit")
+        return CoordinatorResolution(root, "explicit")
     environment_root = str(values.get("LLM_OBSIDIAN_PROJECT_ROOT") or "")
     if environment_root:
-        return CoordinatorResolution(
-            validate_coordinator(environment_root, label="environment"),
-            "environment",
-        )
+        root = validate_coordinator(environment_root, label="environment")
+        return CoordinatorResolution(root, "environment")
     ancestors = _ancestor_candidates(cwd or Path.cwd())
     if len(ancestors) > 1:
         raise CoordinatorError("coordinator ancestor resolution is ambiguous")
     if ancestors:
-        return CoordinatorResolution(
-            validate_coordinator(ancestors[0], label="ancestor"), "ancestor"
-        )
+        root = validate_coordinator(ancestors[0], label="ancestor")
+        return CoordinatorResolution(root, "ancestor")
     registry = registry_path or default_registry_path(values)
     if registry.exists() or registry.is_symlink():
         return CoordinatorResolution(_registry_root(registry), "registry")
@@ -157,11 +163,6 @@ def register_coordinator(
     return payload
 
 
-def die(message: str) -> NoReturn:
-    print(f"review-coordinator: {message}", file=sys.stderr)
-    raise SystemExit(3)
-
-
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -175,9 +176,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         if args.command == "register":
-            payload = register_coordinator(
-                args.vault_root, registry_path=args.registry
-            )
+            payload = register_coordinator(args.vault_root, registry_path=args.registry)
             result = {**payload, "source": "registered"}
         else:
             resolution = resolve_coordinator(
@@ -191,7 +190,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "source": resolution.source,
             }
     except CoordinatorError as exc:
-        die(str(exc))
+        print(f"review-coordinator: {exc}", file=sys.stderr)
+        raise SystemExit(3) from exc
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
     return 0
 

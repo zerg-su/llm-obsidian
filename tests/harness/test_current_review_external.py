@@ -39,12 +39,16 @@ def check(label: str, condition: bool, detail: str = "") -> None:
 
 def coordinator(path: Path) -> Path:
     (path / "wiki").mkdir(parents=True)
-    (path / "scripts").mkdir()
+    (path / "scripts/harness").mkdir(parents=True)
     (path / "skills/review").mkdir(parents=True)
     (path / "config").mkdir()
     (path / "docs/skill-references").mkdir(parents=True)
     (path / "scripts/task-review-runner.py").write_text("# fixture\n", encoding="utf-8")
     shutil.copy2(ROOT / "scripts/review-inspect.py", path / "scripts/review-inspect.py")
+    shutil.copy2(
+        ROOT / "scripts/harness/review_submit.py",
+        path / "scripts/harness/review_submit.py",
+    )
     shutil.copy2(
         ROOT / "docs/skill-references/engineering-quality-contract.md",
         path / "docs/skill-references/engineering-quality-contract.md",
@@ -188,12 +192,15 @@ with tempfile.TemporaryDirectory(prefix="external-current-review.") as raw:
         vault / "docs/skill-references/engineering-quality-contract.md"
     )
     coordinator_inspect = vault / "scripts/review-inspect.py"
+    coordinator_submit = vault / "scripts/harness/review_submit.py"
     check(
         "external prompt uses existing coordinator-owned review authority",
         str(coordinator_contract) in prompt
         and str(coordinator_inspect) in prompt
+        and str(coordinator_submit) in prompt
         and coordinator_contract.is_file()
-        and coordinator_inspect.is_file(),
+        and coordinator_inspect.is_file()
+        and coordinator_submit.is_file(),
         prompt,
     )
     check(
@@ -261,5 +268,48 @@ with tempfile.TemporaryDirectory(prefix="external-current-review.") as raw:
     finally:
         task_review_current._run_review = original
     check("dirty rejection creates no active pointer", len(captures) == captures_before_dirty and not (vault / ".vault-meta/harness/current-review" / dirty_key / "active.json").exists())
+
+    mandatory_review_artifacts = (
+        "scripts/review-inspect.py",
+        "scripts/harness/review_submit.py",
+        "docs/skill-references/engineering-quality-contract.md",
+    )
+    for index, relative in enumerate(mandatory_review_artifacts):
+        incomplete = coordinator(base / f"incomplete-coordinator-{index}")
+        (incomplete / relative).unlink()
+        untouched = product(base / f"products/incomplete-{index}", index + 20)
+        incomplete_key = resolve_target(untouched).target_key
+        captures_before_incomplete = len(captures)
+        scratch_entries_before = set(scratch.iterdir())
+        task_review_current._run_review = stop_before_provider
+        try:
+            task_review_runner.run_current_review(
+                untouched,
+                vault_root=incomplete,
+                origin_surface="11111111-1111-4111-8111-111111111111",
+                scratch_root=scratch,
+            )
+        except task_review_runner.TaskReviewError as exc:
+            check(
+                f"missing {relative} fails before review effects",
+                "verified LLM Obsidian vault" in str(exc),
+                str(exc),
+            )
+        else:
+            check(f"missing {relative} fails before review effects", False)
+        finally:
+            task_review_current._run_review = original
+        check(
+            f"missing {relative} leaves no gate, operation, prompt, or provider effect",
+            len(captures) == captures_before_incomplete
+            and not (
+                incomplete
+                / ".vault-meta/harness/current-review"
+                / incomplete_key
+                / "active.json"
+            ).exists()
+            and not (incomplete / ".vault-meta/harness").exists()
+            and set(scratch.iterdir()) == scratch_entries_before,
+        )
 
 print("\nAll external current-review tests passed.")

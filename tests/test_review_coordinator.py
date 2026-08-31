@@ -29,13 +29,19 @@ def check(label: str, condition: bool, detail: str = "") -> None:
 
 def coordinator(path: Path) -> Path:
     (path / "wiki").mkdir(parents=True)
-    (path / "scripts").mkdir()
+    (path / "scripts/harness").mkdir(parents=True)
     (path / "skills/review").mkdir(parents=True)
     (path / "config").mkdir()
+    (path / "docs/skill-references").mkdir(parents=True)
     (path / "scripts/task-review-runner.py").write_text("# fixture\n", encoding="utf-8")
+    (path / "scripts/review-inspect.py").write_text("# fixture\n", encoding="utf-8")
+    (path / "scripts/harness/review_submit.py").write_text("# fixture\n", encoding="utf-8")
     (path / "skills/review/SKILL.md").write_text("# Review\n", encoding="utf-8")
     (path / "config/model-routing.toml").write_text("schema_version = 1\n", encoding="utf-8")
     (path / "config/verification-profiles.toml").write_text("[profiles]\n", encoding="utf-8")
+    (path / "docs/skill-references/engineering-quality-contract.md").write_text(
+        "# Engineering quality\n", encoding="utf-8"
+    )
     return path.resolve()
 
 
@@ -113,5 +119,27 @@ with tempfile.TemporaryDirectory(prefix="review-coordinator-test.") as raw:
         check("missing coordinator stops before review effects", "coordinator" in str(exc))
     else:
         check("missing coordinator stops before review effects", False)
+
+    mandatory_review_artifacts = (
+        "scripts/review-inspect.py",
+        "scripts/harness/review_submit.py",
+        "docs/skill-references/engineering-quality-contract.md",
+    )
+    for index, relative in enumerate(mandatory_review_artifacts):
+        incomplete = coordinator(base / f"incomplete-{index}")
+        (incomplete / relative).unlink()
+        try:
+            resolve_coordinator(explicit=incomplete, cwd=external)
+        except CoordinatorError as exc:
+            check(
+                f"missing mandatory review artifact fails admission: {relative}",
+                "verified LLM Obsidian vault" in str(exc),
+                str(exc),
+            )
+        else:
+            check(
+                f"missing mandatory review artifact fails admission: {relative}",
+                False,
+            )
 
 print("\nAll review coordinator tests passed.")

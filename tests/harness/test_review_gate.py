@@ -2686,11 +2686,15 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
     (product / "skills/review").mkdir(parents=True)
     (product / "scripts/harness").mkdir(parents=True)
     (product / "config").mkdir()
+    (product / "docs/skill-references").mkdir(parents=True)
     (product / "skills/review/SKILL.md").write_text(
         "# Review\n\nInspect the exact ContextPacket and product HEAD.\n",
         encoding="utf-8",
     )
     (product / "scripts/harness/review_submit.py").write_text(
+        "# test fixture\n", encoding="utf-8"
+    )
+    (product / "scripts/review-inspect.py").write_text(
         "# test fixture\n", encoding="utf-8"
     )
     (product / "scripts/task-review-runner.py").write_text(
@@ -2701,6 +2705,9 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
     )
     (product / "config/verification-profiles.toml").write_bytes(
         (ROOT / "config/verification-profiles.toml").read_bytes()
+    )
+    (product / "docs/skill-references/engineering-quality-contract.md").write_text(
+        "# Engineering quality\n", encoding="utf-8"
     )
     (product / "AGENTS.md").write_text(
         "# Product instructions\n", encoding="utf-8"
@@ -3646,6 +3653,7 @@ with tempfile.TemporaryDirectory(prefix="review-iteration-facade.") as raw:
         product / "skills/review",
         product / "scripts/harness",
         product / "config",
+        product / "docs/skill-references",
     ):
         directory.mkdir(parents=True, exist_ok=True)
     (product / "skills/review/SKILL.md").write_text(
@@ -3655,11 +3663,17 @@ with tempfile.TemporaryDirectory(prefix="review-iteration-facade.") as raw:
     (product / "scripts/harness/review_submit.py").write_text(
         "# test fixture\n", encoding="utf-8"
     )
+    (product / "scripts/review-inspect.py").write_text(
+        "# test fixture\n", encoding="utf-8"
+    )
     (product / "scripts/task-review-runner.py").write_text(
         "# test fixture\n", encoding="utf-8"
     )
     for name in ("model-routing.toml", "verification-profiles.toml"):
         (product / "config" / name).write_bytes((ROOT / "config" / name).read_bytes())
+    (product / "docs/skill-references/engineering-quality-contract.md").write_text(
+        "# Engineering quality\n", encoding="utf-8"
+    )
     plan = product / "wiki/plan.md"
     plan.write_text(
         """# Iteration barrier plan
