@@ -1,2 +1,0 @@
-# Host-Python dependencies for repository and skill validation tools.
-PyYAML==6.0.3

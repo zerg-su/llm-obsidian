@@ -575,6 +575,32 @@ def _review_plan_authority(
     meta: Mapping[str, Any], worktree: Path
 ) -> tuple[Path, TaskPlanAuthority | None]:
     if meta.get("lifecycle") == "current-checkout":
+        raw_snapshot = str(meta.get("plan_snapshot_file") or "")
+        if raw_snapshot:
+            digest = str(meta.get("approved_plan_sha256") or "")
+            runtime_root = Path(
+                str(meta.get("runtime_root") or "")
+            ).expanduser().resolve()
+            snapshot = Path(raw_snapshot).expanduser()
+            expected = (
+                runtime_root
+                / "inputs"
+                / "approved-plans"
+                / f"{digest}.md"
+            )
+            if (
+                not snapshot.is_absolute()
+                or snapshot.is_symlink()
+                or not snapshot.is_file()
+                or snapshot != expected
+                or snapshot.resolve() != expected
+                or runtime_root == worktree
+                or worktree in runtime_root.parents
+            ):
+                raise TaskReviewError(
+                    "current review plan snapshot identity is invalid"
+                )
+            return snapshot, None
         return Path(str(meta["plan_file"])).expanduser().resolve(), None
     try:
         authority = resolve_plan_authority(meta, worktree)

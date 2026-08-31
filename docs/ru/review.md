@@ -50,11 +50,15 @@ hash-bound plan без `--plan`, а после `changes-requested` executor мо
 передать amended plan вместе с чистым committed resolution HEAD.
 После доказанного zero-effect preflight failure callback также переиспользует
 этот plan, но только для того же policy и того же HEAD с совпавшими hash.
-При materialization plan читается один раз: одни exact bytes одновременно
-связывают full plan hash, Outcome Contract и reviewer ContextPacket до любого
-provider effect. Изменение только prose между admission и packet поэтому тоже
-fail-closed.
+Exact bytes plan захватываются до allocation UUID/owner, затем публикуются как
+digest-named snapshot во внешнем owner scratch. Full plan hash, Outcome
+Contract и reviewer ContextPacket читают этот snapshot, поэтому изменение
+исходного plan после публикации owner не оставляет orphan scratch и не меняет
+review boundary.
 Concurrent-запуски одной цели сериализуются и получают task ID победителя.
+Поздний `--new-lineage`, увидевший уже опубликованный replacement, также
+присоединяется к нему, но только если target, policy, plan identity и exhausted
+predecessor совпадают.
 
 ## Жизненный цикл finding
 

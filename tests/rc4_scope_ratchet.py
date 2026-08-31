@@ -543,8 +543,14 @@ headroom.
 The following Light Review correction retains every bounded snapshot-origin
 base coverage gap as the deterministic prefix of the child result and forces
 an incomplete advisory status whenever one exists. It adds 17 measured lines
-to the existing validator owner and no production file. The exact candidate is
-therefore 303 files / 115,512 lines, with no speculative headroom.
+to the existing validator owner and no production file.
+
+The final current-review correction captures plan bytes before owner
+publication and converges late fresh-lineage callers on the already-published
+winner. Fresh-lineage policy moves out of the oversized lifecycle coordinator
+into one cohesive owner; the measured candidate adds one file and 42 net lines.
+The exact candidate is therefore 304 files / 115,755 lines, with no speculative
+headroom.
 """
 
 from __future__ import annotations
@@ -555,12 +561,11 @@ from pathlib import Path
 #: Maximum tracked Python files under ``scripts/`` for the generic review
 #: target candidate. The six new owners and their boundaries are justified in
 #: the module history above.
-SCRIPT_FILE_CEILING = 303
+SCRIPT_FILE_CEILING = 304
 
 #: Maximum total lines across those files. This is the measured exact candidate
-#: after exact plan-byte binding, scoped findings, and snapshot-gap propagation,
-#: with zero headroom.
-SCRIPT_LINE_CEILING = 115_512
+#: after frozen plan ownership and late-lineage convergence, with zero headroom.
+SCRIPT_LINE_CEILING = 115_755
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

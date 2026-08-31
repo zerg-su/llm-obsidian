@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import os
 import shutil
 import uuid
@@ -26,7 +27,13 @@ from task_review_context import (
     _zero_effect_attention_shape,
 )
 from task_review_identity import _current_runtime_path
-from task_review_shared import TaskReviewError, _atomic_json, _git, _read_json
+from task_review_shared import (
+    TaskReviewError,
+    _atomic_bytes,
+    _atomic_json,
+    _git,
+    _read_json,
+)
 
 
 @contextmanager
@@ -52,6 +59,35 @@ def current_admission_lock(scoped_active_path: Path) -> Iterator[None]:
             yield
         finally:
             fcntl.flock(handle, fcntl.LOCK_UN)
+
+
+def freeze_current_plan_bytes(plan: Path, expected_sha256: str) -> bytes:
+    """Capture exact plan bytes before allocating or publishing an owner."""
+
+    try:
+        content = plan.read_bytes()
+    except OSError as exc:
+        raise TaskReviewError("current review plan snapshot is unavailable") from exc
+    if hashlib.sha256(content).hexdigest() != expected_sha256:
+        raise TaskReviewError("current review plan changed before owner publication")
+    return content
+
+
+def publish_current_plan_snapshot(
+    runtime_root: Path, content: bytes, expected_sha256: str
+) -> Path:
+    """Publish captured plan bytes below their exact owner scratch."""
+
+    if hashlib.sha256(content).hexdigest() != expected_sha256:
+        raise TaskReviewError("current review plan snapshot digest changed")
+    path = (
+        runtime_root
+        / "inputs"
+        / "approved-plans"
+        / f"{expected_sha256}.md"
+    )
+    _atomic_bytes(path, content)
+    return path
 
 
 def plan_rebind_allowed(
@@ -207,8 +243,20 @@ def start_current_review(
     session = {**session, "source": source}
     plan = plan_file.expanduser().resolve()
     approved_plan_sha256, outcome_contract_sha256 = plan_identity
+    bound_plan_sha256 = (
+        boundary_input.plan_sha256
+        if boundary_input is not None
+        else approved_plan_sha256
+    )
+    frozen_plan_bytes = freeze_current_plan_bytes(plan, bound_plan_sha256)
     task_id = str(uuid.uuid4())
     runtime_path = _current_runtime_path(worktree, task_id, scratch_root)
+    frozen_plan = (
+        runtime_path
+        / "inputs"
+        / "approved-plans"
+        / f"{bound_plan_sha256}.md"
+    )
     meta: dict[str, Any] = {
         "version": 4,
         "lifecycle": "current-checkout",
@@ -220,14 +268,11 @@ def start_current_review(
         "target_key": target.target_key,
         "review_lease": review_lease,
         "plan_file": str(plan),
+        "plan_snapshot_file": str(frozen_plan),
         "routing": {"session": session},
         "review_policy": requested_policy,
         "runtime_root": str(runtime_path),
-        "approved_plan_sha256": (
-            boundary_input.plan_sha256
-            if boundary_input is not None
-            else approved_plan_sha256
-        ),
+        "approved_plan_sha256": bound_plan_sha256,
         "outcome_contract_sha256": (
             boundary_input.outcome_contract_sha256
             if boundary_input is not None
@@ -261,6 +306,11 @@ def start_current_review(
     )
     runtime_root = _current_runtime_root(worktree, task_id, scratch_root)
     try:
+        published_plan = publish_current_plan_snapshot(
+            runtime_root, frozen_plan_bytes, bound_plan_sha256
+        )
+        if published_plan != frozen_plan:
+            raise TaskReviewError("current review plan snapshot path changed")
         if boundary_input is not None:
             if purpose == "release" and boundary_input_file is not None:
                 meta["review_boundary_input_source_file"] = str(

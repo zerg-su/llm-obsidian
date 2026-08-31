@@ -20,8 +20,10 @@ from harness.verification import load_profiles
 from harness.workflows.review_gate import ReviewPreset
 from current_review_admission import (
     current_admission_lock,
+    freeze_current_plan_bytes,
     guard_active_plan,
     plan_rebind_allowed,
+    publish_current_plan_snapshot,
     start_current_review,
     zero_effect_replacement_plan,
 )
@@ -31,6 +33,11 @@ from current_review_lease import (
     evaluate_review_lease,
     lease_attention_payload,
     resolve_review_base,
+)
+from current_review_lineage import (
+    new_lineage_supersedes_active as _new_lineage_supersedes_active,
+    published_new_lineage_matches as _published_new_lineage_matches,
+    same_requested_policy as _same_requested_policy,
 )
 from current_review_scope import (
     current_plan_identity,
@@ -133,39 +140,6 @@ def _current_policy(
         "boundary_input_sha256": boundary_input_sha256,
         "base_sha": base_sha,
     }
-
-
-def _same_requested_policy(
-    stored: Mapping[str, Any],
-    requested: Mapping[str, Any],
-    *,
-    allow_boundary_rebind: bool = False,
-) -> bool:
-    base_matches = all(
-        stored.get(name) == requested.get(name)
-        for name in (
-            "mode",
-            "cross_model",
-            "runtime",
-            "model",
-            "effort",
-            "max_verify_iterations",
-            "verification_profile",
-            "verification_profile_sha256",
-        )
-    )
-    return (
-        base_matches
-        and str(stored.get("purpose") or "implementation")
-        == str(requested.get("purpose") or "implementation")
-        and str(stored.get("base_sha") or "")
-        == str(requested.get("base_sha") or "")
-        and (
-            allow_boundary_rebind
-            or str(stored.get("boundary_input_sha256") or "")
-            == str(requested.get("boundary_input_sha256") or "")
-        )
-    )
 
 
 def _current_review_artifact_root(
@@ -322,52 +296,6 @@ def _approved_implementation_enters_release(
 def _require_new_lineage_source(new_lineage: bool, message: str) -> None:
     if new_lineage:
         raise TaskReviewError(message)
-
-
-def _new_lineage_supersedes_active(
-    candidate: Mapping[str, Any],
-    vault: Path,
-    worktree: Path,
-    task_id: str,
-    *,
-    new_lineage: bool,
-    same_policy: bool,
-    status: str,
-    bound_head: str,
-    current_head: str,
-    operation_quiescent: bool,
-) -> bool:
-    if not new_lineage:
-        return False
-    if not same_policy:
-        raise TaskReviewError(
-            "an exhausted current review uses another preset or override"
-        )
-    if status != "changes-requested":
-        raise TaskReviewError(
-            "--new-lineage requires an exhausted changes-requested review"
-        )
-    if not bound_head or bound_head == current_head:
-        raise TaskReviewError(
-            "--new-lineage requires a committed resolution HEAD"
-        )
-    if not operation_quiescent:
-        raise TaskReviewError(
-            "--new-lineage requires quiescent review operations"
-        )
-    from task_review_finalization_attempt import finalization_ledger
-
-    exhausted = finalization_ledger(
-        candidate, vault, task_id, worktree
-    ).snapshot()
-    if (
-        exhausted.get("terminal_disposition")
-        != "finalization-budget-exhausted"
-    ):
-        raise TaskReviewError(
-            "--new-lineage requires an exhausted finalization ledger"
-        )
-    return True
 
 
 def _active_current_review(
@@ -681,12 +609,20 @@ def _resume_current_review(
     if lease_changed:
         updates: dict[str, Any] = {"review_lease": review_lease}
         if boundary_input is not None and gate_status == "changes-requested":
+            frozen_plan = publish_current_plan_snapshot(
+                runtime_root,
+                freeze_current_plan_bytes(
+                    effective_plan, boundary_input.plan_sha256
+                ),
+                boundary_input.plan_sha256,
+            )
             stored_boundary = runtime_root / "inputs/review-boundary-input.json"
             _atomic_json(stored_boundary, boundary_input.payload())
             updates.update(
                 {
                     "review_policy": requested_policy,
                     "review_boundary_input_file": str(stored_boundary),
+                    "plan_snapshot_file": str(frozen_plan),
                     "approved_plan_sha256": boundary_input.plan_sha256,
                     "outcome_contract_sha256": (
                         boundary_input.outcome_contract_sha256
@@ -694,9 +630,15 @@ def _resume_current_review(
                 }
             )
         elif boundary_input is None and gate_status == "changes-requested":
+            frozen_plan = publish_current_plan_snapshot(
+                runtime_root,
+                freeze_current_plan_bytes(effective_plan, plan_sha256),
+                plan_sha256,
+            )
             updates.update(
                 {
                     "plan_file": str(effective_plan),
+                    "plan_snapshot_file": str(frozen_plan),
                     "approved_plan_sha256": plan_sha256,
                     "outcome_contract_sha256": outcome_sha256,
                 }
@@ -745,9 +687,20 @@ def _admit_and_run_current_review(
             current = _read_json(active_path, "current review state")
             current_task_id = str(current.get("task_id") or "")
             if (
-                current_task_id != observed_task_id
-                and str(current.get("supersedes_task_id") or "")
-                == observed_task_id
+                (
+                    current_task_id != observed_task_id
+                    and str(current.get("supersedes_task_id") or "")
+                    == observed_task_id
+                )
+                or _published_new_lineage_matches(
+                    current,
+                    vault,
+                    worktree,
+                    target.target_key,
+                    requested_policy,
+                    plan_identity,
+                    scratch_root,
+                )
             ):
                 effective_new_lineage = False
         meta = _active_current_review(

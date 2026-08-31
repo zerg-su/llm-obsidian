@@ -144,22 +144,6 @@ select_python() {
   die "a runnable Python 3.9+ is required. On macOS finish Command Line Tools setup or run 'brew install python', then rerun."
 }
 
-install_python_tooling() {
-  local requirements="$ROOT/requirements-tooling.txt" managed_marker
-  local pip_args=(
-    install
-    --user
-    --disable-pip-version-check
-    --requirement "$requirements"
-  )
-  [ -f "$requirements" ] || die "tooling requirements are missing: $requirements"
-  managed_marker="$($PYTHON -c 'import pathlib, sysconfig; print(pathlib.Path(sysconfig.get_path("stdlib")) / "EXTERNALLY-MANAGED")')"
-  [ ! -f "$managed_marker" ] || pip_args+=(--break-system-packages)
-  log "install: pinned Python tooling dependencies"
-  run "$PYTHON" -m pip "${pip_args[@]}"
-  run "$PYTHON" -c 'import importlib.metadata, yaml; assert importlib.metadata.version("PyYAML") == "6.0.3"'
-}
-
 install_mcp_proxy() {
   if [ "$DRY_RUN" -eq 1 ]; then
     "$PYTHON" "$GW/install-proxy.py" --lock "$PROXY_LOCK" --dest "$PROXY_BIN" --plan
@@ -233,8 +217,6 @@ ensure_macos_clt
 select_python
 
 log "repo: $ROOT"
-
-install_python_tooling
 
 if [ "$DO_SETUP_VAULT" -eq 1 ]; then
   vault_args=()

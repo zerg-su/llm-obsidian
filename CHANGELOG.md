@@ -33,8 +33,13 @@ packages were published for them.
   root is removed if later publication fails. A callback that replaces a
   proven zero-effect preflight failure reuses the predecessor's hash-verified
   concrete plan instead of asking for `--plan`. Context materialization reads
-  the mutable current plan once and binds the same bytes to its full hash,
-  Outcome Contract, and reviewer packet before provider effects.
+  the exact plan bytes before owner allocation, publishes their digest-named
+  snapshot inside external owner scratch, and binds that snapshot to the full
+  hash, Outcome Contract, and reviewer packet. A late overlapping
+  `--new-lineage` caller now joins the already-published matching replacement
+  instead of rejecting it or creating another provider effect.
+- Clean-machine setup no longer installs an unused PyYAML package or mutates
+  host Python/network state without a repository consumer.
 - Immutable verification receipts now expose a focused `implementation-full`
   profile: exact HEAD, complete `make test`, `git diff --check`, and final clean
   status, without coupling implementation review to unrelated release checks.
@@ -52,10 +57,11 @@ packages were published for them.
   `incomplete` advisory status.
 - The live scripts ratchet moves to the exact measured candidate: six cohesive
   review owners plus the extracted admission owner raise the contour from 296
-  files / 113,215 lines to 303 files / 115,512 lines, including the explicit
+  files / 113,215 lines to 304 files / 115,755 lines, including the explicit
   exhausted-lineage, typed Outcome evidence, scratch-safe same-target
   admission, zero-effect callback recovery, exact plan-byte binding, and scoped
-  advisory findings and fallback-gap propagation with no speculative headroom.
+  advisory findings, fallback-gap propagation, frozen owner-scoped plans, and
+  staggered replacement convergence with no speculative headroom.
 
 ## [2.8.5] - 2026-08-19
 
