@@ -12,6 +12,8 @@ packages were published for them.
 
 ## [Unreleased]
 
+## [2.8.10] - 2026-09-01
+
 ### Added
 
 - Generic external Git targets now support advisory same-runtime Light Review
