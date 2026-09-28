@@ -32,13 +32,12 @@ Inspect `/tmp/tiling-peek.json` (structured diagnostics: script path, python int
 When `TILING_READY=1`, capture stdout for the report transaction:
 
 ```bash
-./scripts/tiling-check.py
-REPORT_EXIT=$?
+REPORT=$(./scripts/tiling-check.py); REPORT_EXIT=$?
 case $REPORT_EXIT in
-  0)  echo "tiling report generated" ;;
-  2)  echo "tiling ERROR: usage error during report generation" ;;
-  3)  echo "tiling ERROR: cache corrupt during report generation" ;;
-  4)  echo "tiling ERROR: scale hard-fail during report generation" ;;
+  0)  echo "tiling report captured" ;;
+  2)  echo "tiling ERROR: report usage error" ;;
+  3)  echo "tiling ERROR: report cache corrupt" ;;
+  4)  echo "tiling ERROR: report scale hard-fail" ;;
   10) echo "tiling ERROR: ollama became unreachable after --peek" ;;
   11) echo "tiling ERROR: model became unavailable after --peek" ;;
   *)  echo "tiling ERROR: unexpected exit code $REPORT_EXIT from tiling-check.py" ;;
@@ -111,7 +110,7 @@ comparable to bge-m3 on this vault.
 
 ```markdown
 ## Semantic Tiling
-See [[tiling-report-YYYY-MM-DD]] for the full pair listing.
+Full pair listing: the stdout of `tiling-check.py`, included in this report below.
 - Errors (>=0.92): N pairs
 - Review (0.85-0.92): M pairs
 - Calibrated: true|false

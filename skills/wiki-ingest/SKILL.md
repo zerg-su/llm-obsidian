@@ -176,7 +176,7 @@ Steps:
 2. Run `python3 scripts/document-normalize.py check --json` once when the batch
    contains binary documents. If unavailable, process text-like sources and
    return one consolidated Docling escalation for the remaining files.
-3. Use single-source steps 1–6; collect page and manifest ops for step 5, without per-source dispatch. Bound semantic cleanup to this turn; never spawn background model work to exceed repair limits. Cross-source links: step 4.
+3. Use single-source steps 1–6; keep page and manifest ops for the final transaction (batch step 5), without per-source dispatch. Bound semantic cleanup to this turn; never spawn background model work to exceed repair limits.
 4. Cross-reference drafts; check contradictions (single step 6).
 5. Hot cache and log once at the end (one final transaction);
    `wiki/index.md` only for a new key hub (single step 5).

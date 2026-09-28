@@ -91,6 +91,11 @@ class DefuddleContracts(unittest.TestCase):
         self.assertIn("/defuddle page.html", row)
         self.assertIn("/wiki-ingest <URL>", row)
         self.assertNotIn("Network read", row)
+        for filename, label in (("README.md", "Local HTML cleanup"), ("README.ru.md", "Очистка локального HTML")):
+            with self.subTest(readme=filename):
+                rows = (ROOT / filename).read_text(encoding="utf-8").splitlines()
+                row = next(line for line in rows if re.search(r"\| `defuddle` (?:before synthesis|до synthesis) \|", line))
+                self.assertIn(label, row)
 
     def test_u_t1_mutations(self) -> None:
         for instruction in (
@@ -116,6 +121,10 @@ class DraftContracts(unittest.TestCase):
     def test_u_t1_draft_isolation(self) -> None:
         text = (ROOT / "skills/draft/SKILL.md").read_text(encoding="utf-8")
         self.assertEqual(url_instruction_issues(text), [], "U-T1 / U6g")
+        inputs = text.split("## Input", 1)[1].split("## Phase 0:", 1)[0]
+        self.assertNotIn("thread URL", inputs)
+        self.assertIn("pasted thread text", inputs)
+        self.assertIn("local file", inputs)
         source = text.split("## Phase 1:", 1)[1].split("## Phase 2:", 1)[0]
         self.assertIn("paste", source.lower())
         self.assertIn("local file", source)
@@ -193,6 +202,7 @@ class IngestContracts(unittest.TestCase):
             draft = " ".join(steps[3].split())
             self.assertIn("single-source steps 1–6", draft)
             self.assertIn("page and manifest", draft)
+            self.assertIn("for the final transaction (batch step 5)", draft)
             self.assertIn("without per-source dispatch", draft)
         with self.subTest(contract="one transaction and conditional index"):
             final = " ".join(steps[5].split())
@@ -261,10 +271,37 @@ class LintContracts(unittest.TestCase):
         ):
             self.assertIn(phrase, intro)
         reference = (ROOT / "skills/wiki-lint/references/semantic-tiling.md").read_text(encoding="utf-8")
+        self.assertNotIn("[[tiling-report-", reference)
+        self.assertIn("included in this report below", reference)
         for content in (text, reference):
             self.assertNotIn("--report wiki/", content)
             self.assertIn("stdout", content)
             self.assertIn("report transaction", content)
+
+    def test_tiling_report_capture(self) -> None:
+        reference = (ROOT / "skills/wiki-lint/references/semantic-tiling.md").read_text(encoding="utf-8")
+        report = reference.split("When `TILING_READY=1`", 1)[1]
+        snippet = re.search(r"```bash\n([\s\S]*?)\n```", report).group(1)
+        with tempfile.TemporaryDirectory(prefix="prompt-audit-tiling-") as tmp:
+            scratch = Path(tmp).resolve()
+            self.assertFalse(scratch.is_relative_to(ROOT.resolve()))
+            helper = scratch / "scripts/tiling-check.py"
+            helper.parent.mkdir()
+            for code in (0, 2, 3, 4, 10, 11, 7):
+                with self.subTest(exit_code=code):
+                    helper.write_text(
+                        "#!/bin/sh\nprintf '%s\\n' 'pair one' 'pair two'\n"
+                        f"printf '%s\\n' 'diagnostic' >&2\nexit {code}\n",
+                        encoding="utf-8",
+                    )
+                    helper.chmod(0o700)
+                    result = subprocess.run(
+                        ["bash", "-c", snippet + '\nprintf "\\nCAPTURE:%s\\nEXIT:%s\\n" "$REPORT" "$REPORT_EXIT"\n'],
+                        cwd=scratch, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=8,
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(result.stderr, "diagnostic\n")
+                    self.assertTrue(result.stdout.endswith(f"\nCAPTURE:pair one\npair two\nEXIT:{code}\n"), result.stdout)
 
     def test_lint_severity_and_generic_guidance(self) -> None:
         text = (ROOT / "skills/wiki-lint/SKILL.md").read_text(encoding="utf-8")
@@ -319,6 +356,7 @@ class SaveContracts(unittest.TestCase):
             "~95 calls/month", "34 fixed in lint 2026-06-09",
             "sanctioned exception", "feedback_skill_preflight_clarification",
             "feedback_session_id_in_frontmatter",
+            "[[feedback_*]]",
         ):
             with self.subTest(obsolete=obsolete):
                 self.assertFalse(obsolete in text, f"Obsolete guidance: {obsolete}")

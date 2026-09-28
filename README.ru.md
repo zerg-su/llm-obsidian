@@ -136,7 +136,7 @@ retries, progress и cleanup.
 | Repo/plan/context candidates | harness context + Git modules | Проверенные ID, manifests и пути заменяют токены на угадывание проекта, плана, окна и прошлой сессии. |
 | Изменение вольта | `vault-write.py` | Одна optimistic journaled-транзакция вместо серии хрупких edits страницы, log, hot, plan и manifest. |
 | Поиск | section BM25 + optional local embeddings | Модель получает лучшие ограниченные секции, а не целые папки и повторяющиеся страницы. |
-| Очистка web | `defuddle` до synthesis | Навигация, реклама и boilerplate не занимают контекст. |
+| Очистка локального HTML | `defuddle` до synthesis | Навигация, реклама и boilerplate не занимают контекст. |
 | Документы | cached stdlib/Docling pipeline | OCR и parsing переиспользуются по hash источника; неизменный PDF не читается заново моделью. |
 | Review transport | typed internal callback broker | Не нужно копировать длинные пути и свободный текст между терминалами. |
 | Acceptance | exact SHA + per-cell dependency fingerprints | Зелёные lifecycle-ячейки переиспользуются только при неизменной code-owned dependency closure. |

@@ -15,7 +15,7 @@ The user describes a situation / pastes a thread → Claude composes 2-3 alterna
 ## Input
 
 ```
-/draft <context — thread URL, pasted message, or description>
+/draft <pasted thread text, local file, or description>
 ```
 
 Examples:

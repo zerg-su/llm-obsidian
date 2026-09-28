@@ -174,9 +174,7 @@ Use sub-indexes when the question is scoped to one domain. Avoid reading the ful
 
 ## Filing Answers Back
 
-Good answers compound into the wiki. Don't let insights disappear into chat history.
-
-When filing an answer:
+When filing an answer, use `answered` for a confirmed answer, `open` otherwise:
 
 ```yaml
 ---

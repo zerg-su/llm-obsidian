@@ -233,7 +233,7 @@ tech) — give both tracks. Не «один-line summary и идём дальш�
 
 ### What "informative" is NOT
 
-- Restatement of memory rules → cross-link `[[feedback_*]]` instead.
+- Restatement of memory rules → refer to CLAUDE.md.
 - Pure narrative «we discussed X, Y, Z» without facts → rewrite в declarative.
 - Vague terms — «улучшилось», «стало стабильнее» → numbers / before-after.
 - Page mostly composed of cross-refs without content → either expand or merge

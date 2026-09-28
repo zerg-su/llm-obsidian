@@ -106,20 +106,28 @@ def supporting_page(title: str, address: str, kind: str = "concept") -> str:
 
 class QueryTemplateContracts(unittest.TestCase):
     def test_u_t3_query_answer(self) -> None:
+        text = (ROOT / "skills/wiki-query/SKILL.md").read_text(encoding="utf-8")
+        rule = text.split("## Filing Answers Back", 1)[1].split("```yaml", 1)[0]
+        self.assertIn("`answered` for a confirmed answer, `open` otherwise", rule)
         page = render_template("wiki-query", "## Filing Answers Back", {
             "YYYY-MM-DD": "2026-09-28",
             "<domain>": "testing",
             "<from ./scripts/allocate-address.sh>": "c-000001",
             "<./scripts/current-session-id.sh>": "prompt-audit-test",
         })
-        code, output = validate_pages({
-            "wiki/questions/Answer.md": page + "\n# Answer\nA supported answer.\n",
-            "wiki/concepts/Page referenced in answer.md": supporting_page("Page referenced in answer", "c-000002"),
-            "wiki/sources/Relevant Source.md": supporting_page("Relevant Source", "c-000003", "source"),
-        })
-        self.assertEqual(code, 0, output)
-        self.assertIn("0 FAIL, 0 WARN", output)
-        print(f"U-T3 query answer: {output.strip()} [explicit TMPDIR root]")
+        for status in ("open", "answered"):
+            with self.subTest(status=status):
+                # Apply only the status choice documented next to the template.
+                rendered = page.replace("status: open\n", f"status: {status}\n")
+                self.assertEqual(parse_frontmatter(split_frontmatter(rendered))["status"], status)
+                code, output = validate_pages({
+                    "wiki/questions/Answer.md": rendered + "\n# Answer\nA supported answer.\n",
+                    "wiki/concepts/Page referenced in answer.md": supporting_page("Page referenced in answer", "c-000002"),
+                    "wiki/sources/Relevant Source.md": supporting_page("Relevant Source", "c-000003", "source"),
+                })
+                self.assertEqual(code, 0, output)
+                self.assertIn("0 FAIL, 0 WARN", output)
+                print(f"U-T3 query answer ({status}): {output.strip()} [explicit TMPDIR root]")
 
     def test_u_t3_query_sub_index(self) -> None:
         page = render_template("wiki-query", "## Domain Sub-Index Format", {
