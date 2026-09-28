@@ -393,6 +393,10 @@ test-task-lifecycle:
 test-instruction-lint:
 	@echo "=== test_instruction_lint.py ==="
 	@python3 tests/test_instruction_lint.py
+	@echo "=== test_prompt_audit.py ==="
+	@python3 tests/test_prompt_audit.py
+	@echo "=== test_prompt_audit_templates.py ==="
+	@python3 tests/test_prompt_audit_templates.py
 
 test-ci-workflow:
 	@echo "=== test_ci_workflow.py ==="
