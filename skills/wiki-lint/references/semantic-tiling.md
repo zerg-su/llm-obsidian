@@ -29,19 +29,19 @@ fi
 
 Inspect `/tmp/tiling-peek.json` (structured diagnostics: script path, python interpreter, ollama URL, cache state, thresholds state) whenever the status is ambiguous. Never collapse unknown exits into "unknown status" silently.
 
-When `TILING_READY=1`:
+When `TILING_READY=1`, capture stdout for the report transaction:
 
 ```bash
-./scripts/tiling-check.py --report wiki/meta/reports/tiling-report-YYYY-MM-DD.md
+./scripts/tiling-check.py
 REPORT_EXIT=$?
 case $REPORT_EXIT in
-  0)  echo "tiling report written" ;;
-  2)  echo "tiling ERROR: usage error during --report" ;;
-  3)  echo "tiling ERROR: cache corrupt during --report" ;;
-  4)  echo "tiling ERROR: scale hard-fail during --report" ;;
-  10) echo "tiling ERROR: ollama became unreachable between --peek and --report" ;;
-  11) echo "tiling ERROR: model became unavailable between --peek and --report" ;;
-  *)  echo "tiling ERROR: unexpected exit code $REPORT_EXIT from tiling-check.py --report" ;;
+  0)  echo "tiling report generated" ;;
+  2)  echo "tiling ERROR: usage error during report generation" ;;
+  3)  echo "tiling ERROR: cache corrupt during report generation" ;;
+  4)  echo "tiling ERROR: scale hard-fail during report generation" ;;
+  10) echo "tiling ERROR: ollama became unreachable after --peek" ;;
+  11) echo "tiling ERROR: model became unavailable after --peek" ;;
+  *)  echo "tiling ERROR: unexpected exit code $REPORT_EXIT from tiling-check.py" ;;
 esac
 ```
 

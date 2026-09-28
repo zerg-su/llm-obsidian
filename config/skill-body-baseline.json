@@ -256,7 +256,7 @@
     },
     "wiki-lint": {
       "body_bytes": 12905,
-      "body_lines": 219,
+      "body_lines": 226,
       "closure_bytes": 25148,
       "closure_token_estimate": 6287,
       "token_estimate": 3227

@@ -234,5 +234,51 @@ class IngestContracts(unittest.TestCase):
         self.assertIn("Syntax reference: the `obsidian-markdown` skill", intro)
 
 
+class LintContracts(unittest.TestCase):
+    def test_d_u6e_dead_link_categories(self) -> None:
+        text = (ROOT / "skills/wiki-lint/SKILL.md").read_text(encoding="utf-8")
+        report = text.split("## Lint Report Format", 1)[1].split("## Naming Conventions", 1)[0]
+        links = report.split("## Dead Links", 1)[1].split("## Missing Pages", 1)[0]
+        self.assertNotIn("create stub or remove link", links)
+        self.assertEqual(
+            re.findall(r"(?m)^- \*\*(.+?)\*\*:", links),
+            ["Renamed/moved", "Frontier (not yet created)", "Obsolete intent"],
+        )
+        self.assertIn("no auto-stub", links)
+        self.assertIn("human review", links)
+
+    def test_lint_writer_stages(self) -> None:
+        text = (ROOT / "skills/wiki-lint/SKILL.md").read_text(encoding="utf-8")
+        intro = " ".join(text.split("## Lint Checks", 1)[0].split())
+        for phrase in (
+            "scripts/vault-write.py", "one transaction per approved stage",
+            "report (+ dashboard) first", "approved fixes afterwards",
+            "separate transaction", "expected_sha256", "--sha256 <path>",
+        ):
+            self.assertIn(phrase, intro)
+        reference = (ROOT / "skills/wiki-lint/references/semantic-tiling.md").read_text(encoding="utf-8")
+        for content in (text, reference):
+            self.assertNotIn("--report wiki/", content)
+            self.assertIn("stdout", content)
+            self.assertIn("report transaction", content)
+
+    def test_lint_severity_and_generic_guidance(self) -> None:
+        text = (ROOT / "skills/wiki-lint/SKILL.md").read_text(encoding="utf-8")
+        for obsolete in (
+            "All five issues are", "WARN-level patterns", "per план Phase 4.9 P1",
+            "added 2026-06-09", "added 2026-06-10", "deterministic since 2026-07-03",
+            "Frontmatter Discipline (P1)", "Disabled in this vault", "zero usage",
+        ):
+            with self.subTest(obsolete=obsolete):
+                self.assertFalse(obsolete in text, f"Obsolete guidance: {obsolete}")
+        self.assertIn("severity from validator output", text)
+        self.assertIn("cosmetic findings", text)
+        self.assertIn("explicit `sessions: []`", text)
+        self.assertIn("summary content appended into the date field silently bloats hot.md", text)
+        self.assertIn("Lint does not generate canvas maps", text)
+        self.assertIn("only on explicit request", text)
+        self.assertIn("canvas core-plugin is enabled", text)
+
+
 if __name__ == "__main__":
     unittest.main()
