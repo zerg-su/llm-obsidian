@@ -234,11 +234,11 @@
       "token_estimate": 370
     },
     "wiki": {
-      "body_bytes": 3083,
+      "body_bytes": 3125,
       "body_lines": 96,
-      "closure_bytes": 16429,
-      "closure_token_estimate": 4108,
-      "token_estimate": 771
+      "closure_bytes": 16471,
+      "closure_token_estimate": 4118,
+      "token_estimate": 782
     },
     "wiki-fold": {
       "body_bytes": 2358,
@@ -262,11 +262,11 @@
       "token_estimate": 3227
     },
     "wiki-query": {
-      "body_bytes": 7047,
-      "body_lines": 197,
-      "closure_bytes": 7047,
-      "closure_token_estimate": 1762,
-      "token_estimate": 1762
+      "body_bytes": 7322,
+      "body_lines": 203,
+      "closure_bytes": 7322,
+      "closure_token_estimate": 1831,
+      "token_estimate": 1831
     }
   }
 }

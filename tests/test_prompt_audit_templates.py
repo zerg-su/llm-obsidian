@@ -22,7 +22,7 @@ def render_template(skill: str, section: str, replacements: dict[str, str]) -> s
     text = (ROOT / "skills" / skill / "SKILL.md").read_text(encoding="utf-8")
     section_text = text.split(section, 1)[1]
     match = re.search(
-        r"(?m)^(?P<fence>`{3,4})markdown\n(?P<page>---\n[\s\S]*?)^(?P=fence)$",
+        r"(?m)^(?P<fence>`{3,4})(?:markdown|yaml)\n(?P<page>---\n[\s\S]*?)^(?P=fence)$",
         section_text,
     )
     if match is None:
@@ -86,6 +86,48 @@ class LintTemplateContracts(unittest.TestCase):
                 self.assertEqual(code, 0, output)
                 self.assertIn("0 FAIL, 0 WARN", output)
                 print(f"U-T3 {section}: {output.strip()} [explicit TMPDIR root]")
+
+
+def supporting_page(title: str, address: str, kind: str = "concept") -> str:
+    provenance = ""
+    if kind == "source":
+        provenance = (
+            "source_class: internal\nverified_at: 2026-09-28\n"
+            f"content_sha256: {'a' * 64}\n"
+        )
+    return (
+        f'---\ntype: {kind}\ntitle: "{title}"\naddress: {address}\n'
+        "status: developing\ncreated: 2026-09-28\nupdated: 2026-09-28\n"
+        f"tags: [test]\nsessions: [prompt-audit-test]\n{provenance}---\n\n# {title}\n"
+    )
+
+
+class QueryTemplateContracts(unittest.TestCase):
+    def test_u_t3_query_answer(self) -> None:
+        page = render_template("wiki-query", "## Filing Answers Back", {
+            "YYYY-MM-DD": "2026-09-28",
+            "<domain>": "testing",
+            "<from ./scripts/allocate-address.sh>": "c-000001",
+            "<./scripts/current-session-id.sh>": "prompt-audit-test",
+        })
+        code, output = validate_pages({
+            "wiki/questions/Answer.md": page + "\n# Answer\nA supported answer.\n",
+            "wiki/concepts/Page referenced in answer.md": supporting_page("Page referenced in answer", "c-000002"),
+            "wiki/sources/Relevant Source.md": supporting_page("Relevant Source", "c-000003", "source"),
+        })
+        self.assertEqual(code, 0, output)
+        self.assertIn("0 FAIL, 0 WARN", output)
+        print(f"U-T3 query answer: {output.strip()} [explicit TMPDIR root]")
+
+    def test_u_t3_query_sub_index(self) -> None:
+        page = render_template("wiki-query", "## Domain Sub-Index Format", {
+            "YYYY-MM-DD": "2026-09-28",
+            "<SESSION_ID>": "prompt-audit-test",
+        })
+        code, output = validate_pages({"wiki/entities/_index.md": page})
+        self.assertEqual(code, 0, output)
+        self.assertIn("0 FAIL, 0 WARN", output)
+        print(f"U-T3 query sub-index: {output.strip()} [explicit TMPDIR root]")
 
 
 if __name__ == "__main__":

@@ -280,5 +280,23 @@ class LintContracts(unittest.TestCase):
         self.assertIn("canvas core-plugin is enabled", text)
 
 
+class QueryContracts(unittest.TestCase):
+    def test_query_retrieval_modes(self) -> None:
+        text = (ROOT / "skills/wiki-query/SKILL.md").read_text(encoding="utf-8")
+        standard = next(line for line in text.splitlines() if line.startswith("| **Standard**"))
+        self.assertIn("hot.md + retrieve.py sections + 3-5 pages", standard)
+        self.assertIn("index when navigational or retrieval coverage looks thin", standard)
+        deep = text.split("## Deep Mode", 1)[1].split("## Section retrieval", 1)[0]
+        candidates = numbered_steps(deep)[2]
+        self.assertIn('./scripts/retrieve.py "<question>" --top 10 --json', candidates)
+        self.assertIn("index scan", candidates)
+        self.assertIn("`tag-search.py` as optional cross-check", candidates)
+
+    def test_wiki_curated_index(self) -> None:
+        text = (ROOT / "skills/wiki/SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("master catalog of key hubs; folder `_index.md` listings regenerate automatically", text)
+        self.assertFalse("update on every ingest" in text, "U2k: unconditional master-index update")
+
+
 if __name__ == "__main__":
     unittest.main()
