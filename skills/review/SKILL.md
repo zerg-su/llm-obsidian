@@ -74,7 +74,8 @@ receipts, terminal approval closes only its exact surface and archives only
 exact operation/worktree/HEAD/profile evidence. A second restart, exhausted
 budget, or unresolved drift becomes `attention-required`.
 
-Standalone Deep is unchanged. Finalization cycles 1–3 use
+Standalone Deep keeps its default dual-provider topology and is not a
+finalization route. Finalization cycles 1–3 use
 `finalization-primary`; cycles 4–5 add `finalization-independent` only after its
 accepted pivot receipt. Explicit single-model always wins. Reserve every fresh
 exact-HEAD attempt before provider effect; a fifth material failure exhausts

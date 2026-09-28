@@ -90,10 +90,9 @@ Bounded review/schema work may use the compiled ephemeral profile below.
    explicit decision: `approve --spec <request.json> --challenge-sha256
    <exact-validate-challenge>` returns its one-shot `approval_token`; reject and
    revise are terminal.
-8. Never synthesize, reuse, or supply a malformed token. A legacy host-token
-   start consumes that approved decision atomically; a policy-valid token-free
-   start consumes its pending snapshot atomically and rejects all drift before
-   effects. Built-ins continue to omit the token.
+8. Never synthesize, reuse, or supply a malformed token. A host-token start consumes that
+   approved decision atomically; a policy-valid token-free start consumes its pending snapshot
+   atomically and rejects all drift before effects. Built-ins omit the token.
 9. Show the bounded typed launch result. When it returns
    `coordinator_action: return-to-idle-without-polling`, end this turn. Do not
    poll, wait, or run monitors; typed callbacks resume the idle coordinator.

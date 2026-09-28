@@ -491,5 +491,20 @@ class CanvasContracts(unittest.TestCase):
         self.assertIn("Read-операции (open / list / показать) — без pre-flight.", preflight)
 
 
+class DatedTextContracts(unittest.TestCase):
+    def test_u4_stale_wording_removed(self) -> None:
+        obsolete_by_skill = {
+            "learn": ("эталон: A4", "2026-06-10"),
+            "review": ("is unchanged",),
+            "implementation-plan": ("remains unchanged",),
+            "dispatch": ("continue to omit", "legacy host-token"),
+        }
+        for skill, obsolete_phrases in obsolete_by_skill.items():
+            text = (ROOT / "skills" / skill / "SKILL.md").read_text(encoding="utf-8")
+            for phrase in obsolete_phrases:
+                with self.subTest(skill=skill, phrase=phrase):
+                    self.assertFalse(phrase in text, f"Obsolete U4 wording in {skill}: {phrase}")
+
+
 if __name__ == "__main__":
     unittest.main()
