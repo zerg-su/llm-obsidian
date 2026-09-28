@@ -298,5 +298,32 @@ class QueryContracts(unittest.TestCase):
         self.assertFalse("update on every ingest" in text, "U2k: unconditional master-index update")
 
 
+class SaveContracts(unittest.TestCase):
+    def test_u_t2_save_fast_path(self) -> None:
+        text = (ROOT / "skills/save/SKILL.md").read_text(encoding="utf-8")
+        block = preflight_block(text, "Phase 0 —")
+        self.assertEqual(preflight_issues(block), [])
+        self.assertEqual(list(numbered_steps(block)), [1, 2, 3])
+        self.assertIn("**infer, show, proceed**", block)
+        self.assertIn("without AskUserQuestion", block)
+        self.assertIn("ask ONE AskUserQuestion", block)
+        self.assertTrue(preflight_issues(block + "\nAsk four questions."))
+
+    def test_save_provenance_and_dated_wording(self) -> None:
+        text = (ROOT / "skills/save/SKILL.md").read_text(encoding="utf-8")
+        for obsolete in (
+            "~95 calls/month", "34 fixed in lint 2026-06-09",
+            "sanctioned exception", "feedback_skill_preflight_clarification",
+            "feedback_session_id_in_frontmatter",
+        ):
+            with self.subTest(obsolete=obsolete):
+                self.assertFalse(obsolete in text, f"Obsolete guidance: {obsolete}")
+        self.assertIn("[[file-name|Label]]", text)
+        template = text.split("## Frontmatter Template", 1)[1].split("## Writing Style", 1)[0]
+        self.assertIn("CLAUDE.md", template)
+        self.assertIn("./scripts/current-session-id.sh", template)
+        self.assertFalse("[[.raw/" in template, "U6b: raw source must be path metadata")
+
+
 if __name__ == "__main__":
     unittest.main()
