@@ -413,5 +413,83 @@ class FindSessionContracts(unittest.TestCase):
         self.assertTrue(preflight_issues(block + "\nAsk four questions."))
 
 
+class BacklogContracts(unittest.TestCase):
+    def test_d_u3f_slug_lookup(self) -> None:
+        text = (ROOT / "skills/backlog/SKILL.md").read_text(encoding="utf-8")
+        section = text.split("### Phase C.1:", 1)[1]
+        match = re.search(r"```bash\n([\s\S]*?)\n```", section)
+        self.assertIsNotNone(match)
+        lines = [
+            "- [2026-09-28] blog-theme-upgrade-more — prefix collision",
+            "- [2026-09-28] blog-theme-upgrade — exact entry",
+            "- [2026-09-28] blog-theme-upgrade-2 — suffixed entry",
+            "- [2026-09-28] blog-theme-upgrade",
+            "- [2026-09-28] blog-theme-upgradeish — glued suffix",
+        ]
+        with tempfile.TemporaryDirectory(prefix="prompt-audit-backlog-") as tmp:
+            scratch = Path(tmp).resolve()
+            self.assertFalse(scratch.is_relative_to(ROOT.resolve()))
+            path = scratch / "wiki/backlog.md"
+            path.parent.mkdir()
+            content = "\n".join(lines) + "\n"
+            path.write_text(content, encoding="utf-8")
+            for slug, code, expected in (
+                ("blog-theme-upgrade", 0, [f"2:{lines[1]}", f"4:{lines[3]}"]),
+                ("missing-slug", 1, []),
+            ):
+                with self.subTest(slug=slug):
+                    result = subprocess.run(
+                        ["bash", "-c", match.group(1).replace("<slug>", slug)],
+                        cwd=scratch, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=8,
+                    )
+                    self.assertEqual(result.returncode, code, result.stderr)
+                    self.assertEqual(result.stdout.splitlines(), expected)
+                    self.assertEqual(path.read_text(encoding="utf-8"), content)
+
+    def test_backlog_uniqueness_and_single_source_rules(self) -> None:
+        text = (ROOT / "skills/backlog/SKILL.md").read_text(encoding="utf-8")
+        draft = preflight_block(text, "Phase A.2:")
+        rule = "If the slug exists, append `-2`, `-3`, …"
+        self.assertIn(rule, draft)
+        self.assertLess(draft.index("Read `wiki/backlog.md`"), draft.index(rule))
+        self.assertLess(draft.index(rule), draft.index("--sha256"))
+        self.assertIn("Exit 4 means re-read, re-check slug uniqueness, and retry.", draft)
+        for obsolete in ("NEVER auto-drop", "NEVER duplicate state", "❌ Pre-flight questions on `add`", "❌ Slug conflicts"):
+            with self.subTest(obsolete=obsolete):
+                self.assertFalse(obsolete in text, f"Obsolete backlog rule: {obsolete}")
+        self.assertIn("Don't drop items automatically; the user decides.", text)
+        self.assertIn("After promote the item leaves the backlog, so state lives in one place; `wiki/log.md` keeps the history.", text)
+
+    def test_u_t2_backlog_add_preflight(self) -> None:
+        text = (ROOT / "skills/backlog/SKILL.md").read_text(encoding="utf-8")
+        add = text.split("## Mode: add", 1)[1].split("## Mode: list", 1)[0]
+        self.assertEqual(preflight_issues(add), [])
+        preflight = preflight_block(add, "Phase A.0:")
+        self.assertIn("At most 2 questions (skip any that are already clear", preflight)
+        self.assertIn("Optional.", preflight)
+        self.assertIn("NO scope/audience/mode questions", preflight)
+        self.assertTrue(preflight_issues(add + "\nAsk four questions."))
+        self.assertTrue(preflight_issues(preflight_block(text, "Phase C.0:")), "Promote preflight remains outside U-T2 scope")
+
+
+class CanvasContracts(unittest.TestCase):
+    def test_canvas_read_write_boundary(self) -> None:
+        text = (ROOT / "skills/canvas/SKILL.md").read_text(encoding="utf-8")
+        default = text.split("## Default Canvas", 1)[1].split("```json", 1)[0]
+        self.assertIn("only in an explicit write operation", default)
+        self.assertIn("read operations report a missing file", default)
+        read = text.split("### open / status", 1)[1].split("### new", 1)[0]
+        missing = numbered_steps(read)[3]
+        self.assertIn("report the missing file and stop", missing)
+        self.assertNotRegex(missing, r"(?i)\b(create|write)\b")
+
+    def test_canvas_shared_preflight_reference(self) -> None:
+        text = (ROOT / "skills/canvas/SKILL.md").read_text(encoding="utf-8")
+        preflight = preflight_block(text, "Pre-flight")
+        self.assertFalse("feedback_skill_preflight_clarification" in preflight)
+        self.assertIn("правило pre-flight из CLAUDE.md", preflight)
+        self.assertIn("Read-операции (open / list / показать) — без pre-flight.", preflight)
+
+
 if __name__ == "__main__":
     unittest.main()
