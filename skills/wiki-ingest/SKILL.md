@@ -12,9 +12,9 @@ allowed-tools: Read Write Edit Glob Grep Bash AskUserQuestion
 
 # wiki-ingest: Source Ingestion
 
-Read the source. Write the wiki. Cross-reference everything. A single source typically touches 8-15 wiki pages.
+Read the source. Write the wiki. Cross-reference every entity and concept the source touches, updating existing pages rather than creating near-duplicates.
 
-**Syntax standard**: Write all Obsidian Markdown using proper Obsidian Flavored Markdown. Wikilinks as `[[Note Name]]`, callouts as `> [!type] Title`, embeds as `![[file]]`, properties as YAML frontmatter. If the kepano/obsidian-skills plugin is installed, prefer its canonical obsidian-markdown skill for Obsidian syntax reference. Otherwise, follow the guidance in this skill.
+**Syntax standard**: Obsidian Flavored Markdown — wikilinks `[[Note Name]]` (no paths), callouts `> [!type] Title`, embeds `![[file]]`, YAML frontmatter. Syntax reference: the `obsidian-markdown` skill.
 
 ---
 
@@ -148,11 +148,12 @@ Steps:
 
 1. **Normalize** a local source as described above, then read the resulting
    Markdown completely. Plain pasted content needs no normalization. Do not skim.
-2. **Discuss** key takeaways with the user. Ask: "What should I emphasize? How granular?" Skip this if the user says "just ingest it."
+2. Use the confirmation rule below.
 3. **Draft** the source summary in `wiki/sources/`. Use the source frontmatter schema from `references/frontmatter.md`. Assign an address per the **Address Assignment** section below.
 4. **Draft create/update operations** for every entity and concept. For each update capture `python3 scripts/vault-write.py --sha256 <path>` before editing; new pages get addresses.
 5. **Draft** relevant domain/overview updates. Folder `_index.md` listings regenerate automatically; never hand-edit their AUTO-INDEX blocks. Touch `wiki/index.md` only for a new key hub.
-6. **Commit all pages plus bookkeeping through one dispatcher transaction**:
+6. **Check for contradictions before dispatch.** If new info conflicts with existing pages, include `> [!contradiction]` callouts in both drafted page operations.
+7. **Commit all pages plus bookkeeping through one dispatcher transaction**:
     ```bash
     python3 scripts/vault-write.py <<'PAYLOAD'
     {"actor": "wiki-ingest", "session": "<SESSION_ID>",
@@ -162,7 +163,6 @@ Steps:
     PAYLOAD
     ```
     Exit 2 = cap violation — fix the payload and re-run; never bypass with direct hot.md/log.md Edits.
-7. **Check for contradictions before dispatch.** If new info conflicts with existing pages, include `> [!contradiction]` callouts in both drafted page operations.
 
 ---
 
@@ -172,20 +172,19 @@ Trigger: user drops multiple files or says "ingest all of these."
 
 Steps:
 
-1. List all files to process. Confirm with user before starting.
+1. List files; use the confirmation rule below.
 2. Run `python3 scripts/document-normalize.py check --json` once when the batch
    contains binary documents. If unavailable, process text-like sources and
    return one consolidated Docling escalation for the remaining files.
-3. Process each source following the single ingest flow. Accumulate bounded
-   semantic-cleanup segments in the same turn. If any document returns
-   `needs_user_action`, stop that document and consolidate the escalation;
-   never spawn background model work to exceed the repair limits. Defer
-   cross-referencing between sources until the cross-reference pass.
-4. After all sources: do a cross-reference pass. Look for connections between the newly ingested sources.
-5. Update index, hot cache, and log once at the end (not per-source).
+3. Use single-source steps 1–6; collect page and manifest ops for step 5, without per-source dispatch. Bound semantic cleanup to this turn; never spawn background model work to exceed repair limits. Cross-source links: step 4.
+4. Cross-reference drafts; check contradictions (single step 6).
+5. Hot cache and log once at the end (one final transaction);
+   `wiki/index.md` only for a new key hub (single step 5).
 6. Report: "Processed N sources. Created X pages, updated Y pages. Here are the key connections I found."
 
-Batch ingest is less interactive. For 30+ sources, expect significant processing time. Check in with the user after every 10 sources.
+**Confirmation** (single step 2 / batch step 1): discuss only unclear takeaways; confirm a batch plan once. Never re-confirm an approved batch or re-ask resolved questions.
+Pause only sources needing decisions: `low_quality`, `needs_user_action`, `unsupported`, `conversion_failed`; unattended runs escalate to the coordinator.
+Contradictions become callouts before dispatch.
 
 ---
 
@@ -193,13 +192,14 @@ Batch ingest is less interactive. For 30+ sources, expect significant processing
 
 Token budget matters. Follow these rules during ingest:
 
-- Read `wiki/hot.md` first. If it contains the relevant context, don't re-read full pages.
+- Read `wiki/hot.md` first for orientation; it never replaces reading a page you will update.
 - Read `wiki/index.md` to find existing pages before creating new ones.
-- Read only 3-5 existing pages per ingest. If you need 10+, you are reading too broadly.
+- Read the existing pages you will update (full-content updates need their current text) and any
+  page needed to rule out a duplicate; locate everything else through `retrieve.py` snippets.
 - Existing pages use full-content `op:update` with a freshly captured
   `expected_sha256`; the writer does not expose PATCH semantics.
 - Keep wiki pages short. 100-300 lines max. If a page grows beyond 300 lines, split it.
-- Use search (`/search/simple/`) to find specific content without reading full pages.
+- Use `./scripts/retrieve.py "<query>" --top 5 --json` to find specific content without reading full pages.
 
 ---
 

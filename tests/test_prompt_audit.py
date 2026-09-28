@@ -59,6 +59,15 @@ def preflight_issues(block: str) -> list[str]:
     return [match.group() for pattern in patterns for match in re.finditer(pattern, block, re.I)]
 
 
+def numbered_steps(section: str) -> dict[int, str]:
+    """Read top-level ordered steps, retaining indented command payloads."""
+    matches = list(re.finditer(r"(?m)^(\d+)\. ", section))
+    return {
+        int(match.group(1)): section[match.end():matches[i + 1].start() if i + 1 < len(matches) else len(section)]
+        for i, match in enumerate(matches)
+    }
+
+
 class DefuddleContracts(unittest.TestCase):
     def test_d_u1_local_only(self) -> None:
         text = (ROOT / "skills/defuddle/SKILL.md").read_text(encoding="utf-8")
@@ -162,6 +171,67 @@ class DraftContracts(unittest.TestCase):
         self.assertIn("Use the Phase 6 layout", compose)
         self.assertNotIn("Example shape:", compose)
         self.assertNotIn("The fix landed yesterday", compose)
+
+
+class IngestContracts(unittest.TestCase):
+    def test_d_u6f_transaction_order(self) -> None:
+        text = (ROOT / "skills/wiki-ingest/SKILL.md").read_text(encoding="utf-8")
+        single = text.split("## Single Source Ingest", 1)[1].split("## Batch Ingest", 1)[0]
+        batch = text.split("## Batch Ingest", 1)[1].split("## Context Window Discipline", 1)[0]
+        steps = numbered_steps(single)
+        contradiction = next(n for n, step in steps.items() if "Check for contradictions before dispatch" in step)
+        dispatch = next(n for n, step in steps.items() if "python3 scripts/vault-write.py <<" in step)
+        with self.subTest(contract="contradictions before writes"):
+            self.assertLess(contradiction, dispatch, "D-U6f")
+            self.assertIn("both drafted page operations", steps[contradiction])
+        steps = numbered_steps(batch)
+        with self.subTest(contract="accumulate batch operations"):
+            draft = " ".join(steps[3].split())
+            self.assertIn("single-source steps 1–6", draft)
+            self.assertIn("page and manifest", draft)
+            self.assertIn("without per-source dispatch", draft)
+        with self.subTest(contract="one transaction and conditional index"):
+            final = " ".join(steps[5].split())
+            self.assertIn("one final transaction", final)
+            self.assertIn("`wiki/index.md` only for a new key hub", final)
+            self.assertNotIn("Update index,", final)
+
+    def test_u2a_read_updated_pages_and_retrieve(self) -> None:
+        text = (ROOT / "skills/wiki-ingest/SKILL.md").read_text(encoding="utf-8")
+        context = text.split("## Context Window Discipline", 1)[1].split("## Contradictions", 1)[0]
+        context = " ".join(context.split())
+        self.assertIn("never replaces reading a page you will update", context)
+        self.assertIn("Read the existing pages you will update", context)
+        self.assertIn("page needed to rule out a duplicate", context)
+        self.assertIn('./scripts/retrieve.py "<query>" --top 5 --json', context)
+        self.assertNotIn("Read only 3-5", context)
+        self.assertNotIn("/search/simple/", context)
+
+    def test_u2j_one_confirmation_rule(self) -> None:
+        text = (ROOT / "skills/wiki-ingest/SKILL.md").read_text(encoding="utf-8")
+        batch = text.split("## Batch Ingest", 1)[1].split("## Context Window Discipline", 1)[0]
+        self.assertIn("**Confirmation**", batch)
+        rule = " ".join(batch.split("**Confirmation**", 1)[1].split())
+        for phrase in (
+            "single step 2", "batch step 1", "unclear takeaways",
+            "confirm a batch plan once", "Never re-confirm an approved batch",
+            "re-ask resolved questions", "unattended runs escalate to the coordinator",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, rule)
+        for failure in ("low_quality", "needs_user_action", "unsupported", "conversion_failed"):
+            self.assertIn(f"`{failure}`", rule)
+        self.assertIn("Contradictions become callouts before dispatch", rule)
+        self.assertNotIn("after every 10 sources", text)
+        self.assertNotIn('Ask: "What should I emphasize?', text)
+
+    def test_u2hi_source_scope_and_syntax(self) -> None:
+        text = (ROOT / "skills/wiki-ingest/SKILL.md").read_text(encoding="utf-8")
+        intro = text.split("## Delta Tracking", 1)[0]
+        self.assertNotIn("8-15 wiki pages", intro)
+        self.assertNotIn("kepano/obsidian-skills", intro)
+        self.assertIn("updating existing pages rather than creating near-duplicates", intro)
+        self.assertIn("Syntax reference: the `obsidian-markdown` skill", intro)
 
 
 if __name__ == "__main__":
