@@ -12,6 +12,28 @@ packages were published for them.
 
 ## [Unreleased]
 
+## [2.8.11] - 2026-09-28
+
+### Fixed
+
+- `defuddle` cleans saved local HTML; URLs use protected `wiki-ingest`.
+  `draft` accepts pasted or local thread text and uses research/docs tooling
+  for fact checks. Clarification uses defaults and asks only unresolved questions.
+- Ingest checks contradictions before dispatch and collects batch writes into
+  one final transaction. Lint reports and approved fixes use separate writer
+  stages; query retrieval and curated index guidance follow the existing tools.
+- Save, lint, and query templates carry required schema/provenance fields.
+  Question and synthesis pages use `open|answered`; save YAML explanations live
+  outside the code blocks so the strict parser can validate the templates.
+- Session lookup uses runnable JSONL snippets without the unused auto-inject
+  branch. Backlog lookup matches exact slugs and rechecks uniqueness after a
+  conflict. Canvas read operations report missing files without creating them.
+
+### Changed
+
+- Replaced dated skill guidance with stable contracts and registered prompt
+  regressions and scratch-vault template validation in `make test`.
+
 ## [2.8.10] - 2026-09-01
 
 ### Added

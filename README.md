@@ -395,6 +395,7 @@ There is no speculative roadmap in this README. The repository describes what is
 | Topic | Document |
 |---|---|
 | Complete idea-to-architecture-to-Harness workflow (Russian) | [Architecture Workflow v1](docs/architecture-workflow-v1.ru.md) |
+| v2.8.11 skill contracts and validated templates | [v2.8.11 release notes](docs/releases/v2.8.11.md) |
 | v2.8.10 external review lifecycle | [v2.8.10 release notes](docs/releases/v2.8.10.md) |
 | v2.8.5 Codex trust-transition repair | [v2.8.5 release notes](docs/releases/v2.8.5.md) |
 | v2.8.4 custom initial-delivery repair | [v2.8.4 release notes](docs/releases/v2.8.4.md) |

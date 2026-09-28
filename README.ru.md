@@ -402,6 +402,7 @@ Acceptance heartbeat хранит только stage/status/counters/timestamps.
 | Тема | Документ |
 |---|---|
 | Полный путь от идеи и архитектуры до Work Item DAG и Harness | [Architecture Workflow v1](docs/architecture-workflow-v1.ru.md) |
+| Контракты skills и валидные шаблоны в v2.8.11 | [Release notes v2.8.11](docs/releases/v2.8.11.md) |
 | Lifecycle review внешних репозиториев в v2.8.10 | [Release notes v2.8.10](docs/releases/v2.8.10.md) |
 | Исправление trust-transition Codex в v2.8.5 | [Release notes v2.8.5](docs/releases/v2.8.5.md) |
 | Исправление первой доставки custom pipeline в v2.8.4 | [Release notes v2.8.4](docs/releases/v2.8.4.md) |
