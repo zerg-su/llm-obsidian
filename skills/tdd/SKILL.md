@@ -17,12 +17,16 @@ vertical slice:
 5. Bind green to declared success evidence, not task completion; explicit gaps.
 6. Commit a runnable slice.
 
-After the implemented behavior and affected checks are green, use
-`mutation-testing` for a bounded independent sensitivity check when test adequacy
-is requested or acceptance depends on a critical guard, side effect or transition.
+Before completing every non-exempt TDD invocation, after implementation,
+refactoring and affected checks are GREEN, run `mutation-testing` for a bounded
+independent sensitivity check. Run it once for the completed scope, not after
+each RED/GREEN slice; use its mutation budget and isolation rules.
 Pass the current files (dirty is valid), behavioral contract and canonical verifier.
-Return survivors to test strengthening; its sample score never replaces outcome
-evidence or the existing review gates. Exemptions below still apply.
+Strengthen tests for survivors and recheck them within this invocation; do not
+recursively start another TDD invocation. Report the mutation evidence before
+completion. A blocked verifier or missing behavioral seam is an explicit evidence
+gap, never a passed check. Record any exemption below and its proportional check.
+The sample score never replaces outcome evidence or existing review gates.
 
 Unknown adapter/runtime mechanism: first use the `prototype` skill to prove one
 falsifiable live path in disposable isolation while production stays unchanged.

@@ -50,8 +50,9 @@ Codex — `$llm-obsidian:name`. Другой agent может прочитать
 
 ## Выбор и комбинации
 
-- Критичные guards/side effects после GREEN или запрос качества тестов: `tdd` →
+- Каждый TDD-прогон с изменением поведения, после GREEN и рефакторинга: `tdd` →
   `mutation-testing` → усиление тестов для survivors → прежние integration/review gates.
+  Один вызов на завершённый scope; исключения и блокировки фиксируются явно по правилам `tdd`.
 - Неясная feature: `clarify` → `design` → `implementation-plan` → `tdd`.
 - Новый/развивающийся project: `clarify` → `architecture` → нужные
   `design`/`research`/`prototype` handoffs → `decompose` → один accepted Work

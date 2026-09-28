@@ -43,7 +43,7 @@
       },
       "overall_input": "Approved implementation outcome, current dirty artifacts, behavioral contract and existing verifier.",
       "overall_outcome": "Useful evidence of test sensitivity and authorized test improvements with original unrelated work preserved.",
-      "local_subgoal": "Implement the approved behavior, then hand green artifacts to the optional scoped sensitivity check.",
+      "local_subgoal": "Implement the approved behavior, then run the bounded sensitivity check before completing every non-exempt TDD invocation.",
       "completion_proxies": [
         "Green baseline",
         "Runner exit zero",
@@ -55,10 +55,11 @@
         "Causal failure or justified survivor/equivalent/inconclusive classification for each attempted mutant",
         "Original inventoried files and Git index unchanged during experiments",
         "Former survivors killed after authorized test strengthening; original affected checks green",
-        "Residual scope and normal delivery/review gates explicitly retained"
+        "Residual scope and normal delivery/review gates explicitly retained",
+        "Mutation report for each non-exempt invocation; blocked seams and documented exemptions remain explicit, never a passed check"
       ],
       "evidence": "docs/acceptance/mutation-testing.md; docs/acceptance/evidence/mutation-testing/behavioral-evidence.json; tests/test_mutation_workspace.py; tests/test_skill_router.sh",
-      "change": "none after the five-pass quality audit of the authorized new capability and TDD handoff",
+      "change": "none in the five-pass audit after the user-authorized mandatory TDD completion handoff",
       "behavior_proof": "Quality audit preserves the product boundary: original artifacts are not mutated; tests are strengthened only when authorized; provider, vault writer and dispatch/reap contracts are untouched."
     }
   ]

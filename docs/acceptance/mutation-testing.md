@@ -112,3 +112,29 @@ builds, in-scope submodules, external symlinks and missing ignored dependencies
 are explicit constraints, not silently approximated. SIGKILL may leave private
 scratch/processes; original source is never an undo target. Claims of unchanged
 source cover the recorded inventory/index, not excluded/ignored files.
+
+## Mandatory TDD completion handoff (2026-09-28 follow-up)
+
+The user requested mutation checking after every TDD invocation. The canonical
+TDD skill now calls `mutation-testing` once after implementation/refactoring and
+affected checks are GREEN, before reporting completion. Survivor strengthening
+and rechecks stay within that invocation. Existing documented exemptions retain
+a proportional check; missing or blocked consumer verification remains an
+explicit evidence gap. The mutation budget, copy isolation and authorization
+boundaries are unchanged. Both repository copies carry the same rule.
+
+The system skill-creator validator and the five-pass improve-skills audit pass.
+In the public clone, instruction lint, skill budget, all 22 Codex adapter cases,
+all 15 mutation runner cases, TDD/engineering contracts and Russian documentation
+checks pass. Private-clone focused contracts and lint pass; the previously
+recorded `save` budget and adapter A7 failures remain. Release acceptance
+correctly rejects uncommitted changes in both clones.
+
+A fresh independent agent received only an ordinary `join_labels` implementation
+request through the updated TDD skill, without a mutation-testing request. It
+observed RED before implementation, GREEN with eight tests, then automatically
+ran six semantic mutants. All six were KILLED on their intended assertions;
+baseline/control stayed GREEN and the runner recorded source preservation.
+The normalized raw report, plan and logs are retained in `behavioral-evidence.json`
+as `tdd-automatic-completion-handoff`. This demonstrates the handoff in one
+execution, not a guarantee of agent compliance in all future runs.
