@@ -18,7 +18,7 @@ Codex — `$llm-obsidian:name`. Другой agent может прочитать
 | `daily` · `/daily` · `$llm-obsidian:daily` | Итог дня по evidence | Дата и доступные session/git facts | EOD status; не план на будущее | Vault write · `/daily` |
 | `debug` · `/debug` · `$llm-obsidian:debug` | Воспроизводимый defect | Symptom, repro, expected behavior | Root cause; fix только если разрешён | Read-only diagnosis · `/debug validation exits 2` |
 | `decompose` · `/decompose` · `$llm-obsidian:decompose` | Разложить accepted project knowledge на delivery outcomes | Accepted artifacts/decisions и constraints | Work Item DAG через MAP/ACCEPT; не file/TDD plan и не split | Read-only до отдельного MATERIALIZE approval · `/decompose Atlas` |
-| `defuddle` · `/defuddle` · `$llm-obsidian:defuddle` | Очистить web page перед ingest | URL страницы | Readable Markdown; не vault write сам по себе | Network read · `/defuddle https://example.com/guide` |
+| `defuddle` · `/defuddle` · `$llm-obsidian:defuddle` | Очистить локальный HTML перед ingest | Локальный HTML-файл | Readable Markdown; URL → `/wiki-ingest <URL>` | Local read · `/defuddle page.html` |
 | `design` · `/design` · `$llm-obsidian:design` | Архитектурные варианты до реализации | Outcome и constraints | Boundaries, alternatives, ADR candidate | Read-only · `/design callback ownership` |
 | `dispatch` · `/dispatch` · `$llm-obsidian:dispatch` | Передать утверждённый plan в worktree | Путь approved plan | Harness task; не выполняет неутверждённый plan | Local worktree/cmux effect · `/dispatch wiki/plans/example.md` |
 | `distill-runbook` · `/distill-runbook` · `$llm-obsidian:distill-runbook` | Превратить captured commands в human runbook | Current session command log | Sanitized procedure; не выполняет её | Vault write · `/distill-runbook` |
@@ -56,7 +56,7 @@ Codex — `$llm-obsidian:name`. Другой agent может прочитать
 - Project documentation: `implementation-plan` → `tdd` → deterministic docs
   gate → `review`; отдельный `document-project` skill в 2.6.3 не поставляется,
   потому что fresh control уже покрывал требуемое поведение.
-- Новый документ: `defuddle` для web cleanup или `wiki-ingest` для файла →
+- Новый документ: `defuddle` для очистки локального HTML или `wiki-ingest` для файла →
   `save`/transaction → `wiki-query` для проверки findability.
 - Долгая task: `save-plan` → `dispatch` → `review` → `reap`.
 - Approved параллельная task: `save-plan` → `split` preview → явный
