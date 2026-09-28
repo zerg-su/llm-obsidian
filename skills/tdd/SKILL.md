@@ -1,6 +1,6 @@
 ---
 name: tdd
-description: Implement approved behavior through red-green slices. Use for clear feature or bug-fix coding, not prototypes or diagnosis-only work.
+description: Use red-green slices for approved features/fixes; not prototypes or diagnosis-only work.
 ---
 
 # TDD
@@ -16,6 +16,13 @@ vertical slice:
 4. Minimal change makes it pass; run affected integration checks.
 5. Bind green to declared success evidence, not task completion; explicit gaps.
 6. Commit a runnable slice.
+
+After the implemented behavior and affected checks are green, use
+`mutation-testing` for a bounded independent sensitivity check when test adequacy
+is requested or acceptance depends on a critical guard, side effect or transition.
+Pass the current files (dirty is valid), behavioral contract and canonical verifier.
+Return survivors to test strengthening; its sample score never replaces outcome
+evidence or the existing review gates. Exemptions below still apply.
 
 Unknown adapter/runtime mechanism: first use the `prototype` skill to prove one
 falsifiable live path in disposable isolation while production stays unchanged.

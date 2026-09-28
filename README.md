@@ -234,7 +234,7 @@ Claude invokes them through its plugin UI (`/skill`). Codex uses the generated r
 | **Capture and writing** | `save`, `save-plan`, `journal`, `backlog`, `daily`, and `agenda` turn conversations and dated work into canonical vault data. |
 | **Knowledge access** | `wiki-query`, `find-session`, `wiki-lint`, and `wiki-fold` retrieve, audit, and compact durable knowledge. |
 | **Documents and web** | `wiki-ingest`, `defuddle`, `research`, and `unsafe-research` normalize sources and keep trust domains explicit. |
-| **Engineering** | `debug`, `tdd`, `design`, `prototype`, and `resolve-conflict` keep reasoning disciplined while the harness owns lifecycle mechanics. |
+| **Engineering** | `debug`, `tdd`, `mutation-testing`, `design`, `prototype`, and `resolve-conflict` cover implementation and isolated behavioral test checks; the harness owns lifecycle mechanics. |
 | **Thinking and communication** | `draft` proposes redacted external replies; `learn` tutors from your notes; `distill-runbook` turns sanitized shell history into human-executable procedures. |
 | **Skill quality** | `improve-skills` explicitly audits invocation, information hierarchy, completion criteria, and pruning while preserving behavior. |
 | **Obsidian-native output** | `obsidian-markdown`, `obsidian-bases`, and `canvas` produce correct links, properties, database views, and visual canvases. |

@@ -4,7 +4,7 @@ Skill — versioned reasoning contract. Claude использует plugin skill
 Codex — `$llm-obsidian:name`. Другой agent может прочитать
 `skills/<name>/SKILL.md` вручную. Router даёт hint, но не расширяет разрешения.
 
-## Каталог 38 skills
+## Каталог 39 skills
 
 | Skill и вызов | Когда применять | Вход | Результат и граница | Permission/effect · минимальный пример |
 |---|---|---|---|---|
@@ -28,6 +28,7 @@ Codex — `$llm-obsidian:name`. Другой agent может прочитать
 | `improve-skills` · `/improve-skills` · `$llm-obsidian:improve-skills` | Проверить/улучшить существующие skills | Exact skill set и eval evidence | Five-pass audit без semantic drift | Skill writes только в approved scope · `/improve-skills skills/save` |
 | `journal` · `/journal` · `$llm-obsidian:journal` | Датированная заметка/reminder/plan | Дата, item и режим | Journal update и session map | Vault transaction · `/journal на завтра проверить RC` |
 | `learn` · `/learn` · `$llm-obsidian:learn` | Учиться по wiki curriculum | Module или quiz request | Study/quiz/practice/progress | Vault read; progress write по запросу · `/learn quiz module-2` |
+| `mutation-testing` · `/mutation-testing` · `$llm-obsidian:mutation-testing` | Проверить чувствительность зелёных тестов после TDD | Текущие artifacts, контракт поведения, canonical verifier | Изолированные поведенческие мутации и классифицированный отчёт; sample score не заменяет приёмку | Private-copy writes; усиление исходных тестов в разрешённом scope · `/mutation-testing проверь guard после TDD` |
 | `obsidian-bases` · `/obsidian-bases` · `$llm-obsidian:obsidian-bases` | Создать `.base` view | Source notes, fields, filters, view | Native table/cards/filter/formula | Vault `.base` write · `/obsidian-bases table projects` |
 | `obsidian-markdown` · `/obsidian-markdown` · `$llm-obsidian:obsidian-markdown` | Писать Obsidian Flavored Markdown | Note intent и нужные OMF elements | Wikilinks, embeds, callouts, properties | Write только по task authority · `/obsidian-markdown callout summary` |
 | `prototype` · `/prototype` · `$llm-obsidian:prototype` | Ответить на один технический вопрос spike'ом | Один bounded question | Disposable evidence; не production change | Disposable-worktree write · `/prototype можно ли compile spec` |
@@ -49,6 +50,8 @@ Codex — `$llm-obsidian:name`. Другой agent может прочитать
 
 ## Выбор и комбинации
 
+- Критичные guards/side effects после GREEN или запрос качества тестов: `tdd` →
+  `mutation-testing` → усиление тестов для survivors → прежние integration/review gates.
 - Неясная feature: `clarify` → `design` → `implementation-plan` → `tdd`.
 - Новый/развивающийся project: `clarify` → `architecture` → нужные
   `design`/`research`/`prototype` handoffs → `decompose` → один accepted Work

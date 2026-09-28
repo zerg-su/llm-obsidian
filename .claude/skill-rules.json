@@ -92,6 +92,15 @@
       "hint": "Approved public seam, focused red-green vertical slices"
     },
     {
+      "skill": "mutation-testing",
+      "patterns": [
+        "(?i)(?:^|\\s)/mutation-testing(?:\\s|$)",
+        "(?i)\\b(run|perform|do|use)\\b.{0,35}\\b(semantic |behavioral )?mutation[- ]test(?:ing|s)?\\b",
+        "(?i)\\b(проверь|прогони|проведи)\\b.{0,45}\\b(тест\\w* мутаци\\w*|мутационн\\w* тест\\w*)\\b"
+      ],
+      "hint": "After GREEN, challenge behavior in private copies; preserve dirty source and classify causal failures"
+    },
+    {
       "skill": "design",
       "patterns": [
         "(?i)\\bsystem design\\b",

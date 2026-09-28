@@ -66,6 +66,12 @@ run_case_without() {
 }
 
 echo "== positive skill matches =="
+run_case "mutation-explicit" '/mutation-testing scripts/foo.py' 'Skill("mutation-testing")'
+run_case "mutation-EN" 'run semantic mutation testing after TDD' 'Skill("mutation-testing")'
+run_case "mutation-RU" 'проверь тесты мутациями после TDD' 'Skill("mutation-testing")'
+run_case_without "mutation-not-biology" 'Explain genetic mutation rates' 'Skill("mutation-testing")'
+run_case_without "mutation-not-edit" 'Change the default timeout in settings' 'Skill("mutation-testing")'
+run_case_without "mutation-not-ordinary-tdd" 'implement feature with TDD' 'Skill("mutation-testing")' 'Skill("tdd")'
 run_case "clarify-grill-EN" 'grill me on this API migration plan'                     'Skill("clarify")'
 run_case "clarify-RU"       'допроси меня перед реализацией этого дизайна'            'Skill("clarify")'
 run_case "clarify-code-EN"  'use clarify-before-code for this refactor'               'Skill("clarify")'

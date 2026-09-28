@@ -1,0 +1,249 @@
+{
+  "schema_version": 1,
+  "normalization": "Only machine-local path prefixes are replaced; original SHA-256 identifies each raw local artifact. These are recorded executions, not a model-success guarantee.",
+  "cases": [
+    {
+      "case": "forward-initial",
+      "verdicts": [
+        "KILLED",
+        "SURVIVED",
+        "SURVIVED"
+      ],
+      "artifacts": [
+        {
+          "kind": "runner-report",
+          "original_sha256": "f5319c27ae59434c12d0454fbac6af1d2e1ff66f23f21d7d9262cbefff87fa96",
+          "normalized_content": "{\n  \"schema_version\": 1,\n  \"status\": \"collected\",\n  \"runs\": [\n    {\n      \"id\": \"baseline\",\n      \"status\": \"passed\",\n      \"exit_code\": 0,\n      \"log\": \"baseline.log\"\n    },\n    {\n      \"id\": \"capacity-inclusive\",\n      \"status\": \"failed\",\n      \"exit_code\": 2,\n      \"log\": \"capacity-inclusive.log\"\n    },\n    {\n      \"id\": \"missing-role-guard\",\n      \"status\": \"passed\",\n      \"exit_code\": 0,\n      \"log\": \"missing-role-guard.log\"\n    },\n    {\n      \"id\": \"missing-event-append\",\n      \"status\": \"passed\",\n      \"exit_code\": 0,\n      \"log\": \"missing-event-append.log\"\n    },\n    {\n      \"id\": \"control\",\n      \"status\": \"passed\",\n      \"exit_code\": 0,\n      \"log\": \"control.log\"\n    }\n  ],\n  \"source_unchanged\": true,\n  \"plan_sha256\": \"964d4481b3da38eaae135cc6f0204292864c5c67a2690e5309b979b8e3e533eb\",\n  \"source_manifest_sha256\": \"cd9e9c639d0fb3475c7ce2eb3503b253ac9aec9c3c73938d512d26d9722ec071\",\n  \"classification\": \"Agent must inspect behavioral failure evidence; exit codes are observations only.\"\n}\n"
+        },
+        {
+          "kind": "mutation-plan",
+          "original_sha256": "4b6f7edaf06345d0e62e412521a15cb1e78be7d9ece377c9ad4e94674358e7de",
+          "normalized_content": "{\n  \"schema_version\": 1,\n  \"command\": [\n    \"make\",\n    \"check\"\n  ],\n  \"timeout_seconds\": 10,\n  \"mutations\": [\n    {\n      \"id\": \"capacity-inclusive\",\n      \"path\": \"policy.py\",\n      \"before\": \"return count < limit\",\n      \"after\": \"return count <= limit\",\n      \"reason\": \"Admission erroneously permits the configured capacity boundary.\",\n      \"expected_failure\": \"capacity boundary assertion rejects admin count=3.\"\n    },\n    {\n      \"id\": \"missing-role-guard\",\n      \"path\": \"policy.py\",\n      \"before\": \"if role != \\\"admin\\\":\",\n      \"after\": \"if False:\",\n      \"reason\": \"Bypass the role guard and admit non-admin users under capacity.\",\n      \"expected_failure\": \"A non-admin admission assertion should observe False.\"\n    },\n    {\n      \"id\": \"missing-event-append\",\n      \"path\": \"policy.py\",\n      \"before\": \"    log.append(message)\",\n      \"after\": \"    pass\",\n      \"reason\": \"Report successful event processing without recording the event.\",\n      \"expected_failure\": \"A journal contents assertion should observe [\\\"hello\\\"].\"\n    }\n  ]\n}\n"
+        },
+        {
+          "kind": "baseline",
+          "original_sha256": "0c7f9ceb9b131d26399e998396e479d5d9e46d67c2819faef8d2ea184e63424b",
+          "normalized_content": "checks passed\n"
+        },
+        {
+          "kind": "capacity-inclusive",
+          "original_sha256": "97f096efe3ada60a6551daa4908e39cd089d622d4020257c96b18c602ea1b9e6",
+          "normalized_content": "Traceback (most recent call last):\n  File \"<forward-fixture>/evidence/work/check.py\", line 3, in <module>\n    assert not admit(\"admin\", 3), \"capacity boundary\"\n           ^^^^^^^^^^^^^^^^^^^^^\nAssertionError: capacity boundary\nmake: *** [check] Error 1\n"
+        },
+        {
+          "kind": "missing-role-guard",
+          "original_sha256": "0c7f9ceb9b131d26399e998396e479d5d9e46d67c2819faef8d2ea184e63424b",
+          "normalized_content": "checks passed\n"
+        },
+        {
+          "kind": "missing-event-append",
+          "original_sha256": "0c7f9ceb9b131d26399e998396e479d5d9e46d67c2819faef8d2ea184e63424b",
+          "normalized_content": "checks passed\n"
+        },
+        {
+          "kind": "control",
+          "original_sha256": "0c7f9ceb9b131d26399e998396e479d5d9e46d67c2819faef8d2ea184e63424b",
+          "normalized_content": "checks passed\n"
+        },
+        {
+          "kind": "fixture-policy.py",
+          "original_sha256": "3cc72fc2dcebdb5135f3a28eb5166c4271b87a21c6ea04bae132d5a36556ddfb",
+          "normalized_content": "def admit(role, count, limit=3):\n    if role != \"admin\":\n        return False\n    return count < limit\n\ndef event(log, message):\n    log.append(message)\n    return True\n\n# Work in progress, preserve this.\n"
+        },
+        {
+          "kind": "fixture-check.py",
+          "original_sha256": "71569ec9fc1a7a1ef0284565520be668f0c4666b7045e5d9c4f3c69d9ec594c6",
+          "normalized_content": "from policy import admit, event\nassert admit(\"admin\", 0), \"admin admission\"\nassert not admit(\"admin\", 3), \"capacity boundary\"\nlog = []\nassert event(log, \"hello\"), \"event success\"\nprint(\"checks passed\")\n"
+        },
+        {
+          "kind": "fixture-Makefile",
+          "original_sha256": "9fe40a1a8564fb1c8814a092d2d364ade3da483ff53e29817e6583cf52833b9f",
+          "normalized_content": "check:\n\t@python3 check.py\n"
+        }
+      ]
+    },
+    {
+      "case": "forward-strengthened",
+      "verdicts": [
+        "KILLED",
+        "KILLED",
+        "KILLED"
+      ],
+      "artifacts": [
+        {
+          "kind": "runner-report",
+          "original_sha256": "12a794ef380832728d400d4dad2ba3774e926d6f9c7be28ea6ba62cdd6b7c264",
+          "normalized_content": "{\n  \"schema_version\": 1,\n  \"status\": \"collected\",\n  \"runs\": [\n    {\n      \"id\": \"baseline\",\n      \"status\": \"passed\",\n      \"exit_code\": 0,\n      \"log\": \"baseline.log\"\n    },\n    {\n      \"id\": \"capacity-inclusive\",\n      \"status\": \"failed\",\n      \"exit_code\": 2,\n      \"log\": \"capacity-inclusive.log\"\n    },\n    {\n      \"id\": \"missing-role-guard\",\n      \"status\": \"failed\",\n      \"exit_code\": 2,\n      \"log\": \"missing-role-guard.log\"\n    },\n    {\n      \"id\": \"missing-event-append\",\n      \"status\": \"failed\",\n      \"exit_code\": 2,\n      \"log\": \"missing-event-append.log\"\n    },\n    {\n      \"id\": \"control\",\n      \"status\": \"passed\",\n      \"exit_code\": 0,\n      \"log\": \"control.log\"\n    }\n  ],\n  \"source_unchanged\": true,\n  \"plan_sha256\": \"964d4481b3da38eaae135cc6f0204292864c5c67a2690e5309b979b8e3e533eb\",\n  \"source_manifest_sha256\": \"796755922e915e8243d9e9a11fffb30e21f02a5c0304c6f4873c43a216c54638\",\n  \"classification\": \"Agent must inspect behavioral failure evidence; exit codes are observations only.\"\n}\n"
+        },
+        {
+          "kind": "mutation-plan",
+          "original_sha256": "4b6f7edaf06345d0e62e412521a15cb1e78be7d9ece377c9ad4e94674358e7de",
+          "normalized_content": "{\n  \"schema_version\": 1,\n  \"command\": [\n    \"make\",\n    \"check\"\n  ],\n  \"timeout_seconds\": 10,\n  \"mutations\": [\n    {\n      \"id\": \"capacity-inclusive\",\n      \"path\": \"policy.py\",\n      \"before\": \"return count < limit\",\n      \"after\": \"return count <= limit\",\n      \"reason\": \"Admission erroneously permits the configured capacity boundary.\",\n      \"expected_failure\": \"capacity boundary assertion rejects admin count=3.\"\n    },\n    {\n      \"id\": \"missing-role-guard\",\n      \"path\": \"policy.py\",\n      \"before\": \"if role != \\\"admin\\\":\",\n      \"after\": \"if False:\",\n      \"reason\": \"Bypass the role guard and admit non-admin users under capacity.\",\n      \"expected_failure\": \"A non-admin admission assertion should observe False.\"\n    },\n    {\n      \"id\": \"missing-event-append\",\n      \"path\": \"policy.py\",\n      \"before\": \"    log.append(message)\",\n      \"after\": \"    pass\",\n      \"reason\": \"Report successful event processing without recording the event.\",\n      \"expected_failure\": \"A journal contents assertion should observe [\\\"hello\\\"].\"\n    }\n  ]\n}\n"
+        },
+        {
+          "kind": "baseline",
+          "original_sha256": "0c7f9ceb9b131d26399e998396e479d5d9e46d67c2819faef8d2ea184e63424b",
+          "normalized_content": "checks passed\n"
+        },
+        {
+          "kind": "capacity-inclusive",
+          "original_sha256": "cdeebfe9198a3034fca6963a39e3b73006ca0f294716fd08cf98460183dae68c",
+          "normalized_content": "Traceback (most recent call last):\n  File \"<forward-fixture>/second-evidence/work/check.py\", line 3, in <module>\n    assert not admit(\"admin\", 3), \"capacity boundary\"\n           ^^^^^^^^^^^^^^^^^^^^^\nAssertionError: capacity boundary\nmake: *** [check] Error 1\n"
+        },
+        {
+          "kind": "missing-role-guard",
+          "original_sha256": "9025631b43c1162e171f91334c4114e72603a249347c24dec1d5b39700129ca3",
+          "normalized_content": "Traceback (most recent call last):\n  File \"<forward-fixture>/second-evidence/work/check.py\", line 4, in <module>\n    assert not admit(\"viewer\", 0), \"non-admin rejection\"\n           ^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: non-admin rejection\nmake: *** [check] Error 1\n"
+        },
+        {
+          "kind": "missing-event-append",
+          "original_sha256": "46ae80e1f17807c44f27d770cf514566cc2262ee9c4b6b97088e1edae159b5a3",
+          "normalized_content": "Traceback (most recent call last):\n  File \"<forward-fixture>/second-evidence/work/check.py\", line 7, in <module>\n    assert log == [\"hello\"], \"event recorded exactly once\"\n           ^^^^^^^^^^^^^^^^\nAssertionError: event recorded exactly once\nmake: *** [check] Error 1\n"
+        },
+        {
+          "kind": "control",
+          "original_sha256": "0c7f9ceb9b131d26399e998396e479d5d9e46d67c2819faef8d2ea184e63424b",
+          "normalized_content": "checks passed\n"
+        },
+        {
+          "kind": "fixture-policy.py",
+          "original_sha256": "3cc72fc2dcebdb5135f3a28eb5166c4271b87a21c6ea04bae132d5a36556ddfb",
+          "normalized_content": "def admit(role, count, limit=3):\n    if role != \"admin\":\n        return False\n    return count < limit\n\ndef event(log, message):\n    log.append(message)\n    return True\n\n# Work in progress, preserve this.\n"
+        },
+        {
+          "kind": "fixture-check.py",
+          "original_sha256": "f1deb528e7fd7f95886cd387c2ee506e6927a74560f9f6f9eee59f49bdc014a8",
+          "normalized_content": "from policy import admit, event\nassert admit(\"admin\", 0), \"admin admission\"\nassert not admit(\"admin\", 3), \"capacity boundary\"\nassert not admit(\"viewer\", 0), \"non-admin rejection\"\nlog = []\nassert event(log, \"hello\"), \"event success\"\nassert log == [\"hello\"], \"event recorded exactly once\"\nprint(\"checks passed\")\n"
+        },
+        {
+          "kind": "fixture-Makefile",
+          "original_sha256": "9fe40a1a8564fb1c8814a092d2d364ade3da483ff53e29817e6583cf52833b9f",
+          "normalized_content": "check:\n\t@python3 check.py\n"
+        }
+      ]
+    },
+    {
+      "case": "runner-self-mutations",
+      "verdicts": [
+        "KILLED",
+        "KILLED",
+        "KILLED"
+      ],
+      "artifacts": [
+        {
+          "kind": "runner-report",
+          "original_sha256": "e58cc00a8c36863142372b6a21229dc5bf3c99a5415b194e905c80e5c3bcf771",
+          "normalized_content": "{\n  \"schema_version\": 1,\n  \"status\": \"collected\",\n  \"runs\": [\n    {\n      \"id\": \"baseline\",\n      \"status\": \"passed\",\n      \"exit_code\": 0,\n      \"log\": \"baseline.log\",\n      \"cwd\": \"<self-fixture>/evidence/work\",\n      \"command\": [\n        \"python3\",\n        \"tests/test_mutation_workspace.py\",\n        \"MutationWorkspaceTests.test_red_baseline_stops_before_mutation\",\n        \"MutationWorkspaceTests.test_original_drift_is_detected_never_restored\",\n        \"MutationWorkspaceTests.test_each_verifier_has_fresh_temporary_files\"\n      ],\n      \"mutated_path\": null,\n      \"artifact_sha256\": null\n    },\n    {\n      \"id\": \"ignore-baseline\",\n      \"status\": \"failed\",\n      \"exit_code\": 1,\n      \"log\": \"ignore-baseline.log\",\n      \"cwd\": \"<self-fixture>/evidence/work\",\n      \"command\": [\n        \"python3\",\n        \"tests/test_mutation_workspace.py\",\n        \"MutationWorkspaceTests.test_red_baseline_stops_before_mutation\",\n        \"MutationWorkspaceTests.test_original_drift_is_detected_never_restored\",\n        \"MutationWorkspaceTests.test_each_verifier_has_fresh_temporary_files\"\n      ],\n      \"mutated_path\": \"skills/mutation-testing/scripts/run_mutations.py\",\n      \"artifact_sha256\": \"17e4121948eeae9e729a79445de94179b932b076a7a508bd72743f6cff17f512\"\n    },\n    {\n      \"id\": \"ignore-source-drift\",\n      \"status\": \"failed\",\n      \"exit_code\": 1,\n      \"log\": \"ignore-source-drift.log\",\n      \"cwd\": \"<self-fixture>/evidence/work\",\n      \"command\": [\n        \"python3\",\n        \"tests/test_mutation_workspace.py\",\n        \"MutationWorkspaceTests.test_red_baseline_stops_before_mutation\",\n        \"MutationWorkspaceTests.test_original_drift_is_detected_never_restored\",\n        \"MutationWorkspaceTests.test_each_verifier_has_fresh_temporary_files\"\n      ],\n      \"mutated_path\": \"skills/mutation-testing/scripts/run_mutations.py\",\n      \"artifact_sha256\": \"31351d600fcae71d2c212c2752a90532c878d435aef2c2146b35a04b6a2796d6\"\n    },\n    {\n      \"id\": \"share-temporary-state\",\n      \"status\": \"failed\",\n      \"exit_code\": 1,\n      \"log\": \"share-temporary-state.log\",\n      \"cwd\": \"<self-fixture>/evidence/work\",\n      \"command\": [\n        \"python3\",\n        \"tests/test_mutation_workspace.py\",\n        \"MutationWorkspaceTests.test_red_baseline_stops_before_mutation\",\n        \"MutationWorkspaceTests.test_original_drift_is_detected_never_restored\",\n        \"MutationWorkspaceTests.test_each_verifier_has_fresh_temporary_files\"\n      ],\n      \"mutated_path\": \"skills/mutation-testing/scripts/run_mutations.py\",\n      \"artifact_sha256\": \"bc3b8c30e75818f868e885da92f5c66a12ce30a76ead98c4a972eba06df26067\"\n    },\n    {\n      \"id\": \"control\",\n      \"status\": \"passed\",\n      \"exit_code\": 0,\n      \"log\": \"control.log\",\n      \"cwd\": \"<self-fixture>/evidence/work\",\n      \"command\": [\n        \"python3\",\n        \"tests/test_mutation_workspace.py\",\n        \"MutationWorkspaceTests.test_red_baseline_stops_before_mutation\",\n        \"MutationWorkspaceTests.test_original_drift_is_detected_never_restored\",\n        \"MutationWorkspaceTests.test_each_verifier_has_fresh_temporary_files\"\n      ],\n      \"mutated_path\": null,\n      \"artifact_sha256\": null\n    }\n  ],\n  \"source_unchanged\": true,\n  \"runner_sha256\": \"e94b7dc797edb2ededbef47003776a171a2032de21be146cccab721cd7897c27\",\n  \"plan_sha256\": \"3c8ce5a72a64cc3cb3322e6cb9e3f363a3b59938b41e04098a51d3714cb09341\",\n  \"source_manifest_sha256\": \"d56ef3ade230bf585e9eb7148f835ecda1ea1427558dfe08b5e6d2516c3b685d\",\n  \"classification\": \"Agent must inspect behavioral failure evidence; exit codes are observations only.\"\n}\n"
+        },
+        {
+          "kind": "mutation-plan",
+          "original_sha256": "7a7458f9c10a7d2cd241f9c02e6219016853d9ce26cc7b5f93c483ad6ea38a3f",
+          "normalized_content": "{\n  \"schema_version\": 1,\n  \"command\": [\n    \"python3\",\n    \"tests/test_mutation_workspace.py\",\n    \"MutationWorkspaceTests.test_red_baseline_stops_before_mutation\",\n    \"MutationWorkspaceTests.test_original_drift_is_detected_never_restored\",\n    \"MutationWorkspaceTests.test_each_verifier_has_fresh_temporary_files\"\n  ],\n  \"timeout_seconds\": 30,\n  \"mutations\": [\n    {\n      \"id\": \"ignore-baseline\",\n      \"path\": \"skills/mutation-testing/scripts/run_mutations.py\",\n      \"before\": \"if baseline[\\\"status\\\"] != \\\"passed\\\":\",\n      \"after\": \"if False:\",\n      \"reason\": \"continue mutations even when unmodified verifier fails\",\n      \"expected_failure\": \"test_red_baseline_stops_before_mutation rejects collected batch\"\n    },\n    {\n      \"id\": \"ignore-source-drift\",\n      \"path\": \"skills/mutation-testing/scripts/run_mutations.py\",\n      \"before\": \"if not report[\\\"source_unchanged\\\"]:\",\n      \"after\": \"if False:\",\n      \"reason\": \"report success despite concurrent source edits\",\n      \"expected_failure\": \"test_original_drift_is_detected_never_restored rejects success exit\"\n    },\n    {\n      \"id\": \"share-temporary-state\",\n      \"path\": \"skills/mutation-testing/scripts/run_mutations.py\",\n      \"before\": \"scratch = output / \\\"tmp\\\" / name\\n        scratch.mkdir(parents=True)\",\n      \"after\": \"scratch = output / \\\"tmp\\\"\\n        scratch.mkdir(parents=True, exist_ok=True)\",\n      \"reason\": \"leak verifier scratch between controls and mutants\",\n      \"expected_failure\": \"test_each_verifier_has_fresh_temporary_files rejects contaminated control\"\n    }\n  ]\n}\n"
+        },
+        {
+          "kind": "baseline",
+          "original_sha256": "55724f796b2ba6b98270126687ee1f1b8577ed628cc1b0dc21e1d1d5fab37d4d",
+          "normalized_content": "...\n----------------------------------------------------------------------\nRan 3 tests in 2.574s\n\nOK\n"
+        },
+        {
+          "kind": "ignore-baseline",
+          "original_sha256": "09d72c5f1a9a45fb0944e20eef44a7d457ad963db41d648ca56179d799014605",
+          "normalized_content": "F..\n======================================================================\nFAIL: test_red_baseline_stops_before_mutation (__main__.MutationWorkspaceTests.test_red_baseline_stops_before_mutation)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"<self-fixture>/evidence/work/tests/test_mutation_workspace.py\", line 82, in test_red_baseline_stops_before_mutation\n    self.assertEqual(report[\"status\"], \"baseline-failed\")\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: 'control-failed' != 'baseline-failed'\n- control-failed\n+ baseline-failed\n\n\n----------------------------------------------------------------------\nRan 3 tests in 2.558s\n\nFAILED (failures=1)\n"
+        },
+        {
+          "kind": "ignore-source-drift",
+          "original_sha256": "0f9c2593d16f7569bc120c8cbd0a788956b52eae81269071f59347d0a72d8841",
+          "normalized_content": ".F.\n======================================================================\nFAIL: test_original_drift_is_detected_never_restored (__main__.MutationWorkspaceTests.test_original_drift_is_detected_never_restored)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"<self-fixture>/evidence/work/tests/test_mutation_workspace.py\", line 163, in test_original_drift_is_detected_never_restored\n    self.assertNotEqual(result.returncode, 0)\n    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: 0 == 0\n\n----------------------------------------------------------------------\nRan 3 tests in 2.412s\n\nFAILED (failures=1)\n"
+        },
+        {
+          "kind": "share-temporary-state",
+          "original_sha256": "7c4e9d21e35e9c8c8bc657a404dbf98ec0499b50fda7a7ee82a795d17f770763",
+          "normalized_content": "..F\n======================================================================\nFAIL: test_each_verifier_has_fresh_temporary_files (__main__.MutationWorkspaceTests.test_each_verifier_has_fresh_temporary_files)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"<self-fixture>/evidence/work/tests/test_mutation_workspace.py\", line 105, in test_each_verifier_has_fresh_temporary_files\n    self.assertEqual(result.returncode, 0, result.stderr)\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: 1 != 0 : \n\n----------------------------------------------------------------------\nRan 3 tests in 2.570s\n\nFAILED (failures=1)\n"
+        },
+        {
+          "kind": "control",
+          "original_sha256": "da502e67ad5bfaf48fa212ea01f60c6478b3ffe6355dae2db778a8066b40ed3b",
+          "normalized_content": "...\n----------------------------------------------------------------------\nRan 3 tests in 2.378s\n\nOK\n"
+        }
+      ]
+    },
+    {
+      "case": "forward-report",
+      "artifacts": [
+        {
+          "kind": "independent-report",
+          "original_sha256": "8372b5cdf80be6a52c99b0cf173a28adcafd1b12c037171b89a81c37f71bcde5",
+          "normalized_content": "# Independent mutation skill forward test\n\nResult: 1 KILLED, 2 SURVIVED, 0 EQUIVALENT, 0 INVALID, 0 INCONCLUSIVE. Baseline and final control GREEN. Source unchanged. Report-only scope respected.\n\n## Bound experiment\n\nTarget: `project/` beside this report. Read target AGENTS.md, Makefile, policy.py, check.py, notes.txt and staged/unstaged diffs. Canonical verifier is argv `[\"make\", \"check\"]`, executing the existing `python3 check.py` locally. Existing runtime dependencies: Python 3, make and Git; no installation, network, provider or service needed. Three mutants, ten-second timeout per verifier. Scope is admission authorization/capacity and event-recording behavior of policy.py. Tests and verification configuration stayed identical. Ignored dependencies: none needed. Explicit includes/excludes: none. Other possible admission/default/input behaviors were not sampled; this is a bounded test-sensitivity experiment.\n\nInvocation:\n\n```sh\npython3 <toolkit>/skills/mutation-testing/scripts/run_mutations.py --source <forward-fixture>/project --plan <forward-fixture>/plan.json --output <forward-fixture>/evidence\n```\n\nRunner exit code 0; batch status collected. Source was copied from current working bytes (default limit=3 plus the unstaged comment), while staged default limit=4 stayed in the original index.\n\n## Semantic classifications\n\n| ID | Defect | Observed evidence | Verdict |\n|---|---|---|---|\n| capacity-inclusive | `count < limit` becomes `count <= limit`, admitting equality | `capacity-inclusive.log` raises `AssertionError: capacity boundary` from the private evidence/work/check.py, line 3. This is the intended behavioral assertion. | KILLED |\n| missing-role-guard | `if role != \"admin\":` becomes `if False:`, admitting non-admin callers below capacity | `missing-role-guard.log`: checks passed. Existing tests call only admin; no non-admin rejection observation. Mutation parses and changes the declared behavior. | SURVIVED |\n| missing-event-append | `log.append(message)` becomes `pass`, returning success without recording | `missing-event-append.log`: checks passed. Existing test executes event but asserts only its return value, leaving log contents unobserved. | SURVIVED |\n\nBaseline/control logs both say `checks passed`, exit 0. The killed traceback explicitly identifies the private execution path. Passing logs themselves contain no cwd/target metadata; their private-copy attribution uses the provided helper's execution contract and the recorded plan/report. This did not block execution, but per-run cwd and mutated-file hash receipts would improve evidence portability. No functional skill blocker or execution failure encountered.\n\nProposed missing tests, without modifying the project: `assert not admit(\"viewer\", 0)` and `assert log == [\"hello\"]` after event. The selected-sample kill ratio is 1/3, not project coverage or correctness evidence. No test-strengthening phase was authorized or executed.\n\n## Preservation and identities\n\nRunner source_unchanged=true. Independent before/after comparison is also exactly equal for root file byte SHA-256 values, raw Git index hash, HEAD, staged diff, unstaged diff and porcelain status. Status remains `MM policy.py` and `?? notes.txt`. Thus staged, unstaged and untracked work remain intact. Git metadata was not copied into the experiment; no original verification command was run.\n\nPlan SHA-256: `964d4481b3da38eaae135cc6f0204292864c5c67a2690e5309b979b8e3e533eb`.\n\nSource manifest SHA-256: `cd9e9c639d0fb3475c7ce2eb3503b253ac9aec9c3c73938d512d26d9722ec071`.\n\nOriginal index SHA-256: `19c29d580a51bcad1c7e60141dc7b8f9537e47872c841062a3a59768b5de2811`.\n\nOriginal HEAD: `ef7927a5f337ee4915447a1968ff65819f5f3796`.\n\nEvidence retained beside this report: `plan.json`, `source-before.json`, `source-after.json`, `evidence/report.json`, `evidence/source-manifest.json`, `evidence/plan.json`, `evidence/snapshot/`, and the five `evidence/*.log` files. The helper removed execution copies after their runs. Source retention claims exclude ignored files by the helper contract; this fixture needed no ignored resources.\n"
+        }
+      ]
+    },
+    {
+      "case": "forward-strengthening-report",
+      "artifacts": [
+        {
+          "kind": "independent-report",
+          "original_sha256": "d9205d415dc5e76e9f77a81b8610446ab67e443f3e3e052c0b17c9e90b986c46",
+          "normalized_content": "# Second independent forward test: strengthen survivors\n\nResult: 3 KILLED, 0 SURVIVED, 0 EQUIVALENT, 0 INVALID, 0 INCONCLUSIVE. Baseline and final control GREEN; original affected check GREEN. Only project/check.py changed. First-run report, plan and evidence retained.\n\n## Authorized change\n\nThe new request authorized test improvement only, with production, Git index and unrelated notes preserved. Read mutation-testing's previously loaded workflow plus skills/tdd/SKILL.md and its full references/test-quality.md. Added two observable, public-interface assertions without mocks or source inspection:\n\n```python\nassert not admit(\"viewer\", 0), \"non-admin rejection\"\n# After the existing event(log, \"hello\") call:\nassert log == [\"hello\"], \"event recorded exactly once\"\n```\n\nNamed regression defects before executing: bypassed authorization guard must fail the first assertion; missing append must fail the second. Production needed no change because it already implements these behaviors. The TDD skill's commit step was not followed: the explicit request to preserve the Git index and change only tests takes precedence, so changes remain unstaged and no commit was created.\n\n## Actual RED/GREEN evidence\n\nThe second batch reused the exact first plan. Verifier argv remains [\"make\", \"check\"], ten-second timeout per run, three mutations, existing Python 3/make/Git dependencies, no network/install/provider/external resource. Baseline first proved strengthened tests GREEN on unmutated current working bytes. Fresh private copies then produced these RED results, followed by GREEN final control:\n\n| Mutation | Classification | Actual failure |\n|---|---|---|\n| capacity-inclusive | KILLED | `AssertionError: capacity boundary`, check.py line 3 |\n| missing-role-guard | KILLED | `AssertionError: non-admin rejection`, check.py line 4 |\n| missing-event-append | KILLED | `AssertionError: event recorded exactly once`, check.py line 7 |\n\nAll three traceback paths point to second-evidence/work/check.py, establishing private-copy execution for every mutant. These are intended behavioral assertion failures, not syntax/import/setup failures. Runner exit 0, status collected, source_unchanged=true. Baseline/control each exit 0 and print checks passed.\n\nOriginal affected checks were then run with argv [\"env\", \"PYTHONDONTWRITEBYTECODE=1\", \"make\", \"check\"] from project/. Exit 0, checks passed. The environment setting suppresses source-tree bytecode artifacts; it does not alter assertions. This fixture has no additional integration target beyond its complete canonical make check. There was no chronology of changing production from RED to GREEN: the RED evidence is regression sensitivity against disposable defects, while correct production stayed intact throughout.\n\nExact runner command:\n\n```sh\npython3 <toolkit>/skills/mutation-testing/scripts/run_mutations.py --source <forward-fixture>/project --plan <forward-fixture>/plan.json --output <forward-fixture>/second-evidence\n```\n\n## Preservation and scope\n\nIndependent second-source-before.json / second-source-after.json comparison: only check.py bytes changed; no added root files; all other captured file hashes identical, including policy.py and notes.txt. HEAD, raw Git index and staged diff identical. Status is ` M check.py`, `MM policy.py`, `?? notes.txt`. The runner additionally confirms complete inventoried source integrity during the mutation batch after the authorized test edit. Evidence: second-preservation.json.\n\nNo includes/excludes or ignored dependencies needed. Only these three defects were sampled; no broader role/input/default or integration matrix is claimed. The selected-sample ratio improved from 1/3 to 3/3, which does not establish project coverage, general correctness or completion of parent review gates. No further useful survivors in this sample.\n\nNo execution blocker or functional skill defect encountered. The first run's minor evidence portability limitation remains: successful verifier logs omit cwd/target metadata; all second-run mutant failures identify their private paths directly. The TDD commit wording required reconciliation with explicit index-preservation scope, which was clear enough to proceed without asking.\n\nPlan SHA-256 (unchanged): `964d4481b3da38eaae135cc6f0204292864c5c67a2690e5309b979b8e3e533eb`.\n\nSecond source-manifest SHA-256: `796755922e915e8243d9e9a11fffb30e21f02a5c0304c6f4873c43a216c54638`.\n\nEvidence retained: second-evidence/plan.json, second-evidence/source-manifest.json, second-evidence/report.json, second-evidence/snapshot/, second-evidence/{baseline,capacity-inclusive,missing-role-guard,missing-event-append,control}.log, second-original-check.log, second-source-before.json, second-source-after.json, second-preservation.json. Prior evidence/ and forward-test-report.md remain available.\n"
+        },
+        {
+          "kind": "independent-source-check",
+          "original_sha256": "8cc2e857f3685025686cd4f786d21918c300cb2e1e646cb81aab4b63ac716a2e",
+          "normalized_content": "{\n  \"changed_files\": [\n    \"check.py\"\n  ],\n  \"added_files\": [],\n  \"head_preserved\": true,\n  \"index_preserved\": true,\n  \"staged_diff_preserved\": true,\n  \"status\": \" M check.py\\nMM policy.py\\n?? notes.txt\\n\"\n}\n"
+        }
+      ]
+    },
+    {
+      "case": "instructions-without-consumer",
+      "verdicts": [
+        "INCONCLUSIVE"
+      ],
+      "artifacts": [
+        {
+          "kind": "runner-report",
+          "original_sha256": "729e51358ea3efa73de127a6ac700a46fb568fe35370d9626bdb5b5fce2a7d91",
+          "normalized_content": "{\n  \"schema_version\": 1,\n  \"status\": \"collected\",\n  \"runs\": [\n    {\n      \"id\": \"baseline\",\n      \"status\": \"passed\",\n      \"exit_code\": 0,\n      \"log\": \"baseline.log\",\n      \"cwd\": \"<forward-fixture>/third-evidence/work\",\n      \"command\": [\n        \"python3\",\n        \"check.py\"\n      ],\n      \"mutated_path\": null,\n      \"artifact_sha256\": null\n    },\n    {\n      \"id\": \"negate-verification-duty\",\n      \"status\": \"passed\",\n      \"exit_code\": 0,\n      \"log\": \"negate-verification-duty.log\",\n      \"cwd\": \"<forward-fixture>/third-evidence/work\",\n      \"command\": [\n        \"python3\",\n        \"check.py\"\n      ],\n      \"mutated_path\": \"workflow.md\",\n      \"artifact_sha256\": \"00f512d8aa52525dcb4c3737b0b853059fb69f385918f835e6e5903f6aed153a\"\n    },\n    {\n      \"id\": \"control\",\n      \"status\": \"passed\",\n      \"exit_code\": 0,\n      \"log\": \"control.log\",\n      \"cwd\": \"<forward-fixture>/third-evidence/work\",\n      \"command\": [\n        \"python3\",\n        \"check.py\"\n      ],\n      \"mutated_path\": null,\n      \"artifact_sha256\": null\n    }\n  ],\n  \"source_unchanged\": true,\n  \"runner_sha256\": \"e94b7dc797edb2ededbef47003776a171a2032de21be146cccab721cd7897c27\",\n  \"plan_sha256\": \"ad588fb0b4be3e4d121ce00e3d84c02398db7cc6371748316c77dd60ae5505ad\",\n  \"source_manifest_sha256\": \"2ef378b48b5a7378a2cd7d66cccefc995ea70c7f44522ec826442a646069cfcd\",\n  \"classification\": \"Agent must inspect behavioral failure evidence; exit codes are observations only.\"\n}\n"
+        },
+        {
+          "kind": "mutation-plan",
+          "original_sha256": "1bc168b8310b0253ae6a3a009e50b1f2f40dd5a57603e9142e3b37e3270df667",
+          "normalized_content": "{\n  \"schema_version\": 1,\n  \"command\": [\n    \"python3\",\n    \"check.py\"\n  ],\n  \"timeout_seconds\": 10,\n  \"mutations\": [\n    {\n      \"id\": \"negate-verification-duty\",\n      \"path\": \"workflow.md\",\n      \"before\": \"Before accepting a task, verify the behavior and report the evidence.\",\n      \"after\": \"Before accepting a task, do not verify the behavior and do not report the evidence.\",\n      \"reason\": \"Reverse verification and evidence duties while retaining the substring observed by the existing static check. This is a lexical sensitivity diagnostic, not a consumer-behavior test.\",\n      \"expected_failure\": \"An actual workflow consumer test should reject acceptance without verification/evidence; the available substring assertion has no such observation.\"\n    }\n  ]\n}\n"
+        },
+        {
+          "kind": "independent-report",
+          "original_sha256": "10e14d5474a15767bb3c63afdf6ed0cba95d97418578381d92e769ee15628dff",
+          "normalized_content": "# Third forward test: workflow instruction sensitivity\n\nThe existing check misses a reversal of the instruction text. Workflow consumer behavior is UNTESTED: this project has no consumer harness. Passing the check cannot establish behavioral adequacy.\n\n## Raw artifacts and available evidence\n\nInspected the complete tracked project: AGENTS.md names canonical `python3 check.py`; workflow.md says `Before accepting a task, verify the behavior and report the evidence.`; check.py merely asserts the presence of the literal substring `verify the behavior` and prints `checks passed`. There are no additional project files, executable workflow consumer, behavioral fixtures, or integration checks. The original Git status is clean.\n\nA single bounded lexical diagnostic is justified instead of the normal 3–8 behavioral mutants: additional text edits cannot supply the absent consumer seam. In a private copy, replaced the instruction with `Before accepting a task, do not verify the behavior and do not report the evidence.`. This reverses the stated duties while retaining the checked substring. The existing assertion cannot observe whether a task is accepted, verification happens or evidence is returned. The actual behavior of any real interpreter is unknown.\n\n## Experiment and classification\n\nCanonical verifier argv [\"python3\", \"check.py\"], timeout 10 seconds. Existing dependencies Python 3 and Git; no new runner, provider, network or install. No includes/excludes or ignored dependencies. Baseline, the mutated document and final control all printed `checks passed`, exit 0. Source unchanged=true; independent pre/post comparison also identical.\n\nBehavioral classifications: KILLED 0, SURVIVED 0, EQUIVALENT 0, INVALID 0, INCONCLUSIVE 1. The `negate-verification-duty` diagnostic is INCONCLUSIVE for consumer behavior because no consumer ran; the observed static check passed despite reversed instruction text. Do not label this behavioral SURVIVED or EQUIVALENT. Kill ratio is N/A because there are no adequately observed behavioral mutants.\n\nThe runner's per-run cwd/command and mutated-file hash identify the private target: third-evidence/work, workflow.md SHA-256 `00f512d8aa52525dcb4c3737b0b853059fb69f385918f835e6e5903f6aed153a`. Execution logs and receipt were inspected. The new receipt fields provide copy attribution even though the logs only contain `checks passed`.\n\nCommand:\n\n```sh\npython3 <toolkit>/skills/mutation-testing/scripts/run_mutations.py --source <forward-fixture>/instructions-project --plan <forward-fixture>/third-plan.json --output <forward-fixture>/third-evidence\n```\n\n## Blocked seam and proposed follow-up\n\nA behavioral mutation assessment requires an existing or separately authorized local consumer harness that observes a task acceptance decision, actual verification and returned evidence. It must first pass on the original instructions and then reject the reversed duties for an observable contract failure. A richer grep, keyword blacklist or schema check alone does not satisfy that need. No consumer, tests or dependencies were created because this request is report-only and prohibits providers/external effects.\n\nNo helper execution blocker or concrete skill defect encountered. The skill correctly warned that source grep is not behavioral evidence. Its absence of consumer seam limits this result; it is not a failed tool mechanism. Source workflow.md, check.py, all other files, HEAD, raw index and stage listing are unchanged. Scratch/evidence are outside the project, and first/second reports remain intact.\n\nPlan SHA-256: `ad588fb0b4be3e4d121ce00e3d84c02398db7cc6371748316c77dd60ae5505ad`.\n\nSource-manifest SHA-256: `2ef378b48b5a7378a2cd7d66cccefc995ea70c7f44522ec826442a646069cfcd`.\n\nRunner SHA-256 recorded by the helper: `e94b7dc797edb2ededbef47003776a171a2032de21be146cccab721cd7897c27`.\n\nEvidence retained: third-plan.json, third-source-before.json, third-source-after.json, third-evidence/plan.json, third-evidence/source-manifest.json, third-evidence/report.json, third-evidence/snapshot/, third-evidence/{baseline,negate-verification-duty,control}.log.\n"
+        },
+        {
+          "kind": "baseline",
+          "original_sha256": "0c7f9ceb9b131d26399e998396e479d5d9e46d67c2819faef8d2ea184e63424b",
+          "normalized_content": "checks passed\n"
+        },
+        {
+          "kind": "negate-verification-duty",
+          "original_sha256": "0c7f9ceb9b131d26399e998396e479d5d9e46d67c2819faef8d2ea184e63424b",
+          "normalized_content": "checks passed\n"
+        },
+        {
+          "kind": "control",
+          "original_sha256": "0c7f9ceb9b131d26399e998396e479d5d9e46d67c2819faef8d2ea184e63424b",
+          "normalized_content": "checks passed\n"
+        },
+        {
+          "kind": "fixture-workflow.md",
+          "original_sha256": "58d1f80a66ef34da5b40ef7af5fce6cb457a5374b2cee1eab73b98e7ce153467",
+          "normalized_content": "Before accepting a task, verify the behavior and report the evidence.\n"
+        },
+        {
+          "kind": "fixture-check.py",
+          "original_sha256": "7046bc2b655be4129c67de015e50162fe53b9353c0d893555f72baa182d557a1",
+          "normalized_content": "from pathlib import Path\nassert \"verify the behavior\" in Path(\"workflow.md\").read_text()\nprint(\"checks passed\")\n"
+        },
+        {
+          "kind": "fixture-AGENTS.md",
+          "original_sha256": "e98c18fa995a4443386bd3f871da329f7a986284dac6fd6050e3ea05f5249011",
+          "normalized_content": "Canonical local check: python3 check.py. No network.\n"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "records": [
+    {
+      "skill": "mutation-testing",
+      "verdict": "no-change",
+      "passes": {
+        "invocation": "pass",
+        "hierarchy": "pass",
+        "steering": "pass",
+        "pruning": "pass",
+        "goal_preservation": "pass"
+      },
+      "overall_input": "Approved implementation outcome, current dirty artifacts, behavioral contract and existing verifier.",
+      "overall_outcome": "Useful evidence of test sensitivity and authorized test improvements with original unrelated work preserved.",
+      "local_subgoal": "Measure a bounded sample of realistic faults using private current-state copies and causal evidence.",
+      "completion_proxies": [
+        "Green baseline",
+        "Runner exit zero",
+        "High sample kill ratio",
+        "Successful skill structural audit"
+      ],
+      "required_outcome_evidence": [
+        "GREEN baseline and final control for the exact snapshot",
+        "Causal failure or justified survivor/equivalent/inconclusive classification for each attempted mutant",
+        "Original inventoried files and Git index unchanged during experiments",
+        "Former survivors killed after authorized test strengthening; original affected checks green",
+        "Residual scope and normal delivery/review gates explicitly retained"
+      ],
+      "evidence": "docs/acceptance/mutation-testing.md; docs/acceptance/evidence/mutation-testing/behavioral-evidence.json; tests/test_mutation_workspace.py; tests/test_skill_router.sh",
+      "change": "none after the five-pass quality audit of the authorized new capability and TDD handoff",
+      "behavior_proof": "Quality audit preserves the product boundary: original artifacts are not mutated; tests are strengthened only when authorized; provider, vault writer and dispatch/reap contracts are untouched."
+    },
+    {
+      "skill": "tdd",
+      "verdict": "no-change",
+      "passes": {
+        "invocation": "pass",
+        "hierarchy": "pass",
+        "steering": "pass",
+        "pruning": "pass",
+        "goal_preservation": "pass"
+      },
+      "overall_input": "Approved implementation outcome, current dirty artifacts, behavioral contract and existing verifier.",
+      "overall_outcome": "Useful evidence of test sensitivity and authorized test improvements with original unrelated work preserved.",
+      "local_subgoal": "Implement the approved behavior, then hand green artifacts to the optional scoped sensitivity check.",
+      "completion_proxies": [
+        "Green baseline",
+        "Runner exit zero",
+        "High sample kill ratio",
+        "Successful skill structural audit"
+      ],
+      "required_outcome_evidence": [
+        "GREEN baseline and final control for the exact snapshot",
+        "Causal failure or justified survivor/equivalent/inconclusive classification for each attempted mutant",
+        "Original inventoried files and Git index unchanged during experiments",
+        "Former survivors killed after authorized test strengthening; original affected checks green",
+        "Residual scope and normal delivery/review gates explicitly retained"
+      ],
+      "evidence": "docs/acceptance/mutation-testing.md; docs/acceptance/evidence/mutation-testing/behavioral-evidence.json; tests/test_mutation_workspace.py; tests/test_skill_router.sh",
+      "change": "none after the five-pass quality audit of the authorized new capability and TDD handoff",
+      "behavior_proof": "Quality audit preserves the product boundary: original artifacts are not mutated; tests are strengthened only when authorized; provider, vault writer and dispatch/reap contracts are untouched."
+    }
+  ]
+}

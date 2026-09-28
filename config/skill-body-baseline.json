@@ -142,6 +142,13 @@
       "closure_token_estimate": 2765,
       "token_estimate": 2765
     },
+    "mutation-testing": {
+      "body_bytes": 5182,
+      "body_lines": 85,
+      "closure_bytes": 9205,
+      "closure_token_estimate": 2302,
+      "token_estimate": 1296
+    },
     "obsidian-bases": {
       "body_bytes": 5503,
       "body_lines": 287,
@@ -213,11 +220,11 @@
       "token_estimate": 1003
     },
     "tdd": {
-      "body_bytes": 1306,
-      "body_lines": 23,
-      "closure_bytes": 3147,
-      "closure_token_estimate": 787,
-      "token_estimate": 327
+      "body_bytes": 1772,
+      "body_lines": 30,
+      "closure_bytes": 3613,
+      "closure_token_estimate": 904,
+      "token_estimate": 443
     },
     "unsafe-research": {
       "body_bytes": 1497,
