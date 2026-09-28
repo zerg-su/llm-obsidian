@@ -3,7 +3,11 @@
 
 from __future__ import annotations
 
+import json
 import re
+import shlex
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -323,6 +327,90 @@ class SaveContracts(unittest.TestCase):
         self.assertIn("CLAUDE.md", template)
         self.assertIn("./scripts/current-session-id.sh", template)
         self.assertFalse("[[.raw/" in template, "U6b: raw source must be path metadata")
+
+
+class FindSessionContracts(unittest.TestCase):
+    def setUp(self) -> None:
+        self.text = (ROOT / "skills/find-session/SKILL.md").read_text(encoding="utf-8")
+        scratch = tempfile.TemporaryDirectory(prefix="prompt-audit-sessions-")
+        self.addCleanup(scratch.cleanup)
+        self.scratch = Path(scratch.name).resolve()
+        self.assertFalse(self.scratch.is_relative_to(ROOT.resolve()))
+
+    def snippet(self, heading: str) -> str:
+        section = self.text.split(heading, 1)[1]
+        match = re.search(r"```bash\n([\s\S]*?)\n```", section)
+        self.assertIsNotNone(match, f"Missing snippet after {heading}")
+        return match.group(1)
+
+    def write_jsonl(self, relative: str, records: list[dict]) -> Path:
+        path = self.scratch / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("".join(json.dumps(record) + "\n" for record in records), encoding="utf-8")
+        return path
+
+    def run_snippet(self, snippet: str) -> list[str]:
+        before = {p.relative_to(self.scratch): p.read_bytes() for p in self.scratch.rglob("*") if p.is_file()}
+        result = subprocess.run(
+            ["bash", "-c", snippet], cwd=self.scratch, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=8,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        after = {p.relative_to(self.scratch): p.read_bytes() for p in self.scratch.rglob("*") if p.is_file()}
+        self.assertEqual(after, before, "Retrieval snippets must not mutate their fixture sources")
+        return result.stdout.splitlines()
+
+    def test_d_u3cde_reverse_lookup(self) -> None:
+        target = "wiki/concepts/Vault lock.md"
+        self.write_jsonl(".vault-meta/session-to-pages.jsonl", [
+            {"sid": "sid-first", "pages": ["wiki/concepts/Other.md", target]},
+            {"sid": "sid-prefix", "pages": [target + ".backup"]},
+            {"sid": "sid-second", "pages": [target]},
+            {"sid": target, "pages": []},
+        ])
+        snippet = self.snippet("Reverse lookup:").replace('"<page-path>"', shlex.quote(target))
+        self.assertEqual(self.run_snippet(snippet), ["sid-first", "sid-second"])
+
+    def test_d_u3cde_history_lookup(self) -> None:
+        project = str(self.scratch / "current project")
+        display = "Fixed VAULT-write lock " + "x" * 100
+        history = self.write_jsonl(".claude/history.jsonl", [
+            {"sessionId": "sid-current", "timestamp": 1790596800000, "project": project, "display": display},
+            {"sessionId": "sid-other", "timestamp": 1790510400000, "project": "/other-project", "display": "vault-write retry"},
+            {"sessionId": "sid-unrelated", "timestamp": 1790424000000, "project": project, "display": "parser refactor"},
+            {"sessionId": "sid-metadata-only", "timestamp": 1790337600000, "project": "/vault-write", "display": "another topic"},
+        ])
+        for scope, keyword, expected in (
+            ("current", "vault-WRITE", [f"sid-current 1790596800000 {display[:80]}"]),
+            ("all", "vault-WRITE", [f"sid-current 1790596800000 {display[:80]}", "sid-other 1790510400000 vault-write retry"]),
+            ("current", "absent-keyword", []),
+        ):
+            with self.subTest(scope=scope, keyword=keyword):
+                snippet = self.snippet("### Prong B:")
+                # Redirect only the input path to TMPDIR; do not change HOME.
+                snippet = snippet.replace('"~/.claude/history.jsonl"', json.dumps(str(history)))
+                snippet = snippet.replace("~/.claude/history.jsonl", shlex.quote(str(history)))
+                for placeholder, value in (("<keyword>", keyword), ("<scope: current|all>", scope), ("<repo-root>", project)):
+                    snippet = snippet.replace('"' + placeholder + '"', json.dumps(value))
+                self.assertEqual(self.run_snippet(snippet), expected)
+
+    def test_find_session_dead_branches(self) -> None:
+        for obsolete in ("auto-inject", "extract_technical_nouns", "keywords < 2"):
+            with self.subTest(obsolete=obsolete):
+                self.assertFalse(obsolete in self.text.lower(), f"Obsolete find-session branch: {obsolete}")
+        self.assertIsNone(re.search(r"grep -l[^\n]*session-to-pages\.jsonl", self.text))
+        self.assertIn("Keep up to 8 keywords.", self.text)
+        self.assertIn("Ask only when no topic can be determined (see Phase 0).", self.text)
+
+    def test_u_t2_find_session_preflight(self) -> None:
+        block = preflight_block(self.text, "Phase 0:")
+        self.assertEqual(preflight_issues(block), [])
+        self.assertIn("skip clarifying questions", block)
+        for default in ("last 30 days", "current project only", "preview only"):
+            self.assertIn(default, block)
+        self.assertIn("the search topic cannot be extracted", block)
+        self.assertIn("single `AskUserQuestion`", block)
+        self.assertTrue(preflight_issues(block + "\nAsk four questions."))
 
 
 if __name__ == "__main__":
