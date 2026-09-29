@@ -12,6 +12,32 @@ packages were published for them.
 
 ## [Unreleased]
 
+### Planned version: 2.9.0
+
+#### Added
+
+- `mutation-testing` runs bounded behavioral mutations in isolated copies,
+  recording baseline/control results, source integrity and semantic verdicts.
+- `codex-auth-backup.py` provides local backup, account switch and restore for
+  file-based Codex login, with private file permissions and restore safeguards.
+
+#### Changed
+
+- Every TDD run now requires mutation testing after GREEN. Missing execution
+  seams remain explicit gaps rather than successful checks.
+- The Codex runtime default is `gpt-6-astra`; role-specific review routes stay
+  independently configured.
+- Daily's in-process Claude summarizer uses the current session credentials
+  without a separate authentication probe.
+
+#### Fixed
+
+- Current review can retry a committed correction after a blocked attempt;
+  approval replay without an executor summary avoids duplicate provider effects.
+- Replayed blocked callbacks preserve terminal parent state.
+- Codex's updated folder-trust dialog and native activity footer are recognized;
+  exact cmux surface closure includes the observed containing window.
+
 ## [2.8.10] - 2026-09-01
 
 ### Added
