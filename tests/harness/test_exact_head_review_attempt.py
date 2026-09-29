@@ -1218,6 +1218,70 @@ with tempfile.TemporaryDirectory(prefix="exact-protocol-selector.") as raw:
         and store.list(skip_task_id) == [],
     )
 
+    # Current checkout reviews have no executor-owned typed summary. Their
+    # accepted callback must still replay without a new model call or cycle.
+    from current_review_lease import create_review_lease
+    from current_review_admission import publish_current_plan_snapshot
+    from review_target import resolve_target
+
+    current_product = base / "current-product"
+    subprocess.run(
+        ["git", "clone", "--quiet", "--no-hardlinks", str(product), str(current_product)],
+        check=True, capture_output=True,
+    )
+    current_task = "44444444-4444-4444-8444-444444444440"
+    current_root = (base / "current-runtime").resolve()
+    current_root.mkdir()
+    current_meta = {
+        **meta,
+        "lifecycle": "current-checkout",
+        "task_id": current_task,
+        "worktree": str(current_product),
+        "runtime_root": str(current_root),
+        "plan_snapshot_file": str(publish_current_plan_snapshot(
+            current_root, plan.read_bytes(), meta["approved_plan_sha256"]
+        )),
+        "review_lease": create_review_lease(resolve_target(current_product)),
+    }
+    current_runtime = FakeRuntime(store, owner_id=current_task)
+    current_started = _run_review(
+        current_meta, vault, current_product, current_task, current_root,
+        runtime_manager=current_runtime,
+        apply_finalizing_recovery=forbidden_finalizing_recovery,
+    )
+    current_gate = ReviewGateController(
+        vault / ".vault-meta/harness/review-data" / current_task / current_task,
+        current_runtime, store,
+    )
+    current_active = current_gate.rehydrate_attempt()
+    current_lane = current_active.execution.lanes[0]
+    current_round = current_active.rounds[current_lane.axis]
+    current_callback = Path(current_started["lanes"][0]["callback_path"])
+    current_callback.parent.mkdir(parents=True, exist_ok=True)
+    current_callback.write_text(json.dumps(to_dict(review_round_envelope(
+        current_round, ReviewResult(current_lane.axis, "approve", (), 0)
+    ))) + "\n", encoding="utf-8")
+    current_approved = _run_review(
+        current_meta, vault, current_product, current_task, current_root,
+        runtime_manager=current_runtime,
+        apply_finalizing_recovery=forbidden_finalizing_recovery,
+    )
+    current_ledger = vault / ".vault-meta/harness/finalization-ledger" / f"{current_task}.json"
+    ledger_before_replay = current_ledger.read_bytes()
+    current_replayed = _run_review(
+        current_meta, vault, current_product, current_task, current_root,
+        runtime_manager=current_runtime,
+        apply_finalizing_recovery=forbidden_finalizing_recovery,
+    )
+    check(
+        "current approval without typed summary replays with no provider or ledger effect",
+        current_approved["status"] == current_replayed["status"] == "approved"
+        and current_runtime.started == 1
+        and current_ledger.read_bytes() == ledger_before_replay
+        and not current_gate.read()["context"].get("implementer_summary_sha256")
+        and not (current_product / ".task-summary.json").exists(),
+    )
+
     started = _run_review(
         meta,
         vault,

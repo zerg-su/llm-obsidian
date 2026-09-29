@@ -127,6 +127,22 @@ def classify(runtime: str, screen: str, *, closure_armed: bool = False) -> Promp
         if closure_armed and region and _has(region, background):
             return PromptDecision(True, "background-exit", ("Enter",), True)
     elif runtime == "codex":
+        folder_region = _dialog_region(screen, ("enter continue · esc quit",))
+        folder_trust = (
+            "Folder access",
+            "Trust this folder? Codex can read, edit, and run files here, subject to your permission settings.",
+            "Folder settings can run code automatically, even without a model request.",
+            "Continue only if you trust these files. Your trust decision will be saved.",
+        )
+        if (
+            folder_region
+            and _has(folder_region, folder_trust)
+            and re.search(
+                r"(?m)^\s*› 1\. Trust and continue\s*\n\s*2\. Quit\s*$",
+                folder_region,
+            )
+        ):
+            return PromptDecision(True, "workspace-trust", ("Enter",), True)
         region = _dialog_region(
             screen,
             (

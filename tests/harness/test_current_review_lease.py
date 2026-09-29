@@ -51,6 +51,8 @@ with tempfile.TemporaryDirectory(prefix="current-review-lease.") as raw:
     check("lease binds target identity", lease["target_key"] == target.target_key)
     held, rebound = evaluate_review_lease(lease, target, gate_status="reviewing")
     check("unchanged active target retains its lease", not rebound and held == lease)
+    held, rebound = evaluate_review_lease(lease, target, gate_status="blocked")
+    check("same-HEAD blocked callback retains the frozen lease", not rebound and held == lease)
 
     dirty_cases = (
         ("index", lambda root: ((root / "staged.py").write_text("STAGED = 1\n", encoding="utf-8"), subprocess.run(["git", "add", "staged.py"], cwd=root, check=True))),
@@ -68,6 +70,12 @@ with tempfile.TemporaryDirectory(prefix="current-review-lease.") as raw:
             check(f"{name} drift is rejected while review is active", name in exc.reasons, repr(exc.reasons))
         else:
             check(f"{name} drift is rejected while review is active", False)
+        try:
+            evaluate_review_lease(candidate_lease, candidate_target, gate_status="blocked")
+        except CurrentReviewLeaseError as exc:
+            check(f"blocked retry still rejects {name} dirt", name in exc.reasons)
+        else:
+            check(f"blocked retry still rejects {name} dirt", False)
 
     (product / "app.py").write_text("VALUE = 3\n", encoding="utf-8")
     try:
@@ -79,7 +87,9 @@ with tempfile.TemporaryDirectory(prefix="current-review-lease.") as raw:
     subprocess.run(["git", "add", "app.py"], cwd=product, check=True)
     subprocess.run(["git", "commit", "-m", "resolve finding"], cwd=product, check=True, capture_output=True)
     rebound_lease, rebound = evaluate_review_lease(lease, target, gate_status="changes-requested")
-    check("clean changed HEAD rebinds only after changes-requested", rebound and rebound_lease["head"] != lease["head"])
+    check("clean changed HEAD rebinds after changes-requested", rebound and rebound_lease["head"] != lease["head"])
+    blocked_lease, blocked_rebound = evaluate_review_lease(lease, target, gate_status="blocked")
+    check("clean changed HEAD can retry a terminal blocked attempt", blocked_rebound and blocked_lease == rebound_lease)
     try:
         evaluate_review_lease(lease, target, gate_status="reviewing")
     except CurrentReviewLeaseError as exc:
@@ -120,6 +130,13 @@ with tempfile.TemporaryDirectory(prefix="current-review-lease.") as raw:
     check(
         "committed resolution retains the original review base",
         range_changed and rebound_range["base"] == range_base,
+    )
+    blocked_range, blocked_changed = evaluate_review_lease(
+        range_lease, range_target, gate_status="blocked"
+    )
+    check(
+        "blocked retry retains the exact original review range",
+        blocked_changed and blocked_range == rebound_range,
     )
 
     attention = lease_attention_payload(

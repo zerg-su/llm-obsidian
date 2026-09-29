@@ -181,7 +181,10 @@ def evaluate_review_lease(
     current_payload = _range_payload(current, base_sha)
     if current_payload == dict(lease):
         return current_payload, False
-    if gate_status == "changes-requested" and current.head != lease["head"]:
+    # A terminal blocked attempt may retry a committed correction through the
+    # exact-head driver's existing predecessor-bound mechanism retry. Active
+    # attempts and same-HEAD snapshot drift retain their frozen lease.
+    if gate_status in {"changes-requested", "blocked"} and current.head != lease["head"]:
         return current_payload, True
     reasons = ("head",) if current.head != lease["head"] else ("snapshot",)
     raise CurrentReviewLeaseError(

@@ -19,6 +19,8 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from harness.runtime_session_continuation import (  # noqa: E402
     _editor_digest,
     _screen_digest,
+    await_initial_start_acknowledged,
+    classify_continuation_screen,
     deliver_continuation,
 )
 from harness.retained_notification import (  # noqa: E402
@@ -31,6 +33,20 @@ from harness.retained_notification import (  # noqa: E402
 
 SURFACE = "11111111-1111-1111-1111-111111111111"
 PROMPT = "# Harness-owned review verification\nInspect the exact HEAD."
+
+codex_158_activity = (
+    "Working (13s • esc to interrupt)\n\n› Ask Codex to do anything\n"
+    "GPT-6-Astra high · Context 4% used · 258K window · never\n"
+    "? for shortcuts\n"
+)
+assert classify_continuation_screen("codex", codex_158_activity, "") == "active"
+for near_match in (
+    "Working (13s • esc to interrupt)",
+    codex_158_activity.replace("Working (", "Quoted Working ("),
+    codex_158_activity.replace("? for shortcuts", "quoted footer"),
+):
+    assert classify_continuation_screen("codex", near_match, "") != "active"
+print("OK   Codex 0.158 activity requires the exact native status and composer footer")
 
 
 class FakePort:
@@ -52,6 +68,17 @@ class FakePort:
     def send_key(self, surface_id: str, key: str) -> None:
         assert surface_id == SURFACE and key == "Enter"
         self.keys.append(key)
+
+
+assert await_initial_start_acknowledged(
+    FakePort([codex_158_activity]),
+    surface_id=SURFACE,
+    runtime="codex",
+    anchor=PROMPT.splitlines()[0],
+    paste_screen_sha256=_screen_digest("› " + PROMPT),
+    observation_limit=1,
+) == "started"
+print("OK   Codex 0.158 activity acknowledges initial submission without a resend")
 
 
 class SemanticPort(FakePort):

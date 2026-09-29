@@ -14,6 +14,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 import model_routing as routing
+from harness.adapters.codex import CodexDriver
+from harness.contracts import RuntimeRoute
 
 
 def check(name: str, condition: bool) -> None:
@@ -136,6 +138,10 @@ with tempfile.TemporaryDirectory(prefix="model-routing-test.") as raw:
     }
 
     check(
+        "Codex runtime default is Astra",
+        config.runtime_default("codex")["model"] == "gpt-6-astra",
+    )
+    check(
         "Claude runtime default is Opus 5",
         config.runtime_default("claude")["model"] == "claude-opus-5",
     )
@@ -150,7 +156,10 @@ with tempfile.TemporaryDirectory(prefix="model-routing-test.") as raw:
     check(
         "all concrete defaults are discoverable",
         config.default_models()
-        == {"gpt-5.6-sol", "gpt-5.6-terra", "claude-opus-5", "fable"},
+        == {
+            "gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra",
+            "claude-opus-5", "fable",
+        },
     )
     check("Sol alias resolves to concrete Codex target", config.resolve_alias("sol") == {"runtime": "codex", "model": "gpt-5.6-sol"})
 
@@ -199,9 +208,30 @@ with tempfile.TemporaryDirectory(prefix="model-routing-test.") as raw:
     route = routing.resolve(config, "dispatch", session=claude, explicit_model="gpt-5.6-terra")
     check("registered Terra override infers Codex runtime", (route["runtime"], route["model"]) == ("codex", "gpt-5.6-terra"))
     route = routing.resolve(config, "protected-research", session=claude)
-    check("protected research from Claude uses Codex default", (route["runtime"], route["model"]) == ("codex", "gpt-5.6-sol"))
+    check("protected research from Claude uses Codex default", (route["runtime"], route["model"]) == ("codex", "gpt-6-astra"))
     route = routing.resolve(config, "protected-research", session=codex)
     check("protected research from Codex inherits", route["source"][0] == "session")
+    astra = {"runtime": "codex", "model": "gpt-6-astra", "effort": "high"}
+    route = routing.resolve(config, "protected-research", session=astra)
+    command = CodexDriver(
+        Path("/usr/bin/codex"),
+        frozenset(
+            model for model, runtime in config.data["model_registry"].items()
+            if runtime == "codex"
+        ),
+    ).command(
+        RuntimeRoute(
+            route["runtime"], route["model"], route["effort"],
+            "research-safe", config.fingerprint,
+        ),
+        session_root=root / "research-scratch",
+    )
+    check(
+        "protected research accepts the inherited Astra route in the runtime driver",
+        command[command.index("--model") + 1] == "gpt-6-astra"
+        and "--strict-config" in command
+        and command[command.index("--sandbox") + 1] == "workspace-write",
+    )
     route = routing.resolve(config, "diagnostic-fast", session=claude)
     check(
         "fast diagnostics use bounded Terra low without inheriting session context",
@@ -245,7 +275,7 @@ with tempfile.TemporaryDirectory(prefix="model-routing-test.") as raw:
         check("guessed session default fails exact inheritance", False)
     check("native configs initially synchronized", routing.sync_native(config, apply=False) == [])
     path = root / ".codex/profiles/default.toml"
-    path.write_text(path.read_text().replace('model = "gpt-5.6-sol"', 'model = "drift"'), encoding="utf-8")
+    path.write_text(path.read_text().replace('model = "gpt-6-astra"', 'model = "drift"'), encoding="utf-8")
     check("native drift detected", ".codex/profiles/default.toml" in routing.sync_native(config, apply=False))
     routing.sync_native(config, apply=True)
     check("native drift repaired", routing.sync_native(config, apply=False) == [])

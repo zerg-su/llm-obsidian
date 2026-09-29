@@ -504,7 +504,7 @@ def accept_review_round(
         return finish_review_lane(runtime, lane)
     elif verdict == "blocked":
         parent = store.read(lane.owner_id, lane.operation_id)
-        if parent.state != "attention-required":
+        if parent.state not in TERMINAL and parent.state != "attention-required":
             store.transition(
                 lane.owner_id,
                 lane.operation_id,

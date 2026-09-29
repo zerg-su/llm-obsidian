@@ -498,7 +498,10 @@ class CmuxAdapter:
 
     def close_exact(self, surface_id: str) -> None:
         self._require_surface(surface_id)
-        self._run(["close-surface", "--surface", surface_id])
+        window_id = _surface_window_from_tree(self._tree(), surface_id)
+        self._run([
+            "close-surface", "--surface", surface_id, "--window", window_id
+        ])
 
     def close_workspace_exact(
         self, workspace_id: str, window_id: str

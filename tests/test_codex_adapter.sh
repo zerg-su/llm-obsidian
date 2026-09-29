@@ -108,12 +108,17 @@ for relative in (
     ".codex/config.toml",
     ".codex/profiles/default.toml",
     ".codex/profiles/wiki-write.toml",
-    ".codex/profiles/reviewer-readonly.toml",
 ):
     text = (root / relative).read_text()
     parsed = tomllib.loads(text)
     assert parsed["model"] == codex["model"], relative
     assert parsed["model_reasoning_effort"] == codex["effort"], relative
+reviewer = central["roles"]["review"]["codex"]
+reviewer_parsed = tomllib.loads(
+    (root / ".codex/profiles/reviewer-readonly.toml").read_text()
+)
+assert reviewer_parsed["model"] == reviewer["model"]
+assert reviewer_parsed["model_reasoning_effort"] == reviewer["effort"]
 deep = (root / ".codex/profiles/deep.toml").read_text()
 deep_parsed = tomllib.loads(deep)
 assert deep_parsed["model"] == codex["model"]

@@ -98,6 +98,18 @@ def classify_continuation_screen(runtime: str, screen: str, anchor: str) -> str:
         re.match(r"^•\s+(?:Working|Running)\b", line) for line in tail
     ):
         return "active"
+    if (
+        runtime == "codex"
+        and any(
+            re.fullmatch(
+                r"Working \(\d+[hms](?: \d+[ms])* • esc to interrupt\)", line
+            )
+            for line in tail
+        )
+        and any(line.startswith("› ") for line in tail)
+        and any(line.startswith("? for shortcuts") for line in tail)
+    ):
+        return "active"
     if runtime == "claude" and any(
         ("tokens" in line or "effort" in line)
         and re.search(r"(?:…|\.\.\.)\s*\(", line)

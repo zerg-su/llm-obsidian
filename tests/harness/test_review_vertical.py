@@ -783,6 +783,29 @@ with tempfile.TemporaryDirectory(prefix="review-runtime.") as raw:
         == [first_round.operation_id, verification_round.operation_id],
     )
 
+    replay_runtime = FakeReviewRuntime(OperationStore(runtime_root / "blocked-replay"))
+    replay = start_review(
+        simple_request, replay_runtime,
+        origin_surface="11111111-1111-4111-8111-111111111111",
+        cwd=scratch, product_root=ROOT,
+        prompt_pointer="packets/review/handoff.md",
+        callback_root="callbacks/blocked-replay", round_store=replay_runtime.store,
+    )
+    replay_lane = replay.lanes[0]
+    replay_round = prepare_review_round(replay_runtime.store, replay_lane)
+    blocked_envelope = review_round_envelope(
+        replay_round, ReviewResult(replay_lane.axis, "blocked")
+    )
+    accept_review_round(replay_runtime, replay_runtime.store, replay_lane, replay_round, blocked_envelope)
+    replay_runtime.request_exit(replay_lane.owner_id, replay_lane.operation_id)
+    replay_runtime.cleanup(replay_lane.owner_id, replay_lane.operation_id)
+    accept_review_round(replay_runtime, replay_runtime.store, replay_lane, replay_round, blocked_envelope)
+    check(
+        "blocked callback replay preserves a closed parent and its original verdict",
+        replay_runtime.store.read(replay_lane.owner_id, replay_lane.operation_id).state == "complete"
+        and replay_runtime.callbacks[-1].payload["verdict"] == "blocked",
+    )
+
 with tempfile.TemporaryDirectory(prefix="review-runner.") as raw:
     root = Path(raw)
     manifest = root / "packets/review/manifest.json"

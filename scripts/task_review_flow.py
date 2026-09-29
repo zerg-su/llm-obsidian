@@ -1286,7 +1286,12 @@ def _run_exact_head_review(
                 current_summary_sha256 = (
                     context.implementer_summary_sha256
                 )
-                if (
+                current_without_summary = (
+                    meta.get("lifecycle") == "current-checkout"
+                    and not prior_summary_sha256
+                    and not current_summary_sha256
+                )
+                if not current_without_summary and (
                     re.fullmatch(
                         r"[0-9a-f]{64}", prior_summary_sha256
                     )

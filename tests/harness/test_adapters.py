@@ -42,6 +42,13 @@ environments: list[dict[str, str]] = []
 def fake(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
     calls.append(command)
     environments.append(dict(_kwargs.get("env") or {}))
+    if "tree" in command:
+        return subprocess.CompletedProcess(
+            command, 0,
+            json.dumps({"windows": [{"id": window, "workspaces": [{
+                "id": workspace, "panes": [{"surfaces": [{"id": surface}]}],
+            }]}]}), "",
+        )
     if "new-split" in command:
         return subprocess.CompletedProcess(
             command,
@@ -233,6 +240,10 @@ cmux.send_key(surface, "Enter")
 cmux.send_key(surface, "ctrl+c")
 cmux.send_key(surface, "down")
 cmux.close_exact(surface)
+check(
+    "exact surface close includes its observed containing window",
+    calls[-1] == ["cmux", "close-surface", "--surface", surface, "--window", window],
+)
 cmux.close_workspace_exact(workspace, window)
 with patch.dict(
     os.environ,

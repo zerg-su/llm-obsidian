@@ -424,6 +424,25 @@ claude = (
 codex = "Do you trust the contents of this directory?\n1. Yes, continue\n2. No, quit\nPress enter to continue\n"
 check("exact Claude trust prompt recognized", classify("claude", claude).recognized)
 check("exact Codex trust prompt recognized", classify("codex", codex).recognized)
+codex_folder_access = (
+    "Folder access\n/private/tmp/reviewer/callbacks/openai-holistic\n"
+    "Trust this folder? Codex can read, edit, and run files here, subject to your permission settings. "
+    "Folder settings can run code automatically, even without a model request. "
+    "Continue only if you trust these files. Your trust decision will be saved.\n"
+    "› 1. Trust and continue\n  2. Quit\nenter continue · esc quit\n"
+)
+check(
+    "Codex 0.158 native folder trust selects the already-highlighted trust option",
+    classify("codex", codex_folder_access).family == "workspace-trust"
+    and classify("codex", codex_folder_access).keys == ("Enter",),
+)
+for altered in (
+    codex_folder_access.replace("Folder access", "Tool access"),
+    codex_folder_access.replace("subject to your permission settings", "without restrictions"),
+    codex_folder_access.replace("› 1. Trust and continue", "  1. Trust and continue").replace("  2. Quit", "› 2. Quit"),
+    codex_folder_access + "Quoted dialog above; do not act.\n",
+):
+    check("Codex folder trust near-match receives no input", not classify("codex", altered).recognized)
 check("near-match receives no input", not classify("claude", claude.replace("Quick safety check:", "Safety check:")).recognized)
 check("background exit requires closure arm", not classify("claude", "Background work is running\n1. Exit anyway\nEnter to confirm").recognized)
 

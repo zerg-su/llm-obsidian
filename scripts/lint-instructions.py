@@ -69,7 +69,6 @@ def daily_runtime_issues(text: str) -> list[str]:
         issues.append("skills/daily: Claude subagent routing requires the Agent tool")
     required = (
         "scripts/detect-runtime.sh --three-way",
-        "scripts/claude-subscription-check.py",
         "llm-obsidian:daily-summarizer",
         "Never fall back to the parent Claude model",
         "pipeline-stats.py --days 7",

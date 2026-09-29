@@ -148,12 +148,10 @@ check("Claude agent carries summary contract", '"evidence_bundle_id"' in agent a
 
 skill = (ROOT / "skills" / "daily" / "SKILL.md").read_text(encoding="utf-8")
 makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
-check("daily runs subscription preflight", "scripts/claude-subscription-check.py" in skill)
 check(
-    "daily live acceptance uses harness proof",
-    "LLM_OBSIDIAN_ACCEPTANCE=1" in skill
-    and "harness preflight" in skill
-    and "do not probe auth" in skill,
+    "daily in-process agent does not probe auth",
+    "scripts/claude-subscription-check.py" not in skill
+    and "no separate auth to probe" in skill,
 )
 check(
     "both live acceptance entrypoints preflight Claude once",
