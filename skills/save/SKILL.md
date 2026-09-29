@@ -48,9 +48,7 @@ Long prose lives in the new note + the log entry. The hot bullet is a wikilink +
 
 ### Phase 0 — Smart pre-flight (fast-path by default)
 
-/save is the most-used skill (~95 calls/month); a 3-5 question pre-flight on every call is the
-single biggest friction point in the pipeline. So: **infer, show, proceed** — ask only when
-genuinely ambiguous.
+/save runs often, so: **infer, show, proceed** — ask only when genuinely ambiguous.
 
 1. **Infer** from the conversation: note type (table above), target folder, note title,
    update-vs-new (check for an existing page on the same subject — Grep/index).
@@ -65,16 +63,13 @@ genuinely ambiguous.
 3. **If ANY check fails, ask ONE AskUserQuestion** with concrete options covering only the
    ambiguous dimension(s) (e.g. "synthesis в questions/ или concept в concepts/?",
    "обновить [[Existing Page]] или новая страница?"). Never a 3-5 question battery.
-4. This fast-path is a sanctioned exception to the project-wide pre-flight policy
-   (memory `feedback_skill_preflight_clarification`) — for /save only, the policy is
-   "smart": full clarification stays mandatory for every other write-skill.
 
 ### Phase 1 — Plan (one turn, no writes)
 
 In a single turn, before issuing any Write/Edit:
 
 1. **Scan** the current conversation. Identify the most valuable content to preserve.
-2. **Name** the note (from Phase 0; ask only if Phase 0 escalated). Keep the name short and descriptive. **The note's filename and every wikilink you write to it (hot.md bullet, index.md, log.md, cross-refs) must be the SAME string** — a "human" link name pointing at a slug-named file is the #1 source of dead links (34 fixed in lint 2026-06-09).
+2. **Name** the note (from Phase 0; ask only if Phase 0 escalated). Keep the name short and descriptive. **The note's filename and every wikilink you write to it (hot.md bullet, index.md, log.md, cross-refs) must be the SAME string** — a link whose target differs from the filename resolves to nothing. For a human-readable label use an alias: [[file-name|Label]].
 3. **Determine** note type using the table above (already inferred in Phase 0).
 4. **Extract** all relevant content from the conversation. Rewrite it in declarative present tense (not "the user asked" but the actual content itself).
 5. **Collect links**: identify any wiki pages mentioned in the conversation. Add them to `related` in the **new note's** frontmatter (NOT in `wiki/hot.md` frontmatter — see Phase 2 below).
@@ -129,24 +124,28 @@ After the batch returns:
 ## Frontmatter Template
 
 **Every saved page MUST carry `sessions:` (provenance) and `address:` (DragonScale).**
-The dispatcher owns the global log; every content page carries provenance.
+Follow the provenance rule in CLAUDE.md: replace `<SESSION_ID>` with
+`./scripts/current-session-id.sh` output, never the literal placeholder.
+Allocate `address` via `./scripts/allocate-address.sh`. The dispatcher owns the global log.
+Use filename wikilinks in `sources`; `source_path` is optional plain-path metadata for a raw source.
 
 ```yaml
 ---
 type: <synthesis|concept|source|decision|session|service|incident|runbook|question|goal|...>
 title: "Note Title"
-address: c-NNNNNN              # allocated via ./scripts/allocate-address.sh
+address: c-NNNNNN
 created: YYYY-MM-DD
 updated: YYYY-MM-DD
 tags:
   - <relevant-tag>
 status: developing
-sessions:                       # provenance — required (see feedback_session_id_in_frontmatter)
-  - <SESSION_ID>                # substitute ./scripts/current-session-id.sh output, NOT the literal template
+sessions:
+  - <SESSION_ID>
 related:
   - "[[Any Wiki Page Mentioned]]"
 sources:
-  - "[[.raw/source-if-applicable.md]]"
+  - "[[Relevant Source]]"
+source_path: .raw/source-if-applicable.md
 ---
 ```
 
@@ -157,10 +156,21 @@ How to get session ID inside the skill:
 If the script returns `unknown` (rare), record `unknown` and flag it in the body so future
 reindex pass catches it.
 
-For `question` type, add:
+For `question` and `synthesis` in `wiki/questions/`, add and override `status` below.
+Pages in `wiki/questions/` require `open|answered`; `developing` is invalid and blocks Stop.
+Use `open` for an unconfirmed answer or blocking subquestions; `answered` for a confirmed answer/root cause.
 ```yaml
+status: open
 question: "The original query as asked."
 answer_quality: solid
+```
+
+For `source`, add provenance: choose one `source_class`, set the verification date,
+and replace the hash placeholder with the source content's 64-character lowercase SHA-256.
+```yaml
+source_class: official|internal|third-party
+verified_at: YYYY-MM-DD
+content_sha256: <lowercase sha256 of the source content>
 ```
 
 For `decision` type, add:
@@ -223,7 +233,7 @@ tech) — give both tracks. Не «один-line summary и идём дальш�
 
 ### What "informative" is NOT
 
-- Restatement of memory rules → cross-link `[[feedback_*]]` instead.
+- Restatement of memory rules → refer to CLAUDE.md.
 - Pure narrative «we discussed X, Y, Z» without facts → rewrite в declarative.
 - Vague terms — «улучшилось», «стало стабильнее» → numbers / before-after.
 - Page mostly composed of cross-refs without content → either expand or merge

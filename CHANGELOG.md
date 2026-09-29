@@ -38,6 +38,28 @@ packages were published for them.
 - Codex's updated folder-trust dialog and native activity footer are recognized;
   exact cmux surface closure includes the observed containing window.
 
+#### Skill contract audit
+
+- `defuddle` cleans saved local HTML; URLs use protected `wiki-ingest`.
+  `draft` accepts pasted or local thread text and uses research/docs tooling
+  for fact checks. Clarification uses defaults and asks only unresolved questions.
+- Ingest checks contradictions before dispatch and collects batch writes into
+  one final transaction. Lint reports and approved fixes use separate writer
+  stages; query retrieval and curated index guidance follow the existing tools.
+- Save, lint, and query templates carry required schema/provenance fields.
+  Question and synthesis pages use `open|answered`; save YAML explanations live
+  outside the code blocks so the strict parser can validate the templates.
+- Session lookup uses runnable JSONL snippets without the unused auto-inject
+  branch. Backlog lookup matches exact slugs and rechecks uniqueness after a
+  conflict. Canvas read operations report missing files without creating them.
+
+- Replaced dated skill guidance with stable contracts and registered prompt
+  regressions and scratch-vault template validation in `make test`.
+- The scripts ratchet is pinned to exactly 305 files / 116,060 lines: the
+  152-line auth utility plus 38 net runtime lines. The unchanged 28-file review
+  authority contour is 16,467 lines; the no-summary replay guard adds five.
+  Baselines document this measured growth without speculative headroom.
+
 ## [2.8.10] - 2026-09-01
 
 ### Added

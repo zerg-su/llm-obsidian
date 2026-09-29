@@ -5,7 +5,7 @@ metadata:
 description: |
   Communication ADVISOR, not sender: 2-3 alternative draft replies for any external communication (email, issue comment, forum post, chat message) + historical hints from the wiki + a redaction pass; the user copies and posts themselves.
   Triggers: сформируй ответ, как ответить, помоги ответить, draft a reply.
-allowed-tools: Read Glob Grep Bash AskUserQuestion WebFetch
+allowed-tools: Read Glob Grep Bash AskUserQuestion
 ---
 
 # /draft — 2-3 alternative drafts + historical hints, ADVISOR
@@ -15,7 +15,7 @@ The user describes a situation / pastes a thread → Claude composes 2-3 alterna
 ## Input
 
 ```
-/draft <context — thread URL, pasted message, or description>
+/draft <pasted thread text, local file, or description>
 ```
 
 Examples:
@@ -25,9 +25,12 @@ Examples:
 
 ---
 
-## Phase 0: Pre-flight (mandatory — AskUserQuestion)
+## Phase 0: Pre-flight
 
-Single `AskUserQuestion` with 4 questions:
+Ask one `AskUserQuestion`, at most three questions, only about what the prompt
+leaves open. Defaults: channel inferred from the source, tone `formal-neutral`, scope
+`answer-only`, all constraints apply for external channels. Skip the phase when every
+item is resolved by the prompt or by the defaults above.
 
 1. **Target channel**: `email` / `issue or PR comment` / `forum post` / `chat message` / `internal note` (private note — slang allowed, redaction relaxed).
 2. **Tone**:
@@ -52,13 +55,9 @@ If invoked from another skill's chain — scope and source material are pre-load
 
 ## Phase 1: Read source (read-only)
 
-If a URL — fetch it:
-
-```python
-WebFetch(url='<thread / issue / post URL>', prompt='Extract the message(s) that need a reply, with author and context')
-```
-
-If a paste / description — parse as-is.
+If the source is a URL, ask the user to paste the thread text or provide a local file.
+Do not fetch the thread here, including via `curl`/`wget` or WebFetch.
+Read a local file; parse pasted text or a description as-is.
 
 ---
 
@@ -80,38 +79,8 @@ Anti-pattern: dumping 10 references — that is noise. Pick the most non-obvious
 
 Each draft = full text + rationale + tradeoffs. Variants must differ in SCOPE / TONE / STANCE, not in synonyms.
 
-Example shape:
-
-```markdown
-### Variant 1 — terse + factual
-
-> The fix landed yesterday; the error rate has been flat since 23:50. Remaining
-> follow-ups: clean up the config drift and raise the alert severity.
-
-**Rationale**: scannable in 10 seconds, facts + actionable items.
-**Tradeoff**: does not explain why the workaround was chosen (a reviewer may ask).
-
-### Variant 2 — detailed + reasoning
-
-> The fix was applied manually rather than through the normal release path
-> because of configuration drift discovered during rollout. Follow-ups:
-> 1) reconcile the drift and open a PR with the permanent fix; 2) raise the
-> alert severity so this class of failure pages earlier; 3) add a monitor
-> for the metric that would have caught it.
-
-**Rationale**: explains the "why" — useful if the thread contained questions.
-**Tradeoff**: longer, requires > 30 seconds of reader time.
-
-### Variant 3 — pushback + question
-
-> The fix works, but before closing this out — do we understand why the limit
-> was hardcoded in the first place? If it is historical legacy without a
-> current reason, we should remove the hardcode rather than patch around it.
-> If there is an active reason, I would like the owner to confirm it first.
-
-**Rationale**: surfaces the underlying open question instead of closing on inertia.
-**Tradeoff**: extends the thread's scope; may be unwanted if urgency is high.
-```
+Use the Phase 6 layout (text, **Rationale**, **Tradeoff** per variant). Match
+length and register to the thread and the chosen tone, not to a fixed template.
 
 ---
 
@@ -120,7 +89,7 @@ Example shape:
 The draft goes to an external audience — a factual error in a version / flag / behavior claim damages credibility more than any stylistic issue. Before redaction:
 
 1. Extract verifiable technical claims from all 2-3 variants (versions, commands, API behavior).
-2. Verify against official documentation (WebFetch the project's docs / changelog; use available docs tooling if configured).
+2. Verify against official documentation via `/research` or configured docs tooling.
 3. If a claim is not confirmed — rewrite it, or mark it in the draft with a caveat ("needs verification") and note this in the variant's rationale.
 4. Purely conversational replies with no technical facts — skip this phase.
 

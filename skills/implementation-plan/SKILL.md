@@ -42,8 +42,8 @@ Implementation-plan never resolves the gap. Address the gap to the owning
 `architecture`, `design`, or other upstream carrier; do not re-route the whole
 planning request or answer as it. `implementation-plan` remains the response
 carrier: a failed gate does not transfer the user's planning request; emit the
-gap and stop file/TDD planning. The legacy Outcome Contract + design path below
-remains unchanged; this branch adds no mandatory decompose step.
+gap and stop file/TDD planning. The approved Outcome Contract + design carrier
+needs no decompose step.
 
 Write normative plan prose in English unless the user explicitly requests
 another language. This includes the Outcome Contract, goal, evidence

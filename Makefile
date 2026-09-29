@@ -6,10 +6,11 @@
 .PHONY: test-lifecycle-simulator test-lifecycle-simulator-body test-lifecycle-simulator-extended test-harness test-harness-coverage test-code-quality code-quality-audit test-model-routing test-review-modes test-session-preflight test-model-literal-lint test-upgrade-preflight test-task-sessions test-docs
 
 test-lifecycle-simulator:
-	@./scripts/with-timeout 60 $(MAKE) --no-print-directory test-lifecycle-simulator-body
+	@./scripts/with-timeout 60 python3 tests/harness/lifecycle_test_environment.py $(MAKE) --no-print-directory test-lifecycle-simulator-body
 
 test-lifecycle-simulator-body:
 	@echo "=== deterministic lifecycle simulator (fast) ==="
+	@python3 tests/harness/test_lifecycle_test_environment.py
 	@python3 tests/harness/test_lifecycle_simulator_oracle.py
 	@python3 tests/harness/test_lifecycle_simulator_world.py
 	@python3 tests/harness/test_lifecycle_scheduler.py
@@ -393,6 +394,10 @@ test-task-lifecycle:
 test-instruction-lint:
 	@echo "=== test_instruction_lint.py ==="
 	@python3 tests/test_instruction_lint.py
+	@echo "=== test_prompt_audit.py ==="
+	@python3 tests/test_prompt_audit.py
+	@echo "=== test_prompt_audit_templates.py ==="
+	@python3 tests/test_prompt_audit_templates.py
 
 test-ci-workflow:
 	@echo "=== test_ci_workflow.py ==="
@@ -493,6 +498,8 @@ test-gateway:
 test-codex-adapter:
 	@echo "=== test_codex_adapter.sh ==="
 	@bash tests/test_codex_adapter.sh
+	@echo "=== test_codex_auth_backup.py ==="
+	@python3 tests/test_codex_auth_backup.py
 
 test-dcg-assets:
 	@echo "=== test_dcg_assets.sh ==="

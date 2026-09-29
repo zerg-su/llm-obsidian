@@ -21,7 +21,7 @@ Three depths. Choose based on question complexity + scope.
 | Mode | Trigger | Reads | Token cost | Best for |
 |------|---------|-------|------------|---------|
 | **Quick** | `query quick: ...` or simple factual Q | hot.md + index.md only | ~1,500 | "What is X?", date lookups, quick facts |
-| **Standard** | default (no flag) | hot.md + index + 3-5 pages | ~3,000 | Most questions |
+| **Standard** | default (no flag) | hot.md + retrieve.py sections + 3-5 pages (index when navigational or retrieval coverage looks thin) | ~3,000 | Most questions |
 | **Deep** | `query deep: ...` or "thorough", "comprehensive" | Full wiki + optional isolated web supplement | ~8,000+ | "Compare A vs B across everything", synthesis, gap analysis |
 
 ---
@@ -62,7 +62,7 @@ Use for synthesis questions, comparisons, or "tell me everything about X."
 Steps:
 
 1. Read `wiki/hot.md` and `wiki/index.md`.
-2. Identify all relevant sections (concepts, entities, sources, comparisons); candidates = index scan ∪ `./scripts/tag-search.py "<question>" --top 10`.
+2. Identify all relevant sections (concepts, entities, sources, comparisons); candidates = `./scripts/retrieve.py "<question>" --top 10 --json` ∪ index scan (`tag-search.py` as optional cross-check).
 3. Read every relevant page. No skipping.
 4. If wiki coverage is thin AND the user opted in, run:
 
@@ -150,7 +150,11 @@ Each domain folder has a `_index.md` for focused lookups:
 ---
 type: meta
 title: "Entities Index"
+created: YYYY-MM-DD
 updated: YYYY-MM-DD
+status: developing
+tags: [meta, index]
+sessions: [<SESSION_ID>]
 ---
 # Entities
 
@@ -170,9 +174,7 @@ Use sub-indexes when the question is scoped to one domain. Avoid reading the ful
 
 ## Filing Answers Back
 
-Good answers compound into the wiki. Don't let insights disappear into chat history.
-
-When filing an answer:
+When filing an answer, use `answered` for a confirmed answer, `open` otherwise:
 
 ```yaml
 ---
@@ -186,8 +188,10 @@ tags: [question, <domain>]
 related:
   - "[[Page referenced in answer]]"
 sources:
-  - "[[wiki/sources/relevant-source.md]]"
-status: developing
+  - "[[Relevant Source]]"
+status: open
+address: <from ./scripts/allocate-address.sh>
+sessions: [<./scripts/current-session-id.sh>]
 ---
 ```
 

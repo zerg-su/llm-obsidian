@@ -72,7 +72,7 @@ Created: YYYY-MM-DD
 - YAML frontmatter required: type, status, created, updated, tags, sessions
 - Wikilinks `[[Note Name]]` (unique filenames, no paths)
 - `.raw/` source documents — never modify
-- `wiki/index.md` — master catalog, update on every ingest
+- `wiki/index.md` — master catalog of key hubs; folder `_index.md` listings regenerate automatically
 - All wiki mutation goes through `scripts/vault-write.py`; `wiki/log.md` is prepend-only and writer-owned
 
 ## Operations

@@ -47,7 +47,8 @@ context: (optional) — Claude greps wiki/ for a likely related page
 
 ### Phase A.2: Draft the new canonical file
 
-Read `wiki/backlog.md`, capture its hash with `python3 scripts/vault-write.py --sha256 wiki/backlog.md`, and append the strict entry in memory:
+Read `wiki/backlog.md`. If the slug exists, append `-2`, `-3`, …
+Capture its hash with `python3 scripts/vault-write.py --sha256 wiki/backlog.md`, and append the strict entry in memory:
 
 ```markdown
 - [2026-05-23] blog-theme-upgrade — upgrade the blog theme to v3 — context: [[Blog]]
@@ -65,7 +66,7 @@ If the file does not exist, allocate an address and use the skeleton below. Then
 {"actor":"backlog","session":"<SESSION_ID>","pages":[{"op":"update","path":"wiki/backlog.md","expected_sha256":"<hash>","content":"<full updated markdown>"}],"log_entry":"## [YYYY-MM-DD HH:MM] backlog | add — <slug>"}
 ```
 
-For first creation use `op:create` and omit `expected_sha256`. Exit 4 means re-read because another capture landed first.
+For first creation use `op:create` and omit `expected_sha256`. Exit 4 means re-read, re-check slug uniqueness, and retry.
 
 Confirm in chat: `✓ added <slug>: <summary>` (one line).
 
@@ -108,7 +109,7 @@ Anti-rot: mark items with `age > 60d` with a `⚠` suffix + footer:
 ⚠ 1 item > 60 days. Consider: /backlog promote <slug> and choose a wiki target or Drop.
 ```
 
-NEVER auto-drop. The user decides explicitly.
+Don't drop items automatically; the user decides.
 
 ---
 
@@ -126,7 +127,7 @@ Where to promote — single question, 4 options:
 ### Phase C.1: Read + locate item
 
 ```bash
-grep -n "^- \[[0-9-]+\] <slug>" wiki/backlog.md
+grep -nE '^- \[[0-9-]+\] <slug>( |$)' wiki/backlog.md
 ```
 
 If the slug is not found — error, suggest `/backlog list` to see the current state.
@@ -147,7 +148,7 @@ Re-read `wiki/backlog.md` after the chained `/save`, capture its SHA-256, remove
 
 Where `<target>` = `[[<wiki-page>]]` / `drop`.
 
-NEVER duplicate state: after promote the item disappears from the backlog. To find what happened to it — `wiki/log.md` keeps the history.
+After promote the item leaves the backlog, so state lives in one place; `wiki/log.md` keeps the history.
 
 ---
 
@@ -196,8 +197,6 @@ Promoted items disappear from here; tracking moves to a wiki page or drop (see w
 
 - ❌ Duplicate state: leaving an item in the backlog after promote — `wiki/log.md` loses authoritative tracking.
 - ❌ Auto-dropping items > 60d — the user decides explicitly.
-- ❌ Pre-flight questions on `add` — it is lightweight capture, not write-heavy.
 - ❌ Violating the strict format in backlog.md — the list-mode parser breaks.
 - ❌ Skipping the log.md entry on promote — the audit trail is lost.
-- ❌ Slug conflicts (two items with the same slug) — Phase A.1 must check + auto-suffix (`-2`).
 - ❌ Duplicating already-tracked work items into the backlog — the backlog captures ideas before they get a page or tracker entry, it does not mirror existing tracking.

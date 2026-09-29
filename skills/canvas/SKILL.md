@@ -20,7 +20,7 @@ A canvas is a JSON file Obsidian renders as an infinite visual board. This skill
 
 ## Pre-flight (перед write-операциями)
 
-Если из запроса не очевидны все три пункта — один `AskUserQuestion` перед изменением `.canvas` файлов (per `feedback_skill_preflight_clarification`):
+Если из запроса не очевидны все три пункта — один `AskUserQuestion` перед изменением `.canvas` файлов (правило pre-flight из CLAUDE.md):
 
 1. **Target canvas** — какой файл (existing из `wiki/canvases/` / default / новый).
 2. **Mode** — добавить в существующий vs создать новый (add-vs-new).
@@ -34,7 +34,7 @@ Read-операции (open / list / показать) — без pre-flight.
 
 `wiki/canvases/main.canvas`
 
-If it does not exist, create it:
+If missing, create it only in an explicit write operation; read operations report a missing file:
 
 ```json
 {
@@ -65,8 +65,7 @@ If it does not exist, create it:
 1. Check if `wiki/canvases/main.canvas` exists.
 2. If yes: read it, count nodes by type, list all group node labels (zone names).
    Report: "Canvas has N nodes: X images, Y text cards, Z wiki pages. Zones: [list]"
-3. If no: create it with the starter structure above.
-   Report: "Created main.canvas with a General zone."
+3. If no: report the missing file and stop.
 4. Tell user: "Open `wiki/canvases/main.canvas` in Obsidian to view."
 
 ---

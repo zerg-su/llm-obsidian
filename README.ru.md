@@ -136,7 +136,7 @@ retries, progress и cleanup.
 | Repo/plan/context candidates | harness context + Git modules | Проверенные ID, manifests и пути заменяют токены на угадывание проекта, плана, окна и прошлой сессии. |
 | Изменение вольта | `vault-write.py` | Одна optimistic journaled-транзакция вместо серии хрупких edits страницы, log, hot, plan и manifest. |
 | Поиск | section BM25 + optional local embeddings | Модель получает лучшие ограниченные секции, а не целые папки и повторяющиеся страницы. |
-| Очистка web | `defuddle` до synthesis | Навигация, реклама и boilerplate не занимают контекст. |
+| Очистка локального HTML | `defuddle` до synthesis | Навигация, реклама и boilerplate не занимают контекст. |
 | Документы | cached stdlib/Docling pipeline | OCR и parsing переиспользуются по hash источника; неизменный PDF не читается заново моделью. |
 | Review transport | typed internal callback broker | Не нужно копировать длинные пути и свободный текст между терминалами. |
 | Acceptance | exact SHA + per-cell dependency fingerprints | Зелёные lifecycle-ячейки переиспользуются только при неизменной code-owned dependency closure. |
@@ -402,7 +402,7 @@ Acceptance heartbeat хранит только stage/status/counters/timestamps.
 | Тема | Документ |
 |---|---|
 | Полный путь от идеи и архитектуры до Work Item DAG и Harness | [Architecture Workflow v1](docs/architecture-workflow-v1.ru.md) |
-| Мутационные проверки и восстановление runtime в v2.9.0 (не выпущено) | [Release notes v2.9.0](docs/releases/v2.9.0.md) |
+| Мутационные проверки, контракты скиллов и runtime в v2.9.0 (не выпущено) | [Release notes v2.9.0](docs/releases/v2.9.0.md) |
 | Lifecycle review внешних репозиториев в v2.8.10 | [Release notes v2.8.10](docs/releases/v2.8.10.md) |
 | Исправление trust-transition Codex в v2.8.5 | [Release notes v2.8.5](docs/releases/v2.8.5.md) |
 | Исправление первой доставки custom pipeline в v2.8.4 | [Release notes v2.8.4](docs/releases/v2.8.4.md) |

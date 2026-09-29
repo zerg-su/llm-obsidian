@@ -122,7 +122,7 @@ exact IDs, callbacks, bounded retries, progress, and cleanup.
 | Repository/context candidates | harness context and Git modules | IDs, manifests, and validated paths replace token-heavy guessing about repo, plan, window, or prior session. |
 | Vault mutation | `vault-write.py` | One optimistic, journaled transaction replaces many fragile edits to pages, log, hot list, plan, and manifest. |
 | Search | section BM25 + optional local embeddings | The model sees the best bounded sections, not whole folders or repeated page bodies. |
-| Web cleanup | `defuddle` before synthesis | Navigation, ads, and boilerplate are removed before they consume context. |
+| Local HTML cleanup | `defuddle` before synthesis | Navigation, ads, and boilerplate are removed before they consume context. |
 | Document conversion | cached stdlib/Docling pipeline | OCR and parsing are reused by source hash instead of spending model tokens rereading unchanged binaries. |
 | Review transport | typed internal callback broker | No long callback paths or free-form findings need to be copied between terminal windows. |
 | Acceptance reruns | exact SHA + per-cell dependency fingerprints | Green lifecycle cells are reused only while their code-owned dependency closure is unchanged. |
@@ -395,7 +395,7 @@ There is no speculative roadmap in this README. The repository describes what is
 | Topic | Document |
 |---|---|
 | Complete idea-to-architecture-to-Harness workflow (Russian) | [Architecture Workflow v1](docs/architecture-workflow-v1.ru.md) |
-| v2.9.0 mutation testing and runtime recovery (unreleased) | [v2.9.0 release notes](docs/releases/v2.9.0.md) |
+| v2.9.0 mutation testing, skill contracts and runtime recovery (unreleased) | [v2.9.0 release notes](docs/releases/v2.9.0.md) |
 | v2.8.10 external review lifecycle | [v2.8.10 release notes](docs/releases/v2.8.10.md) |
 | v2.8.5 Codex trust-transition repair | [v2.8.5 release notes](docs/releases/v2.8.5.md) |
 | v2.8.4 custom initial-delivery repair | [v2.8.4 release notes](docs/releases/v2.8.4.md) |

@@ -341,7 +341,7 @@ with tempfile.TemporaryDirectory(prefix="live-release-preflight.") as raw:
         }
         == {
             ("claude", "claude-opus-5", "high", "executor"),
-            ("codex", "gpt-5.6-sol", "high", "executor"),
+            ("codex", "gpt-6-astra", "high", "executor"),
             ("claude", "claude-opus-5", "high", "reviewer-callback"),
             ("claude", "fable", "xhigh", "reviewer-callback"),
             ("codex", "gpt-5.6-sol", "xhigh", "reviewer-callback"),

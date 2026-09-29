@@ -12,13 +12,13 @@ allowed-tools: Read Glob Grep Bash Write Edit AskUserQuestion
 
 # wiki-lint: Wiki Health Check
 
-Run lint after every 10-15 ingests, or weekly. Ask before auto-fixing anything. Output a lint report to `wiki/meta/reports/lint-report-YYYY-MM-DD.md`.
+Run lint after every 10-15 ingests, or weekly. Ask before auto-fixing anything. Output a lint report to `wiki/meta/reports/lint-report-YYYY-MM-DD.md`. Writes go through `scripts/vault-write.py`, one transaction per approved stage: the report (+ dashboard) first; approved fixes afterwards as a separate transaction (`op:update`, `expected_sha256` from `--sha256 <path>`).
 
 ---
 
 ## Lint Checks
 
-**Step 0 (MANDATORY, before everything): run the deterministic validator.**
+**Step 0: run the deterministic validator first.**
 
 ```bash
 python3 scripts/validate-vault.py
@@ -56,17 +56,17 @@ Work through these in order:
 8. **Stale index entries**. Items in `wiki/index.md` pointing to renamed or deleted pages.
 9. **Address validity** (DragonScale Mechanism 2, opt-in). Validate `address:` fields, uniqueness, counter, post-rollout enforcement. Summary in **Address Validation** below; full spec — `references/address-validation.md`.
 10. **Semantic tiling** (DragonScale Mechanism 3, opt-in). Flag candidate duplicate pages via embedding cosine similarity. Summary in **Semantic Tiling** below; full spec — `references/semantic-tiling.md`.
-11. **Frontmatter discipline** (per план Phase 4.9 P1). Pages with bloated or stale frontmatter. See the **Frontmatter Discipline** section below.
-12. **Hot cache size** (added 2026-06-09 after the 99KB incident). Covered by Step 0 (`validate-vault.py` `hot` check: 800 words, 15 one-line bullets ≤160 chars, 8 threads, 120-word narrative). Here only: 🔴 FAIL if the frontmatter `updated:` line is longer than ~40 chars — summary content appended into the date field (the exact failure mode that once grew hot.md to 99KB).
-13. **Pipeline usage stats** (added 2026-06-10). Run `./scripts/pipeline-stats.py --days 30` and include its output as a report section. Вердикт по скиллам — из заголовка отчёта, не из нулей: `Dead-weight candidates` — полный; `Claude-zero skills` — недоказан, «Router intent» не трогать; `Skill usage evidence unavailable` — выводов нет. Удалять скилл только с подтверждения. Router-правила с сотнями hints и ~0 follow-through — кандидаты на сужение паттернов в `.claude/skill-rules.json`.
-14. **Stale pending plans** (added 2026-06-10; deterministic since 2026-07-03). Covered by Step 0 (`validate-vault.py` `plans` check: status vocabulary pending|executed|abandoned, executed needs a `Результат:` link, pending >30d → WARN). Do NOT re-count manually — surface the Step 0 output and suggest per stale item: close via `plan_close` (vault-write payload) or set `status: abandoned`.
-15. **Wiki-drift spot-check candidates** (added 2026-06-10). From `.vault-meta/index.jsonl` pick the 5 oldest-by-`updated` pages with `type: service` and `status: solid` → report section «Stale-risk: verify via MCP». Lint только перечисляет кандидатов на сверку с живой инфрой — verification руками/через MCP по желанию пользователя.
+11. **Frontmatter discipline**. Pages with bloated or stale frontmatter. See the **Frontmatter Discipline** section below.
+12. **Hot cache size**. Covered by Step 0 (`validate-vault.py` `hot` check: 800 words, 15 one-line bullets ≤160 chars, 8 threads, 120-word narrative). Here only: 🔴 FAIL if the frontmatter `updated:` line is longer than ~40 chars — summary content appended into the date field silently bloats hot.md.
+13. **Pipeline usage stats**. Run `./scripts/pipeline-stats.py --days 30` and include its output as a report section. Вердикт по скиллам — из заголовка отчёта, не из нулей: `Dead-weight candidates` — полный; `Claude-zero skills` — недоказан, «Router intent» не трогать; `Skill usage evidence unavailable` — выводов нет. Удалять скилл только с подтверждения. Router-правила с сотнями hints и ~0 follow-through — кандидаты на сужение паттернов в `.claude/skill-rules.json`.
+14. **Stale pending plans**. Covered by Step 0 (`validate-vault.py` `plans` check: status vocabulary pending|executed|abandoned, executed needs a `Результат:` link, pending >30d → WARN). Do NOT re-count manually — surface the Step 0 output and suggest per stale item: close via `plan_close` (vault-write payload) or set `status: abandoned`.
+15. **Wiki-drift spot-check candidates**. From `.vault-meta/index.jsonl` pick the 5 oldest-by-`updated` pages with `type: service` and `status: solid` → report section «Stale-risk: verify via MCP». Lint только перечисляет кандидатов на сверку с живой инфрой — verification руками/через MCP по желанию пользователя.
 
 ---
 
-## Frontmatter Discipline (P1)
+## Frontmatter Discipline
 
-Beyond the basic «missing required fields» check (item 6), flag these WARN-level patterns:
+Take severity from validator output; WARN remains for cosmetic findings and explicit `sessions: []` legacy-unknown:
 
 - **`related:` overflow** — `related:` array > 8 entries. Better: short list + long cross-references in the body. Hard cap is not enforced; this is a hint to declutter.
 - **Frontmatter block > 25 lines** — compact visibility lost. Suggest extracting auxiliary fields into the body, or merging arrays into flow-style.
@@ -74,7 +74,7 @@ Beyond the basic «missing required fields» check (item 6), flag these WARN-lev
 - **`status: developing` > 30 days** — page hasn't moved out of `developing` since `updated:` field. Either promote to `evergreen`/`mature`, mark `superseded`/`closed`, or move into `wiki/questions/` if it's an unresolved open question.
 - **Missing `sessions:` array** — strict schema failure. `sessions: []` is accepted only as an explicit legacy-unknown marker and reported as WARN.
 
-All five issues are **WARN** (not blocking). Report under `## Frontmatter Discipline` section in the lint report. Suggest concrete remediation per finding (which tag to add, which status to set, which session id to backfill).
+Report under `## Frontmatter Discipline` section in the lint report. Suggest concrete remediation per finding (which tag to add, which status to set, which session id to backfill).
 
 Source: `.vault-meta/index.jsonl` already has all the fields needed — no need to re-parse wiki/ in the lint script.
 
@@ -92,6 +92,7 @@ created: YYYY-MM-DD
 updated: YYYY-MM-DD
 tags: [meta, lint]
 status: developing
+sessions: [<SESSION_ID>]
 ---
 
 # Lint Report: YYYY-MM-DD
@@ -106,7 +107,9 @@ status: developing
 - [[Page Name]]: no inbound links. Suggest: link from [[Related Page]] or delete.
 
 ## Dead Links
-- [[Missing Page]]: referenced in [[Source Page]] but does not exist. Suggest: create stub or remove link.
+- **Renamed/moved**: [[Old Name]] → [[Real Page]] after confirming the same page; approved fix.
+- **Frontier (not yet created)**: [[Future Hub]] — keep the forward-link; no auto-stub.
+- **Obsolete intent**: [[Retired Topic]] — remove only after human review.
 
 ## Missing Pages
 - "concept name": mentioned in [[Page A]], [[Page B]], [[Page C]]. Suggest: create a concept page.
@@ -157,7 +160,11 @@ Create or update `wiki/meta/dashboard.md` with these queries:
 ---
 type: meta
 title: "Dashboard"
+created: YYYY-MM-DD
 updated: YYYY-MM-DD
+status: developing
+tags: [meta, dashboard]
+sessions: [<SESSION_ID>]
 ---
 # Wiki Dashboard
 
@@ -186,7 +193,7 @@ LIST FROM "wiki/questions" WHERE answer_quality = "draft" SORT created DESC
 
 ## Canvas Map
 
-**Disabled in this vault (2026-06-10):** Obsidian canvas core-plugin выключен, `/canvas` заморожен (zero usage за 2 месяца) — canvas-карты НЕ генерировать. Если canvas вернут (включить core-plugin + снять disable-model-invocation у /canvas), спецификация формата — JSON Canvas, см. `skills/canvas/`.
+Lint does not generate canvas maps; /canvas runs only on explicit request when the Obsidian canvas core-plugin is enabled.
 
 ---
 
@@ -214,7 +221,7 @@ reimplement or override their thresholds in the lint report.
 
 ## Semantic Tiling
 
-Opt-in (требует локальный ollama + `bge-m3`; детект через `./scripts/tiling-check.py --peek`, exit 10 = ollama недоступен → skip, exit 11 = модель не скачана). Полная спецификация — **Read** `references/semantic-tiling.md`: exit-коды, scope/exclusions, security posture (remote ollama только с `--allow-remote-ollama`), bands (bge-m3 калиброван: error >=0.92 / review 0.85-0.92; свежий seed 0.90/0.85 не калиброван до релейбла — пороги привязаны к модели), процедура калибровки, scale-лимиты (warn >500 страниц, hard-fail >5000). Read-only, no auto-merge. Отчёт: `./scripts/tiling-check.py --report wiki/meta/reports/tiling-report-YYYY-MM-DD.md`.
+Opt-in (требует локальный ollama + `bge-m3`; детект через `./scripts/tiling-check.py --peek`, exit 10 = ollama недоступен → skip, exit 11 = модель не скачана). Полная спецификация — **Read** `references/semantic-tiling.md`: exit-коды, scope/exclusions, security posture (remote ollama только с `--allow-remote-ollama`), bands (bge-m3 калиброван: error >=0.92 / review 0.85-0.92; свежий seed 0.90/0.85 не калиброван до релейбла — пороги привязаны к модели), процедура калибровки, scale-лимиты (warn >500 страниц, hard-fail >5000). Read-only, no auto-merge. Отчёт: `./scripts/tiling-check.py` → stdout; include the text in the report transaction.
 
 ## Before Auto-Fixing
 

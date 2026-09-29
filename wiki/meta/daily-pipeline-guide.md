@@ -2,7 +2,7 @@
 type: meta
 title: "daily-pipeline-guide"
 created: 2026-07-05
-updated: 2026-08-18
+updated: 2026-09-29
 tags:
   - meta
   - guide
@@ -12,6 +12,7 @@ related:
   - "[[index]]"
   - "[[getting-started]]"
 sessions:
+  - 01a0e944-18a3-7071-94fb-65a04eadeb97
   - public-template-v2
   - 019f72c4-816e-7200-a399-505adaa350e0
   - 019f6ddd-d07e-7a30-b018-f6358753fb91
@@ -28,7 +29,7 @@ sessions:
 ### Wiki-ядро
 
 - **wiki** — бутстрап вольта под себя: режимы, scaffold, персонализация. Первая команда в новом вольте.
-- **wiki-ingest** — `ingest <путь|URL>`: источник → 8-15 связанных типизированных страниц.
+- **wiki-ingest** — `ingest <путь|URL>`: источник → связанные типизированные страницы; пакет записывается одной транзакцией.
 - **wiki-query** — «что ты знаешь про X?»: поиск с цитатами (режимы quick/standard/deep).
 - **wiki-lint** — health-check: орфаны, мёртвые ссылки, frontmatter-гэпы, dupes (tiling).
 - **vault-repair** — один bounded recovery/validation/Stop pass после `COMMIT_BLOCKED`; Claude: `/vault-repair`, Codex: `$llm-obsidian:vault-repair`.
@@ -38,7 +39,7 @@ sessions:
 - **close** — save + аккуратно выйти из сессии.
 - **unsafe-research** — только по явному запросу: один vault-aware web-контекст с предупреждением о риске.
 - **canvas** — визуальные канвасы: изображения, страницы, PDF.
-- **defuddle** — очистить веб-страницу от мусора перед ингестом.
+- **defuddle** — очистить сохранённый локальный HTML; URL обрабатывает защищённый wiki-ingest.
 
 ### Согласование
 
@@ -69,7 +70,8 @@ sessions:
 - **design** — уточнить домен и выбрать минимальный дизайн до реализации.
 - **codebase-design** — спроектировать или углубить границы модулей, durable interfaces и test seams без pass-through дробления.
 - **implementation-plan** — разложить утверждённый outcome/design на owned `consumes`/`produces` TDD-слайсы и evidence.
-- **tdd** — вести изменение коротким red → green → regression циклом.
+- **tdd** — вести изменение коротким red → green → regression циклом, затем проверять чувствительность тестов мутациями.
+- **mutation-testing** — после GREEN в TDD запускать поведенческие мутации в изолированных копиях с baseline/control и проверкой неизменности исходников.
 - **debug** — локализовать root cause и проверить исходный failing loop.
 - **prototype** — проверить риск в disposable worktree, не смешивая прототип с production.
 - **resolve-conflict** — собрать BASE/ours/theirs evidence и разрешать только явно авторизованные пути.

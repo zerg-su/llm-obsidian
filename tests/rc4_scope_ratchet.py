@@ -578,6 +578,15 @@ effort overrides before admission while preserving its four configured XHigh
 lanes for external targets. The existing current-review policy owner grows by
 four measured lines and no new production file. The exact candidate is
 therefore 304 files / 115,870 lines, with no speculative headroom.
+
+2.9.0 integrates the authorized runtime fixes and local Codex auth utility.
+The new codex-auth-backup.py costs 152 lines. Existing owners add exactly
+38 net lines: blocked review lease retry (+3), window-bound cmux close (+3),
+Codex folder trust (+16), native activity recognition (+12), removal of the
+redundant daily auth-probe requirement (-1), and no-summary approval replay
+(+5). Terminal blocked callback replay is line-neutral. The existing focused
+runtime tests and tests/test_codex_auth_backup.py cover these changes. The
+live contour is exactly 305 files / 116,060 lines, with no extra headroom.
 """
 
 from __future__ import annotations
@@ -588,11 +597,11 @@ from pathlib import Path
 #: Maximum tracked Python files under ``scripts/`` for the generic review
 #: target candidate. The six new owners and their boundaries are justified in
 #: the module history above.
-SCRIPT_FILE_CEILING = 304
+SCRIPT_FILE_CEILING = 305
 
 #: Maximum total lines across those files. This is the measured exact candidate
-#: after current Full-policy hardening, with zero headroom.
-SCRIPT_LINE_CEILING = 115_870
+#: after the 2.9.0 runtime/auth integration, with zero headroom.
+SCRIPT_LINE_CEILING = 116_060
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:
