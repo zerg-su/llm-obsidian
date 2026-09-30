@@ -32,6 +32,10 @@ packages were published for them.
 
 #### Fixed
 
+- The registered Codex schema adapter uses the supported disabled web-search
+  mode and developer-level operation scope; quoted requests do not grant new
+  workflow authority. Ordinary interactive/app host policies are unchanged.
+
 - Current review can retry a committed correction after a blocked attempt;
   approval replay without an executor summary avoids duplicate provider effects.
 - Replayed blocked callbacks preserve terminal parent state.
@@ -55,8 +59,10 @@ packages were published for them.
 
 - Replaced dated skill guidance with stable contracts and registered prompt
   regressions and scratch-vault template validation in `make test`.
-- The scripts ratchet is pinned to exactly 305 files / 116,060 lines: the
-  152-line auth utility plus 38 net runtime lines. The unchanged 28-file review
+- The scripts ratchet is pinned to exactly 305 files / 116,072 measured lines: the
+  152-line auth utility, 38 net runtime lines and 13 schema-scope binding lines.
+  The integrated base was one line below its previous ceiling.
+  The unchanged 28-file review
   authority contour is 16,467 lines; the no-summary replay guard adds five.
   Baselines document this measured growth without speculative headroom.
 

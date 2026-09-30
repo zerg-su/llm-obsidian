@@ -587,6 +587,14 @@ redundant daily auth-probe requirement (-1), and no-summary approval replay
 (+5). Terminal blocked callback replay is line-neutral. The existing focused
 runtime tests and tests/test_codex_auth_backup.py cover these changes. The
 live contour is exactly 305 files / 116,060 lines, with no extra headroom.
+
+U-R10 preserves that file surface and adds exactly 13 lines in the existing
+Codex schema compiler: a fixed developer-level operation-scope instruction
+and its config binding. The supported web-search pin is line-neutral.
+Compiler conformance, native no-model config/prompt inspection and isolated
+mutations cover the binding; model compliance remains a separate gate.
+The integrated base measures 116,059 lines (one below its old ceiling); the
+live contour becomes exactly 305 files / 116,072 lines, with no headroom.
 """
 
 from __future__ import annotations
@@ -600,8 +608,8 @@ from pathlib import Path
 SCRIPT_FILE_CEILING = 305
 
 #: Maximum total lines across those files. This is the measured exact candidate
-#: after the 2.9.0 runtime/auth integration, with zero headroom.
-SCRIPT_LINE_CEILING = 116_060
+#: after the 2.9.0 runtime/auth integration and U-R10 binding, with zero headroom.
+SCRIPT_LINE_CEILING = 116_072
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

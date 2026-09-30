@@ -261,6 +261,13 @@ invalid result is terminal/typed and never falls back to paid credits, another
 provider, or a hidden interactive session. Arbitrary direct print-mode commands
 remain prohibited; continuable work stays in visible cmux sessions.
 
+The registered Codex schema profile pins `web_search="disabled"` and fixed
+developer instructions. Quoted requests are input data, not new authority;
+workflow descriptions preserve the supplied input, role and approval boundaries
+or report an incompatibility. Native config/prompt inspection proves the pin and
+developer-role binding, not model compliance or isolation of every tool.
+This profile does not change the host rules of ordinary interactive/app sessions.
+
 Reviewers remain product-read-only but are no longer toolchain-starved. Review
 specs, callbacks, baselines, liveness state, and results live under exact
 owner/operation/run identity, so several sessions in one project do not share
