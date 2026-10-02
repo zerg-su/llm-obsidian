@@ -112,6 +112,10 @@ class SurfaceTrackingSessions:
         self._waits = 0
 
     def start(self, request: object, *, on_surface_opened: object = None) -> object:
+        check(
+            "live executor uses an isolated workspace rather than crowding the origin pane",
+            request.placement == "workspace",
+        )
         marker = self.root / ".task-meta.json"
         context = json.loads(marker.read_text()) if marker.is_file() else {}
         check(

@@ -241,6 +241,7 @@ def run_cell(
                     run_id=run_id,
                     origin_surface=origin,
                     cwd=root,
+                    placement="workspace",
                     prompt_pointer=prompt_pointer,
                     callback_pointer=callback_pointer,
                 )

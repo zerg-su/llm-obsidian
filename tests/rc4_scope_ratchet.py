@@ -611,13 +611,14 @@ retain the delivery generation and cannot replay a send. Registered lifecycle pr
 exclusive supported interactive task context so hooks retain task telemetry
 without running the vault coordinator Stop pipeline in a release checkout.
 Foreign/changed context is preserved, and abnormal runs retain scope while
-owned resources remain. Four existing production owners grow by exactly 119
+owned resources remain. Four existing production owners grow by exactly 120
 lines. Input-only continuations use a separate receipt namespace, so provider
 exit checks only the actual callback/result generation. Broker-accepted
 parent evidence is sealed in that original generation before another input
 can request exit. Production worker exit followed by ordinary exact cleanup
 is covered, and a genuinely missing required result still requires attention; behavioral continuation/replay, hook-context and cleanup regressions
-cover the repair. The exact contour is 305 files / 116,207 lines with no extra
+cover the repair. Lifecycle probes explicitly use supported workspace placement,
+avoiding an unreadable prompt when the origin pane is crowded. The exact contour is 305 files / 116,208 lines with no extra
 headroom. The standard four-cell contract and authentication policy are unchanged.
 """
 
@@ -633,7 +634,7 @@ SCRIPT_FILE_CEILING = 305
 
 #: Maximum total lines across those files. This is the measured exact candidate
 #: after the 2.9.0 runtime/auth integration, U-R10 binding and cmux I/O, with zero headroom.
-SCRIPT_LINE_CEILING = 116_207
+SCRIPT_LINE_CEILING = 116_208
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:
