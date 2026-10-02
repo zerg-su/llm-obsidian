@@ -245,6 +245,41 @@ check(
     calls[-1] == ["cmux", "close-surface", "--surface", surface, "--window", window],
 )
 cmux.close_workspace_exact(workspace, window)
+
+# Native launches remain anchored while the user works in another workspace.
+# The gateway reproduces cmux's workspace-scoped surface resolution: an exact
+# surface UUID alone cannot resolve a terminal outside the selected workspace.
+from harness.runtime_session_continuation import await_surface_transport_ready
+
+offscreen_events: list[tuple[str, str]] = []
+
+
+def offscreen_transport(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+    if "tree" in command:
+        return fake(command, **kwargs)
+    if not all(
+        flag in command and command[command.index(flag) + 1] == identity
+        for flag, identity in (("--surface", surface), ("--workspace", workspace), ("--window", window))
+    ):
+        return subprocess.CompletedProcess(command, 1, "", "Error: not_found: Workspace not found")
+    if "read-screen" in command:
+        return subprocess.CompletedProcess(command, 0, "user@host /tmp> ", "")
+    verb = "send-key" if "send-key" in command else "send"
+    offscreen_events.append((verb, command[-1]))
+    return subprocess.CompletedProcess(command, 0, "", "")
+
+
+transport = CmuxAdapter(offscreen_transport)
+check(
+    "offscreen launch reads its terminal while another workspace is selected",
+    await_surface_transport_ready(transport, surface_id=surface, observation_limit=1),
+)
+transport.send(surface, "bounded command")
+transport.send_key(surface, "Enter")
+check(
+    "offscreen launch delivers command and Enter only to the exact terminal",
+    offscreen_events == [("send", "bounded command"), ("send-key", "Enter")],
+)
 with patch.dict(
     os.environ,
     {
@@ -841,6 +876,8 @@ real_run = subprocess.run
 late_calls: list[list[str]] = []
 def late_fake(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
     late_calls.append(command)
+    if "tree" in command:
+        return fake(command, **_kwargs)
     return subprocess.CompletedProcess(command, 0, "ok", "")
 subprocess.run = late_fake
 try:

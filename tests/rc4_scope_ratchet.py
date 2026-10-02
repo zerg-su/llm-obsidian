@@ -595,6 +595,14 @@ Compiler conformance, native no-model config/prompt inspection and isolated
 mutations cover the binding; model compliance remains a separate gate.
 The integrated base measures 116,059 lines (one below its old ceiling); the
 live contour becomes exactly 305 files / 116,072 lines, with no headroom.
+
+2.9.0 release preparation integrates the existing window/workspace-bound
+cmux terminal I/O repair. The current adapter adds exactly 16 lines and no
+production file: read, send and send-key resolve their containing workspace
+and window from the all-window tree instead of relying on focus. The
+offscreen regression is RED on the old adapter and GREEN on this candidate;
+three isolated argument-routing mutations exercise that same consumer.
+The exact candidate is 305 files / 116,088 lines, with no free headroom.
 """
 
 from __future__ import annotations
@@ -608,8 +616,8 @@ from pathlib import Path
 SCRIPT_FILE_CEILING = 305
 
 #: Maximum total lines across those files. This is the measured exact candidate
-#: after the 2.9.0 runtime/auth integration and U-R10 binding, with zero headroom.
-SCRIPT_LINE_CEILING = 116_072
+#: after the 2.9.0 runtime/auth integration, U-R10 binding and cmux I/O, with zero headroom.
+SCRIPT_LINE_CEILING = 116_088
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

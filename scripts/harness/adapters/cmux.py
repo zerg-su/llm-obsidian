@@ -358,9 +358,25 @@ class CmuxAdapter:
         value = json.loads(self._run(args).stdout)
         return self._surface(value)
 
+    def _transport_target(self, surface_id: str) -> list[str]:
+        """Pin terminal I/O to its observed containers, independent of focus."""
+        self._require_surface(surface_id)
+        tree = self._tree()
+        window_id = _surface_window_from_tree(tree, surface_id)
+        workspace_id = surface_workspaces_from_tree(tree).surface_workspaces.get(
+            surface_id.casefold(), ""
+        )
+        if not UUID_RE.fullmatch(workspace_id):
+            raise CmuxError("transport surface has no exact workspace identity")
+        return [
+            "--surface", surface_id,
+            "--workspace", workspace_id,
+            "--window", window_id,
+        ]
+
     def send(self, surface_id: str, text: str) -> None:
         self._require_surface(surface_id)
-        self._run(["send", "--surface", surface_id, text])
+        self._run(["send", *self._transport_target(surface_id), text])
 
     def send_key(self, surface_id: str, key: str) -> None:
         self._require_surface(surface_id)
@@ -374,11 +390,11 @@ class CmuxAdapter:
             "down",
         }:
             raise CmuxError("key is not allowlisted")
-        self._run(["send-key", "--surface", surface_id, key])
+        self._run(["send-key", *self._transport_target(surface_id), key])
 
     def read(self, surface_id: str) -> str:
         self._require_surface(surface_id)
-        return self._run(["read-screen", "--surface", surface_id]).stdout
+        return self._run(["read-screen", *self._transport_target(surface_id)]).stdout
 
     def status(self, surface_id: str) -> str:
         self._require_surface(surface_id)

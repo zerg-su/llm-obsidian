@@ -3600,7 +3600,10 @@ with tempfile.TemporaryDirectory(prefix="harness-dashboard-open.") as raw:
         and send_calls[0][2:4] == ["--surface", dashboard]
         and "harness-dashboard.py" in send_calls[0][-1]
         and enter_calls
-        == [["cmux", "send-key", "--surface", dashboard, "Enter"]] * 2
+        == [["cmux", "send-key", "--surface", dashboard,
+             "--workspace", workspace,
+             "--window", "6D3C2B1A-3333-4C22-9D22-2B2B2B2B2B2B",
+             "Enter"]] * 2
         and not any("focus" in call and "new-split" not in call for call in fake.calls)
         and _tree_bytes(store_root) == baseline,
     )

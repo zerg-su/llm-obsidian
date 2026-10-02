@@ -32,6 +32,8 @@ packages were published for them.
 
 #### Fixed
 
+- Bind cmux terminal read/send/send-key to the observed workspace and window; the offscreen regression preserves the selected user workspace. The correction adds exactly 16 production lines with no new module.
+
 - The registered Codex schema adapter uses the supported disabled web-search
   mode and developer-level operation scope; quoted requests do not grant new
   workflow authority. Ordinary interactive/app host policies are unchanged.
@@ -59,8 +61,9 @@ packages were published for them.
 
 - Replaced dated skill guidance with stable contracts and registered prompt
   regressions and scratch-vault template validation in `make test`.
-- The scripts ratchet is pinned to exactly 305 files / 116,072 measured lines: the
-  152-line auth utility, 38 net runtime lines and 13 schema-scope binding lines.
+- The scripts ratchet is pinned to exactly 305 files / 116,088 measured lines: the
+  152-line auth utility, 38 net runtime lines, 13 schema-scope binding lines
+  and 16 terminal-routing lines.
   The integrated base was one line below its previous ceiling.
   The unchanged 28-file review
   authority contour is 16,467 lines; the no-summary replay guard adds five.
