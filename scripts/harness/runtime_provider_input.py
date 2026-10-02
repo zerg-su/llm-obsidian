@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable, Mapping
 
@@ -105,7 +105,7 @@ def bound_continuation_effect_id(
 def _latest_input_generation(provider_root: Path, callback_generation: int) -> int:
     """Keep the bounded input namespace separate from callback registration."""
     directories = list(provider_root.glob("generation-*"))
-    if len(directories) > 25 or any(
+    if provider_root.is_symlink() or len(directories) > 25 or any(
         not re.fullmatch(r"generation-([1-9][0-9]*)", path.name)
         or path.is_symlink() or not path.is_dir()
         or (path / "delivery").is_symlink()
@@ -119,6 +119,24 @@ def _latest_input_generation(provider_root: Path, callback_generation: int) -> i
     return max([callback_generation, *generations])
 
 
+def _seal_accepted_callback_result(manager: object, record: OperationRecord, target: Mapping[str, object], provider_root: Path, identity: object) -> None:
+    """Record broker-accepted parent evidence before continuation can exit it."""
+    if not record.accepted_callback_id:
+        return
+    current = manager.store.read(record.spec.owner_id, record.spec.operation_id)
+    if (current.run_id != record.run_id or current.resources != record.resources
+            or current.accepted_callback_id != record.accepted_callback_id
+            or current.accepted_callback_sha256 != record.accepted_callback_sha256):
+        raise RuntimeSessionError("accepted callback authority changed")
+    generation = int(target["generation"])
+    stream = RuntimeProviderEventStream.rehydrate(provider_root, generation)
+    state = stream.controller.current_state()
+    if (state.identity != replace(identity, generation=generation)
+            or not state.cursor.input_accepted or state.attention_reason):
+        raise RuntimeSessionError("accepted callback result requires attention")
+    stream.result(current.accepted_callback_sha256)
+
+
 def prepare_continuation_target(manager: object, record: OperationRecord, prompt: str, workspace_id: str) -> tuple[dict[str, object], dict[str, object]]:
     """Advance only input delivery; keep callback/result authority unchanged.
 
@@ -129,13 +147,15 @@ def prepare_continuation_target(manager: object, record: OperationRecord, prompt
     provider_root = manager._state_root(record) / "provider-events"
     generation = int(target["generation"])
     same_parent = target["operation_id"] == record.spec.operation_id and target["run_id"] == record.run_id
+    input_root = provider_root / "continuation-inputs" if same_parent else provider_root
     if same_parent:
-        generation = _latest_input_generation(provider_root, generation)
-    delivery_state = provider_root / f"generation-{generation}/delivery/delivery-state.json"
+        generation = _latest_input_generation(input_root, generation)
+    stream_root = input_root if (input_root / f"generation-{generation}/delivery/delivery-state.json").is_file() else provider_root
+    delivery_state = stream_root / f"generation-{generation}/delivery/delivery-state.json"
     if same_parent and delivery_state.is_file():
-        previous = RuntimeProviderEventStream.rehydrate(provider_root, generation).controller.current_state()
+        previous = RuntimeProviderEventStream.rehydrate(stream_root, generation).controller.current_state()
         proposed = RuntimeProviderEventStream.create(
-            provider_root, owner_id=record.spec.owner_id, operation_id=record.spec.operation_id,
+            stream_root, owner_id=record.spec.owner_id, operation_id=record.spec.operation_id,
             run_id=record.run_id, generation=generation,
             process_identity=record.resources.process_identity,
             workspace_id=workspace_id, surface_id=record.resources.surface_id,
@@ -149,6 +169,7 @@ def prepare_continuation_target(manager: object, record: OperationRecord, prompt
             with manager.store.locked(record.spec.owner_id):
                 if manager._callback_target(record) != target:
                     raise RuntimeSessionError("continuation target changed")
+                _seal_accepted_callback_result(manager, record, target, provider_root, proposed.identity)
                 generation += 1
         return {**target, "generation": generation}, target
     return target, target
@@ -170,9 +191,12 @@ def reserve_continuation_input(
     )
     if not typed:
         return RuntimeContinuationInput(None)
+    input_root = (provider_root / "continuation-inputs"
+                  if target["operation_id"] == record.spec.operation_id and target["run_id"] == record.run_id
+                  else provider_root)
     try:
         stream = RuntimeProviderEventStream.create(
-            provider_root,
+            input_root,
             owner_id=record.spec.owner_id,
             operation_id=record.spec.operation_id,
             run_id=record.run_id,

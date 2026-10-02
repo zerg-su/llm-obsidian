@@ -3007,10 +3007,10 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
           and codex_continue_manager._callback_target(before)["generation"] == 7)
     initial_stream.accept_input()
     codex_continue_manager.accept_callback(envelope())
-    initial_stream.result(envelope().payload_sha256)
     callback_file = codex_continue_root / "callbacks/result.json"
     callback_file.write_text(json.dumps(to_dict(envelope())))
     original_events = {p.name: p.read_bytes() for p in (provider_root / "generation-7/events").glob("*.json")}
+    input_root = provider_root / "continuation-inputs"
 
     def observe_same_parent_callback(retained: bool) -> RuntimeWorkerExecution:
         callback_worker = RuntimeWorkerExecution.__new__(RuntimeWorkerExecution)
@@ -3030,13 +3030,14 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         check(
             "same-parent continuation retains original callback generation for " + ("live" if retained else "restarted") + " worker",
             codex_continue_manager._callback_target(before)["generation"] == 7
-            and not RuntimeProviderEventStream.rehydrate(provider_root, 8).controller.current_state().cursor.result_published
-            and {p.name: p.read_bytes() for p in (provider_root / "generation-7/events").glob("*.json")} == original_events,
+            and not RuntimeProviderEventStream.rehydrate(input_root, 8).controller.current_state().cursor.result_published
+            and all((provider_root / "generation-7/events" / name).read_bytes() == content for name, content in original_events.items()),
         )
         return callback_worker
 
     def inspect_before_continuation_ack() -> None:
-        assert not RuntimeProviderEventStream.rehydrate(provider_root, 8).controller.current_state().cursor.input_accepted
+        assert initial_stream.controller.current_state().cursor.result_published, "accepted callback result must be sealed before continuation send"
+        assert not RuntimeProviderEventStream.rehydrate(input_root, 8).controller.current_state().cursor.input_accepted
         observe_same_parent_callback(False)
 
     codex_continue_cmux.before_input_ack = inspect_before_continuation_ack
@@ -3062,7 +3063,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
     )
 
     continuation_state = RuntimeProviderEventStream.rehydrate(
-        provider_root, 8
+        input_root, 8
     ).controller.current_state()
     check(
         "same-parent typed continuation has its own accepted input receipt",
@@ -3094,6 +3095,11 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         "provider_generation": 7,
     })
     codex_continue_manager.request_exit("owner-1", "runtime-1")
+    callback_worker.record_provider_exit(0)
+    check("expected worker exit preserves the completed callback contour",
+          codex_continue_manager.store.read("owner-1", "runtime-1").state == "exiting"
+          and not RuntimeProviderEventStream.rehydrate(input_root, 8).controller.current_state().attention_reason
+          and not (provider_root / "generation-8").exists())
     codex_continue_manager.process.status_value = "dead"
     codex_continue_manager.process.supervisor_status_value = "dead"
     codex_continue_cmux.surface_status = "missing"
@@ -3101,6 +3107,28 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
     check("same-parent continued callback permits real exact cleanup",
           closed_continuation.record.state == "complete"
           and closed_continuation.record.resources == OwnedResources(), closed_continuation)
+
+    missing_store = OperationStore(root / "genuinely-missing-result-store")
+    missing_store.create(codex_continue_spec, lane_id="lane-shared", run_id="run-1")
+    for state in ("preflight", "starting", "running", "awaiting-callback"):
+        missing_store.transition("owner-1", "runtime-1", state)
+    OperationSupervisor(missing_store, "owner-1", "runtime-1").bind_resources(resources)
+    missing_worker = RuntimeWorkerExecution.__new__(RuntimeWorkerExecution)
+    missing_worker.store = missing_store
+    missing_worker.spec = {"owner_id": "owner-1", "operation_id": "runtime-1", "run_id": "run-1"}
+    missing_worker.spec_path = missing_store.root / "owners/owner-1/runtime/runtime-1/launch.json"
+    missing_stream = RuntimeProviderEventStream.create(
+        missing_worker._provider_event_root, owner_id="owner-1", operation_id="runtime-1", run_id="run-1",
+        generation=1, process_identity=resources.process_identity,
+        workspace_id=WORKSPACE, surface_id=SURFACE, input_sha256="f" * 64,
+    )
+    missing_stream.start()
+    missing_stream.reserve_input()
+    missing_stream.accept_input()
+    missing_worker.record_provider_exit(0)
+    check("a genuinely missing required result still requires attention",
+          missing_store.read("owner-1", "runtime-1").state == "attention-required"
+          and missing_stream.controller.current_state().attention_reason == "result-missing")
 
     class RetainedPromptCmux(FakeCmux):
         def __init__(self, events: list[str], *, acknowledge: bool) -> None:
