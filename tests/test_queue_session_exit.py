@@ -14,6 +14,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts/queue-session-exit.py"
 SURFACE = "00000000-0000-0000-0000-000000000123"
+WORKSPACE = "00000000-0000-0000-0000-000000000456"
+WINDOW = "00000000-0000-0000-0000-000000000789"
+TARGET = f"--surface {SURFACE} --workspace {WORKSPACE} --window {WINDOW}"
 
 
 def check(label: str, condition: bool) -> None:
@@ -41,7 +44,18 @@ with tempfile.TemporaryDirectory(prefix="queue-session-exit-test.") as raw:
     tmp = Path(raw)
     log = tmp / "cmux.log"
     cmux = tmp / "cmux"
-    cmux.write_text("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CMUX_TEST_LOG\"\n", encoding="utf-8")
+    tree = {"windows": [{"id": WINDOW, "workspaces": [{"id": WORKSPACE,
+        "panes": [{"surfaces": [{"id": SURFACE}]}]}]}]}
+    cmux.write_text(
+        f"#!{sys.executable}\n"
+        "import json, os, sys\n"
+        "args = sys.argv[1:]\n"
+        "with open(os.environ['CMUX_TEST_LOG'], 'a') as f: f.write(' '.join(args) + '\\n')\n"
+        f"if args == ['--id-format', 'both', 'tree', '--all', '--json']: print(json.dumps({tree!r}))\n"
+        "elif not all(flag in args and args[args.index(flag) + 1] == value for flag, value in "
+        f"[('--surface', {SURFACE!r}), ('--workspace', {WORKSPACE!r}), ('--window', {WINDOW!r})]): sys.exit(1)\n",
+        encoding="utf-8",
+    )
     cmux.chmod(0o755)
     vault = tmp / "vault"
     (vault / "wiki").mkdir(parents=True)
@@ -60,17 +74,19 @@ with tempfile.TemporaryDirectory(prefix="queue-session-exit-test.") as raw:
     claude_env = {key: value for key, value in base.items() if key not in {"CODEX_THREAD_ID", "CODEX_CI", "CODEX_MANAGED_BY_NPM"}}
     result = subprocess.run([sys.executable, str(SCRIPT)], text=True, capture_output=True, env=claude_env, check=False)
     payload = json.loads(result.stdout)
-    calls = log.read_text().splitlines()
+    observed = log.read_text().splitlines()
+    calls = [call for call in observed if call != "--id-format both tree --all --json"]
     check(
         "Claude queues direct exit to exact surface",
         payload["status"] == "queued"
         and calls == [
             TURN_END_MARK,
-            f"send-key --surface {SURFACE} ctrl+u",
-            f"send --surface {SURFACE} /exit",
-            f"send-key --surface {SURFACE} Enter",
+            f"send-key {TARGET} ctrl+u",
+            f"send {TARGET} /exit",
+            f"send-key {TARGET} Enter",
         ],
     )
+    check("Claude derives all three exit commands from all-window inventory", observed.count("--id-format both tree --all --json") == 3)
     check(
         "turn-end pipeline runs before the exit is queued",
         calls[0] == TURN_END_MARK and payload["turn_end"]["status"] == "clean",
@@ -81,18 +97,20 @@ with tempfile.TemporaryDirectory(prefix="queue-session-exit-test.") as raw:
     codex_env = dict(base, CODEX_THREAD_ID="thread")
     result = subprocess.run([sys.executable, str(SCRIPT)], text=True, capture_output=True, env=codex_env, check=False)
     payload = json.loads(result.stdout)
-    calls = log.read_text().splitlines()
+    observed = log.read_text().splitlines()
+    calls = [call for call in observed if call != "--id-format both tree --all --json"]
     check(
         "Codex uses bounded clear and Tab queue",
         len(calls) == 43
         and calls[0] == TURN_END_MARK
-        and calls[1:41] == [f"send-key --surface {SURFACE} Backspace"] * 40
+        and calls[1:41] == [f"send-key {TARGET} Backspace"] * 40
         and calls[-2:]
         == [
-            f"send --surface {SURFACE} /exit",
-            f"send-key --surface {SURFACE} Tab",
+            f"send {TARGET} /exit",
+            f"send-key {TARGET} Tab",
         ],
     )
+    check("Codex derives all 42 queue commands from all-window inventory", observed.count("--id-format both tree --all --json") == 42)
     check("Codex retains manual fallback", payload["manual_fallback"] is True)
 
     missing_env = dict(claude_env)
