@@ -112,6 +112,14 @@ class SurfaceTrackingSessions:
         self._waits = 0
 
     def start(self, request: object, *, on_surface_opened: object = None) -> object:
+        marker = self.root / ".task-meta.json"
+        context = json.loads(marker.read_text()) if marker.is_file() else {}
+        check(
+            "live executor enters scoped task context before provider start",
+            context.get("version") == 1
+            and context.get("runtime_owner_id") == request.spec.owner_id
+            and context.get("vault_root") == str(self.root.resolve()),
+        )
         spec = request.spec
         key = (spec.owner_id, spec.operation_id)
         surface = f"2222{next(_SURFACE_SEQUENCE):04d}-2222-4222-8222-222222222222"
@@ -504,6 +512,37 @@ try:
 finally:
     for handle in handles:
         handle.cleanup()
+
+# A marker is lifecycle scope, never approval or authority to overwrite work.
+with tempfile.TemporaryDirectory(prefix="live-task-scope.") as raw:
+    scope_root = Path(raw).resolve()
+    (scope_root / "wiki").mkdir()
+    marker = scope_root / ".task-meta.json"
+    hook_spec = importlib.util.spec_from_file_location("live_hook_context", ROOT / "hooks/run-hook.py")
+    assert hook_spec and hook_spec.loader
+    hook = importlib.util.module_from_spec(hook_spec)
+    hook_spec.loader.exec_module(hook)
+    with driver._lifecycle_task_context(scope_root, "live-fixture-owner", COMMIT):
+        is_task, origin, task_root = hook.task_context({"cwd": str(scope_root)})
+        check("production hooks treat live probe as task, not vault coordinator",
+              is_task and origin == task_root == scope_root)
+    check("owned live context is removed after resource-free closure", not marker.exists())
+    foreign = b'{"version":1,"task_name":"unrelated task"}\n'
+    marker.write_bytes(foreign)
+    try:
+        with driver._lifecycle_task_context(scope_root, "live-fixture-owner", COMMIT):
+            raise AssertionError("foreign context admitted")
+    except driver.LiveDriverError:
+        pass
+    check("foreign task context is preserved before any provider starts", marker.read_bytes() == foreign)
+    marker.unlink()
+    changed = b'{"version":1,"task_name":"changed by another writer"}\n'
+    try:
+        with driver._lifecycle_task_context(scope_root, "live-fixture-owner", COMMIT):
+            marker.write_bytes(changed)
+    except driver.LiveDriverError:
+        pass
+    check("changed task context is never removed", marker.read_bytes() == changed)
 
 if FAILED:
     raise AssertionError(

@@ -603,6 +603,17 @@ and window from the all-window tree instead of relying on focus. The
 offscreen regression is RED on the old adapter and GREEN on this candidate;
 three isolated argument-routing mutations exercise that same consumer.
 The exact candidate is 305 files / 116,088 lines, with no free headroom.
+
+The user-authorized Codex live acceptance repair separates the new bounded
+continuation attempt from its accepted initial input receipt. The acknowledged prior input binds an incremented same-parent callback
+generation; retries retain that generation and cannot replay a send. Registered lifecycle probes also acquire
+exclusive supported interactive task context so hooks retain task telemetry
+without running the vault coordinator Stop pipeline in a release checkout.
+Foreign/changed context is preserved, and abnormal runs retain scope while
+owned resources remain. Three existing production owners grow by exactly 69
+lines; behavioral continuation/replay, hook-context and cleanup regressions
+cover the repair. The exact contour is 305 files / 116,157 lines with no extra
+headroom. The standard four-cell contract and authentication policy are unchanged.
 """
 
 from __future__ import annotations
@@ -617,7 +628,7 @@ SCRIPT_FILE_CEILING = 305
 
 #: Maximum total lines across those files. This is the measured exact candidate
 #: after the 2.9.0 runtime/auth integration, U-R10 binding and cmux I/O, with zero headroom.
-SCRIPT_LINE_CEILING = 116_088
+SCRIPT_LINE_CEILING = 116_157
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

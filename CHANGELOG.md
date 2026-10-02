@@ -32,6 +32,8 @@ packages were published for them.
 
 #### Fixed
 
+- Same-parent Codex continuation reserves a fresh typed input generation by advancing the acknowledged same-parent callback target; replay cannot send a second prompt. Registered live lifecycle probes use exclusive task context so hooks do not index or commit the release vault. Foreign and changed context is preserved.
+
 - Bind cmux terminal read/send/send-key to the observed workspace and window; the offscreen regression preserves the selected user workspace. The correction adds exactly 16 production lines with no new module.
 
 - The registered Codex schema adapter uses the supported disabled web-search
@@ -61,7 +63,7 @@ packages were published for them.
 
 - Replaced dated skill guidance with stable contracts and registered prompt
   regressions and scratch-vault template validation in `make test`.
-- The scripts ratchet is pinned to exactly 305 files / 116,088 measured lines: the
+- The scripts ratchet is pinned to exactly 305 files / 116,157 measured lines: the
   152-line auth utility, 38 net runtime lines, 13 schema-scope binding lines
   and 16 terminal-routing lines.
   The integrated base was one line below its previous ceiling.

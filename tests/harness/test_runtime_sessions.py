@@ -2968,6 +2968,38 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
             product_root=codex_continue_product,
         )
     )
+    # Reproduce the real same-parent path: worker input already has a typed
+    # generation-1 receipt, and the parent has accepted its first callback.
+    before = codex_continue_manager.store.read("owner-1", "runtime-1")
+    provider_root = codex_continue_manager._state_root(before) / "provider-events"
+    old_target = codex_continue_manager._callback_target(before)
+    codex_continue_manager._write_callback_target(
+        before, operation_id="runtime-1", run_id="run-1",
+        callback_pointer=str(old_target["callback_pointer"]), generation=7,
+    )
+    initial_stream = RuntimeProviderEventStream.create(
+        provider_root, owner_id="owner-1", operation_id="runtime-1", run_id="run-1",
+        generation=7, process_identity=before.resources.process_identity,
+        workspace_id=WORKSPACE, surface_id=SURFACE,
+        input_sha256=hashlib.sha256(b"first accepted fixture prompt").hexdigest(),
+    )
+    initial_stream.start()
+    initial_stream.reserve_input()
+    sent_before_rejection = list(codex_continue_cmux.sent)
+    try:
+        codex_continue_manager.continue_session(
+            "owner-1", "runtime-1", "checkpoint-1", "continue.md"
+        )
+    except RuntimeSessionError:
+        pass
+    else:
+        raise AssertionError("unacknowledged prior input must block continuation")
+    check("unacknowledged input cannot advance generation or send another prompt",
+          codex_continue_cmux.sent == sent_before_rejection
+          and codex_continue_manager._callback_target(before)["generation"] == 7)
+    initial_stream.accept_input()
+    codex_continue_manager.accept_callback(envelope())
+    initial_stream.result(envelope().payload_sha256)
     codex_continued = codex_continue_manager.continue_session(
         "owner-1", "runtime-1", "checkpoint-1", "continue.md"
     )
@@ -2986,6 +3018,25 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         == 1
         and "\n" not in expected_codex_continuation,
         codex_continue_cmux.sent,
+    )
+
+    continuation_state = RuntimeProviderEventStream.rehydrate(
+        provider_root, int(codex_continue_manager._callback_target(codex_continued.record)["generation"])
+    ).controller.current_state()
+    check(
+        "same-parent typed continuation has its own accepted input receipt",
+        continuation_state.cursor.input_accepted
+        and continuation_state.identity.generation == 8
+        and initial_stream.controller.current_state().cursor.result_published,
+    )
+    sent_before_replay = list(codex_continue_cmux.sent)
+    replay = codex_continue_manager.continue_session(
+        "owner-1", "runtime-1", "checkpoint-1", "continue.md"
+    )
+    check(
+        "same-parent typed continuation replay sends no second prompt",
+        codex_continue_cmux.sent == sent_before_replay
+        and replay.record.attempt == codex_continued.record.attempt,
     )
 
     class RetainedPromptCmux(FakeCmux):

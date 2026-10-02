@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -18,6 +19,38 @@ from live_acceptance_contracts import (
     RuntimeSessions,
     _stable_id,
 )
+
+
+@contextmanager
+def _lifecycle_task_context(root: Path, owner_id: str, commit_sha: str):
+    """Give a registered lifecycle probe existing task-hook semantics.
+
+    This is supported interactive v1 task context, not a dispatch/approval
+    receipt. Hooks keep telemetry but cannot act as a vault coordinator.
+    Never overwrite an existing task marker or remove a changed marker.
+    """
+    from harness.store import OperationStore
+
+    marker = root / ".task-meta.json"
+    raw = (json.dumps({"version": 1, "task_name": "Bounded live lifecycle",
+        "vault_root": str(root), "runtime_owner_id": owner_id,
+        "head_sha": commit_sha}, sort_keys=True) + "\n").encode()
+    try:
+        descriptor = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError as exc:
+        raise LiveDriverError("live lifecycle requires an unoccupied task context") from exc
+    with os.fdopen(descriptor, "wb") as stream:
+        stream.write(raw)
+        stream.flush()
+        os.fsync(stream.fileno())
+    try:
+        yield
+    finally:
+        records = OperationStore(root / ".vault-meta/harness").list(owner_id)
+        if not any(record.resources != OwnedResources() for record in records):
+            if marker.is_symlink() or marker.read_bytes() != raw:
+                raise LiveDriverError("live task context changed; preserved for diagnosis")
+            marker.unlink()
 
 
 def _atomic_text(path: Path, text: str) -> None:
