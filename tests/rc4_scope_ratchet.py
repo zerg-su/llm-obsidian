@@ -610,9 +610,9 @@ generation; retries retain that generation and cannot replay a send. Registered 
 exclusive supported interactive task context so hooks retain task telemetry
 without running the vault coordinator Stop pipeline in a release checkout.
 Foreign/changed context is preserved, and abnormal runs retain scope while
-owned resources remain. Three existing production owners grow by exactly 69
+owned resources remain. Four existing production owners grow by exactly 79
 lines; behavioral continuation/replay, hook-context and cleanup regressions
-cover the repair. The exact contour is 305 files / 116,157 lines with no extra
+cover the repair. The exact contour is 305 files / 116,167 lines with no extra
 headroom. The standard four-cell contract and authentication policy are unchanged.
 """
 
@@ -628,7 +628,7 @@ SCRIPT_FILE_CEILING = 305
 
 #: Maximum total lines across those files. This is the measured exact candidate
 #: after the 2.9.0 runtime/auth integration, U-R10 binding and cmux I/O, with zero headroom.
-SCRIPT_LINE_CEILING = 116_157
+SCRIPT_LINE_CEILING = 116_167
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

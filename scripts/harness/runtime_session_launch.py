@@ -46,6 +46,7 @@ from .runtime_provider_input import (
     bound_continuation_effect_id,
     initial_provider_argv,
     interactive_provider_input,
+    prepare_continuation_target,
     reserve_continuation_input,
 )
 from .store import StoreError
@@ -728,35 +729,7 @@ class RuntimeSessionLaunchMixin:
         prompt = self._read_prompt(prompt_path)
         runtime = record.spec.route.runtime
         delivery_prompt = interactive_provider_input(runtime, prompt_path, prompt)
-        target = self._callback_target(record)
-        provider_root = self._state_root(record) / "provider-events"
-        generation = int(target["generation"])
-        delivery_state = provider_root / f"generation-{generation}/delivery/delivery-state.json"
-        if (target["operation_id"] == operation_id and target["run_id"] == record.run_id
-                and delivery_state.is_file()):
-            previous = RuntimeProviderEventStream.rehydrate(provider_root, generation).controller.current_state()
-            proposed = RuntimeProviderEventStream.create(
-                provider_root, owner_id=owner_id, operation_id=operation_id,
-                run_id=record.run_id, generation=generation,
-                process_identity=record.resources.process_identity,
-                workspace_id=str(metadata.get("workspace_id") or ""),
-                surface_id=record.resources.surface_id,
-                input_sha256=hashlib.sha256(delivery_prompt.encode()).hexdigest(),
-            ).controller.initial
-            if previous.identity != proposed.identity:
-                raise RuntimeSessionError("continuation provider identity changed")
-            if previous.idempotency_key != proposed.idempotency_key:
-                if not previous.cursor.input_accepted or previous.attention_reason:
-                    raise RuntimeSessionError("prior provider input requires attention")
-                with self.store.locked(owner_id):
-                    if self._callback_target(record) != target:
-                        raise RuntimeSessionError("continuation target changed")
-                    self._write_callback_target(
-                        record, operation_id=operation_id, run_id=record.run_id,
-                        callback_pointer=str(target["callback_pointer"]),
-                        generation=generation + 1,
-                    )
-                    target = self._callback_target(record)
+        target = prepare_continuation_target(self, record, delivery_prompt, str(metadata.get("workspace_id") or ""))
         effect_id = bound_continuation_effect_id(record, prompt, target)
         receipt_path, receipt, receipt_identity = self._continuation_receipt(
             record, effect_id, prompt, target

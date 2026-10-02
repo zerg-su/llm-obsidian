@@ -101,6 +101,43 @@ def bound_continuation_effect_id(
     )
 
 
+def prepare_continuation_target(manager: object, record: OperationRecord, prompt: str, workspace_id: str) -> dict[str, object]:
+    """Advance only an acknowledged same-parent input; retain delegated targets.
+
+    Existing receipts remain immutable. Pending input cannot mint a fresh send,
+    while an exact replay keeps its generation and continuation receipt.
+    """
+    target = manager._callback_target(record)
+    provider_root = manager._state_root(record) / "provider-events"
+    generation = int(target["generation"])
+    delivery_state = provider_root / f"generation-{generation}/delivery/delivery-state.json"
+    if (target["operation_id"] == record.spec.operation_id and target["run_id"] == record.run_id
+            and delivery_state.is_file()):
+        previous = RuntimeProviderEventStream.rehydrate(provider_root, generation).controller.current_state()
+        proposed = RuntimeProviderEventStream.create(
+            provider_root, owner_id=record.spec.owner_id, operation_id=record.spec.operation_id,
+            run_id=record.run_id, generation=generation,
+            process_identity=record.resources.process_identity,
+            workspace_id=workspace_id, surface_id=record.resources.surface_id,
+            input_sha256=hashlib.sha256(prompt.encode()).hexdigest(),
+        ).controller.initial
+        if previous.identity != proposed.identity:
+            raise RuntimeSessionError("continuation provider identity changed")
+        if previous.idempotency_key != proposed.idempotency_key:
+            if not previous.cursor.input_accepted or previous.attention_reason:
+                raise RuntimeSessionError("prior provider input requires attention")
+            with manager.store.locked(record.spec.owner_id):
+                if manager._callback_target(record) != target:
+                    raise RuntimeSessionError("continuation target changed")
+                manager._write_callback_target(
+                    record, operation_id=record.spec.operation_id, run_id=record.run_id,
+                    callback_pointer=str(target["callback_pointer"]),
+                    generation=generation + 1,
+                )
+                target = manager._callback_target(record)
+    return target
+
+
 def reserve_continuation_input(
     provider_root: Path,
     *,
