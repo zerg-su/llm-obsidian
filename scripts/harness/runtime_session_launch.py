@@ -729,7 +729,7 @@ class RuntimeSessionLaunchMixin:
         prompt = self._read_prompt(prompt_path)
         runtime = record.spec.route.runtime
         delivery_prompt = interactive_provider_input(runtime, prompt_path, prompt)
-        target = prepare_continuation_target(self, record, delivery_prompt, str(metadata.get("workspace_id") or ""))
+        target, callback_target = prepare_continuation_target(self, record, delivery_prompt, str(metadata.get("workspace_id") or ""))
         effect_id = bound_continuation_effect_id(record, prompt, target)
         receipt_path, receipt, receipt_identity = self._continuation_receipt(
             record, effect_id, prompt, target
@@ -907,7 +907,7 @@ class RuntimeSessionLaunchMixin:
                         record, target
                     ),
                     ownership_ready=lambda: self._continuation_ownership_ready(
-                        record, target
+                        record, callback_target
                     ),
                     reserve_retry=reserve_retry,
                     observe_stage=observe_stage,

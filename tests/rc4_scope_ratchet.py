@@ -605,14 +605,17 @@ three isolated argument-routing mutations exercise that same consumer.
 The exact candidate is 305 files / 116,088 lines, with no free headroom.
 
 The user-authorized Codex live acceptance repair separates the new bounded
-continuation attempt from its accepted initial input receipt. The acknowledged prior input binds an incremented same-parent callback
-generation; retries retain that generation and cannot replay a send. Registered lifecycle probes also acquire
+continuation attempt from its accepted initial input receipt. The acknowledged prior input binds a new delivery generation while
+the callback/result registration retains its original generation. Retries
+retain the delivery generation and cannot replay a send. Registered lifecycle probes also acquire
 exclusive supported interactive task context so hooks retain task telemetry
 without running the vault coordinator Stop pipeline in a release checkout.
 Foreign/changed context is preserved, and abnormal runs retain scope while
-owned resources remain. Four existing production owners grow by exactly 79
-lines; behavioral continuation/replay, hook-context and cleanup regressions
-cover the repair. The exact contour is 305 files / 116,167 lines with no extra
+owned resources remain. Four existing production owners grow by exactly 95
+lines; the final 16 lines validate and select the bounded input namespace
+separately from the callback target, addressing the independently reproduced
+stale-result cleanup defect without adding a module or writable authority; behavioral continuation/replay, hook-context and cleanup regressions
+cover the repair. The exact contour is 305 files / 116,183 lines with no extra
 headroom. The standard four-cell contract and authentication policy are unchanged.
 """
 
@@ -628,7 +631,7 @@ SCRIPT_FILE_CEILING = 305
 
 #: Maximum total lines across those files. This is the measured exact candidate
 #: after the 2.9.0 runtime/auth integration, U-R10 binding and cmux I/O, with zero headroom.
-SCRIPT_LINE_CEILING = 116_167
+SCRIPT_LINE_CEILING = 116_183
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

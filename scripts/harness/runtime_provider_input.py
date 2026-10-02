@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Mapping
@@ -101,8 +102,25 @@ def bound_continuation_effect_id(
     )
 
 
-def prepare_continuation_target(manager: object, record: OperationRecord, prompt: str, workspace_id: str) -> dict[str, object]:
-    """Advance only an acknowledged same-parent input; retain delegated targets.
+def _latest_input_generation(provider_root: Path, callback_generation: int) -> int:
+    """Keep the bounded input namespace separate from callback registration."""
+    directories = list(provider_root.glob("generation-*"))
+    if len(directories) > 25 or any(
+        not re.fullmatch(r"generation-([1-9][0-9]*)", path.name)
+        or path.is_symlink() or not path.is_dir()
+        or (path / "delivery").is_symlink()
+        or (path / "delivery/delivery-state.json").is_symlink()
+        or not (path / "delivery/delivery-state.json").is_file()
+        for path in directories
+    ):
+        raise RuntimeSessionError("continuation input namespace is invalid")
+    generations = [int(path.name.removeprefix("generation-")) for path in directories
+                   if (path / "delivery/delivery-state.json").is_file()]
+    return max([callback_generation, *generations])
+
+
+def prepare_continuation_target(manager: object, record: OperationRecord, prompt: str, workspace_id: str) -> tuple[dict[str, object], dict[str, object]]:
+    """Advance only input delivery; keep callback/result authority unchanged.
 
     Existing receipts remain immutable. Pending input cannot mint a fresh send,
     while an exact replay keeps its generation and continuation receipt.
@@ -110,9 +128,11 @@ def prepare_continuation_target(manager: object, record: OperationRecord, prompt
     target = manager._callback_target(record)
     provider_root = manager._state_root(record) / "provider-events"
     generation = int(target["generation"])
+    same_parent = target["operation_id"] == record.spec.operation_id and target["run_id"] == record.run_id
+    if same_parent:
+        generation = _latest_input_generation(provider_root, generation)
     delivery_state = provider_root / f"generation-{generation}/delivery/delivery-state.json"
-    if (target["operation_id"] == record.spec.operation_id and target["run_id"] == record.run_id
-            and delivery_state.is_file()):
+    if same_parent and delivery_state.is_file():
         previous = RuntimeProviderEventStream.rehydrate(provider_root, generation).controller.current_state()
         proposed = RuntimeProviderEventStream.create(
             provider_root, owner_id=record.spec.owner_id, operation_id=record.spec.operation_id,
@@ -129,13 +149,9 @@ def prepare_continuation_target(manager: object, record: OperationRecord, prompt
             with manager.store.locked(record.spec.owner_id):
                 if manager._callback_target(record) != target:
                     raise RuntimeSessionError("continuation target changed")
-                manager._write_callback_target(
-                    record, operation_id=record.spec.operation_id, run_id=record.run_id,
-                    callback_pointer=str(target["callback_pointer"]),
-                    generation=generation + 1,
-                )
-                target = manager._callback_target(record)
-    return target
+                generation += 1
+        return {**target, "generation": generation}, target
+    return target, target
 
 
 def reserve_continuation_input(

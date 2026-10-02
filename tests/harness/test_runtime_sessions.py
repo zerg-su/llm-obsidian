@@ -52,6 +52,7 @@ from harness.contracts import (
     OperationSpec,
     OwnedResources,
     RuntimeRoute,
+    to_dict,
 )
 from harness.runtime_sessions import (
     RuntimeSessionError,
@@ -2903,6 +2904,13 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
     )
 
     class CodexContinuationCmux(FakeCmux):
+        before_input_ack = None
+
+        def send(self, surface_id: str, prompt: str) -> None:
+            super().send(surface_id, prompt)
+            if self.before_input_ack is not None:
+                self.before_input_ack()
+
         def read(self, surface_id: str) -> str:
             assert surface_id == SURFACE
             if not self.sent:
@@ -3000,9 +3008,42 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
     initial_stream.accept_input()
     codex_continue_manager.accept_callback(envelope())
     initial_stream.result(envelope().payload_sha256)
+    callback_file = codex_continue_root / "callbacks/result.json"
+    callback_file.write_text(json.dumps(to_dict(envelope())))
+    original_events = {p.name: p.read_bytes() for p in (provider_root / "generation-7/events").glob("*.json")}
+
+    def observe_same_parent_callback(retained: bool) -> RuntimeWorkerExecution:
+        callback_worker = RuntimeWorkerExecution.__new__(RuntimeWorkerExecution)
+        callback_worker.spec_path = codex_continue_manager._state_root(before) / "launch.json"
+        callback_worker.spec = {
+            "callback_registration": codex_continue_manager._callback_target_path(before),
+            "cwd": codex_continue_root, "owner_id": "owner-1",
+            "operation_id": "runtime-1", "run_id": "run-1",
+        }
+        callback_worker.store = codex_continue_manager.store
+        callback_worker.cmux_adapter = codex_continue_cmux
+        callback_worker.active_target = (7, "runtime-1", "run-1", callback_file) if retained else None
+        callback_worker.callback_handled = retained
+        callback_worker.summary_attention = lambda reason: (_ for _ in ()).throw(AssertionError(reason))
+        for _ in range(3):
+            callback_worker.inspect_callback()
+        check(
+            "same-parent continuation retains original callback generation for " + ("live" if retained else "restarted") + " worker",
+            codex_continue_manager._callback_target(before)["generation"] == 7
+            and not RuntimeProviderEventStream.rehydrate(provider_root, 8).controller.current_state().cursor.result_published
+            and {p.name: p.read_bytes() for p in (provider_root / "generation-7/events").glob("*.json")} == original_events,
+        )
+        return callback_worker
+
+    def inspect_before_continuation_ack() -> None:
+        assert not RuntimeProviderEventStream.rehydrate(provider_root, 8).controller.current_state().cursor.input_accepted
+        observe_same_parent_callback(False)
+
+    codex_continue_cmux.before_input_ack = inspect_before_continuation_ack
     codex_continued = codex_continue_manager.continue_session(
         "owner-1", "runtime-1", "checkpoint-1", "continue.md"
     )
+    codex_continue_cmux.before_input_ack = None
     expected_codex_continuation = interactive_provider_input(
         "codex", codex_continue_path.resolve(), codex_continue_prompt
     )
@@ -3021,7 +3062,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
     )
 
     continuation_state = RuntimeProviderEventStream.rehydrate(
-        provider_root, int(codex_continue_manager._callback_target(codex_continued.record)["generation"])
+        provider_root, 8
     ).controller.current_state()
     check(
         "same-parent typed continuation has its own accepted input receipt",
@@ -3038,6 +3079,28 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         codex_continue_cmux.sent == sent_before_replay
         and replay.record.attempt == codex_continued.record.attempt,
     )
+
+    # Run the real callback observer after continuation, with the old artifact
+    # still present. Both a retained worker and a fresh observer must keep the
+    # accepted result in generation 7 while input delivery uses generation 8.
+    for retained in (True, False):
+        callback_worker = observe_same_parent_callback(retained)
+    closing_record = codex_continue_manager.store.read("owner-1", "runtime-1")
+    resources = closing_record.resources
+    codex_continue_manager._write_json(callback_worker.spec_path.parent / "ready.json", {
+        "schema_version": 1, "status": "ready", "pid": resources.process_group,
+        "process_group": resources.process_group, "supervisor_pid": resources.supervisor_pid,
+        "process_identity": resources.process_identity, "supervisor_identity": resources.supervisor_identity,
+        "provider_generation": 7,
+    })
+    codex_continue_manager.request_exit("owner-1", "runtime-1")
+    codex_continue_manager.process.status_value = "dead"
+    codex_continue_manager.process.supervisor_status_value = "dead"
+    codex_continue_cmux.surface_status = "missing"
+    closed_continuation = codex_continue_manager.cleanup("owner-1", "runtime-1")
+    check("same-parent continued callback permits real exact cleanup",
+          closed_continuation.record.state == "complete"
+          and closed_continuation.record.resources == OwnedResources(), closed_continuation)
 
     class RetainedPromptCmux(FakeCmux):
         def __init__(self, events: list[str], *, acknowledge: bool) -> None:
