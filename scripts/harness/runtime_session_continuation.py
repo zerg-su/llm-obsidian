@@ -468,6 +468,13 @@ def deliver_continuation(
             paste_screen = screen
             paste_digest = _screen_digest(screen)
             break
+        if (
+            screen_state == "idle" and not submit_already_accepted
+            and _editor_digest(runtime, screen) == pre_send_editor_digest
+        ):
+            if observation + 1 < observation_limit:
+                wait(observation_interval_seconds)
+            continue
         if screen_state in {"idle", "permission", "unknown"}:
             return ContinuationDelivery(False, screen_state, 0)
         if observation + 1 < observation_limit:

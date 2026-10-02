@@ -564,6 +564,37 @@ assert stages == [
 ]
 print("OK   paste visibility precedes first Enter and activity acknowledges")
 
+# cmux send can return before Codex repaints the unchanged idle editor.
+for runtime, marker in (("codex", "›"), ("claude", "❯")):
+    baseline = f"{marker} previous editor\nold footer"
+    result, port, retries, _stages = run_case(
+        [f"{marker} previous editor\nnew footer", f"{marker} # Harness-owned review verification",
+         "• Working (1s)" if runtime == "codex" else "✻ Working…(1s · ↓10 tokens)"],
+        pre_screen=baseline, runtime=runtime,
+    )
+    assert result.acknowledged and result.evidence == "provider-activity"
+    assert result.submit_count == 1 and port.sent == [PROMPT]
+    assert port.keys == ["Enter"] and not retries
+print("OK   delayed paste repaint waits for the exact changed editor without resending")
+
+result, port, retries, _stages = run_case(["›", "›"])
+assert not result.acknowledged and result.evidence == "paste-unconfirmed"
+assert result.submit_count == 0 and port.sent == [PROMPT] and not port.keys and not retries
+print("OK   unchanged idle exhaustion never submits or acknowledges the continuation")
+
+for blocker in ("› unrelated changed draft", "1. Allow\n2. Deny\nEnter"):
+    result, port, retries, _stages = run_case([blocker, "› # Harness-owned review verification"])
+    assert not result.acknowledged and result.evidence in {"idle", "unknown"}
+    assert result.submit_count == 0 and not port.keys and not retries
+print("OK   changed unrelated editor and interactive blockers are not paste lag")
+
+result, port, retries, _stages = run_case(
+    ["›", "› # Harness-owned review verification"], ownership=[True, True, False],
+)
+assert not result.acknowledged and result.evidence == "ownership-lost"
+assert result.submit_count == 0 and not port.keys and not retries
+print("OK   ownership loss during delayed paste remains fail-closed")
+
 pre_key_port = FakePort([
     "› previous editor",
     "› # Harness-owned review verification",
