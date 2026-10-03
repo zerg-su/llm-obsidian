@@ -145,12 +145,7 @@ def _delivery_composer_matches(runtime, screen, prompt, identity):
 
 
 def classify_continuation_screen(runtime: str, screen: str, anchor: str) -> str:
-    """Classify only provider UI states that are safe for continuation delivery.
-
-    The screen body remains transient.  We deliberately recognize a small set
-    of native prompt/activity shapes instead of treating arbitrary repainting
-    as provider progress.
-    """
+    """Classify known provider UI states without retaining screen bodies."""
 
     if not screen.strip():
         return "missing"
@@ -297,7 +292,11 @@ def await_initial_input_ready(
                 wait(observation_interval_seconds)
             continue
         state = classify_continuation_screen(runtime, screen, "")
-        if state == "idle":
+        if state == "idle" and (
+            runtime != "codex"
+            or re.search(r"(?:\bcontext\s+\d{1,3}%\s+used\b|\b\d{1,3}%\s+context\s+left\b)",
+                         "\n".join(screen.splitlines()[-24:]), re.IGNORECASE)
+        ):
             idle_observations += 1
             if idle_observations >= INITIAL_IDLE_STABILITY_OBSERVATIONS:
                 return True

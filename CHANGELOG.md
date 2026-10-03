@@ -32,6 +32,10 @@ packages were published for them.
 
 #### Fixed
 
+- Initial Codex input waits for the configured composer context footer before
+  the first native editor handoff. A provisional startup field cannot race
+  configuration or grant submission authority.
+
 - Owned interactive Codex children use the supported legacy keyboard fallback.
   cmux 0.64.25 loses synthetic letter keys in enhanced keyboard mode; child-local
   compatibility restores Ctrl+G without changing caller settings or Claude.

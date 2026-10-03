@@ -777,7 +777,7 @@ class FakeCmux:
     def read(self, surface_id: str) -> str:
         assert surface_id == SURFACE
         if not self.sent:
-            return "❯\n›"
+            return "100% context left\n❯\n›"
         self.transport_visible = True
         prompt = self.sent[-1][1]
         self.logical_buffer = prompt.encode("utf-8")
@@ -842,7 +842,7 @@ initial_ready_port = InitialReadyPort(
     [
         "",
         "Starting MCP servers",
-        *("› Implement {feature}" for _ in range(10)),
+        *("› Implement {feature}\n100% context left" for _ in range(10)),
     ]
 )
 initial_ready_waits: list[float] = []
@@ -874,6 +874,30 @@ check(
     and surface_transport_port.reads == 3,
     surface_transport_port.reads,
 )
+
+provisional_ready_port = InitialReadyPort([
+    *("› Ask Codex to do anything" for _ in range(20)),
+    *("› Ask Codex to do anything\nContext 0% used" for _ in range(10)),
+])
+check(
+    "Codex provisional composer cannot exhaust stability before native configuration",
+    await_initial_input_ready(
+        provisional_ready_port, surface_id=SURFACE, runtime="codex",
+        observation_limit=30, observation_interval_seconds=0,
+        wait=lambda _seconds: None,
+    ) and provisional_ready_port.reads == 30,
+    provisional_ready_port.reads,
+)
+footerless_ready_port = InitialReadyPort(["› Ask Codex to do anything"] * 10)
+check(
+    "stable provisional Codex editor never grants initial readiness",
+    not await_initial_input_ready(
+        footerless_ready_port, surface_id=SURFACE, runtime="codex",
+        observation_limit=10, observation_interval_seconds=0,
+        wait=lambda _seconds: None,
+    ), footerless_ready_port.reads,
+)
+
 
 startup_banner_port = InitialReadyPort(
     ["Last login: Thu Aug 6", "Last login: Thu Aug 6\nzak@host project %"]
@@ -943,7 +967,7 @@ class InitialPromptPort(InitialReadyPort):
         self.keys.append(key)
         if key == "Enter":
             self.screens.extend(
-                "› Implement {feature}" for _ in range(10)
+                "› Implement {feature}\n100% context left" for _ in range(10)
             )
 
 
@@ -976,7 +1000,7 @@ class CodexTrustTransitionPort(InitialReadyPort):
                     )
                 ),
                 "› 1. Yes, continue",
-                *("› Ask Codex to do anything" for _ in range(10)),
+                *("› Ask Codex to do anything\nContext 0% used" for _ in range(10)),
             ]
         )
         self.keys: list[str] = []
@@ -1012,7 +1036,7 @@ class DelayedCodexTrustPort(CodexTrustTransitionPort):
         self.screens = [
             "› Ask Codex to do anything",
             *self.screens,
-            *("› Ask Codex to do anything" for _ in range(10)),
+            *("› Ask Codex to do anything\nContext 0% used" for _ in range(10)),
         ]
 
 
@@ -2923,7 +2947,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         def read(self, surface_id: str) -> str:
             assert surface_id == SURFACE
             if not self.sent:
-                return "›"
+                return "100% context left\n›"
             self.transport_visible = True
             prompt = self.sent[-1][1]
             self.logical_buffer = prompt.encode("utf-8")
@@ -3148,7 +3172,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         def read(self, surface_id: str) -> str:
             assert surface_id == SURFACE
             if not self.sent:
-                return "❯\n›"
+                return "100% context left\n❯\n›"
             prompt = self.sent[-1][1]
             self.logical_buffer = prompt.encode("utf-8")
             anchor = next(
@@ -4796,7 +4820,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         def read(self, surface_id: str) -> str:
             assert surface_id == SURFACE
             if not self.sent:
-                return "›"
+                return "100% context left\n›"
             self.transport_visible = True
             prompt = self.sent[-1][1]
             self.logical_buffer = prompt.encode("utf-8")

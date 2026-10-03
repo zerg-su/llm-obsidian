@@ -42,7 +42,12 @@ keyboard mode drops Ctrl+G, while legacy mode delivers it correctly. Codex
 can display an editor error while preserving the complete draft; it is not a
 model submission. No global editor, keyboard or authentication/model routing
 settings are changed. Research
-profiles do not receive this adapter. Installed-binary behavior requires native
+profiles do not receive this adapter. Initial Codex readiness requires a stable
+configured composer with a numeric context footer; a provisional startup field
+cannot trigger the editor handoff. A hidden or unrecognized context footer fails
+closed within the existing readiness deadline. This footer grants no submit
+authority: submission still requires the complete logical buffer.
+Installed-binary behavior requires native
 acceptance; unit tests alone do not establish that behavior.
 
 Claude's existing screen-based checks are retained. They do not prove exact
