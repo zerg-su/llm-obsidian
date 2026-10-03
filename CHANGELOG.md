@@ -12,7 +12,7 @@ packages were published for them.
 
 ## [Unreleased]
 
-### Planned version: 2.9.0
+### Planned version: 2.9.1
 
 #### Added
 
@@ -31,6 +31,10 @@ packages were published for them.
   without a separate authentication probe.
 
 #### Fixed
+
+- Owned interactive Codex children use the supported legacy keyboard fallback.
+  cmux 0.64.25 loses synthetic letter keys in enhanced keyboard mode; child-local
+  compatibility restores Ctrl+G without changing caller settings or Claude.
 
 - A failed initial input preserves the already published process, supervisor
   and provider-generation ownership in `ready.json`. Failure remains typed in

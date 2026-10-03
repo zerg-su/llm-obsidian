@@ -60,7 +60,7 @@ def _publish(path: Path, value: dict) -> None:
 
 
 def configure_environment(spec: dict, values: dict[str, str]) -> dict[str, str]:
-    """Configure only registered interactive Codex children, never caller globals."""
+    """Configure only owned interactive Codex children, including cmux key compatibility."""
     if (
         spec.get("runtime") != "codex"
         or spec.get("callback_mode") in {"research-fetch", "research-synth"}
@@ -72,6 +72,7 @@ def configure_environment(spec: dict, values: dict[str, str]) -> dict[str, str]:
     _private_directory(root)
     result = dict(values)
     result["VISUAL"] = shlex.join([sys.executable, str(Path(__file__).resolve()), str(root)])
+    result["CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT"] = "1"
     return result
 
 

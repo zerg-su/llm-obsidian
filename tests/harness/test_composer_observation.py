@@ -124,11 +124,13 @@ with tempfile.TemporaryDirectory() as raw:
     original = "  literal buffer\n\npath with space.md\n " .encode()
     seed.write_bytes(original)
     seed.chmod(0o600)
-    caller_env = {"VISUAL": "original-user-editor"}
+    caller_env = {"VISUAL": "original-user-editor", "CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT": "0"}
     env = configure_environment({"runtime": "codex", "ready_path": runtime_root / "ready.json"}, caller_env)
-    assert caller_env == {"VISUAL": "original-user-editor"}
+    assert caller_env == {"VISUAL": "original-user-editor", "CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT": "0"}
+    assert env["CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT"] == "1", "owned Codex must receive cmux-compatible control keys"
     assert "VISUAL" in env and env["VISUAL"] != caller_env["VISUAL"]
     for excluded in (
+        {"runtime": "codex"},
         {"runtime": "claude", "ready_path": runtime_root / "ready.json"},
         {"runtime": "codex", "ready_path": runtime_root / "ready.json", "callback_mode": "research-fetch"},
         {"runtime": "codex", "ready_path": runtime_root / "ready.json", "callback_mode": "research-synth"},

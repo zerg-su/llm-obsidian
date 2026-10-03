@@ -35,7 +35,13 @@ owner-only, process-group/surface-bound nonce receipt carries only SHA-256 and
 byte count. Source symlinks, incomplete reads, stale receipts and unknown UI
 states grant no submit authority. The helper exits with code 75 to retain the
 draft instead of applying Codex's successful-editor whitespace normalization.
-No global editor settings or authentication/model routing are changed. Research
+Owned Codex children also set `CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT=1`.
+In cmux 0.64.25, synthetic letter keys have no Unicode codepoint; enhanced
+keyboard mode drops Ctrl+G, while legacy mode delivers it correctly. Codex
+0.160.0 supports this environment fallback. The helper's unsuccessful exit
+can display an editor error while preserving the complete draft; it is not a
+model submission. No global editor, keyboard or authentication/model routing
+settings are changed. Research
 profiles do not receive this adapter. Installed-binary behavior requires native
 acceptance; unit tests alone do not establish that behavior.
 
