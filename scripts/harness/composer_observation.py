@@ -136,6 +136,7 @@ class ComposerPort:
             if pending.exists() or pending.is_symlink():
                 return None  # An interrupted handoff cannot be silently superseded.
             _publish(pending, request)
+            completed = False
             try:
                 self.port.send_key(surface_id, "ctrl+g")
                 for _ in range(40):
@@ -160,14 +161,17 @@ class ComposerPort:
                             "Save and close external editor to continue." not in screen
                             and state in {"idle", "input-ready"}
                         ):
+                            completed = True
                             return value["sha256"], value["byte_count"]
                     time.sleep(0.05)
                 return None
             except (OSError, ValueError, TypeError, RuntimeError):
                 return None
             finally:
-                pending.unlink(missing_ok=True)
-                receipt.unlink(missing_ok=True)
+                # A late helper must never adopt a replacement request's nonce.
+                if completed:
+                    pending.unlink(missing_ok=True)
+                    receipt.unlink(missing_ok=True)
 
 
 def observation_port(port: object, runtime: str, runtime_root: Path, process_group: int) -> object:

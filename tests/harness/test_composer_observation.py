@@ -171,9 +171,56 @@ with tempfile.TemporaryDirectory() as raw:
     assert not (port.root / "request.json").exists()
     assert not list(port.root.glob("[0-9a-f]*.json"))
     print("OK   real editor helper hashes literal bytes without bodies/global changes; nonce scratch reaped")
-    adapter.mode = "symlink"
-    assert port.observe_composer("probe") is None and seed.read_bytes() == original
-    adapter.mode = "stale"
+
+    for mode in ("symlink", "stale"):
+        runtime_root = runtime_root / mode
+        runtime_root.mkdir(mode=0o700)
+        adapter.mode = mode
+        port = ComposerPort(adapter, runtime_root, os.getpgrp())
+        assert port.observe_composer("probe") is None and seed.read_bytes() == original
+    print("OK   unsafe seed and stale receipt grant no logical authority")
+
+with tempfile.TemporaryDirectory() as raw:
+    runtime_root = Path(raw).resolve()
+    seed = runtime_root / "late-seed.md"
+    seed.write_bytes(b"old delayed draft")
+    seed.chmod(0o600)
+
+    class LateEditorPort:
+        def __init__(self):
+            self.keys = []
+            self.first_request = None
+
+        def send_key(self, _surface, key):
+            assert key == "ctrl+g"
+            self.keys.append(key)
+            capture = runtime_root / "composer-observation"
+            if self.first_request is None:
+                self.first_request = json.loads((capture / "request.json").read_text())
+                return  # A has not read its request or exited when the caller times out.
+            # If B were admitted, the delayed A would read B's mutable request.
+            late = subprocess.run([
+                sys.executable, "-B", str(ROOT / "scripts/harness/composer_observation.py"),
+                str(capture), str(seed),
+            ], capture_output=True)
+            assert late.returncode == 75
+
+        def read(self, _surface):
+            return "› idle draft"
+
+    adapter = LateEditorPort()
+    port = ComposerPort(adapter, runtime_root, os.getpgrp())
     assert port.observe_composer("probe") is None
-    assert not (port.root / "request.json").exists()
-    print("OK   source symlinks and stale nonce receipts do not create composer authority")
+    first = adapter.first_request
+    assert port.observe_composer("probe") is None and adapter.keys == ["ctrl+g"]
+    assert json.loads((port.root / "request.json").read_text()) == first
+    late = subprocess.run([
+        sys.executable, "-B", str(ROOT / "scripts/harness/composer_observation.py"),
+        str(port.root), str(seed),
+    ], capture_output=True)
+    assert late.returncode == 75 and not late.stdout and not late.stderr
+    receipt = json.loads((port.root / (first["nonce"] + ".json")).read_text())
+    assert receipt["nonce"] == first["nonce"]
+    assert receipt["sha256"] == hashlib.sha256(seed.read_bytes()).hexdigest()
+    assert port.observe_composer("probe") is None and adapter.keys == ["ctrl+g"]
+    print("OK   delayed helper retains only its original nonce; no later observation or submit authority")

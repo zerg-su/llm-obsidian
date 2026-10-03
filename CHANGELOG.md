@@ -67,7 +67,7 @@ packages were published for them.
 
 - Replaced dated skill guidance with stable contracts and registered prompt
   regressions and scratch-vault template validation in `make test`.
-- The scripts ratchet is pinned to exactly 306 files / 116,589 measured lines: the
+- The scripts ratchet is pinned to exactly 306 files / 116,593 measured lines: the
   152-line auth utility, 38 net runtime lines, 13 schema-scope binding lines
   16 terminal-routing lines and 201 continuation/task-context/paste repair lines.
   The integrated base was one line below its previous ceiling.

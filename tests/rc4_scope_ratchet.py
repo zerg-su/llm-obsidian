@@ -640,8 +640,13 @@ that source to initial input, continuation and retry, replacing Codex's
 expected-driven reconstruction. Claude's prior matching remains unchanged and
 unverified by explicit authorization. The post-submit observation phase is
 extracted without raising function or file limits. Together with upstream
-model/prompt fixes, the exact tree is 306 files / 116,589 lines, with no
+model/prompt fixes, the exact tree is 306 files / 116,593 lines, with no
 speculative headroom, timeout growth, second paste or extra submit budget.
+
+The advisory nonce-race correction retains unresolved handoff reservations. A
+late helper cannot acquire the identity of another observation. Four measured
+production lines preserve this fail-closed boundary; delayed-helper RED/GREEN
+regression exercises the ordering without another provider effect.
 
 """
 
@@ -657,7 +662,7 @@ SCRIPT_FILE_CEILING = 306
 
 #: Maximum total lines across those files. This is the measured exact candidate
 #: after the 2.9.0 runtime/auth integration, U-R10 binding and cmux I/O, with zero headroom.
-SCRIPT_LINE_CEILING = 116_589
+SCRIPT_LINE_CEILING = 116_593
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:
