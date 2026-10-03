@@ -4390,7 +4390,9 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
     assert workspace_surface_stream.start().action == "wait"
     assert workspace_surface_stream.reserve_input().action == "send"
     assert workspace_surface_stream.accept_input().action == "wait"
+    assert not workspace_manager.review_result_ready("owner-1", "runtime-workspace-surface")
     assert workspace_surface_stream.result(workspace_surface_sha).action == "close"
+    assert workspace_manager.review_result_ready("owner-1", "runtime-workspace-surface")
     workspace_process.status_value = "dead"
     workspace_process.supervisor_status_value = "dead"
     workspace_manager.request_exit("owner-1", "runtime-workspace-surface")

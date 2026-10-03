@@ -526,6 +526,11 @@ def finish_review_lane(
     deadline = time.monotonic() + max(0.0, timeout_seconds)
     poll_delay = max(0.0, poll_seconds)
     attention_retries = 0
+    result_ready = getattr(runtime, "review_result_ready", None)
+    while callable(result_ready) and not result_ready(lane.owner_id, lane.operation_id):
+        if time.monotonic() >= deadline:
+            return _runtime_record(runtime.status(lane.owner_id, lane.operation_id))
+        time.sleep(min(poll_delay, max(0.0, deadline - time.monotonic())))
     result = runtime.request_exit(lane.owner_id, lane.operation_id)
     while True:
         record = _runtime_record(result)

@@ -1506,3 +1506,20 @@ with tempfile.TemporaryDirectory(prefix="delivery-boundary.") as raw:
     )
 
 print("delivery and durable close matrix: ok")
+
+with tempfile.TemporaryDirectory(prefix="invalid-provider-event.") as raw:
+    stream = RuntimeProviderEventStream.create(
+        Path(raw), owner_id="journal-owner", operation_id="journal-op", run_id="journal-run",
+        generation=1, process_identity="a" * 64, workspace_id="workspace-1", surface_id="surface-1", input_sha256="b" * 64,
+    )
+    stream.start(); stream.reserve_input(); stream.accept_input(); stream.process_exited(0)
+    events_before = {p.name: p.read_bytes() for p in (stream.root / "events").glob("*.json")}
+    try:
+        stream.result("c" * 64)
+    except DeliveryError:
+        pass
+    else:
+        raise AssertionError("late result was accepted after process exit")
+    assert {p.name: p.read_bytes() for p in (stream.root / "events").glob("*.json")} == events_before, "rejected event poisoned the write-ahead journal"
+    assert stream.controller.current_state().attention_reason == "result-missing"
+    print("OK   rejected late result preserves the provider journal and its failure state")

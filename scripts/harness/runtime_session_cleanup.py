@@ -479,6 +479,31 @@ class RuntimeSessionCleanupMixin:
             surface_status=surface_status,
         )
 
+    def review_result_ready(self, owner_id: str, operation_id: str) -> bool:
+        """Observe the accepted exact callback's provider result before exit."""
+
+        try:
+            record = self.store.read(owner_id, operation_id)
+            target = self._callback_target(record)
+            callback = self.store.read(owner_id, str(target["operation_id"]))
+            if (
+                callback.run_id != target["run_id"]
+                or not callback.accepted_callback_id
+                or not callback.accepted_callback_sha256
+                or (callback.spec.operation_id != operation_id and (
+                    callback.spec.kind != "review-round"
+                    or callback.spec.parent_operation_id != operation_id
+                    or callback.lane_id != record.lane_id
+                ))
+            ):
+                return False
+            selected = self._exact_result_stream(
+                record, self._metadata(record), callback.accepted_callback_sha256
+            )
+            return selected is not None and selected[1] == int(target["generation"])
+        except (RuntimeSessionError, StoreError):
+            return False
+
     def request_exit(
         self, owner_id: str, operation_id: str
     ) -> RuntimeSessionResult:

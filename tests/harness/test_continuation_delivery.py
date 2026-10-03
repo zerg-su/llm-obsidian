@@ -152,6 +152,7 @@ def run_case(
     *,
     pre_screen: str = "›",
     artifacts: list[bool] | None = None,
+    artifact_after_submit: bool = False,
     retry: bool = True,
     send_prompt: bool = True,
     submit_already_accepted: bool = False,
@@ -169,6 +170,8 @@ def run_case(
     ownership_values = list(ownership or [])
 
     def artifact_ready() -> bool:
+        if artifact_after_submit:
+            return "Enter" in port.keys
         return artifact_values.pop(0) if artifact_values else False
 
     def reserve_retry() -> bool:
@@ -1068,7 +1071,7 @@ print("OK   exhausted shared nudge budget fails closed without duplicate input")
 
 result, port, retries, _stages = run_case(
     ["› " + PROMPT],
-    artifacts=[False, False, True],
+    artifact_after_submit=True,
 )
 assert result.acknowledged and result.evidence == "artifact"
 assert port.sent == [PROMPT] and port.keys == ["Enter"] and not retries
@@ -1406,3 +1409,47 @@ for suffix in ("", "\nunauthorized hidden bytes"):
             deliver_worker_notification(worker, notify_path=path, marker=marker, message=message)
             assert terminal.keys == before
         print("OK   legacy Codex sent-marker recovery requires the complete owned buffer", bool(suffix))
+
+# The configured editor handoff and write-ahead persistence can both block.
+# Changing authority inside either boundary must precede zero task input.
+from harness.composer_observation import ComposerPort
+
+class AuthorityHandoffTerminal(NativeNotificationTerminal):
+    def __init__(self, root, case):
+        super().__init__(root)
+        self.case, self.owned, self.artifact, self.busy_reads = case, True, False, 1
+
+    def read(self, surface):
+        if self.busy_reads:
+            self.busy_reads -= 1
+            return "• Working (1s)\n›"
+        if "Enter" in self.keys:
+            return "• Working (new turn)\n›"
+        return super().read(surface)
+
+    def send_key(self, surface, key):
+        super().send_key(surface, key)
+        if key == "ctrl+g":
+            if self.case == "lost-handoff": self.owned = False
+            if self.case == "artifact-handoff": self.artifact = True
+
+for case in ("control", "lost-handoff", "artifact-handoff", "lost-reservation"):
+    with tempfile.TemporaryDirectory(prefix="authority-handoff.") as raw:
+        terminal = AuthorityHandoffTerminal(Path(raw).resolve(), case)
+        port = ComposerPort(terminal, terminal.root, os.getpgid(os.getppid()))
+        reservations = []
+        def reserve(stage, *_args):
+            reservations.append(stage)
+            if stage == "paste-reserved" and case == "lost-reservation": terminal.owned = False
+        result = deliver_continuation(
+            port, surface_id=SURFACE, runtime="codex", prompt="Only owned input",
+            artifact_ready=lambda: terminal.artifact, ownership_ready=lambda: terminal.owned,
+            reserve_retry=lambda: False, observe_stage=reserve, observation_limit=2, wait=lambda _: None,
+        )
+        if case == "control":
+            assert result.acknowledged and len(terminal.sent) == 1 and terminal.keys.count("Enter") == 1
+        else:
+            assert not terminal.sent and "Enter" not in terminal.keys, (case, result, terminal.sent, terminal.keys)
+            assert result.evidence == ("artifact" if case == "artifact-handoff" else "ownership-lost")
+            if case != "lost-reservation": assert reservations == []
+        print("OK   no stale task input crosses the blocking handoff or reservation", case)

@@ -438,6 +438,23 @@ def resolve_recognized_provider_prompt(
     return prompt.family
 
 
+def _paste_authority(
+    runtime: str, editor_digest: str | None,
+    artifact_ready: ArtifactProbe, ownership_ready: OwnershipProbe,
+) -> ContinuationDelivery | None:
+    """Recheck authority after a blocking composer or reservation boundary."""
+
+    if editor_digest is None:
+        return ContinuationDelivery(False, "composer-unavailable", 0)
+    if runtime != "codex":
+        return None
+    if artifact_ready():
+        return ContinuationDelivery(True, "artifact", 0)
+    if not ownership_ready():
+        return ContinuationDelivery(False, "ownership-lost", 0)
+    return None
+
+
 def deliver_continuation(
     port: ContinuationPort,
     *,
@@ -500,11 +517,15 @@ def deliver_continuation(
             pre_send_screen = port.read(surface_id)
         pre_send_digest = _screen_digest(pre_send_screen)
         pre_send_editor_digest = _delivery_editor_identity(port, surface_id, runtime, pre_send_screen)
-        if pre_send_editor_digest is None:
-            return ContinuationDelivery(False, "composer-unavailable", 0)
+        blocked = _paste_authority(runtime, pre_send_editor_digest, artifact_ready, ownership_ready)
+        if blocked is not None:
+            return blocked
         observe_stage(
             "paste-reserved", 0, pre_send_digest, pre_send_editor_digest, ""
         )
+        blocked = _paste_authority(runtime, pre_send_editor_digest, artifact_ready, ownership_ready)
+        if blocked is not None:
+            return blocked
         port.send(surface_id, prompt)
         observe_stage(
             "transport-accepted", 0, pre_send_digest, pre_send_editor_digest, ""

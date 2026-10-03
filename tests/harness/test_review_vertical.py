@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 from review_contract import ReviewContractError, validate_review
 from harness.callbacks import CallbackBroker
-from harness.contracts import AttentionReason, CapabilityReport, RuntimeRoute
+from harness.contracts import AttentionReason, CapabilityReport, RuntimeRoute, OperationSpec
 from harness.runtime_sessions import RuntimeSessionRequest
 from harness.store import OperationStore
 from harness.workflows import review as review_facade
@@ -886,3 +886,34 @@ with tempfile.TemporaryDirectory(prefix="review-runner.") as raw:
     )
 
 print("review vertical tests passed")
+
+from types import SimpleNamespace
+from unittest.mock import patch
+from harness.workflows.review import finish_review_lane
+
+for case, readiness in (("settled", [True]), ("delayed", [False, False, True]), ("unsettled", [False])):
+    with tempfile.TemporaryDirectory(prefix="review-result-before-exit.") as raw:
+        runtime = FakeReviewRuntime(OperationStore(Path(raw)))
+        spec = OperationSpec("exit-order", "exit-key", "simple-review-holistic", "exit-owner", RuntimeRoute("codex", "gpt-6-astra", "high", "reviewer-callback", "a" * 64), "prompt.md", "scoped")
+        runtime.store.create(spec, lane_id="exit-lane", run_id="exit-run")
+        for state in ("preflight", "starting", "running", "awaiting-callback"):
+            runtime.store.transition(spec.owner_id, spec.operation_id, state)
+        observed = []
+        def ready(*_args):
+            value = readiness.pop(0) if readiness else False
+            observed.append(value)
+            return value
+        runtime.review_result_ready = ready
+        original_exit = runtime.request_exit
+        def exit_after_result(*args):
+            assert observed and observed[-1], "provider exit precedes normalized result"
+            return original_exit(*args)
+        runtime.request_exit = exit_after_result
+        with patch("harness.workflows.review.time.sleep"):
+            result = finish_review_lane(runtime, SimpleNamespace(owner_id=spec.owner_id, operation_id=spec.operation_id), timeout_seconds=0 if case == "unsettled" else 1)
+        if case == "unsettled":
+            assert not runtime.exits and not runtime.cleanups and result.state == "awaiting-callback"
+        else:
+            assert result.state == "complete" and len(runtime.exits) == len(runtime.cleanups) == 1
+            assert observed == ([True] if case == "settled" else [False, False, True])
+        print("OK   reviewer waits for provider result before exact exit", case)

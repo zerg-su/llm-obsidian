@@ -204,6 +204,12 @@ class RuntimeProviderEventStream:
                 state.cursor.last_sequence + 1,
                 **values,
             )
+            # Reject invalid ordering before reserving its immutable journal slot.
+            # The same lock protects validation, write-ahead and reducer advance.
+            try:
+                state.cursor.advance(event)
+            except ProviderEventError as exc:
+                raise RuntimeProviderEventError("provider event failed delivery validation") from exc
             self._write_event(event)
             return self.controller.decide(event=event)
 

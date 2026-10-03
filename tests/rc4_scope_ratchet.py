@@ -668,6 +668,17 @@ Native prototypes precede promotion; behavioral regressions cover foreign tabs,
 moved/ambiguous geometry, asynchronous disappearance and exactly-once effects.
 This measured candidate remains 306 files / 116,679 lines with no headroom.
 
+
+The subsequent Astra finding reproduces ownership loss during a blocking Codex
+baseline handoff. Exact authority and artifact checks now precede reservation
+and paste. Review finalization also observes the exact callback's provider-result
+receipt before exit, while invalid event ordering is rejected before occupying a
+write-ahead journal slot. Native failure and unpublished orphan result are kept;
+no approval or provider result is manufactured. Dedicated behavioral regressions
+cover loss during handoff/reservation, delayed/missing result, and rejected late
+result journal integrity. The exact contour is 306 files / 116,738 lines,
+with no headroom and no new modules or writable authority.
+
 """
 
 from __future__ import annotations
@@ -682,7 +693,7 @@ SCRIPT_FILE_CEILING = 306
 
 #: Maximum total lines across those files. This is the measured exact candidate
 #: after the 2.9.0 runtime/auth integration, U-R10 binding and cmux I/O, with zero headroom.
-SCRIPT_LINE_CEILING = 116_679
+SCRIPT_LINE_CEILING = 116_738
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:
