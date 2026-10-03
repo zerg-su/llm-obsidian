@@ -504,10 +504,13 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
             return self.workspace_current
 
         def close_workspace_exact(
-            self, workspace_id: str, window_id: str
+            self, workspace_id: str, window_id: str, *, expected_surface_id: str = ""
         ) -> None:
             self.closed_workspaces.append((workspace_id, window_id))
             self.workspace_current = "missing"
+            if expected_surface_id:
+                assert expected_surface_id == "11111111-1111-1111-1111-111111111111"
+                self.current = "missing"
 
     class ExitAfterProbeProcess(FakeProcess):
         exit_requested = False
@@ -1307,7 +1310,7 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
 
     create_cli_operation("op-modern-cancel-cli", state="running")
     bind_owned_resources("op-modern-cancel-cli")
-    write_workspace_session("op-modern-cancel-cli")
+    modern_workspace, modern_window = write_workspace_session("op-modern-cancel-cli")
     write_callback_target("op-modern-cancel-cli")
     create_provider_stream("op-modern-cancel-cli")
     write_provider_ready("op-modern-cancel-cli")
@@ -1325,9 +1328,8 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
         modern_cancel_rc == 0
         and modern_cancelled.state == "cancelled"
         and modern_cancelled.resources == OwnedResources()
-        and modern_cancel_cmux.closed_workspaces == []
-        and modern_cancel_cmux.closed
-        == ["11111111-1111-1111-1111-111111111111"],
+        and modern_cancel_cmux.closed_workspaces == [(modern_workspace, modern_window)]
+        and modern_cancel_cmux.closed == [],
     )
 
     create_cli_operation("op-unclosed-cli", state="running")

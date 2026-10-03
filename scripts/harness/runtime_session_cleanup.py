@@ -660,8 +660,14 @@ class RuntimeSessionCleanupMixin:
         if surface_status == "alive":
             supervisor.effect(
                 "close-surface",
-                lambda _record: self.cmux.close_exact(
-                    resources.surface_id
+                lambda _record: (
+                    self.cmux.close_workspace_exact(
+                        str(metadata.get("workspace_id") or ""),
+                        str(metadata.get("window_id") or ""),
+                        expected_surface_id=resources.surface_id,
+                    )
+                    if metadata.get("placement") == "workspace"
+                    else self.cmux.close_exact(resources.surface_id)
                 ),
             )
             try:

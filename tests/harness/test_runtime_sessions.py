@@ -802,11 +802,14 @@ class FakeCmux:
         self.closed.append(surface_id)
 
     def close_workspace_exact(
-        self, workspace_id: str, window_id: str
+        self, workspace_id: str, window_id: str, *, expected_surface_id: str = ""
     ) -> None:
         self.events.append("workspace-close")
         self.closed_workspaces.append((workspace_id, window_id))
         self.workspace_status_value = "missing"
+        if expected_surface_id:
+            assert expected_surface_id == SURFACE
+            self.surface_status = "missing"
 
     def workspace_status(
         self, workspace_id: str, window_id: str
@@ -4398,14 +4401,18 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         "owner-1", "runtime-workspace-surface"
     )
     check(
-        "live task surface closes exactly without closing observer workspace",
+        "live task closes its exact owned workspace after processes exit",
         workspace_surface_cleaned.record.state == "complete"
         and workspace_surface_cleaned.record.resources == OwnedResources()
-        and workspace_cmux.closed == [SURFACE]
-        and workspace_cmux.closed_workspaces == []
-        and workspace_cmux.workspace_status_value == "alive",
+        and workspace_cmux.closed == []
+        and workspace_cmux.closed_workspaces == [(WORKSPACE, WINDOW)]
+        and workspace_cmux.workspace_status_value == "missing",
         workspace_events,
     )
+    replay_cleaned = workspace_manager.cleanup("owner-1", "runtime-workspace-surface")
+    assert replay_cleaned.record == workspace_surface_cleaned.record
+    assert workspace_cmux.closed_workspaces == [(WORKSPACE, WINDOW)]
+    assert workspace_cmux.closed == []
 
     drift_events: list[str] = []
     drift_store = OperationStore(root / "workspace-drift-store")

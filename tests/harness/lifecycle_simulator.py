@@ -453,12 +453,14 @@ class FakeCmux:
             else "missing"
         )
 
-    def close_workspace_exact(self, workspace_id: str, _window_id: str) -> None:
+    def close_workspace_exact(self, workspace_id: str, _window_id: str, *, expected_surface_id: str = "") -> None:
         if workspace_id != WORKSPACE_ID:
             raise RuntimeError("fake cmux workspace identity changed")
         self.effect_observer()
         self.simulated_closes += 1
-        self.state.update(workspace_status="missing")
+        if expected_surface_id and expected_surface_id != SURFACE_ID:
+            raise RuntimeError("fake cmux owned surface identity changed")
+        self.state.update(workspace_status="missing", surface_status="missing")
 
     def disappear(self) -> None:
         self.state.update(surface_status="missing", workspace_status="missing")

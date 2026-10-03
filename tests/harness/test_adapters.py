@@ -242,7 +242,7 @@ cmux.send_key(surface, "down")
 cmux.close_exact(surface)
 check(
     "exact surface close includes its observed containing window",
-    calls[-1] == ["cmux", "close-surface", "--surface", surface, "--window", window],
+    calls[-1] == ["cmux", "close-surface", "--surface", surface, "--workspace", workspace, "--window", window],
 )
 cmux.close_workspace_exact(workspace, window)
 
@@ -1003,3 +1003,67 @@ for label, call in (
         check(label, True)
     else:
         check(label, False)
+
+# Closing an owned workspace must never absorb a user-added surface or a moved
+# container. The gateway models cmux geometry independently of adapter policy.
+other_surface = "55555555-5555-4555-8555-555555555555"
+other_window = "66666666-6666-4666-8666-666666666666"
+for case in ("owned", "extra-tab", "moved", "duplicate", "duplicate-surface", "malformed"):
+    geometry = [{"id": surface}]
+    if case == "extra-tab": geometry.append({"id": other_surface})
+    if case == "malformed": geometry.append({"type": "terminal"})
+    tree = {"windows": [{"id": other_window if case == "moved" else window, "workspaces": [{"id": workspace, "panes": [{"surfaces": geometry}]}]}]}
+    if case == "duplicate": tree["windows"].append(tree["windows"][0])
+    if case == "duplicate-surface": tree["windows"].append({"id": other_window, "workspaces": [{"id": other_surface, "panes": [{"surfaces": [{"id": surface}]}]}]})
+    effects = []
+    def workspace_gateway(command, **_kwargs):
+        if "tree" in command:
+            return subprocess.CompletedProcess(command, 0, json.dumps(tree), "")
+        assert "workspace" in command and "close" in command
+        assert workspace in command and window in command
+        effects.append(command)
+        tree["windows"] = []
+        return subprocess.CompletedProcess(command, 0, "OK", "")
+    guarded = CmuxAdapter(workspace_gateway)
+    try:
+        guarded.close_workspace_exact(workspace, window, expected_surface_id=surface)
+    except CmuxError:
+        assert case != "owned" and effects == [], case
+    else:
+        assert case == "owned" and len(effects) == 1, case
+        guarded.close_workspace_exact(workspace, window, expected_surface_id=surface)
+        assert len(effects) == 1
+    print("OK   guarded workspace cleanup", case)
+
+for case in ("delayed", "close-race", "stuck", "split-close-race"):
+    tree = {"windows": [{"id": window, "workspaces": [{"id": workspace, "panes": [{"surfaces": [{"id": surface}]}]}]}]}
+    effects = []
+    observations = []
+    def closing_gateway(command, **_kwargs):
+        if "tree" in command:
+            observations.append(command)
+            if effects and case == "delayed" and len(observations) >= 4:
+                tree["windows"] = []
+            return subprocess.CompletedProcess(command, 0, json.dumps(tree), "")
+        effects.append(command)
+        if case in {"close-race", "split-close-race"}:
+            tree["windows"] = []
+            return subprocess.CompletedProcess(command, 1, "", "Surface not found in window")
+        return subprocess.CompletedProcess(command, 0, "OK", "")
+    closing = CmuxAdapter(closing_gateway)
+    with patch("harness.adapters.cmux.time.sleep"):
+        try:
+            if case == "split-close-race":
+                closing.close_exact(surface)
+            else:
+                closing.close_workspace_exact(workspace, window, expected_surface_id=surface)
+        except CmuxError as exc:
+            assert case == "stuck" and "unconfirmed" in str(exc)
+        else:
+            assert case != "stuck"
+    assert len(effects) == 1, (case, effects)
+    if case == "split-close-race":
+        assert effects[0] == ["cmux", "close-surface", "--surface", surface, "--workspace", workspace, "--window", window]
+    if case == "delayed":
+        assert len(observations) == 4
+    print("OK   close disappearance observation does not repeat effects", case)

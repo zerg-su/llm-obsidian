@@ -658,6 +658,16 @@ bounded busy, ownership loss and artifact arrival. The readiness correction had
 one line of headroom; this exact tree is 306 files / 116,605 lines, without spare
 capacity or a full acceptance rerun.
 
+
+Post-2.9.1 acceptance reproduced missing Codex composer wiring at the actual
+retained-worker notification seam and native cmux refusal to close a workspace's
+last surface. The existing owners now bind the configured composer, enforce the
+complete buffer on legacy recovery, honor the durable accepted receipt on replay,
+and close only a verified single-surface owned workspace after processes die.
+Native prototypes precede promotion; behavioral regressions cover foreign tabs,
+moved/ambiguous geometry, asynchronous disappearance and exactly-once effects.
+This measured candidate remains 306 files / 116,679 lines with no headroom.
+
 """
 
 from __future__ import annotations
@@ -672,7 +682,7 @@ SCRIPT_FILE_CEILING = 306
 
 #: Maximum total lines across those files. This is the measured exact candidate
 #: after the 2.9.0 runtime/auth integration, U-R10 binding and cmux I/O, with zero headroom.
-SCRIPT_LINE_CEILING = 116_605
+SCRIPT_LINE_CEILING = 116_679
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

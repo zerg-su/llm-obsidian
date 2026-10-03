@@ -287,11 +287,16 @@ class FakeCmux:
         key_observer: Callable[[str, str, str], None] | None = None,
     ) -> None:
         self.sent: list[tuple[str, str]] = []
+        self.logical_buffer = b""
         self.keys: list[tuple[str, str]] = []
         self.key_observer = key_observer
 
     def send(self, surface_id: str, text: str) -> None:
         self.sent.append((surface_id, text))
+        self.logical_buffer = text.encode("utf-8")
+
+    def observe_composer(self, _surface: str) -> tuple[str, int]:
+        return hashlib.sha256(self.logical_buffer).hexdigest(), len(self.logical_buffer)
 
     def read(self, surface_id: str) -> str:
         message = next(
@@ -310,6 +315,8 @@ class FakeCmux:
 
     def send_key(self, surface_id: str, key: str) -> None:
         self.keys.append((surface_id, key))
+        if key == "Enter":
+            self.logical_buffer = b""
         if self.key_observer is not None:
             message = next(
                 (

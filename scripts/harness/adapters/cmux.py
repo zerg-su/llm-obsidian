@@ -6,6 +6,7 @@ import json
 import os
 import re
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Mapping, Sequence
@@ -515,27 +516,75 @@ class CmuxAdapter:
 
     def close_exact(self, surface_id: str) -> None:
         self._require_surface(surface_id)
-        window_id = _surface_window_from_tree(self._tree(), surface_id)
-        self._run([
-            "close-surface", "--surface", surface_id, "--window", window_id
-        ])
+        try:
+            self._run(["close-surface", *self._transport_target(surface_id)])
+        except CmuxError:
+            if surface_id.casefold() in self.surface_workspaces().observed_surfaces:
+                raise
 
     def close_workspace_exact(
-        self, workspace_id: str, window_id: str
+        self, workspace_id: str, window_id: str, *, expected_surface_id: str = ""
     ) -> None:
         if not UUID_RE.fullmatch(workspace_id):
             raise CmuxError("workspace must be an exact UUID")
         if not UUID_RE.fullmatch(window_id):
             raise CmuxError("window must be an exact UUID")
-        self._run(
-            [
-                "workspace",
-                "close",
-                workspace_id,
-                "--window",
-                window_id,
+        if expected_surface_id:
+            self._require_surface(expected_surface_id)
+            if not self._owned_workspace_present(
+                self._tree(), workspace_id, window_id, expected_surface_id
+            ):
+                return
+        try:
+            self._run(["workspace", "close", workspace_id, "--window", window_id])
+        except CmuxError:
+            if not expected_surface_id or self._owned_workspace_present(
+                self._tree(), workspace_id, window_id, expected_surface_id
+            ):
+                raise
+        if expected_surface_id:
+            # Native close acknowledgment precedes hierarchy repaint. Observe
+            # disappearance without repeating the close effect or using focus.
+            for _ in range(40):
+                if not self._owned_workspace_present(
+                    self._tree(), workspace_id, window_id, expected_surface_id
+                ):
+                    return
+                time.sleep(0.05)
+            raise CmuxError("owned workspace close remains unconfirmed")
+
+    @staticmethod
+    def _owned_workspace_present(
+        tree: dict, workspace_id: str, window_id: str, surface_id: str
+    ) -> bool:
+        index = surface_workspaces_from_tree(tree)
+        matches = [
+            (window, workspace)
+            for window in tree["windows"]
+            for workspace in window.get("workspaces", [])
+            if str(workspace.get("id") or workspace.get("workspace_id") or "").casefold() == workspace_id.casefold()
+        ]
+        if not matches:
+            if surface_id.casefold() in index.observed_surfaces:
+                raise CmuxError("owned surface moved outside its workspace")
+            return False
+        if len(matches) != 1 or str(matches[0][0].get("id") or matches[0][0].get("window_id") or "").casefold() != window_id.casefold():
+            raise CmuxError("owned workspace has no unique containing window")
+        if _surface_window_from_tree(tree, surface_id).casefold() != window_id.casefold():
+            raise CmuxError("owned surface moved outside its window")
+        if index.surface_workspaces.get(surface_id.casefold(), "").casefold() != workspace_id.casefold():
+            raise CmuxError("owned surface has no unique workspace")
+        try:
+            surfaces = [
+                str(surface.get("id") or surface.get("surface_id") or "").casefold()
+                for pane in matches[0][1]["panes"]
+                for surface in pane["surfaces"]
             ]
-        )
+        except (KeyError, TypeError, AttributeError) as exc:
+            raise CmuxError("owned workspace geometry is unavailable") from exc
+        if surfaces != [surface_id.casefold()]:
+            raise CmuxError("owned workspace contains unowned or ambiguous surfaces")
+        return True
 
     @staticmethod
     def _require_surface(surface_id: str) -> None:

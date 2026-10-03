@@ -12,7 +12,18 @@ packages were published for them.
 
 ## [Unreleased]
 
-### Planned version: 2.9.1
+### Fixed
+
+- Retained Codex worker notifications use the configured full-buffer composer
+  adapter. Legacy recovery verifies the complete buffer; accepted replay sends
+  no further input.
+- Cleanup closes only the exact owned workspace with a single owned surface,
+  after its provider and supervisor exit. Foreign tabs or ambiguous geometry
+  block cleanup; asynchronous disappearance never repeats the close command.
+- Register the review continuation owner in the coverage audit manifest and
+  link the current release notes from both README files.
+
+## [2.9.1] - 2026-10-03
 
 #### Added
 

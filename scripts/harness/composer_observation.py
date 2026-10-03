@@ -113,6 +113,9 @@ class ComposerPort:
     def send_key(self, surface_id: str, key: str) -> None:
         self.port.send_key(surface_id, key)
 
+    def agent_status(self, workspace_id: str, runtime: str) -> str:
+        return self.port.agent_status(workspace_id, runtime)
+
     def observe_composer(self, surface_id: str) -> tuple[str, int] | None:
         from .runtime_session_continuation import classify_continuation_screen
 

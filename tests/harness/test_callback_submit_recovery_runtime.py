@@ -629,6 +629,7 @@ with tempfile.TemporaryDirectory(prefix="superseded-review-cleanup.") as raw:
         def __init__(self) -> None:
             self.alive = True
             self.closed: list[str] = []
+            self.closed_workspaces: list[tuple[str, str, str]] = []
 
         def status(self, surface_id: str) -> str:
             check("superseded cleanup probes exact old surface", surface_id == SURFACE)
@@ -636,6 +637,11 @@ with tempfile.TemporaryDirectory(prefix="superseded-review-cleanup.") as raw:
 
         def close_exact(self, surface_id: str) -> None:
             self.closed.append(surface_id)
+            self.alive = False
+
+        def close_workspace_exact(self, workspace_id: str, window_id: str, *, expected_surface_id: str = "") -> None:
+            assert (workspace_id, window_id, expected_surface_id) == ("22222222-2222-4222-8222-222222222222", "33333333-3333-4333-8333-333333333333", SURFACE)
+            self.closed_workspaces.append((workspace_id, window_id, expected_surface_id))
             self.alive = False
 
     cleanup_cmux = CleanupCmux()
@@ -670,7 +676,8 @@ with tempfile.TemporaryDirectory(prefix="superseded-review-cleanup.") as raw:
         cleaned.record.state == "cancelled"
         and cleaned.record.resources == OwnedResources()
         and replay.record == cleaned.record
-        and cleanup_cmux.closed == [SURFACE]
+        and cleanup_cmux.closed == []
+        and len(cleanup_cmux.closed_workspaces) == 1
         and authorization_path.is_file(),
         (cleaned, replay, cleanup_cmux.closed),
     )

@@ -458,6 +458,7 @@ with tempfile.TemporaryDirectory(prefix="custom-runtime.") as raw:
     class NotificationCmux:
         def __init__(self) -> None:
             self.message = ""
+            self.logical_buffer = b""
             self.ready_callback_notification_attempts = 0
             self.initial_notification_attempts = 0
             self.successor_notification_attempts = 0
@@ -476,6 +477,10 @@ with tempfile.TemporaryDirectory(prefix="custom-runtime.") as raw:
                 else:
                     self.successor_notification_attempts += 1
             self.message = message
+            self.logical_buffer = message.encode("utf-8")
+
+        def observe_composer(self, _surface: str) -> tuple[str, int]:
+            return hashlib.sha256(self.logical_buffer).hexdigest(), len(self.logical_buffer)
 
         def read(self, _surface: str) -> str:
             anchor = next(
@@ -489,7 +494,8 @@ with tempfile.TemporaryDirectory(prefix="custom-runtime.") as raw:
             return f"› {anchor}" if anchor else "›"
 
         def send_key(self, _surface: str, _key: str) -> None:
-            return None
+            if _key == "Enter":
+                self.logical_buffer = b""
 
     notification_cmux = NotificationCmux()
     thread = threading.Thread(

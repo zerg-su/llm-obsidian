@@ -1290,3 +1290,119 @@ result, port, waits = callback_before_idle_case(2, artifacts=[False, True])
 assert result.acknowledged and result.evidence == "artifact" and result.submit_count == 0
 assert port.sent == port.keys == [] and waits == []
 print("OK   existing continuation artifact during readiness prevents another input")
+
+# Real worker notification composition must bind the configured editor helper.
+# Only terminal I/O is doubled; the nonce exporter, buffer verifier and durable
+# notification reducer remain production code.
+from types import SimpleNamespace
+from harness.composer_observation import export_digest
+
+
+class NativeNotificationTerminal:
+    def __init__(self, runtime_root, *, hidden_suffix=""):
+        self.root = runtime_root
+        self.buffer = ""
+        self.hidden_suffix = hidden_suffix
+        self.sent, self.keys = [], []
+
+    def read(self, surface_id):
+        assert surface_id == SURFACE
+        return (f"› [Pasted Content {len(self.buffer)} chars]\n? for shortcuts" if self.buffer else "›\n? for shortcuts")
+
+    def agent_status(self, workspace_id, runtime):
+        assert workspace_id == "owned-workspace" and runtime == "codex"
+        return "idle"
+
+    def send(self, surface_id, text):
+        assert surface_id == SURFACE
+        self.sent.append(text)
+        self.buffer = text + self.hidden_suffix
+
+    def send_key(self, surface_id, key):
+        assert surface_id == SURFACE
+        self.keys.append(key)
+        if key == "ctrl+g":
+            seed = self.root / "native-editor-buffer"
+            seed.write_text(self.buffer)
+            seed.chmod(0o600)
+            export_digest(self.root / "composer-observation", seed)
+        elif key == "Enter":
+            self.buffer = ""
+        else:
+            raise AssertionError(key)
+
+
+def native_notification_worker(root, port):
+    def publish(path, marker):
+        with path.open("x") as handle:
+            json.dump(marker, handle)
+    return SimpleNamespace(
+        spec={"surface_id": SURFACE, "runtime": "codex"},
+        spec_path=root / "launch.json", cmux_adapter=port,
+        handle=SimpleNamespace(process_group=os.getpgid(os.getppid())),
+        write_immutable_json=publish,
+        _workspace_id=lambda: "owned-workspace",
+    )
+
+
+with tempfile.TemporaryDirectory(prefix="owned-notification-composition.") as raw:
+    root = Path(raw).resolve()
+    terminal = NativeNotificationTerminal(root)
+    worker = native_notification_worker(root, terminal)
+    path = root / "notification.json"
+    marker = {"schema_version": 1, "status": "sent"}
+    message = "Inspect the exact HEAD.\nUnicode: Привет!\nTrailing whitespace:  \n"
+    deliver_worker_notification(worker, notify_path=path, marker=marker, message=message)
+    assert terminal.sent == [message] and terminal.keys.count("Enter") == 1
+    assert json.loads(path.read_text()) == marker
+    receipt = json.loads(path.with_name("notification-delivery.json").read_text())
+    assert receipt["stage"] == "submit-accepted" and receipt["submit_count"] == 1
+    before = terminal.sent[:], terminal.keys[:]
+    deliver_worker_notification(worker, notify_path=path, marker=marker, message=message)
+    assert (terminal.sent, terminal.keys) == before
+    print("OK   owned worker notification exports full native buffer, submits once and never replays")
+
+with tempfile.TemporaryDirectory(prefix="owned-notification-mismatch.") as raw:
+    root = Path(raw).resolve()
+    terminal = NativeNotificationTerminal(root, hidden_suffix="\nunauthorized hidden bytes")
+    worker = native_notification_worker(root, terminal)
+    path = root / "notification.json"
+    try:
+        deliver_worker_notification(worker, notify_path=path, marker=marker, message=message)
+    except RetainedNotificationError:
+        pass
+    else:
+        raise AssertionError("changed full buffer was accepted")
+    assert "Enter" not in terminal.keys and not path.exists()
+    print("OK   worker notification rejects invisible mismatched bytes before Enter")
+
+with tempfile.TemporaryDirectory(prefix="owned-notification-no-child.") as raw:
+    root = Path(raw).resolve()
+    terminal = NativeNotificationTerminal(root)
+    worker = native_notification_worker(root, terminal)
+    worker.handle = None
+    try:
+        deliver_worker_notification(worker, notify_path=root / "notification.json", marker=marker, message=message)
+    except RetainedNotificationError:
+        pass
+    else:
+        raise AssertionError("unbound provider child was accepted")
+    assert terminal.sent == terminal.keys == []
+    print("OK   missing provider child stops notification before any transport")
+
+for suffix in ("", "\nunauthorized hidden bytes"):
+    with tempfile.TemporaryDirectory(prefix="owned-notification-recovery.") as raw:
+        root = Path(raw).resolve()
+        terminal = NativeNotificationTerminal(root)
+        terminal.buffer = message + suffix
+        worker = native_notification_worker(root, terminal)
+        path = root / "notification.json"
+        path.write_text(json.dumps(marker))
+        deliver_worker_notification(worker, notify_path=path, marker=marker, message=message)
+        assert not terminal.sent
+        assert terminal.keys.count("Enter") == (0 if suffix else 1)
+        if not suffix:
+            before = terminal.keys[:]
+            deliver_worker_notification(worker, notify_path=path, marker=marker, message=message)
+            assert terminal.keys == before
+        print("OK   legacy Codex sent-marker recovery requires the complete owned buffer", bool(suffix))

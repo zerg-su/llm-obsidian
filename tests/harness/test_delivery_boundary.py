@@ -478,7 +478,7 @@ with tempfile.TemporaryDirectory(prefix="delivery-boundary.") as raw:
             raise AssertionError("missing surface must not be closed twice")
 
         @staticmethod
-        def close_workspace_exact(_workspace_id: str, _window_id: str) -> None:
+        def close_workspace_exact(_workspace_id: str, _window_id: str, *, expected_surface_id: str = "") -> None:
             raise AssertionError("missing workspace must not be closed twice")
 
     store = OperationStore(root / "cleanup-store")

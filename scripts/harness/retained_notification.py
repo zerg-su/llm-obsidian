@@ -13,7 +13,9 @@ from pathlib import Path
 from typing import Callable, Iterator, Mapping, Protocol
 
 from .prompts import classify
+from .composer_observation import observation_port
 from .runtime_session_continuation import (
+    _composer_identity,
     _editor_digest,
     _editor_state,
     _prompt_anchor,
@@ -190,6 +192,10 @@ def recover_visible_notification(
             return False
         anchor, editor_lines = _prompt_anchor(message), _editor_state(runtime, screen)
         exact_editor = bool(editor_lines and anchor and anchor in editor_lines[-1])
+        if runtime == "codex":
+            exact_editor = _composer_identity(port, surface_id) == hashlib.sha256(
+                message.encode("utf-8")
+            ).hexdigest()
         if classify(runtime, screen).interactive or status not in {"idle", "needs-input"} or not exact_editor:
             return False
         _atomic_json(receipt_path, {**expected, "status": "reserved"})
@@ -293,6 +299,18 @@ def deliver_worker_notification(
     port = getattr(worker, "cmux_adapter", None)
     if not isinstance(spec, dict) or port is None:
         raise RetainedNotificationError("notification worker is incomplete")
+    identity = {
+        "operation_id": str(marker.get("operation_id") or ""),
+        "message_sha256": hashlib.sha256(message.encode()).hexdigest(),
+        "notification": notify_path.name,
+    }
+    delivery_path = notify_path.with_name(f"{notify_path.stem}-delivery.json")
+    if spec.get("runtime") == "codex" and not callable(getattr(port, "observe_composer", None)):
+        root = getattr(worker, "spec_path", None)
+        group = getattr(getattr(worker, "handle", None), "process_group", 0)
+        if not isinstance(root, Path) or type(group) is not int or group <= 1:
+            raise RetainedNotificationError("notification provider ownership is unavailable")
+        port = observation_port(port, "codex", root.parent, group)
     existing: object | None = None
     if notify_path.is_symlink():
         raise RetainedNotificationError("notification marker cannot be a symlink")
@@ -305,6 +323,15 @@ def deliver_worker_notification(
             ) from exc
         if existing != dict(marker):
             raise RetainedNotificationError("notification marker changed")
+        if spec.get("runtime") == "codex":
+            delivered = _read_receipt(delivery_path, {
+                "schema_version": 1, "identity": identity,
+                "identity_sha256": _identity_sha256(identity),
+            })
+            if delivered is not None:
+                if delivered.get("stage") == "submit-accepted":
+                    return
+                raise RetainedNotificationError("notification marker precedes completed delivery")
         workspace_probe = getattr(worker, "_workspace_id", None)
         if workspace_probe is None:
             return
@@ -312,11 +339,6 @@ def deliver_worker_notification(
             workspace_id = str(workspace_probe())
         except Exception:
             return
-        identity = {
-            "operation_id": str(marker.get("operation_id") or ""),
-            "message_sha256": hashlib.sha256(message.encode()).hexdigest(),
-            "notification": notify_path.name,
-        }
         recover_visible_notification(
             port,
             surface_id=str(spec["surface_id"]),
@@ -332,12 +354,6 @@ def deliver_worker_notification(
     writer = getattr(worker, "write_immutable_json", None)
     if writer is None:
         raise RetainedNotificationError("notification worker writer is unavailable")
-    identity = {
-        "operation_id": str(marker.get("operation_id") or ""),
-        "message_sha256": hashlib.sha256(message.encode()).hexdigest(),
-        "notification": notify_path.name,
-    }
-    delivery_path = notify_path.with_name(f"{notify_path.stem}-delivery.json")
     _deliver_new_notification(
         port,
         surface_id=str(spec["surface_id"]),
