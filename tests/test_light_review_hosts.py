@@ -131,4 +131,17 @@ cross = subprocess.run(
 )
 check("Light route CLI rejects cross-runtime before delegation", cross.returncode == 3 and "same runtime" in cross.stderr)
 
+astra = subprocess.run(
+    [sys.executable, str(ROOT / "scripts/model_routing.py"), "--root", str(ROOT), "light-review", "--model", "gpt-6-astra", "--effort", "xhigh"],
+    cwd=ROOT, env=env, text=True, capture_output=True, check=False,
+)
+astra_payload = json.loads(astra.stdout) if astra.returncode == 0 else {}
+check(
+    "Light CLI accepts registered Astra xhigh end to end",
+    astra.returncode == 0
+    and (astra_payload.get("runtime"), astra_payload.get("model"), astra_payload.get("effort"))
+    == ("codex", "gpt-6-astra", "xhigh"),
+    astra.stderr,
+)
+
 print("\nAll Light Review host tests passed.")

@@ -96,8 +96,9 @@ def resolve(
         role == "review"
         and explicit_model
         and explicit_model not in config.data["model_aliases"]
+        and explicit_model not in config.data["model_registry"]
     ):
-        raise RoutingError("review model override must be a registered alias")
+        raise RoutingError("review model override must be a registered model or alias")
 
     source: list[str] = []
     session_source = str(session.get("source") or "") if session else ""

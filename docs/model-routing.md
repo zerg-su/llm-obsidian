@@ -27,8 +27,12 @@ runtime fails closed. There is no silent alias substitution or effort coercion.
 | Unsafe research | After an explicit unsafe request, inherit the full current route and security context; warn once and do not run a second synthesis. |
 | Other deep work | Inherit runtime/model and use the configured deep effort. |
 
-Review model overrides accept only the registered aliases `sol`, `terra`,
-`opus`, and `fable`; runtime/alias mismatches fail closed. `--deep --full` is
+Review model overrides accept registered aliases (`sol`, `terra`, `opus`,
+`fable`) or exact names in `model_registry`, such as `gpt-6-astra`.
+Unknown models are rejected even with `--runtime`; runtime/model mismatches
+fail closed. For example, `--model gpt-6-astra --effort xhigh` selects that
+exact route without changing the defaults. Light Review additionally requires
+the model to belong to the current session's runtime. `--deep --full` is
 invalid, and explicit Full cannot be combined with a runtime/model override.
 Aliases choose a concrete route only; public lane IDs use stable provider
 prefixes, while operation metadata records the exact resolved runtime/model.

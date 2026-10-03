@@ -403,6 +403,21 @@ check(
     and {single_request.route_for(axis).runtime for axis in single_request.policy.axes}
     == {"claude"},
 )
+for mode, expected_axes in (
+    ("simple", ("openai-holistic",)),
+    ("deep", ("openai-intent", "openai-engineering")),
+):
+    astra_request = routed(mode, model="gpt-6-astra", effort="xhigh")
+    check(
+        f"explicit Astra {mode} binds every lane to the exact requested route",
+        astra_request is not None
+        and astra_request.policy.axes == expected_axes
+        and {
+            (route.runtime, route.model, route.effort)
+            for axis in astra_request.policy.axes
+            for route in (astra_request.route_for(axis),)
+        } == {("codex", "gpt-6-astra", "xhigh")},
+    )
 full_request = routed("full")
 check(
     "full routes the exact four-lane provider grid",
