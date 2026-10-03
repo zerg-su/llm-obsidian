@@ -679,6 +679,12 @@ cover loss during handoff/reservation, delayed/missing result, and rejected late
 result journal integrity. The exact contour is 306 files / 116,738 lines,
 with no headroom and no new modules or writable authority.
 
+The same authority guard now follows initial/retry submit reservations before
+Enter, preserving the number of already accepted submits. A narrow effect helper
+keeps the existing function branch ceiling. ComposerPort regressions cover lost
+ownership and newly accepted artifacts at both boundaries. The measured contour
+is 306 files / 116,756 lines with zero headroom.
+
 """
 
 from __future__ import annotations
@@ -693,7 +699,7 @@ SCRIPT_FILE_CEILING = 306
 
 #: Maximum total lines across those files. This is the measured exact candidate
 #: after the 2.9.0 runtime/auth integration, U-R10 binding and cmux I/O, with zero headroom.
-SCRIPT_LINE_CEILING = 116_738
+SCRIPT_LINE_CEILING = 116_756
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

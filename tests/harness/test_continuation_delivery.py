@@ -692,14 +692,13 @@ for runtime, marker, active in (
     ("codex", "›", "• Working (1s)"),
     ("claude", "❯", "✻ Working…(1s · ↓10 tokens)"),
 ):
-    def deliver_editor(screens, *, limit=2, prompt=expected_pointer, ownership=(), artifacts=()):
+    def deliver_editor(screens, *, limit=2, prompt=expected_pointer, lose_after_submit=False, artifact_after_submit=False):
         candidate = FakePort([f"{marker} previous editor"] + screens)
         reservations = []
-        ownership_values, artifact_values = list(ownership), list(artifacts)
         delivered = deliver_continuation(
             candidate, surface_id=SURFACE, prompt=prompt, runtime=runtime,
-            artifact_ready=lambda: artifact_values.pop(0) if artifact_values else False,
-            ownership_ready=lambda: ownership_values.pop(0) if ownership_values else True,
+            artifact_ready=lambda: artifact_after_submit and "Enter" in candidate.keys,
+            ownership_ready=lambda: not (lose_after_submit and "Enter" in candidate.keys),
             reserve_retry=lambda: reservations.append(True) or True,
             observe_stage=lambda *_args: None,
             observation_limit=limit, wait=lambda _seconds: None,
@@ -777,12 +776,12 @@ for runtime, marker, active in (
         assert not delivered.acknowledged and delivered.submit_count == 1
         assert candidate.keys == ["Enter"] and candidate.sent == [expected_pointer]
     delivered, candidate, reservations = deliver_editor(
-        [exact, exact, exact, exact, active], ownership=[True] * 6 + [False],
+        [exact, exact, exact, exact, active], lose_after_submit=True,
     )
     assert not delivered.acknowledged and delivered.evidence == "ownership-lost"
     assert candidate.keys == ["Enter"]
     delivered, candidate, reservations = deliver_editor(
-        [exact, exact, exact, exact, active], artifacts=[False] * 4 + [True],
+        [exact, exact, exact, exact, active], artifact_after_submit=True,
     )
     assert delivered.acknowledged and delivered.evidence == "artifact"
     assert candidate.keys == ["Enter"]
@@ -1423,17 +1422,22 @@ class AuthorityHandoffTerminal(NativeNotificationTerminal):
         if self.busy_reads:
             self.busy_reads -= 1
             return "• Working (1s)\n›"
-        if "Enter" in self.keys:
+        if "Enter" in self.keys and "retry-reservation" not in self.case:
             return "• Working (new turn)\n›"
         return super().read(surface)
 
     def send_key(self, surface, key):
+        buffer = self.buffer
         super().send_key(surface, key)
+        if key == "Enter" and "retry-reservation" in self.case:
+            self.buffer = buffer  # External provider did not acknowledge the first Enter.
         if key == "ctrl+g":
             if self.case == "lost-handoff": self.owned = False
             if self.case == "artifact-handoff": self.artifact = True
 
-for case in ("control", "lost-handoff", "artifact-handoff", "lost-reservation"):
+for case in ("control", "lost-handoff", "artifact-handoff", "lost-reservation",
+             "lost-submit-reservation", "artifact-submit-reservation",
+             "lost-retry-reservation", "artifact-retry-reservation"):
     with tempfile.TemporaryDirectory(prefix="authority-handoff.") as raw:
         terminal = AuthorityHandoffTerminal(Path(raw).resolve(), case)
         port = ComposerPort(terminal, terminal.root, os.getpgid(os.getppid()))
@@ -1441,13 +1445,23 @@ for case in ("control", "lost-handoff", "artifact-handoff", "lost-reservation"):
         def reserve(stage, *_args):
             reservations.append(stage)
             if stage == "paste-reserved" and case == "lost-reservation": terminal.owned = False
+            for boundary, suffix in (("submit-reserved", "submit-reservation"),
+                                     ("submit-retry-reserved", "retry-reservation")):
+                if stage == boundary and case == "lost-" + suffix: terminal.owned = False
+                if stage == boundary and case == "artifact-" + suffix: terminal.artifact = True
         result = deliver_continuation(
             port, surface_id=SURFACE, runtime="codex", prompt="Only owned input",
             artifact_ready=lambda: terminal.artifact, ownership_ready=lambda: terminal.owned,
-            reserve_retry=lambda: False, observe_stage=reserve, observation_limit=2, wait=lambda _: None,
+            reserve_retry=lambda: "retry-reservation" in case, observe_stage=reserve, observation_limit=2, wait=lambda _: None,
         )
         if case == "control":
             assert result.acknowledged and len(terminal.sent) == 1 and terminal.keys.count("Enter") == 1
+        elif "submit-reservation" in case or "retry-reservation" in case:
+            prior_submits = int("retry-reservation" in case)
+            assert len(terminal.sent) == 1 and terminal.keys.count("Enter") == prior_submits, (case, result, terminal.keys)
+            assert result.submit_count == prior_submits
+            assert result.evidence == ("artifact" if case.startswith("artifact-") else "ownership-lost")
+            assert result.acknowledged == case.startswith("artifact-")
         else:
             assert not terminal.sent and "Enter" not in terminal.keys, (case, result, terminal.sent, terminal.keys)
             assert result.evidence == ("artifact" if case == "artifact-handoff" else "ownership-lost")

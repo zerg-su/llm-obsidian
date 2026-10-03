@@ -455,6 +455,31 @@ def _paste_authority(
     return None
 
 
+def _reserve_and_submit(
+    port: ContinuationPort, *, surface_id: str, runtime: str,
+    submit_attempt: int, submit_count: int, pre_send_digest: str,
+    pre_send_editor_digest: str, paste_digest: str,
+    artifact_ready: ArtifactProbe, ownership_ready: OwnershipProbe,
+    observe_stage: StageObserver,
+) -> ContinuationDelivery | None:
+    """Persist submission intent, then revalidate authority before Enter."""
+
+    next_submit_count = submit_count + 1
+    observe_stage(
+        "submit-retry-reserved" if submit_attempt else "submit-reserved",
+        next_submit_count, pre_send_digest, pre_send_editor_digest, paste_digest,
+    )
+    blocked = _paste_authority(runtime, pre_send_editor_digest, artifact_ready, ownership_ready)
+    if blocked is not None:
+        return ContinuationDelivery(blocked.acknowledged, blocked.evidence, submit_count)
+    port.send_key(surface_id, "Enter")
+    observe_stage(
+        "submit-retried" if submit_attempt else "submit-accepted",
+        next_submit_count, pre_send_digest, pre_send_editor_digest, paste_digest,
+    )
+    return None
+
+
 def deliver_continuation(
     port: ContinuationPort,
     *,
@@ -618,23 +643,16 @@ def deliver_continuation(
                 return ContinuationDelivery(False, "prompt-mismatch", submit_count)
             if not ownership_ready():
                 return ContinuationDelivery(False, "ownership-lost", submit_count)
-        next_submit_count = submit_count + 1
-        observe_stage(
-            "submit-retry-reserved" if submit_attempt else "submit-reserved",
-            next_submit_count,
-            pre_send_digest,
-            pre_send_editor_digest,
-            paste_digest,
+        blocked = _reserve_and_submit(
+            port, surface_id=surface_id, runtime=runtime,
+            submit_attempt=submit_attempt, submit_count=submit_count,
+            pre_send_digest=pre_send_digest, pre_send_editor_digest=pre_send_editor_digest,
+            paste_digest=paste_digest, artifact_ready=artifact_ready,
+            ownership_ready=ownership_ready, observe_stage=observe_stage,
         )
-        port.send_key(surface_id, "Enter")
-        submit_count = next_submit_count
-        observe_stage(
-            "submit-retried" if submit_attempt else "submit-accepted",
-            submit_count,
-            pre_send_digest,
-            pre_send_editor_digest,
-            paste_digest,
-        )
+        if blocked is not None:
+            return blocked
+        submit_count += 1
         observed = _await_continuation_activity(
             port, surface_id=surface_id, runtime=runtime, anchor=anchor,
             prompt=prompt, paste_digest=paste_digest,
