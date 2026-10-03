@@ -429,7 +429,6 @@ class RuntimeWorkerExecution(
                 pass
             self.contain_provider_start_failure(self.process, self.handle)
             self.mark_attention(AttentionReason.ATTENTION_REQUIRED)
-            _atomic_json(self.ready, {"schema_version": 1, "status": "failed"})
             _atomic_json(
                 self.exit_path,
                 {

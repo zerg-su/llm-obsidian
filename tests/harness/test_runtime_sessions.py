@@ -6724,6 +6724,7 @@ def check_executor_handshake_precedes_semantic_ack_and_failure_stays_typed() -> 
         cmux = HeldSemanticFailureCmux()
         observed: list[ProcessHandle] = []
         pre_release_kinds: list[list[str]] = []
+        published_ready: list[bytes] = []
 
         def observe_handshake(launch: SurfaceLaunch) -> None:
             try:
@@ -6736,6 +6737,7 @@ def check_executor_handshake_precedes_semantic_ack_and_failure_stays_typed() -> 
                     "executor worker reached the held semantic window",
                     cmux.ack_started.wait(timeout=2),
                 )
+                published_ready.append(launch.ready_path.read_bytes())
                 generation = (
                     launch.spec_path.parent / "provider-events" / "generation-1"
                 )
@@ -6783,8 +6785,12 @@ def check_executor_handshake_precedes_semantic_ack_and_failure_stays_typed() -> 
             (code, exit_record, record.state, kinds, delivery),
         )
         check(
-            "a failed semantic start rewrites the ready handshake fail-closed",
-            ready_record.get("status") == "failed",
+            "a failed semantic start preserves immutable process and generation ownership",
+            ready_record.get("status") == "ready"
+            and ready_record.get("provider_generation") == 1
+            and published_ready == [launch.ready_path.read_bytes()]
+            and ready_record["process_group"] == observed[0].process_group
+            and ready_record["process_identity"] == observed[0].process_identity,
             ready_record,
         )
 

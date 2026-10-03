@@ -32,6 +32,10 @@ packages were published for them.
 
 #### Fixed
 
+- A failed initial input preserves the already published process, supervisor
+  and provider-generation ownership in `ready.json`. Failure remains typed in
+  `exit.json` and the operation state, so cleanup can use the original identity.
+
 - Codex confirms the complete logical editor buffer with a child-local VISUAL digest helper and owned Ctrl+G. Fresh nonce-bound hash/length authority protects initial input, continuation and retry; screen wrapping cannot authorize Enter. Missing authority fails closed. Claude retains its previous checks and remains independently unverified.
 
 
