@@ -10,7 +10,7 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
-## [Unreleased]
+## [2.9.2] - 2026-10-03
 
 ### Fixed
 
@@ -20,6 +20,11 @@ packages were published for them.
 - Cleanup closes only the exact owned workspace with a single owned surface,
   after its provider and supervisor exit. Foreign tabs or ambiguous geometry
   block cleanup; asynchronous disappearance never repeats the close command.
+- Recheck Codex artifact and ownership after blocking editor handoff and
+  durable paste/initial-submit/retry-submit reservations. Stop before additional
+  input and preserve the number of already accepted submits.
+- Reviewer finalization waits for the exact accepted callback's provider result
+  before exit; invalid event order cannot occupy an immutable journal slot.
 - Register the review continuation owner in the coverage audit manifest and
   link the current release notes from both README files.
 
