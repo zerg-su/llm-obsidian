@@ -405,7 +405,7 @@ with tempfile.TemporaryDirectory(prefix="notification-delayed-paste.") as raw:
     else:
         raise AssertionError("late paste unexpectedly completed immediately")
     assert port.sent == [PROMPT] and port.keys == []
-    port.screens = ["› # Harness-owned review verification"]
+    port.screens = ["› " + PROMPT]
     deliver_worker_notification(
         worker,
         notify_path=notify,
@@ -456,7 +456,7 @@ class CrashAfterNotificationEnterPort(CodexSemanticPort):
 with tempfile.TemporaryDirectory(prefix="notification-enter-crash.") as raw:
     notify = Path(raw) / "notify.json"
     port = CrashAfterNotificationEnterPort(
-        ["› old", "› # Harness-owned review verification"]
+        ["› old", "› " + PROMPT]
     )
     worker = FakeWorker(port)
     marker = {"schema_version": 1, "operation_id": "enter-crash"}
@@ -550,7 +550,7 @@ print("OK   cross-process recovery linearizes one Enter")
 
 result, port, retries, stages = run_case(
     [
-        "› # Harness-owned review verification",
+        "› " + PROMPT,
         "• Working (1s)",
     ]
 )
@@ -564,11 +564,55 @@ assert stages == [
 ]
 print("OK   paste visibility precedes first Enter and activity acknowledges")
 
+# Distinct pointers/hashes may share the entire historical 96-character anchor.
+from harness.runtime_provider_input import interactive_provider_input
+expected_pointer = interactive_provider_input(
+    "codex", Path("/tmp/" + "shared-directory/" * 8 + "expected.md"), "Expected contract",
+)
+wrong_path = interactive_provider_input(
+    "codex", Path("/tmp/" + "shared-directory/" * 8 + "unrelated.md"), "Unrelated contract",
+)
+wrong_hash = interactive_provider_input(
+    "codex", Path("/tmp/" + "shared-directory/" * 8 + "expected.md"), "Other contract bytes",
+)
+for runtime, marker, active in (
+    ("codex", "›", "• Working (1s)"),
+    ("claude", "❯", "✻ Working…(1s · ↓10 tokens)"),
+):
+    for draft in (
+        f"{marker} {wrong_path}", f"{marker} {wrong_hash}",
+        f"{marker} {expected_pointer.replace('expected.md', 'expected .md')}",
+        f"{marker} {expected_pointer}\nAssistant: historical response\n{marker} unrelated current draft",
+        f"{marker} [Pasted Content 3675 chars]",
+    ):
+        port = FakePort([f"{marker} previous editor\nold footer",
+                         f"{marker} previous editor\nnew footer", draft, active])
+        result = deliver_continuation(
+            port, surface_id=SURFACE, prompt=expected_pointer, runtime=runtime,
+            artifact_ready=lambda: False, ownership_ready=lambda: True,
+            reserve_retry=lambda: False, observe_stage=lambda *_args: None,
+            observation_limit=3, wait=lambda _seconds: None,
+        )
+        assert not result.acknowledged and result.submit_count == 0
+        assert port.sent == [expected_pointer] and not port.keys
+    # A soft wrap inside the distinguishing path/hash must not erase identity.
+    wrapped = f"{marker} {expected_pointer[:120]}\n  {expected_pointer[120:]}\n\n? for shortcuts"
+    port = FakePort([f"{marker} previous editor", f"{marker} previous editor", wrapped, active])
+    result = deliver_continuation(
+        port, surface_id=SURFACE, prompt=expected_pointer, runtime=runtime,
+        artifact_ready=lambda: False, ownership_ready=lambda: True,
+        reserve_retry=lambda: False, observe_stage=lambda *_args: None,
+        observation_limit=3, wait=lambda _seconds: None,
+    )
+    assert result.acknowledged and result.submit_count == 1
+    assert port.sent == [expected_pointer] and port.keys == ["Enter"]
+print("OK   complete current composer binds path and hash across lag and wrapping; prefix, history and placeholder cannot submit")
+
 # cmux send can return before Codex repaints the unchanged idle editor.
 for runtime, marker in (("codex", "›"), ("claude", "❯")):
     baseline = f"{marker} previous editor\nold footer"
     result, port, retries, _stages = run_case(
-        [f"{marker} previous editor\nnew footer", f"{marker} # Harness-owned review verification",
+        [f"{marker} previous editor\nnew footer", f"{marker} {PROMPT}",
          "• Working (1s)" if runtime == "codex" else "✻ Working…(1s · ↓10 tokens)"],
         pre_screen=baseline, runtime=runtime,
     )
@@ -583,13 +627,13 @@ assert result.submit_count == 0 and port.sent == [PROMPT] and not port.keys and 
 print("OK   unchanged idle exhaustion never submits or acknowledges the continuation")
 
 for blocker in ("› unrelated changed draft", "1. Allow\n2. Deny\nEnter"):
-    result, port, retries, _stages = run_case([blocker, "› # Harness-owned review verification"])
+    result, port, retries, _stages = run_case([blocker, "› " + PROMPT])
     assert not result.acknowledged and result.evidence in {"idle", "unknown"}
     assert result.submit_count == 0 and not port.keys and not retries
 print("OK   changed unrelated editor and interactive blockers are not paste lag")
 
 result, port, retries, _stages = run_case(
-    ["›", "› # Harness-owned review verification"], ownership=[True, True, False],
+    ["›", "› " + PROMPT], ownership=[True, True, False],
 )
 assert not result.acknowledged and result.evidence == "ownership-lost"
 assert result.submit_count == 0 and not port.keys and not retries
@@ -597,7 +641,7 @@ print("OK   ownership loss during delayed paste remains fail-closed")
 
 pre_key_port = FakePort([
     "› previous editor",
-    "› # Harness-owned review verification",
+    "› " + PROMPT,
 ])
 pre_key_stage: dict[str, object] = {}
 
@@ -637,7 +681,7 @@ except RuntimeError as exc:
 else:
     raise AssertionError("pre-Enter kill point did not interrupt continuation")
 assert pre_key_stage["count"] == 1 and pre_key_port.keys == []
-pre_key_port.screens = ["› # Harness-owned review verification"]
+pre_key_port.screens = ["› " + PROMPT]
 pre_key_replay = deliver_continuation(
     pre_key_port,
     surface_id=SURFACE,
@@ -667,7 +711,7 @@ class CrashAfterEnterPort(FakePort):
 
 post_key_port = CrashAfterEnterPort([
     "› previous editor",
-    "› # Harness-owned review verification",
+    "› " + PROMPT,
 ])
 post_key_stage: dict[str, object] = {}
 
@@ -762,7 +806,7 @@ else:
     raise AssertionError("kill point did not interrupt continuation")
 assert crash_port.sent == [PROMPT] and reserved["stage"] == "transport-accepted"
 crash_port.screens = [
-    "› # Harness-owned review verification",
+    "› " + PROMPT,
     "• Working (recovered turn)",
 ]
 replayed = deliver_continuation(
@@ -790,15 +834,15 @@ result, port, retries, _stages = run_case(
         "• Working (1s)",
     ]
 )
-assert result.acknowledged and result.evidence == "provider-activity"
-assert port.sent == [PROMPT] and port.keys == ["Enter"] and not retries
-print("OK   Codex collapsed pasted content is recognized as input-ready")
+assert not result.acknowledged and result.evidence == "prompt-mismatch"
+assert result.submit_count == 0 and port.sent == [PROMPT] and not port.keys and not retries
+print("OK   generic pasted-content placeholder cannot identify the intended continuation")
 
 result, port, retries, _stages = run_case(
     [
-        "› # Harness-owned review verification",
-        "› # Harness-owned review verification",
-        "› # Harness-owned review verification",
+        "› " + PROMPT,
+        "› " + PROMPT,
+        "› " + PROMPT,
         "• Working (2s)",
     ]
 )
@@ -809,9 +853,9 @@ print("OK   one identity-bound Enter retry never repeats the prompt")
 
 result, port, retries, _stages = run_case(
     [
-        "› # Harness-owned review verification",
-        "› # Harness-owned review verification",
-        "› # Harness-owned review verification",
+        "› " + PROMPT,
+        "› " + PROMPT,
+        "› " + PROMPT,
     ],
     retry=False,
 )
@@ -821,7 +865,7 @@ assert port.sent == [PROMPT] and port.keys == ["Enter"] and retries == [False]
 print("OK   exhausted shared nudge budget fails closed without duplicate input")
 
 result, port, retries, _stages = run_case(
-    ["› # Harness-owned review verification"],
+    ["› " + PROMPT],
     artifacts=[False, False, True],
 )
 assert result.acknowledged and result.evidence == "artifact"
@@ -830,7 +874,7 @@ print("OK   callback artifact wins the delivery race")
 
 transport_baseline = "› previous editor"
 result, port, retries, _stages = run_case(
-    ["› # Harness-owned review verification", "• Working"],
+    ["› " + PROMPT, "• Working"],
     send_prompt=False,
     pre_send_screen_sha256=_screen_digest(transport_baseline),
     pre_send_editor_sha256=_editor_digest("codex", transport_baseline),
@@ -838,7 +882,7 @@ result, port, retries, _stages = run_case(
 assert result.acknowledged and port.sent == [] and port.keys == ["Enter"]
 print("OK   transport replay submits only after a baseline-bound editor change")
 
-stale_editor = "› # Harness-owned review verification"
+stale_editor = "› " + PROMPT
 result, port, retries, _stages = run_case(
     [stale_editor, "• Working (stale previous turn)"],
     send_prompt=False,
@@ -852,7 +896,7 @@ print("OK   transport replay cannot submit a stale same-heading editor")
 result, port, retries, stages = run_case(
     [
         "• Working (stale previous turn)",
-        "› # Harness-owned review verification",
+        "› " + PROMPT,
         "• Working (current turn)",
     ]
 )
@@ -875,10 +919,10 @@ print("OK   stale activity without current input visibility fails closed")
 
 result, port, retries, _stages = run_case(
     [
-        "› # Harness-owned review verification",
+        "› " + PROMPT,
         "• Working (stale previous turn)",
     ],
-    pre_screen="› # Harness-owned review verification",
+    pre_screen="› " + PROMPT,
 )
 assert not result.acknowledged and result.evidence == "paste-unconfirmed"
 assert port.sent == [PROMPT] and port.keys == [] and not retries
@@ -889,18 +933,18 @@ result, port, retries, _stages = run_case(
     send_prompt=False,
     submit_already_accepted=True,
     accepted_submit_count=1,
-    paste_screen_sha256=_screen_digest("› # Harness-owned review verification"),
+    paste_screen_sha256=_screen_digest("› " + PROMPT),
 )
 assert result.acknowledged and result.submit_count == 1
 assert port.sent == [] and port.keys == [] and not retries
 print("OK   durable prior submit may acknowledge activity without another Enter")
 
 result, port, retries, _stages = run_case(
-    ["› # Harness-owned review verification"],
+    ["› " + PROMPT],
     send_prompt=False,
     submit_already_accepted=True,
     accepted_submit_count=1,
-    paste_screen_sha256=_screen_digest("› # Harness-owned review verification"),
+    paste_screen_sha256=_screen_digest("› " + PROMPT),
 )
 assert not result.acknowledged and result.evidence == "submit-effect-uncertain"
 assert port.sent == [] and port.keys == [] and not retries
@@ -920,8 +964,8 @@ print("OK   submit replay rejects activity identical to its durable baseline")
 
 result, port, retries, _stages = run_case(
     [
-        "› # Harness-owned review verification",
-        "› # Harness-owned review verification\n• Working (2s)",
+        "› " + PROMPT,
+        "› " + PROMPT + "\n• Working (2s)",
     ]
 )
 assert result.acknowledged and result.evidence == "provider-activity"
@@ -929,14 +973,14 @@ assert port.keys == ["Enter"] and not retries
 print("OK   visible transcript anchor does not hide exact provider activity")
 
 result, port, retries, _stages = run_case(
-    ["› # Harness-owned review verification", "›"]
+    ["› " + PROMPT, "›"]
 )
 assert not result.acknowledged and result.evidence == "idle"
 assert port.keys == ["Enter"] and not retries
 print("OK   idle repaint cannot acknowledge a continuation")
 
 result, port, retries, _stages = run_case(
-    ["› # Harness-owned review verification", "", ""]
+    ["› " + PROMPT, "", ""]
 )
 assert not result.acknowledged and result.evidence == "submit-unconfirmed"
 assert result.submit_count == 1
@@ -944,7 +988,7 @@ assert port.keys == ["Enter"] and not retries
 print("OK   missing screen after Enter fails closed without retry")
 
 result, port, retries, _stages = run_case(
-    ["› # Harness-owned review verification", "› # Harness-owned review verification", ""]
+    ["› " + PROMPT, "› " + PROMPT, ""]
 )
 assert not result.acknowledged and result.evidence == "submit-unconfirmed"
 assert result.submit_count == 1
@@ -952,14 +996,14 @@ assert port.keys == ["Enter"] and not retries
 print("OK   later missing screen also blocks the Enter retry")
 
 result, port, retries, _stages = run_case(
-    ["› # Harness-owned review verification", "1. Allow\n2. Deny\nEnter"]
+    ["› " + PROMPT, "1. Allow\n2. Deny\nEnter"]
 )
 assert not result.acknowledged and result.evidence == "unknown"
 assert port.keys == ["Enter"] and not retries
 print("OK   unknown interactive screen fails closed")
 
 result, port, retries, _stages = run_case(
-    ["› # Harness-owned review verification"],
+    ["› " + PROMPT],
     ownership=[True, True, False],
 )
 assert not result.acknowledged and result.evidence == "ownership-lost"
@@ -968,8 +1012,8 @@ print("OK   ownership is rechecked before Enter")
 
 result, port, retries, _stages = run_case(
     [
-        "❯ # Harness-owned review verification",
-        "❯ # Harness-owned review verification\n✻ Working…(1s · ↓10 tokens)",
+        "❯ " + PROMPT,
+        "❯ " + PROMPT + "\n✻ Working…(1s · ↓10 tokens)",
     ],
     runtime="claude",
 )

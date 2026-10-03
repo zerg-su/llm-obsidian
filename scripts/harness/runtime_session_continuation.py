@@ -76,6 +76,31 @@ def _editor_digest(runtime: str, screen: str) -> str:
     return sha256("\n".join(_editor_state(runtime, screen)).encode("utf-8")).hexdigest()
 
 
+def _current_composer_matches(runtime: str, screen: str, prompt: str) -> bool:
+    """Bind all visible prompt text, allowing only native whitespace wrapping."""
+
+    marker = {"claude": "❯", "codex": "›"}.get(runtime)
+    if not marker:
+        return False
+    lines = screen.splitlines()[-24:]
+    starts = [index for index, line in enumerate(lines) if line.lstrip().startswith(marker)]
+    if not starts:
+        return False
+    current = starts[-1]
+    editor = [lines[current].lstrip()[len(marker):]]
+    for line in lines[current + 1:]:
+        if not line.strip() or line.lstrip().startswith(("─", "━", "═")):
+            break
+        editor.append(line)
+    remaining = prompt.strip()
+    for line in editor:
+        visible = line.strip()
+        if not remaining.startswith(visible):
+            return False
+        remaining = remaining[len(visible):].lstrip()
+    return not remaining
+
+
 def classify_continuation_screen(runtime: str, screen: str, anchor: str) -> str:
     """Classify only provider UI states that are safe for continuation delivery.
 
@@ -458,6 +483,8 @@ def deliver_continuation(
                 return ContinuationDelivery(
                     False, "submit-effect-uncertain", accepted_submit_count
                 )
+            if not _current_composer_matches(runtime, screen, prompt):
+                return ContinuationDelivery(False, "prompt-mismatch", 0)
             if (
                 _screen_digest(screen) == pre_send_digest
                 or _editor_digest(runtime, screen) == pre_send_editor_digest

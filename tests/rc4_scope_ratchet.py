@@ -611,7 +611,7 @@ retain the delivery generation and cannot replay a send. Registered lifecycle pr
 exclusive supported interactive task context so hooks retain task telemetry
 without running the vault coordinator Stop pipeline in a release checkout.
 Foreign/changed context is preserved, and abnormal runs retain scope while
-owned resources remain. Five existing production owners grow by exactly 127
+owned resources remain. Five existing production owners grow by exactly 154
 lines. Input-only continuations use a separate receipt namespace, so provider
 exit checks only the actual callback/result generation. Broker-accepted
 parent evidence is sealed in that original generation before another input
@@ -620,7 +620,10 @@ is covered, and a genuinely missing required result still requires attention; be
 cover the repair. Lifecycle probes explicitly use supported workspace placement,
 avoiding an unreadable prompt when the origin pane is crowded. The unchanged idle editor after paste waits within the existing observation budget;
 changed/interactive editors and ownership loss remain fail-closed without resend.
-The exact contour is 305 files / 116,215 lines with no extra
+The complete current composer must match all prompt lines, including distinguishing
+path/hash text; a shared prefix, historical anchor or generic pasted-content
+placeholder cannot authorize Enter. Native line wrapping preserves that authority.
+The exact contour is 305 files / 116,242 lines with no extra
 headroom. The standard four-cell contract and authentication policy are unchanged.
 """
 
@@ -636,7 +639,7 @@ SCRIPT_FILE_CEILING = 305
 
 #: Maximum total lines across those files. This is the measured exact candidate
 #: after the 2.9.0 runtime/auth integration, U-R10 binding and cmux I/O, with zero headroom.
-SCRIPT_LINE_CEILING = 116_215
+SCRIPT_LINE_CEILING = 116_242
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:
