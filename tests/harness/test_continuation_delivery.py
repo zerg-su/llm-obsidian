@@ -596,7 +596,7 @@ for runtime, marker, active in (
         assert not result.acknowledged and result.submit_count == 0
         assert port.sent == [expected_pointer] and not port.keys
     # A soft wrap inside the distinguishing path/hash must not erase identity.
-    wrapped = f"{marker} {expected_pointer[:120]}\n  {expected_pointer[120:]}\n\n? for shortcuts"
+    wrapped = f"{marker} {expected_pointer[:120]}\n  {expected_pointer[120:]}"
     port = FakePort([f"{marker} previous editor", f"{marker} previous editor", wrapped, active])
     result = deliver_continuation(
         port, surface_id=SURFACE, prompt=expected_pointer, runtime=runtime,
@@ -638,6 +638,107 @@ result, port, retries, _stages = run_case(
 assert not result.acknowledged and result.evidence == "ownership-lost"
 assert result.submit_count == 0 and not port.keys and not retries
 print("OK   ownership loss during delayed paste remains fail-closed")
+
+# Review reproductions exercise the production delivery boundary, not the parser alone.
+for runtime, marker, active in (
+    ("codex", "›", "• Working (1s)"),
+    ("claude", "❯", "✻ Working…(1s · ↓10 tokens)"),
+):
+    def deliver_editor(screens, *, limit=2, prompt=expected_pointer, ownership=(), artifacts=()):
+        candidate = FakePort([f"{marker} previous editor"] + screens)
+        reservations = []
+        ownership_values, artifact_values = list(ownership), list(artifacts)
+        delivered = deliver_continuation(
+            candidate, surface_id=SURFACE, prompt=prompt, runtime=runtime,
+            artifact_ready=lambda: artifact_values.pop(0) if artifact_values else False,
+            ownership_ready=lambda: ownership_values.pop(0) if ownership_values else True,
+            reserve_retry=lambda: reservations.append(True) or True,
+            observe_stage=lambda *_args: None,
+            observation_limit=limit, wait=lambda _seconds: None,
+        )
+        return delivered, candidate, reservations
+
+    footer = ("\n\nGPT-6-Astra high · Context 5% used · 258K window · never\n"
+              "? for shortcuts") if runtime == "codex" else ""
+    exact = f"{marker} {expected_pointer}" + footer
+    if runtime == "codex":
+        delivered, candidate, reservations = deliver_editor(
+            [exact + "\n  Unexpected footer instruction.", active]
+        )
+        assert not delivered.acknowledged and not candidate.keys and not reservations
+    for suffix in (
+        "\n\n  Perform an unrelated operation.",
+        "\n─ Perform an unrelated operation.",
+        "\n━━━━━━━━\n  Perform an unrelated operation.",
+        "\n\nunknown footer",
+        "\n\n? for shortcuts\n  Perform an unrelated operation.",
+        "\n\nGPT-6-Astra high · Context 5% used · 258K window · never\n"
+        "? for shortcuts\n  Perform an unrelated operation.",
+    ):
+        delivered, candidate, reservations = deliver_editor(
+            [f"{marker} {expected_pointer}" + suffix + footer, active]
+        )
+        assert not delivered.acknowledged and delivered.submit_count == 0, (runtime, suffix)
+        assert candidate.sent == [expected_pointer] and not candidate.keys and not reservations
+    print(f"OK   {runtime} blank/separator/fake-footer suffix cannot authorize Enter")
+
+    for width in (40, 80, 120, len(expected_pointer) - 36):
+        for value, accepted in ((expected_pointer, True), (wrong_path, False), (wrong_hash, False)):
+            chunks = [value[i:i + width] for i in range(0, len(value), width)]
+            wrapped = f"{marker} " + "\n  ".join(chunks) + footer
+            delivered, candidate, reservations = deliver_editor([wrapped, active])
+            assert delivered.acknowledged == accepted, (runtime, width, accepted, delivered)
+            assert candidate.keys == (["Enter"] if accepted else [])
+            assert candidate.sent == [expected_pointer] and not reservations
+    # An indented content marker cannot replace the actual current composer start.
+    delivered, candidate, reservations = deliver_editor(
+        [f"{marker} unrelated current draft\n  {marker} {expected_pointer}" + footer, active]
+    )
+    assert not delivered.acknowledged and not candidate.keys and not reservations
+    multiline = "First exact line.\n\nSecond exact line."
+    delivered, candidate, reservations = deliver_editor(
+        [f"{marker} {multiline}" + footer, active], prompt=multiline,
+    )
+    assert delivered.acknowledged and candidate.keys == ["Enter"] and not reservations
+    print(f"OK   {runtime} complete short native wraps and blank multiline control succeed once")
+
+    for draft in (
+        f"{marker} {wrong_path}" + footer,
+        f"{marker} {wrong_hash}" + footer,
+        f"{marker} {expected_pointer}\nAssistant: old response\n{marker} unrelated draft" + footer,
+        f"{marker} [Pasted Content 3675 chars]" + footer,
+        f"{marker} {expected_pointer}\n\n  Additional instruction." + footer,
+    ):
+        # A changed editor is rejected during post-submit observations.
+        delivered, candidate, reservations = deliver_editor([exact, draft, active])
+        assert not delivered.acknowledged and delivered.submit_count == 1
+        assert candidate.sent == [expected_pointer] and candidate.keys == ["Enter"] and not reservations
+        # It is also rejected on a fresh read after the observation window/reservation.
+        delivered, candidate, reservations = deliver_editor([exact, exact, exact, draft, active])
+        assert not delivered.acknowledged and delivered.submit_count == 1
+        assert candidate.sent == [expected_pointer] and candidate.keys == ["Enter"]
+    delivered, candidate, reservations = deliver_editor([exact, exact, exact, exact, active])
+    assert delivered.acknowledged and delivered.submit_count == 2
+    assert candidate.sent == [expected_pointer] and candidate.keys == ["Enter", "Enter"]
+    assert reservations == [True]
+    # Provider activity after the observation window wins without a second key.
+    delivered, candidate, reservations = deliver_editor([exact, exact, exact, active])
+    assert delivered.acknowledged and delivered.submit_count == 1 and candidate.keys == ["Enter"]
+    for blocker in ("1. Allow\n2. Deny\nEnter", "unknown application state", ""):
+        delivered, candidate, reservations = deliver_editor([exact, exact, exact, blocker, active])
+        assert not delivered.acknowledged and delivered.submit_count == 1
+        assert candidate.keys == ["Enter"] and candidate.sent == [expected_pointer]
+    delivered, candidate, reservations = deliver_editor(
+        [exact, exact, exact, exact, active], ownership=[True] * 6 + [False],
+    )
+    assert not delivered.acknowledged and delivered.evidence == "ownership-lost"
+    assert candidate.keys == ["Enter"]
+    delivered, candidate, reservations = deliver_editor(
+        [exact, exact, exact, exact, active], artifacts=[False] * 4 + [True],
+    )
+    assert delivered.acknowledged and delivered.evidence == "artifact"
+    assert candidate.keys == ["Enter"]
+    print(f"OK   {runtime} retry rechecks identity/activity/permission/ownership/artifact before Enter")
 
 pre_key_port = FakePort([
     "› previous editor",
@@ -840,6 +941,7 @@ print("OK   generic pasted-content placeholder cannot identify the intended cont
 
 result, port, retries, _stages = run_case(
     [
+        "› " + PROMPT,
         "› " + PROMPT,
         "› " + PROMPT,
         "› " + PROMPT,

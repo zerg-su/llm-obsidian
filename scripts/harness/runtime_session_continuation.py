@@ -83,15 +83,26 @@ def _current_composer_matches(runtime: str, screen: str, prompt: str) -> bool:
     if not marker:
         return False
     lines = screen.splitlines()[-24:]
-    starts = [index for index, line in enumerate(lines) if line.lstrip().startswith(marker)]
+    starts = [index for index, line in enumerate(lines) if line.startswith(marker)]
     if not starts:
         return False
     current = starts[-1]
-    editor = [lines[current].lstrip()[len(marker):]]
-    for line in lines[current + 1:]:
-        if not line.strip() or line.lstrip().startswith(("─", "━", "═")):
-            break
-        editor.append(line)
+    end = len(lines)
+    if runtime == "codex":
+        for index in range(len(lines) - 1, current, -1):
+            if re.fullmatch(
+                r"(?:[^\n]* · )?GPT-[^\n]+ · Context \d+% used · "
+                r"\d+[KM] window(?: · [^\n]+)*", lines[index].strip(),
+            ):
+                footer = [line.strip() for line in lines[index + 1:] if line.strip()]
+                if all(line == "? for shortcuts" or re.fullmatch(
+                    r"⚠ \d+ warnings? · f2 to view", line,
+                ) for line in footer):
+                    end = index
+                break
+    # EOF or a supported terminal footer bounds the complete visible composer.
+    # Blank/separator-looking content never grants an earlier boundary.
+    editor = [lines[current][len(marker):]] + lines[current + 1:end]
     remaining = prompt.strip()
     for line in editor:
         visible = line.strip()
@@ -478,6 +489,8 @@ def deliver_continuation(
             return ContinuationDelivery(
                 True, "provider-activity", accepted_submit_count
             )
+        if screen_state == "idle" and _current_composer_matches(runtime, screen, prompt):
+            screen_state = "input-ready"
         if screen_state == "input-ready":
             if submit_already_accepted:
                 return ContinuationDelivery(
@@ -517,6 +530,19 @@ def deliver_continuation(
             )
         if not ownership_ready():
             return ContinuationDelivery(False, "ownership-lost", submit_count)
+        if submit_attempt:
+            if artifact_ready():
+                return ContinuationDelivery(True, "artifact", submit_count)
+            screen = port.read(surface_id)
+            state = classify_continuation_screen(runtime, screen, anchor)
+            if state == "active" and _screen_digest(screen) != paste_digest:
+                return ContinuationDelivery(True, "provider-activity", submit_count)
+            if state not in {"idle", "input-ready"}:
+                return ContinuationDelivery(False, state, submit_count)
+            if not _current_composer_matches(runtime, screen, prompt):
+                return ContinuationDelivery(False, "prompt-mismatch", submit_count)
+            if not ownership_ready():
+                return ContinuationDelivery(False, "ownership-lost", submit_count)
         next_submit_count = submit_count + 1
         observe_stage(
             "submit-retry-reserved" if submit_attempt else "submit-reserved",
@@ -545,6 +571,11 @@ def deliver_continuation(
             screen_state = classify_continuation_screen(runtime, screen, anchor)
             if screen_state == "active" and _screen_digest(screen) != paste_digest:
                 return ContinuationDelivery(True, "provider-activity", submit_count)
+            if screen_state in {"idle", "input-ready"}:
+                if _current_composer_matches(runtime, screen, prompt):
+                    screen_state = "input-ready"
+                elif screen_state == "input-ready":
+                    return ContinuationDelivery(False, "prompt-mismatch", submit_count)
             if screen_state in {"idle", "permission", "unknown", "missing"}:
                 evidence = (
                     "submit-unconfirmed"
