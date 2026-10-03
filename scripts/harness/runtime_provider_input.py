@@ -60,6 +60,19 @@ def interactive_provider_input(
     )
 
 
+def prepare_continuation_input(manager: object, record: OperationRecord, path: Path) -> tuple:
+    """Bind contract bytes and logical observation to the same owned provider."""
+    from .composer_observation import observation_port
+
+    prompt = manager._read_prompt(path)
+    runtime = record.spec.route.runtime
+    delivery = interactive_provider_input(runtime, path, prompt)
+    port = observation_port(
+        manager.cmux, runtime, manager._state_root(record), record.resources.process_group,
+    )
+    return runtime, prompt, delivery, port
+
+
 @dataclass(frozen=True)
 class RuntimeContinuationInput:
     """Optional typed stream; legacy sessions remain byte-for-byte compatible."""

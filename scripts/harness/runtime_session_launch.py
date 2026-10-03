@@ -47,6 +47,7 @@ from .runtime_provider_input import (
     initial_provider_argv,
     interactive_provider_input,
     prepare_continuation_target,
+    prepare_continuation_input,
     reserve_continuation_input,
 )
 from .store import StoreError
@@ -726,9 +727,7 @@ class RuntimeSessionLaunchMixin:
         metadata = self._metadata(record)
         cwd = Path(str(metadata.get("cwd") or "")).resolve()
         prompt_path = self._resolve_pointer(cwd, prompt_pointer, must_exist=True)
-        prompt = self._read_prompt(prompt_path)
-        runtime = record.spec.route.runtime
-        delivery_prompt = interactive_provider_input(runtime, prompt_path, prompt)
+        runtime, prompt, delivery_prompt, delivery_port = prepare_continuation_input(self, record, prompt_path)
         target, callback_target = prepare_continuation_target(self, record, delivery_prompt, str(metadata.get("workspace_id") or ""))
         effect_id = bound_continuation_effect_id(record, prompt, target)
         receipt_path, receipt, receipt_identity = self._continuation_receipt(
@@ -899,7 +898,7 @@ class RuntimeSessionLaunchMixin:
 
             def deliver(_record: OperationRecord) -> None:
                 result = deliver_continuation(
-                    self.cmux,
+                    delivery_port,
                     surface_id=record.resources.surface_id,
                     prompt=delivery_prompt,
                     runtime=record.spec.route.runtime,

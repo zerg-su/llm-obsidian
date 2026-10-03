@@ -76,8 +76,24 @@ def _editor_digest(runtime: str, screen: str) -> str:
     return sha256("\n".join(_editor_state(runtime, screen)).encode("utf-8")).hexdigest()
 
 
-def _current_composer_matches(runtime: str, screen: str, prompt: str) -> bool:
-    """Bind all visible prompt text, allowing only native whitespace wrapping."""
+def _composer_identity(port: ContinuationPort, surface_id: str) -> str | None:
+    """Accept only a complete logical-buffer observation from the owned port."""
+    observer = getattr(port, "observe_composer", None)
+    if not callable(observer):
+        return None
+    observed = observer(surface_id)
+    if (
+        not isinstance(observed, tuple) or len(observed) != 2
+        or not isinstance(observed[0], str)
+        or re.fullmatch(r"[0-9a-f]{64}", observed[0]) is None
+        or type(observed[1]) is not int or not 0 <= observed[1] <= 65536
+    ):
+        return None
+    return observed[0]
+
+
+def _legacy_claude_composer_matches(runtime: str, screen: str, prompt: str) -> bool:
+    """Retain prior Claude behavior; screen ambiguity remains unverified."""
 
     marker = {"claude": "❯", "codex": "›"}.get(runtime)
     if not marker:
@@ -88,18 +104,6 @@ def _current_composer_matches(runtime: str, screen: str, prompt: str) -> bool:
         return False
     current = starts[-1]
     end = len(lines)
-    if runtime == "codex":
-        for index in range(len(lines) - 1, current, -1):
-            if re.fullmatch(
-                r"(?:[^\n]* · )?GPT-[^\n]+ · Context \d+% used · "
-                r"\d+[KM] window(?: · [^\n]+)*", lines[index].strip(),
-            ):
-                footer = [line.strip() for line in lines[index + 1:] if line.strip()]
-                if all(line == "? for shortcuts" or re.fullmatch(
-                    r"⚠ \d+ warnings? · f2 to view", line,
-                ) for line in footer):
-                    end = index
-                break
     # EOF or a supported terminal footer bounds the complete visible composer.
     # Blank/separator-looking content never grants an earlier boundary.
     editor = [lines[current][len(marker):]] + lines[current + 1:end]
@@ -126,6 +130,18 @@ def _current_composer_matches(runtime: str, screen: str, prompt: str) -> bool:
             return False
         remaining = remaining[len(visible):]
     return not remaining
+
+
+def _delivery_editor_identity(port, surface_id, runtime, screen):
+    if runtime == "codex":
+        return _composer_identity(port, surface_id)
+    return _editor_digest(runtime, screen)
+
+
+def _delivery_composer_matches(runtime, screen, prompt, identity):
+    if runtime == "codex":
+        return identity == sha256(prompt.encode("utf-8")).hexdigest()
+    return _legacy_claude_composer_matches(runtime, screen, prompt)
 
 
 def classify_continuation_screen(runtime: str, screen: str, anchor: str) -> str:
@@ -299,6 +315,7 @@ def await_initial_input_visible(
     runtime: str,
     text: str,
     before_editor_sha256: str = "",
+    require_composer_authority: bool = False,
     observation_limit: int = 40,
     observation_interval_seconds: float = 0.05,
     wait: Waiter = sleep,
@@ -321,19 +338,21 @@ def await_initial_input_visible(
         state = classify_continuation_screen(
             runtime, screen, anchor
         )
-        if state == "input-ready":
-            if not before_editor_sha256 or (
-                _editor_digest(runtime, screen) != before_editor_sha256
-            ):
-                return True
         if state == "permission":
             return False
-        if (
-            before_editor_sha256
-            and _editor_state(runtime, screen)
-            and _editor_digest(runtime, screen) != before_editor_sha256
-        ):
-            return True
+        if require_composer_authority and state in {"input-ready", "idle"}:
+            identity = _composer_identity(port, surface_id)
+            if identity == sha256(text.encode()).hexdigest() and identity != before_editor_sha256:
+                return True
+        elif not require_composer_authority:
+            # Notification visibility is a separate legacy contract. Registered
+            # provider submission explicitly requires logical-buffer authority.
+            if state == "input-ready" and (
+                not before_editor_sha256 or _editor_digest(runtime, screen) != before_editor_sha256
+            ):
+                return True
+            if before_editor_sha256 and _editor_state(runtime, screen) and _editor_digest(runtime, screen) != before_editor_sha256:
+                return True
         if observation + 1 < observation_limit:
             wait(observation_interval_seconds)
     return False
@@ -468,7 +487,9 @@ def deliver_continuation(
     if send_prompt:
         pre_send_screen = port.read(surface_id)
         pre_send_digest = _screen_digest(pre_send_screen)
-        pre_send_editor_digest = _editor_digest(runtime, pre_send_screen)
+        pre_send_editor_digest = _delivery_editor_identity(port, surface_id, runtime, pre_send_screen)
+        if pre_send_editor_digest is None:
+            return ContinuationDelivery(False, "composer-unavailable", 0)
         observe_stage(
             "paste-reserved", 0, pre_send_digest, pre_send_editor_digest, ""
         )
@@ -505,18 +526,23 @@ def deliver_continuation(
             return ContinuationDelivery(
                 True, "provider-activity", accepted_submit_count
             )
-        if screen_state == "idle" and _current_composer_matches(runtime, screen, prompt):
-            screen_state = "input-ready"
+        editor_identity = None
+        if screen_state in {"idle", "input-ready"}:
+            editor_identity = _delivery_editor_identity(port, surface_id, runtime, screen)
+            if editor_identity is None:
+                return ContinuationDelivery(False, "composer-unavailable", accepted_submit_count)
+            if screen_state == "idle" and _delivery_composer_matches(runtime, screen, prompt, editor_identity):
+                screen_state = "input-ready"
         if screen_state == "input-ready":
             if submit_already_accepted:
                 return ContinuationDelivery(
                     False, "submit-effect-uncertain", accepted_submit_count
                 )
-            if not _current_composer_matches(runtime, screen, prompt):
+            if not _delivery_composer_matches(runtime, screen, prompt, editor_identity):
                 return ContinuationDelivery(False, "prompt-mismatch", 0)
             if (
                 _screen_digest(screen) == pre_send_digest
-                or _editor_digest(runtime, screen) == pre_send_editor_digest
+                or editor_identity == pre_send_editor_digest
             ):
                 if observation + 1 < observation_limit:
                     wait(observation_interval_seconds)
@@ -526,7 +552,7 @@ def deliver_continuation(
             break
         if (
             screen_state == "idle" and not submit_already_accepted
-            and _editor_digest(runtime, screen) == pre_send_editor_digest
+            and editor_identity == pre_send_editor_digest
         ):
             if observation + 1 < observation_limit:
                 wait(observation_interval_seconds)
@@ -555,7 +581,7 @@ def deliver_continuation(
                 return ContinuationDelivery(True, "provider-activity", submit_count)
             if state not in {"idle", "input-ready"}:
                 return ContinuationDelivery(False, state, submit_count)
-            if not _current_composer_matches(runtime, screen, prompt):
+            if not _delivery_composer_matches(runtime, screen, prompt, _delivery_editor_identity(port, surface_id, runtime, screen)):
                 return ContinuationDelivery(False, "prompt-mismatch", submit_count)
             if not ownership_ready():
                 return ContinuationDelivery(False, "ownership-lost", submit_count)
@@ -576,30 +602,64 @@ def deliver_continuation(
             pre_send_editor_digest,
             paste_digest,
         )
-        for observation in range(observation_limit):
-            if artifact_ready():
-                return ContinuationDelivery(True, "artifact", submit_count)
-            if not ownership_ready():
-                return ContinuationDelivery(
-                    False, "ownership-lost", submit_count
-                )
-            screen = port.read(surface_id)
-            screen_state = classify_continuation_screen(runtime, screen, anchor)
-            if screen_state == "active" and _screen_digest(screen) != paste_digest:
-                return ContinuationDelivery(True, "provider-activity", submit_count)
-            if screen_state in {"idle", "input-ready"}:
-                if _current_composer_matches(runtime, screen, prompt):
-                    screen_state = "input-ready"
-                elif screen_state == "input-ready":
-                    return ContinuationDelivery(False, "prompt-mismatch", submit_count)
-            if screen_state in {"idle", "permission", "unknown", "missing"}:
-                evidence = (
-                    "submit-unconfirmed"
-                    if screen_state == "missing"
-                    else screen_state
-                )
-                return ContinuationDelivery(False, evidence, submit_count)
-            if observation + 1 < observation_limit:
-                wait(observation_interval_seconds)
+        observed = _await_continuation_activity(
+            port, surface_id=surface_id, runtime=runtime, anchor=anchor,
+            prompt=prompt, paste_digest=paste_digest,
+            submit_count=submit_count, artifact_ready=artifact_ready,
+            ownership_ready=ownership_ready, observation_limit=observation_limit,
+            observation_interval_seconds=observation_interval_seconds, wait=wait,
+        )
+        if observed is not None:
+            return observed
 
     return ContinuationDelivery(False, "submit-unconfirmed", submit_count)
+
+
+def _await_continuation_activity(
+    port: ContinuationPort, *, surface_id: str, runtime: str, anchor: str,
+    prompt: str, paste_digest: str, submit_count: int,
+    artifact_ready: ArtifactProbe, ownership_ready: OwnershipProbe,
+    observation_limit: int, observation_interval_seconds: float, wait: Waiter,
+) -> ContinuationDelivery | None:
+    """Observe one submitted turn; buffer clearing alone proves no acceptance."""
+    for observation in range(observation_limit):
+        if artifact_ready():
+            return ContinuationDelivery(True, "artifact", submit_count)
+        if not ownership_ready():
+            return ContinuationDelivery(
+                False, "ownership-lost", submit_count
+            )
+        screen = port.read(surface_id)
+        screen_state = classify_continuation_screen(runtime, screen, anchor)
+        if screen_state == "active" and _screen_digest(screen) != paste_digest:
+            return ContinuationDelivery(True, "provider-activity", submit_count)
+        if screen_state in {"idle", "input-ready"}:
+            current_identity = _delivery_editor_identity(port, surface_id, runtime, screen)
+            if runtime == "codex" and current_identity in {None, sha256(b"").hexdigest()}:
+                # A provider can start or clear its draft during a local
+                # observation. Neither an unavailable/empty buffer nor a
+                # changed screen alone acknowledges the submitted turn.
+                fresh = port.read(surface_id)
+                fresh_state = classify_continuation_screen(runtime, fresh, anchor)
+                if fresh_state == "active" and _screen_digest(fresh) != paste_digest:
+                    return ContinuationDelivery(True, "provider-activity", submit_count)
+                if fresh_state == "permission":
+                    return ContinuationDelivery(False, fresh_state, submit_count)
+                if observation + 1 < observation_limit:
+                    wait(observation_interval_seconds)
+                continue
+            if _delivery_composer_matches(runtime, screen, prompt, current_identity):
+                screen_state = "input-ready"
+            elif screen_state == "input-ready":
+                return ContinuationDelivery(False, "prompt-mismatch", submit_count)
+        if screen_state in {"idle", "permission", "unknown", "missing"}:
+            evidence = (
+                "submit-unconfirmed"
+                if screen_state == "missing"
+                else screen_state
+            )
+            return ContinuationDelivery(False, evidence, submit_count)
+        if observation + 1 < observation_limit:
+            wait(observation_interval_seconds)
+
+    return None

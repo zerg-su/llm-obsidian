@@ -27,6 +27,21 @@ must not be inferred from another runtime.
 | Persistent task lanes | Exact owner/task/model/domain cmux resume with anchored right splits | Same harness and typed checkpoint contract | Script-only state; visible cmux resume requires supported host |
 | Router/operation telemetry | Runtime-tagged, content-free hook/script events | Runtime-tagged, content-free hook/script events | Limited to explicit scripts |
 
+## Harness-owned Codex logical input
+
+Registered interactive Codex sessions use a child-local `VISUAL` helper and
+allowlisted Ctrl+G to observe the complete UTF-8 editor buffer. A serialized,
+owner-only, process-group/surface-bound nonce receipt carries only SHA-256 and
+byte count. Source symlinks, incomplete reads, stale receipts and unknown UI
+states grant no submit authority. The helper exits with code 75 to retain the
+draft instead of applying Codex's successful-editor whitespace normalization.
+No global editor settings or authentication/model routing are changed. Research
+profiles do not receive this adapter. Installed-binary behavior requires native
+acceptance; unit tests alone do not establish that behavior.
+
+Claude's existing screen-based checks are retained. They do not prove exact
+logical newlines across native wrapping, and Claude acceptance remains separate.
+
 ## Optional cmux `events.v1` wake contract
 
 Each interactive Harness runtime worker may own one optional `cmux events`

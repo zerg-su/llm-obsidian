@@ -258,12 +258,14 @@ def provider_environment(
             reviewer["DISABLE_AUTOUPDATER"] = "1"
             reviewer.pop("CLAUDE_CODE_SAFE_MODE", None)
             reviewer.pop("CLAUDE_CODE_SIMPLE", None)
-        return reviewer
+        from .composer_observation import configure_environment
+        return configure_environment(spec, reviewer)
     if spec.get("callback_mode") not in {
         "research-fetch",
         "research-synth",
     }:
-        return dict(values)
+        from .composer_observation import configure_environment
+        return configure_environment(spec, dict(values))
     runtime_home = spec.get("runtime_home")
     if not isinstance(runtime_home, Path):
         raise RuntimeWorkerError("research runtime home is unavailable")

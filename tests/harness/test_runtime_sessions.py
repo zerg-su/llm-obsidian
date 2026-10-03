@@ -726,6 +726,7 @@ class FakeCmux:
         self.submit_count = 0
         self.submits_at_last_send = 0
         self.transport_visible = False
+        self.logical_buffer = b""
 
     def open_split(self, origin_surface: str) -> Surface:
         self.events.append("surface-open")
@@ -734,6 +735,7 @@ class FakeCmux:
         self.submit_count = 0
         self.submits_at_last_send = 0
         self.transport_visible = False
+        self.logical_buffer = b""
         check("start anchors the exact origin surface", origin_surface == ORIGIN)
         return Surface(
             SURFACE,
@@ -756,6 +758,12 @@ class FakeCmux:
         self.submits_at_last_send = self.submit_count
         self.transport_visible = False
 
+    def observe_composer(self, surface_id: str) -> tuple[str, int]:
+        # The fake TUI owns a logical draft separately from its clipped rows.
+        # Transport alone never changes this model; read() consumes the paste.
+        assert surface_id == SURFACE
+        return hashlib.sha256(self.logical_buffer).hexdigest(), len(self.logical_buffer)
+
     def send_key(self, surface_id: str, key: str) -> None:
         check(
             "submission uses exact surface and allowlisted Enter",
@@ -772,6 +780,7 @@ class FakeCmux:
             return "❯\n›"
         self.transport_visible = True
         prompt = self.sent[-1][1]
+        self.logical_buffer = prompt.encode("utf-8")
         anchor = next((line.strip() for line in prompt.splitlines() if line.strip()), "")
         if self.submit_count == self.submits_at_last_send:
             return f"❯ {anchor}"
@@ -2917,6 +2926,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
                 return "›"
             self.transport_visible = True
             prompt = self.sent[-1][1]
+            self.logical_buffer = prompt.encode("utf-8")
             anchor = next(
                 (line.strip() for line in prompt.splitlines() if line.strip()),
                 "",
@@ -3140,6 +3150,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
             if not self.sent:
                 return "❯\n›"
             prompt = self.sent[-1][1]
+            self.logical_buffer = prompt.encode("utf-8")
             anchor = next(
                 (line.strip() for line in prompt.splitlines() if line.strip()),
                 "",
@@ -3263,6 +3274,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
             assert surface_id == SURFACE
             if not self.sent:
                 return "❯"
+            self.logical_buffer = self.sent[-1][1].encode("utf-8")
             anchor = next(
                 (
                     line.strip()
@@ -3288,6 +3300,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
             assert surface_id == SURFACE
             if not self.sent:
                 return "❯"
+            self.logical_buffer = self.sent[-1][1].encode("utf-8")
             anchor = next(
                 (
                     line.strip()
@@ -4786,6 +4799,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
                 return "›"
             self.transport_visible = True
             prompt = self.sent[-1][1]
+            self.logical_buffer = prompt.encode("utf-8")
             anchor = next(
                 (line.strip() for line in prompt.splitlines() if line.strip()),
                 "",
@@ -6057,6 +6071,7 @@ class InitialStartWorkerCmux(FakeCmux):
             return "❯\n"
         self.transport_visible = True
         prompt = self.sent[-1][1]
+        self.logical_buffer = prompt.encode("utf-8")
         anchor = next(
             (" ".join(line.split()) for line in prompt.splitlines() if line.strip()),
             "",
@@ -6084,6 +6099,7 @@ class PostSubmitTrustCmux(InitialStartWorkerCmux):
             return "❯\n"
         self.transport_visible = True
         prompt = self.sent[-1][1]
+        self.logical_buffer = prompt.encode("utf-8")
         anchor = next(
             (" ".join(line.split()) for line in prompt.splitlines() if line.strip()),
             "",
@@ -6608,6 +6624,7 @@ class SwallowedEnterCmux(InitialStartWorkerCmux):
             return "❯\n"
         self.transport_visible = True
         prompt = self.sent[-1][1]
+        self.logical_buffer = prompt.encode("utf-8")
         anchor = next(
             (" ".join(line.split()) for line in prompt.splitlines() if line.strip()),
             "",

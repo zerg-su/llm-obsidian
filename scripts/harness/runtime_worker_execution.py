@@ -15,6 +15,7 @@ from .runtime_provider_events import (
 from .runtime_provider_input import interactive_provider_input
 from .runtime_session_contracts import MAX_PROMPT_BYTES
 from .runtime_session_continuation import (
+    _composer_identity,
     _editor_digest,
     _no_checkpoint,
     _prompt_anchor,
@@ -34,6 +35,7 @@ from .runtime_worker_liveness import RuntimeWorkerLivenessMixin
 from .runtime_worker_loop import RuntimeWorkerLoopMixin
 from .artifact_repair import ArtifactRepairError
 from .cmux_wake_source import CmuxWakeSource, WakeBinding, WakeObservation
+from .composer_observation import observation_port
 
 
 class _UnavailableWakeSource:
@@ -315,17 +317,27 @@ class RuntimeWorkerExecution(
                 raise RuntimeWorkerError(
                     "initial provider input was not durably reserved"
                 )
-            before_editor_sha256 = _editor_digest(
-                self.spec["runtime"],
-                self.cmux_adapter.read(self.spec["surface_id"]),
+            delivery_port = observation_port(
+                self.cmux_adapter, self.spec["runtime"], self.spec_path.parent,
+                self.handle.process_group,
             )
-            self.cmux_adapter.send(self.spec["surface_id"], delivery_text)
+            strict_composer = self.spec["runtime"] == "codex"
+            before_editor_sha256 = (
+                _composer_identity(delivery_port, self.spec["surface_id"])
+                if strict_composer else _editor_digest(
+                    self.spec["runtime"], self.cmux_adapter.read(self.spec["surface_id"]),
+                )
+            )
+            if before_editor_sha256 is None:
+                raise RuntimeWorkerError("initial composer authority is unavailable")
+            delivery_port.send(self.spec["surface_id"], delivery_text)
             if not await_initial_input_visible(
-                self.cmux_adapter,
+                delivery_port,
                 surface_id=self.spec["surface_id"],
                 runtime=self.spec["runtime"],
                 text=delivery_text,
                 before_editor_sha256=before_editor_sha256,
+                require_composer_authority=strict_composer,
             ):
                 raise RuntimeWorkerError(
                     "initial provider input was not visible"
@@ -354,6 +366,12 @@ class RuntimeWorkerExecution(
                 # unconfirmed, missing) keeps its original single-keystroke
                 # fail-closed boundary, and a still-composing second window
                 # stays contained as before.
+                if (
+                    strict_composer
+                    and _composer_identity(delivery_port, self.spec["surface_id"])
+                    != hashlib.sha256(delivery_bytes).hexdigest()
+                ):
+                    raise RuntimeWorkerError("initial retry composer identity changed")
                 self.cmux_adapter.send_key(self.spec["surface_id"], "Enter")
                 acknowledgement = await_initial_start_acknowledged(
                     self.cmux_adapter,

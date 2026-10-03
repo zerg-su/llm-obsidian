@@ -38,6 +38,7 @@ test-harness:
 	@python3 tests/harness/test_contract_boundaries.py
 	@python3 tests/harness/test_contract_state_edge_matrix.py
 	@python3 tests/harness/test_continuation_delivery.py
+	@python3 tests/harness/test_composer_observation.py
 	@python3 tests/harness/test_pipelines.py
 	@python3 tests/harness/test_custom_pipelines.py
 	@python3 tests/harness/test_custom_sequence.py

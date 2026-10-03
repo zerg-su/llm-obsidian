@@ -633,6 +633,16 @@ continuation owner: known native gutters are removed without stripping content
 whitespace; unknown gutters and changed path/hash spaces reject initial/retry Enter.
 The exact contour is 305 files / 116,289 lines with no extra
 headroom. The standard four-cell contract and authentication policy are unchanged.
+
+The approved Codex-only logical-buffer repair adds one cohesive owner for the
+private editor handoff and digest receipts. Existing input/session owners bind
+that source to initial input, continuation and retry, replacing Codex's
+expected-driven reconstruction. Claude's prior matching remains unchanged and
+unverified by explicit authorization. The post-submit observation phase is
+extracted without raising function or file limits. Together with upstream
+model/prompt fixes, the exact tree is 306 files / 116,589 lines, with no
+speculative headroom, timeout growth, second paste or extra submit budget.
+
 """
 
 from __future__ import annotations
@@ -643,11 +653,11 @@ from pathlib import Path
 #: Maximum tracked Python files under ``scripts/`` for the generic review
 #: target candidate. The six new owners and their boundaries are justified in
 #: the module history above.
-SCRIPT_FILE_CEILING = 305
+SCRIPT_FILE_CEILING = 306
 
 #: Maximum total lines across those files. This is the measured exact candidate
 #: after the 2.9.0 runtime/auth integration, U-R10 binding and cmux I/O, with zero headroom.
-SCRIPT_LINE_CEILING = 116_289
+SCRIPT_LINE_CEILING = 116_589
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

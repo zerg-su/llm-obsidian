@@ -6,6 +6,7 @@ from __future__ import annotations
 import sys
 import tempfile
 import json
+import hashlib
 import multiprocessing
 import os
 import threading
@@ -56,12 +57,44 @@ class FakePort:
         self.screens = list(screens)
         self.sent: list[str] = []
         self.keys: list[str] = []
+        self.current = ""
+        self.logical = None
 
     def read(self, surface_id: str) -> str:
         assert surface_id == SURFACE
         if not self.screens:
             return ""
-        return self.screens.pop(0)
+        frame = self.screens.pop(0)
+        if isinstance(frame, tuple):
+            self.current, self.logical = frame
+        else:
+            self.current, self.logical = frame, None
+        return self.current
+
+    def observe_composer(self, surface_id):
+        assert surface_id == SURFACE
+        if self.logical is not None:
+            content = self.logical
+        else:
+            # These legacy fixtures define literal hard lines. Soft-wrapped
+            # fixtures supply their independent logical buffer explicitly.
+            rows = self.current.splitlines()
+            starts = [i for i, row in enumerate(rows) if row.startswith(("›", "❯"))]
+            if not starts:
+                return None
+            rows = rows[starts[0]:]
+            for i in range(len(rows) - 1, 0, -1):
+                if rows[i].startswith("GPT-") and " · Context " in rows[i] and all(
+                    not row or row == "? for shortcuts" or (row.startswith("⚠ ") and row.endswith(" · f2 to view"))
+                    for row in rows[i + 1:]
+                ):
+                    rows = rows[:i]
+                    while rows and not rows[-1]:
+                        rows.pop()
+                    break
+            content = rows[0][1:].removeprefix(" ") + "\n" + "\n".join(rows[1:]) if len(rows) > 1 else rows[0][1:].removeprefix(" ")
+        raw = content.encode()
+        return hashlib.sha256(raw).hexdigest(), len(raw)
 
     def send(self, surface_id: str, text: str) -> None:
         assert surface_id == SURFACE
@@ -609,7 +642,7 @@ for runtime, marker, active in (
         assert port.sent == [expected_pointer] and not port.keys
     # A soft wrap inside the distinguishing path/hash must not erase identity.
     wrapped = f"{marker} {expected_pointer[:120]}\n  {expected_pointer[120:]}"
-    port = FakePort([f"{marker} previous editor", f"{marker} previous editor", wrapped, active])
+    port = FakePort([f"{marker} previous editor", f"{marker} previous editor", (wrapped, expected_pointer), active])
     result = deliver_continuation(
         port, surface_id=SURFACE, prompt=expected_pointer, runtime=runtime,
         artifact_ready=lambda: False, ownership_ready=lambda: True,
@@ -624,9 +657,9 @@ print("OK   complete current composer binds path and hash across lag and wrappin
 for runtime, marker in (("codex", "›"), ("claude", "❯")):
     baseline = f"{marker} previous editor\nold footer"
     result, port, retries, _stages = run_case(
-        [f"{marker} previous editor\nnew footer", f"{marker} {PROMPT}",
+        [(f"{marker} previous editor\nnew footer", "previous editor"), f"{marker} {PROMPT}",
          "• Working (1s)" if runtime == "codex" else "✻ Working…(1s · ↓10 tokens)"],
-        pre_screen=baseline, runtime=runtime,
+        pre_screen=(baseline, "previous editor"), runtime=runtime,
     )
     assert result.acknowledged and result.evidence == "provider-activity"
     assert result.submit_count == 1 and port.sent == [PROMPT]
@@ -698,7 +731,7 @@ for runtime, marker, active in (
         for value, accepted in ((expected_pointer, True), (wrong_path, False), (wrong_hash, False)):
             chunks = [value[i:i + width] for i in range(0, len(value), width)]
             wrapped = f"{marker} " + "\n  ".join(chunks) + footer
-            delivered, candidate, reservations = deliver_editor([wrapped, active])
+            delivered, candidate, reservations = deliver_editor([(wrapped, value), active])
             assert delivered.acknowledged == accepted, (runtime, width, accepted, delivered)
             assert candidate.keys == (["Enter"] if accepted else [])
             assert candidate.sent == [expected_pointer] and not reservations
@@ -760,9 +793,10 @@ for runtime, marker, active in (
     footer = ("\n\nGPT-6-Astra high · Context 5% used · 258K window · never\n"
               "? for shortcuts") if runtime == "codex" else ""
 
-    def whitespace_delivery(value, editor, *, retry=False):
+    def whitespace_delivery(value, editor, *, retry=False, logical=None):
         exact = f"{marker} {value}" + footer
-        screens = [exact, exact, exact, editor, active] if retry else [editor, active]
+        frame = (editor, logical) if logical is not None else editor
+        screens = [exact, exact, exact, frame, active] if retry else [frame, active]
         candidate = FakePort([f"{marker} previous editor"] + screens)
         result = deliver_continuation(
             candidate, surface_id=SURFACE, prompt=value, runtime=runtime,
@@ -777,7 +811,7 @@ for runtime, marker, active in (
         expected_pointer.index("SHA-256 `") + len("SHA-256 `") + 32,
     ):
         exact_wrap = f"{marker} {expected_pointer[:cut]}\n  {expected_pointer[cut:]}" + footer
-        result, candidate = whitespace_delivery(expected_pointer, exact_wrap)
+        result, candidate = whitespace_delivery(expected_pointer, exact_wrap, logical=expected_pointer)
         assert result.acknowledged and candidate.keys == ["Enter"]
         for editor in (
             f"{marker} {expected_pointer[:cut]}\n   {expected_pointer[cut:]}" + footer,
@@ -802,7 +836,7 @@ for runtime, marker, active in (
     for after_space in (False, True):
         boundary = cut + int(after_space)
         exact_wrap = f"{marker} {spaced_pointer[:boundary]}\n  {spaced_pointer[boundary:]}" + footer
-        result, candidate = whitespace_delivery(spaced_pointer, exact_wrap)
+        result, candidate = whitespace_delivery(spaced_pointer, exact_wrap, logical=spaced_pointer)
         assert result.acknowledged and candidate.keys == ["Enter"]
     print(f"OK   {runtime} added/removed literal whitespace and unknown wrap gutter reject initial/retry Enter")
 
@@ -1045,7 +1079,7 @@ result, port, retries, _stages = run_case(
     ["› " + PROMPT, "• Working"],
     send_prompt=False,
     pre_send_screen_sha256=_screen_digest(transport_baseline),
-    pre_send_editor_sha256=_editor_digest("codex", transport_baseline),
+    pre_send_editor_sha256=hashlib.sha256(b"previous editor").hexdigest(),
 )
 assert result.acknowledged and port.sent == [] and port.keys == ["Enter"]
 print("OK   transport replay submits only after a baseline-bound editor change")
@@ -1055,7 +1089,7 @@ result, port, retries, _stages = run_case(
     [stale_editor, "• Working (stale previous turn)"],
     send_prompt=False,
     pre_send_screen_sha256=_screen_digest(stale_editor),
-    pre_send_editor_sha256=_editor_digest("codex", stale_editor),
+    pre_send_editor_sha256=hashlib.sha256(PROMPT.encode()).hexdigest(),
 )
 assert not result.acknowledged and result.evidence == "paste-unconfirmed"
 assert port.sent == [] and port.keys == [] and not retries
@@ -1143,9 +1177,9 @@ print("OK   visible transcript anchor does not hide exact provider activity")
 result, port, retries, _stages = run_case(
     ["› " + PROMPT, "›"]
 )
-assert not result.acknowledged and result.evidence == "idle"
+assert not result.acknowledged and result.evidence == "submit-unconfirmed"
 assert port.keys == ["Enter"] and not retries
-print("OK   idle repaint cannot acknowledge a continuation")
+print("OK   clearing the draft cannot acknowledge a continuation or authorize retry")
 
 result, port, retries, _stages = run_case(
     ["› " + PROMPT, "", ""]

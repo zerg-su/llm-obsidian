@@ -387,6 +387,7 @@ class CmuxAdapter:
             "Backspace",
             "ctrl+c",
             "ctrl+u",
+            "ctrl+g",
             "down",
         }:
             raise CmuxError("key is not allowlisted")
