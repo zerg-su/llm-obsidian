@@ -127,6 +127,23 @@ def classify(runtime: str, screen: str, *, closure_armed: bool = False) -> Promp
         if closure_armed and region and _has(region, background):
             return PromptDecision(True, "background-exit", ("Enter",), True)
     elif runtime == "codex":
+        update_region = _dialog_region(screen, ("enter continue · esc skip",))
+        if (
+            update_region
+            and re.search(
+                r"(?m)^\s*Update available · \d+\.\d+\.\d+ → \d+\.\d+\.\d+\s*$",
+                update_region,
+            )
+            and _has(update_region, (
+                "Release notes: https://github.com/openai/codex/releases/latest",
+            ))
+            and re.search(
+                r"(?m)^\s*› 1\. Update now \(runs `npm install -g @openai/codex`\)\s*"
+                r"\n\s*2\. Skip\s*\n\s*3\. Skip until next version\s*$",
+                update_region,
+            )
+        ):
+            return PromptDecision(True, "update-skip-current", ("down", "Enter"), True)
         folder_region = _dialog_region(screen, ("enter continue · esc quit",))
         folder_trust = (
             "Folder access",

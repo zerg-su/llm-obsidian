@@ -65,6 +65,21 @@ check(
 fable = resolve_light_review_route(config, claude, explicit_model="fable")
 check("Claude Light Review can select Fable", fable["runtime"] == "claude" and fable["model"] == "fable")
 
+astra = resolve_light_review_route(
+    config, codex, explicit_model="gpt-6-astra", explicit_effort="xhigh"
+)
+check(
+    "Light Review accepts exact registered Astra without changing effort",
+    (astra["runtime"], astra["model"], astra["effort"], astra["isolation"])
+    == ("codex", "gpt-6-astra", "xhigh", "native-subagent"),
+)
+try:
+    resolve_light_review_route(config, claude, explicit_model="gpt-6-astra")
+except RoutingError as exc:
+    check("concrete cross-runtime Light override fails visibly", "same runtime" in str(exc))
+else:
+    check("concrete cross-runtime Light override fails visibly", False)
+
 try:
     resolve_light_review_route(config, codex, explicit_model="opus")
 except RoutingError as exc:

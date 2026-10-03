@@ -203,6 +203,18 @@ with tempfile.TemporaryDirectory(prefix="model-routing-test.") as raw:
         "review model alias selects its registered runtime",
         (route["runtime"], route["model"]) == ("codex", "gpt-5.6-terra"),
     )
+    for profile in ("simple", "deep"):
+        for runtime in ("", "codex"):
+            route = routing.resolve(
+                config, "review", session=claude, review_profile=profile,
+                explicit_runtime=runtime, explicit_model="gpt-6-astra",
+                explicit_effort="xhigh",
+            )
+            check(
+                f"{profile} review accepts registered Astra with runtime {runtime!r}",
+                (route["runtime"], route["model"], route["effort"])
+                == ("codex", "gpt-6-astra", "xhigh"),
+            )
     route = routing.resolve(config, "dispatch", session=codex, explicit_model="sonnet")
     check("registered Sonnet override infers Claude runtime", (route["runtime"], route["model"]) == ("claude", "sonnet"))
     route = routing.resolve(config, "dispatch", session=claude, explicit_model="gpt-5.6-terra")
@@ -251,7 +263,10 @@ with tempfile.TemporaryDirectory(prefix="model-routing-test.") as raw:
     for name, call in (
         ("session-required roles fail closed", lambda: routing.resolve(config, "dispatch")),
         ("unknown model without runtime fails closed", lambda: routing.resolve(config, "dispatch", session=codex, explicit_model="unknown")),
-        ("review concrete model override fails closed", lambda: routing.resolve(config, "review", session=codex, explicit_runtime="codex", explicit_model="gpt-5.6-sol")),
+        ("unregistered review model fails closed even with runtime", lambda: routing.resolve(config, "review", session=codex, explicit_runtime="codex", explicit_model="unregistered-review")),
+        ("unregistered review model fails closed without runtime", lambda: routing.resolve(config, "review", session=codex, explicit_model="unregistered-review")),
+        ("registered review model rejects mismatched runtime", lambda: routing.resolve(config, "review", session=codex, explicit_runtime="claude", explicit_model="gpt-6-astra")),
+        ("registered review model rejects invalid effort", lambda: routing.resolve(config, "review", session=codex, explicit_model="gpt-6-astra", explicit_effort="ultra")),
         ("invalid effort fails closed", lambda: routing.resolve(config, "dispatch", session=codex, explicit_effort="ultra")),
     ):
         try:

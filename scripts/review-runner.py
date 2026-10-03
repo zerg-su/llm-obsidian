@@ -59,7 +59,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--full", action="store_true")
     result.add_argument("--cross-model", action="store_true")
     result.add_argument("--runtime", choices=("claude", "codex"), default="")
-    result.add_argument("--model", default="", help="registered model alias only")
+    result.add_argument("--model", default="", help="registered model name or alias")
     result.add_argument("--effort", default="")
     result.add_argument("--session-id", default="")
     result.add_argument("--session-runtime", choices=("claude", "codex"), default="")

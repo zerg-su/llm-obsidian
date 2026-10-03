@@ -44,8 +44,10 @@ for near_match in (
     "Working (13s • esc to interrupt)",
     codex_158_activity.replace("Working (", "Quoted Working ("),
     codex_158_activity.replace("? for shortcuts", "quoted footer"),
+    codex_158_activity.replace("› Ask Codex to do anything", "quoted composer"),
 ):
     assert classify_continuation_screen("codex", near_match, "") != "active"
+assert classify_continuation_screen("claude", codex_158_activity, "") != "active"
 print("OK   Codex 0.158 activity requires the exact native status and composer footer")
 
 
@@ -79,6 +81,16 @@ assert await_initial_start_acknowledged(
     observation_limit=1,
 ) == "started"
 print("OK   Codex 0.158 activity acknowledges initial submission without a resend")
+
+assert await_initial_start_acknowledged(
+    FakePort([codex_158_activity]),
+    surface_id=SURFACE,
+    runtime="codex",
+    anchor=PROMPT.splitlines()[0],
+    paste_screen_sha256=_screen_digest(codex_158_activity),
+    observation_limit=1,
+) == "unconfirmed"
+print("OK   unchanged Codex activity cannot acknowledge a new submission")
 
 
 class SemanticPort(FakePort):

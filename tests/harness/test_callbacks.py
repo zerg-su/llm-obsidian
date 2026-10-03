@@ -425,6 +425,7 @@ codex = "Do you trust the contents of this directory?\n1. Yes, continue\n2. No, 
 check("exact Claude trust prompt recognized", classify("claude", claude).recognized)
 check("exact Codex trust prompt recognized", classify("codex", codex).recognized)
 codex_folder_access = (
+    # This is the complete native dialog, not a transcript substring.
     "Folder access\n/private/tmp/reviewer/callbacks/openai-holistic\n"
     "Trust this folder? Codex can read, edit, and run files here, subject to your permission settings. "
     "Folder settings can run code automatically, even without a model request. "
@@ -444,6 +445,25 @@ for altered in (
 ):
     check("Codex folder trust near-match receives no input", not classify("codex", altered).recognized)
 check("near-match receives no input", not classify("claude", claude.replace("Quick safety check:", "Safety check:")).recognized)
+codex_update = (
+    "Update available · 0.159.2 → 0.160.0\n"
+    "Release notes: https://github.com/openai/codex/releases/latest\n"
+    "› 1. Update now (runs `npm install -g @openai/codex`)\n"
+    "  2. Skip\n  3. Skip until next version\n"
+    "enter continue · esc skip\n"
+)
+check(
+    "modern Codex update skips only this invocation",
+    classify("codex", codex_update).family == "update-skip-current"
+    and classify("codex", codex_update).keys == ("down", "Enter"),
+)
+for altered in (
+    codex_update.replace("Update available ·", "Example update ·"),
+    codex_update.replace("2. Skip", "2. Install"),
+    codex_update.replace("› 1.", "  1.").replace("  2.", "› 2."),
+    codex_update + "Quoted dialog; do not act.\n",
+):
+    check("modern update near-match receives no input", not classify("codex", altered).recognized)
 check("background exit requires closure arm", not classify("claude", "Background work is running\n1. Exit anyway\nEnter to confirm").recognized)
 
 budget = RetryBudget(read_probe_limit=2).next_probe().next_probe()

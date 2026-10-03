@@ -245,7 +245,8 @@ route. Default Deep resolves independent Anthropic and OpenAI holistic routes; a
 explicit model/runtime override instead opens intent and engineering lanes on
 that model alone. Explicit Full resolves the four-lane Anthropic/OpenAI by
 intent/engineering grid and rejects model/runtime overrides before launch.
-Review model overrides accept registered aliases only. Every resolved route
+Review model overrides accept registered aliases or exact registered model names;
+unknown models and runtime/model mismatches fail closed. Every resolved route
 remains recorded in operation metadata. The bounded
 daily summarizer inherits the current session's exact model and changes only
 effort to the centrally configured daily value.

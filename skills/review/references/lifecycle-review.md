@@ -64,8 +64,8 @@ owner. The one-shot flag is never copied into generated callbacks.
 ## Presets and routing
 
 - Simple: one holistic session on the selected model.
-- Deep: default independent Anthropic/OpenAI holistic sessions at `xhigh`; an
-  alias-backed model/runtime override instead uses independent intent and
+- Deep: default independent Anthropic/OpenAI holistic sessions at `xhigh`; a
+  registered model/alias or runtime override instead uses independent intent and
   engineering lanes on that model.
 - Full: explicit only, four lanes `{Anthropic, OpenAI} × {intent, engineering}`
   at `xhigh`; rejects overrides and `--deep`.
