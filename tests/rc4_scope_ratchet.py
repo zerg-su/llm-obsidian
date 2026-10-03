@@ -611,7 +611,7 @@ retain the delivery generation and cannot replay a send. Registered lifecycle pr
 exclusive supported interactive task context so hooks retain task telemetry
 without running the vault coordinator Stop pipeline in a release checkout.
 Foreign/changed context is preserved, and abnormal runs retain scope while
-owned resources remain. Five existing production owners grow by exactly 185
+owned resources remain. Five existing production owners grow by exactly 201
 lines. Input-only continuations use a separate receipt namespace, so provider
 exit checks only the actual callback/result generation. Broker-accepted
 parent evidence is sealed in that original generation before another input
@@ -628,7 +628,10 @@ Post-submit observations and a fresh pre-retry read recheck the complete compose
 changed path/hash and unknown boundaries cannot authorize a second Enter.
 This follow-up adds 31 measured lines only in the existing continuation owner;
 no per-file/function ceiling, timeout, resend or submit budget is raised.
-The exact contour is 305 files / 116,273 lines with no extra
+The whitespace review follow-up adds exactly 16 measured lines only in the same
+continuation owner: known native gutters are removed without stripping content
+whitespace; unknown gutters and changed path/hash spaces reject initial/retry Enter.
+The exact contour is 305 files / 116,289 lines with no extra
 headroom. The standard four-cell contract and authentication policy are unchanged.
 """
 
@@ -644,7 +647,7 @@ SCRIPT_FILE_CEILING = 305
 
 #: Maximum total lines across those files. This is the measured exact candidate
 #: after the 2.9.0 runtime/auth integration, U-R10 binding and cmux I/O, with zero headroom.
-SCRIPT_LINE_CEILING = 116_273
+SCRIPT_LINE_CEILING = 116_289
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

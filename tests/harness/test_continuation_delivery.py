@@ -740,6 +740,60 @@ for runtime, marker, active in (
     assert candidate.keys == ["Enter"]
     print(f"OK   {runtime} retry rechecks identity/activity/permission/ownership/artifact before Enter")
 
+# Native gutters are fixed UI bytes; path/hash whitespace is never a gutter.
+for runtime, marker, active in (
+    ("codex", "›", "• Working (1s)"),
+    ("claude", "❯", "✻ Working…(1s · ↓10 tokens)"),
+):
+    footer = ("\n\nGPT-6-Astra high · Context 5% used · 258K window · never\n"
+              "? for shortcuts") if runtime == "codex" else ""
+
+    def whitespace_delivery(value, editor, *, retry=False):
+        exact = f"{marker} {value}" + footer
+        screens = [exact, exact, exact, editor, active] if retry else [editor, active]
+        candidate = FakePort([f"{marker} previous editor"] + screens)
+        result = deliver_continuation(
+            candidate, surface_id=SURFACE, prompt=value, runtime=runtime,
+            artifact_ready=lambda: False, ownership_ready=lambda: True,
+            reserve_retry=lambda: True, observe_stage=lambda *_args: None,
+            observation_limit=2, wait=lambda _seconds: None,
+        )
+        return result, candidate
+
+    for cut in (
+        expected_pointer.index("expected.md") + len("expected"),
+        expected_pointer.index("SHA-256 `") + len("SHA-256 `") + 32,
+    ):
+        exact_wrap = f"{marker} {expected_pointer[:cut]}\n  {expected_pointer[cut:]}" + footer
+        result, candidate = whitespace_delivery(expected_pointer, exact_wrap)
+        assert result.acknowledged and candidate.keys == ["Enter"]
+        for editor in (
+            f"{marker} {expected_pointer[:cut]}\n   {expected_pointer[cut:]}" + footer,
+            f"{marker} {expected_pointer[:cut]} \n  {expected_pointer[cut:]}" + footer,
+            f"{marker} {expected_pointer[:cut]}\n{expected_pointer[cut:]}" + footer,
+            f"{marker} {expected_pointer[:cut]}\n {expected_pointer[cut:]}" + footer,
+        ):
+            for retry in (False, True):
+                result, candidate = whitespace_delivery(expected_pointer, editor, retry=retry)
+                assert not result.acknowledged and result.submit_count == int(retry), (runtime, cut, retry)
+                assert candidate.keys == (["Enter"] if retry else []) and candidate.sent == [expected_pointer]
+
+    spaced_pointer = interactive_provider_input(
+        "codex", Path("/tmp/" + "shared-directory/" * 8 + "expected .md"), "Expected contract",
+    )
+    cut = spaced_pointer.index("expected .md") + len("expected")
+    removed_space = f"{marker} {spaced_pointer[:cut]}\n  {spaced_pointer[cut + 1:]}" + footer
+    for retry in (False, True):
+        result, candidate = whitespace_delivery(spaced_pointer, removed_space, retry=retry)
+        assert not result.acknowledged and result.submit_count == int(retry)
+        assert candidate.keys == (["Enter"] if retry else [])
+    for after_space in (False, True):
+        boundary = cut + int(after_space)
+        exact_wrap = f"{marker} {spaced_pointer[:boundary]}\n  {spaced_pointer[boundary:]}" + footer
+        result, candidate = whitespace_delivery(spaced_pointer, exact_wrap)
+        assert result.acknowledged and candidate.keys == ["Enter"]
+    print(f"OK   {runtime} added/removed literal whitespace and unknown wrap gutter reject initial/retry Enter")
+
 pre_key_port = FakePort([
     "› previous editor",
     "› " + PROMPT,

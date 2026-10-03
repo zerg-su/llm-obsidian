@@ -103,12 +103,28 @@ def _current_composer_matches(runtime: str, screen: str, prompt: str) -> bool:
     # EOF or a supported terminal footer bounds the complete visible composer.
     # Blank/separator-looking content never grants an earlier boundary.
     editor = [lines[current][len(marker):]] + lines[current + 1:end]
-    remaining = prompt.strip()
-    for line in editor:
-        visible = line.strip()
+    remaining = prompt
+    for index, line in enumerate(editor):
+        if not remaining:
+            if line.strip():
+                return False
+            continue
+        hard_break = index > 0 and remaining.startswith("\n")
+        if hard_break:
+            remaining = remaining[1:]
+        if index == 0:
+            if not line.startswith(" "):
+                return False
+            visible = line[1:]
+        elif line.startswith("  "):
+            visible = line[2:]
+        elif hard_break:
+            visible = line
+        else:
+            return False
         if not remaining.startswith(visible):
             return False
-        remaining = remaining[len(visible):].lstrip()
+        remaining = remaining[len(visible):]
     return not remaining
 
 

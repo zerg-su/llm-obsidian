@@ -32,6 +32,8 @@ packages were published for them.
 
 #### Fixed
 
+- Wrapped composer matching removes only the known native marker/gutters, preserving path/hash whitespace at initial and retry Enter. Unknown or ambiguous gutters fail closed.
+
 - Continuation validates all composer content through the supported terminal footer or EOF, including blank/separator-looking rows, and rechecks full identity immediately before retry Enter. Exact prompts wrapping below 96 characters remain eligible.
 
 - Same-parent Codex continuation reserves a fresh typed input generation without advancing the accepted callback/result target; replay cannot send a second prompt. Registered live lifecycle probes use exclusive task context so hooks do not index or commit the release vault. Foreign and changed context is preserved.
@@ -65,9 +67,9 @@ packages were published for them.
 
 - Replaced dated skill guidance with stable contracts and registered prompt
   regressions and scratch-vault template validation in `make test`.
-- The scripts ratchet is pinned to exactly 305 files / 116,273 measured lines: the
+- The scripts ratchet is pinned to exactly 305 files / 116,289 measured lines: the
   152-line auth utility, 38 net runtime lines, 13 schema-scope binding lines
-  16 terminal-routing lines and 185 continuation/task-context/paste repair lines.
+  16 terminal-routing lines and 201 continuation/task-context/paste repair lines.
   The integrated base was one line below its previous ceiling.
   The unchanged 28-file review
   authority contour is 16,467 lines; the no-summary replay guard adds five.
