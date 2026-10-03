@@ -2938,9 +2938,12 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
 
     class CodexContinuationCmux(FakeCmux):
         before_input_ack = None
+        finish_turn_after_reads = None
+        idle_observed = False
 
         def send(self, surface_id: str, prompt: str) -> None:
             super().send(surface_id, prompt)
+            self.finish_turn_after_reads = None
             if self.before_input_ack is not None:
                 self.before_input_ack()
 
@@ -2957,6 +2960,11 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
             )
             if self.submit_count == self.submits_at_last_send:
                 return f"› {anchor}"
+            if self.finish_turn_after_reads is not None:
+                if self.finish_turn_after_reads == 0:
+                    self.idle_observed = True
+                    return "100% context left\n›"
+                self.finish_turn_after_reads -= 1
             return "• Working (1s • esc to interrupt)"
 
     codex_continue_root = root / "codex-continuation"
@@ -3074,6 +3082,8 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         assert not RuntimeProviderEventStream.rehydrate(input_root, 8).controller.current_state().cursor.input_accepted
         observe_same_parent_callback(False)
 
+    # Callback acceptance precedes two remaining native activity frames.
+    codex_continue_cmux.finish_turn_after_reads = 2
     codex_continue_cmux.before_input_ack = inspect_before_continuation_ack
     codex_continued = codex_continue_manager.continue_session(
         "owner-1", "runtime-1", "checkpoint-1", "continue.md"
@@ -3083,8 +3093,9 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         "codex", codex_continue_path.resolve(), codex_continue_prompt
     )
     check(
-        "Codex continuation stays one compact contract pointer",
+        "Codex continuation waits for idle and stays one compact contract pointer",
         codex_continued.record.state == "running"
+        and codex_continue_cmux.idle_observed
         and codex_continue_cmux.sent[-1]
         == (SURFACE, expected_codex_continuation)
         and sum(

@@ -485,6 +485,19 @@ def deliver_continuation(
     pre_send_editor_digest = pre_send_editor_sha256
     if send_prompt:
         pre_send_screen = port.read(surface_id)
+        for observation in range(observation_limit):
+            if runtime != "codex" or classify_continuation_screen(runtime, pre_send_screen, "") != "active":
+                break
+            if not ownership_ready():
+                return ContinuationDelivery(False, "ownership-lost", 0)
+            if artifact_ready():
+                return ContinuationDelivery(True, "artifact", 0)
+            if observation + 1 == observation_limit:
+                return ContinuationDelivery(False, "composer-busy", 0)
+            wait(observation_interval_seconds)
+            if not ownership_ready():
+                return ContinuationDelivery(False, "ownership-lost", 0)
+            pre_send_screen = port.read(surface_id)
         pre_send_digest = _screen_digest(pre_send_screen)
         pre_send_editor_digest = _delivery_editor_identity(port, surface_id, runtime, pre_send_screen)
         if pre_send_editor_digest is None:

@@ -1224,3 +1224,69 @@ assert port.keys == ["Enter"] and not retries
 print("OK   Claude activity is classified without dropping the prompt anchor")
 
 print("Continuation delivery matrix passed.")
+
+# A model may publish its callback before its native turn stops. Composer
+# handoff is unavailable while active, even though the callback is already valid.
+class CallbackBeforeIdlePort(FakePort):
+    def __init__(self, busy_reads):
+        super().__init__([])
+        self.busy_reads = busy_reads
+        self.busy_observations = 0
+
+    def read(self, surface_id):
+        assert surface_id == SURFACE
+        if self.keys:
+            self.current = "• Working (1s • esc to interrupt)\n›"
+        elif self.sent:
+            self.current = "› " + self.sent[-1]
+        elif self.busy_reads:
+            self.busy_reads -= 1
+            self.current = "• Working (1s • esc to interrupt)\n›"
+        else:
+            self.current = "›"
+        return self.current
+
+    def observe_composer(self, surface_id):
+        if self.current.startswith("• Working"):
+            self.busy_observations += 1
+            return None
+        return super().observe_composer(surface_id)
+
+
+def callback_before_idle_case(busy_reads, *, ownership=None, artifacts=None):
+    port = CallbackBeforeIdlePort(busy_reads)
+    waits = []
+    owns = iter(ownership or [])
+    ready = iter(artifacts or [])
+    result = deliver_continuation(
+        port, surface_id=SURFACE, prompt=PROMPT, runtime="codex",
+        artifact_ready=lambda: next(ready, False),
+        ownership_ready=lambda: next(owns, True),
+        reserve_retry=lambda: False, observe_stage=lambda *args: None,
+        observation_limit=4, observation_interval_seconds=0.05,
+        wait=waits.append,
+    )
+    return result, port, waits
+
+
+result, port, waits = callback_before_idle_case(2)
+assert result.acknowledged and result.submit_count == 1, result
+assert port.sent == [PROMPT] and port.keys == ["Enter"]
+assert port.busy_observations == 0 and waits == [0.05, 0.05]
+print("OK   callback-before-idle waits before native handoff and sends once")
+
+result, port, waits = callback_before_idle_case(100)
+assert not result.acknowledged and result.evidence == "composer-busy"
+assert port.sent == port.keys == [] and port.busy_observations == 0
+assert len(waits) == 3
+print("OK   busy composer exhausts bounded reads without handoff or transport")
+
+result, port, waits = callback_before_idle_case(2, ownership=[True, False])
+assert not result.acknowledged and result.evidence == "ownership-lost"
+assert port.sent == port.keys == [] and waits == []
+print("OK   readiness wait rechecks exact ownership before any input")
+
+result, port, waits = callback_before_idle_case(2, artifacts=[False, True])
+assert result.acknowledged and result.evidence == "artifact" and result.submit_count == 0
+assert port.sent == port.keys == [] and waits == []
+print("OK   existing continuation artifact during readiness prevents another input")

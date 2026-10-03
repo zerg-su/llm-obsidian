@@ -648,6 +648,16 @@ late helper cannot acquire the identity of another observation. Four measured
 production lines preserve this fail-closed boundary; delayed-helper RED/GREEN
 regression exercises the ordering without another provider effect.
 
+
+The user-authorized quick continuation repair adds thirteen production lines to
+wait through native Codex activity before the first editor handoff. It reuses
+existing observation count/interval, preserves ownership and artifact checks,
+and does not resend input. A separate-window control establishes callback-before-
+idle failure and successful delivery after idle; the behavioral matrix covers
+bounded busy, ownership loss and artifact arrival. The readiness correction had
+one line of headroom; this exact tree is 306 files / 116,605 lines, without spare
+capacity or a full acceptance rerun.
+
 """
 
 from __future__ import annotations
@@ -662,7 +672,7 @@ SCRIPT_FILE_CEILING = 306
 
 #: Maximum total lines across those files. This is the measured exact candidate
 #: after the 2.9.0 runtime/auth integration, U-R10 binding and cmux I/O, with zero headroom.
-SCRIPT_LINE_CEILING = 116_593
+SCRIPT_LINE_CEILING = 116_605
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

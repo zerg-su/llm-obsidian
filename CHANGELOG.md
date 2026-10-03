@@ -32,6 +32,10 @@ packages were published for them.
 
 #### Fixed
 
+- Codex continuation waits through an active native turn before requesting
+  composer identity. Callback publication alone no longer races editor readiness;
+  exhausted readiness or lost ownership sends no input.
+
 - Initial Codex input waits for the configured composer context footer before
   the first native editor handoff. A provisional startup field cannot race
   configuration or grant submission authority.

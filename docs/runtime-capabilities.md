@@ -50,7 +50,11 @@ authority: submission still requires the complete logical buffer.
 Installed-binary behavior requires native
 acceptance; unit tests alone do not establish that behavior.
 
-Claude's existing screen-based checks are retained. They do not prove exact
+Continuation also waits through Codex activity before its first buffer
+observation, using the existing observation count/interval. A callback can arrive
+before native idle. Busy exhaustion (`composer-busy`) or ownership loss sends no
+input; no additional paste or Enter is authorized. Claude's existing screen-based
+checks are retained. They do not prove exact
 logical newlines across native wrapping, and Claude acceptance remains separate.
 
 ## Optional cmux `events.v1` wake contract
