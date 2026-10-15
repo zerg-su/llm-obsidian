@@ -10,6 +10,22 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.9.3] - 2026-10-15
+
+### Added
+
+- `tech-doc` skill: write or audit runbooks, READMEs and how-tos with
+  commands taken from the repository, a quick-reference-first operations
+  manual and S1000D-style procedures.
+- `plain-talk` skill: strict plain technical style pass (about 80% of
+  ASD-STE100) for replies and text.
+- `docs/skill-references/plain-style.md` as the single style source, and
+  `skills/tech-doc/scripts/doc_lint.py` (`make test-doc-lint`).
+
+### Changed
+
+- Skill description budget is 7800 bytes (was 7500).
+
 ## [2.9.2] - 2026-10-03
 
 ### Fixed
