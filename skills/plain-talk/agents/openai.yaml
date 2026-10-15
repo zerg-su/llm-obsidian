@@ -1,0 +1,4 @@
+interface:
+  display_name: "Plain Talk"
+  short_description: "Rewrite or explain text in plain technical style"
+  default_prompt: "Use $plain-talk to rewrite or explain this text in plain technical style (about 80% ASD-STE100)."

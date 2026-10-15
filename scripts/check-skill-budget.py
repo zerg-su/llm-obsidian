@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 
-DEFAULT_LIMIT = 7500
+DEFAULT_LIMIT = 7800
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BASELINE = ROOT / "config" / "skill-body-baseline.json"
 DESCRIPTION_RX = re.compile(

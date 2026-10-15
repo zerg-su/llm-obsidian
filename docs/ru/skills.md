@@ -4,7 +4,7 @@ Skill — versioned reasoning contract. Claude использует plugin skill
 Codex — `$llm-obsidian:name`. Другой agent может прочитать
 `skills/<name>/SKILL.md` вручную. Router даёт hint, но не расширяет разрешения.
 
-## Каталог 39 skills
+## Каталог 41 skills
 
 | Skill и вызов | Когда применять | Вход | Результат и граница | Permission/effect · минимальный пример |
 |---|---|---|---|---|
@@ -31,6 +31,7 @@ Codex — `$llm-obsidian:name`. Другой agent может прочитать
 | `mutation-testing` · `/mutation-testing` · `$llm-obsidian:mutation-testing` | Проверить чувствительность зелёных тестов после TDD | Текущие artifacts, контракт поведения, canonical verifier | Изолированные поведенческие мутации и классифицированный отчёт; sample score не заменяет приёмку | Private-copy writes; усиление исходных тестов в разрешённом scope · `/mutation-testing проверь guard после TDD` |
 | `obsidian-bases` · `/obsidian-bases` · `$llm-obsidian:obsidian-bases` | Создать `.base` view | Source notes, fields, filters, view | Native table/cards/filter/formula | Vault `.base` write · `/obsidian-bases table projects` |
 | `obsidian-markdown` · `/obsidian-markdown` · `$llm-obsidian:obsidian-markdown` | Писать Obsidian Flavored Markdown | Note intent и нужные OMF elements | Wikilinks, embeds, callouts, properties | Write только по task authority · `/obsidian-markdown callout summary` |
+| `plain-talk` · `/plain-talk` · `$llm-obsidian:plain-talk` | Строгая переделка или объяснение текста простым техническим языком (~80% ASD-STE100) | Текст, вопрос или прошлый ответ; режим explain/rewrite/audit | Текст с главным выводом первым; для rewrite — «What changed»; смысл не меняется | No-write output · `/plain-talk перепиши ответ` |
 | `prototype` · `/prototype` · `$llm-obsidian:prototype` | Ответить на один технический вопрос spike'ом | Один bounded question | Disposable evidence; не production change | Disposable-worktree write · `/prototype можно ли compile spec` |
 | `reap` · `/reap` · `$llm-obsidian:reap` | Закрыть approved dispatch task | Terminal task/review evidence | Typed Wiki Summary, review archive, lifecycle close | Coordinator-owned vault/lifecycle effect · `/reap` |
 | `research` · `/research` · `$llm-obsidian:research` | Текущий/нишевый вопрос с источниками | Bounded query и minimal context | Isolated fetch + networkless synthesis | Protected network fetch · `/research PipelineSpec guidance` |
@@ -40,6 +41,7 @@ Codex — `$llm-obsidian:name`. Другой agent может прочитать
 | `save` · `/save` · `$llm-obsidian:save` | Сохранить решение/вопрос/знание | Content, type и provenance | Deduplicated vault page | Vault transaction · `/save решение по callback` |
 | `split` · `/split` · `$llm-obsidian:split` | Preview или явная bounded activation approved plan | Frozen plan/Outcome Contract, bounded candidates; для activation — `--dispatch` | Exact SplitManifest; preview имеет zero effects, activation запускает dependency-ready workspace children через harness и принимает только exact approved resource-free receipts | Preview: read-only · `/split wiki/plans/example.md`; activation: `/split --dispatch wiki/plans/example.md` |
 | `tdd` · `/tdd` · `$llm-obsidian:tdd` | Реализовать ясное поведение | Authorized behavior и observable seam | RED→GREEN slices; не diagnosis-only | Product/test writes · `/tdd fail-closed parent gate` |
+| `tech-doc` · `/tech-doc` · `$llm-obsidian:tech-doc` | Написать или проверить runbook, README, how-to | Целевой файл или тема, читатель, языки | Документ по структуре QRH/S1000D с проверенными командами и `doc-lint`; не коммитит, `wiki/` только через `/save` | Edit названных doc-файлов · `/tech-doc README.md` |
 | `unsafe-research` · `/unsafe-research` · `$llm-obsidian:unsafe-research` | Явно принять single-context web risk | Query, full context, explicit authorization | Cited answer; никогда не fallback protected research | Network с принятым context risk · `/unsafe-research current vendor status` |
 | `vault-repair` · `/vault-repair` · `$llm-obsidian:vault-repair` | Stop сообщил `COMMIT_BLOCKED` | Exact log и dirty paths | Один recovery/validation/Stop repair pass | Bounded local pipeline; no ownership bypass · `/vault-repair` |
 | `wiki-fold` · `/wiki-fold` · `$llm-obsidian:wiki-fold` | Свернуть старые operation-log entries | Oldest unprocessed entries | Deterministic rollup, dry-run по умолчанию | Vault transaction только explicit commit · `/wiki-fold --dry-run` |

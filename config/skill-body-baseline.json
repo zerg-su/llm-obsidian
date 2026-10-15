@@ -163,6 +163,13 @@
       "closure_token_estimate": 1349,
       "token_estimate": 1349
     },
+    "plain-talk": {
+      "body_bytes": 1851,
+      "body_lines": 32,
+      "closure_bytes": 1851,
+      "closure_token_estimate": 463,
+      "token_estimate": 463
+    },
     "prototype": {
       "body_bytes": 681,
       "body_lines": 13,
@@ -225,6 +232,13 @@
       "closure_bytes": 3927,
       "closure_token_estimate": 982,
       "token_estimate": 522
+    },
+    "tech-doc": {
+      "body_bytes": 2435,
+      "body_lines": 45,
+      "closure_bytes": 7215,
+      "closure_token_estimate": 1804,
+      "token_estimate": 609
     },
     "unsafe-research": {
       "body_bytes": 1497,

@@ -170,6 +170,24 @@
       "hint": "Exact conflicted worktree; no stage/continue/abort without authorization"
     },
     {
+      "skill": "tech-doc",
+      "patterns": [
+        "(?i)\\b/?tech[- ]?doc\\b",
+        "(?i)\\b(напиши|перепиши|оформи|отревьюй|проверь|улучши)\\w*\\s+(\\S+\\s+){0,2}(документаци|доку\\b|readme|ридми|ранбук|runbook)",
+        "(?i)\\b(write|rewrite|audit|review)\\s+(the |a |this )?(runbook|readme|operations manual|how-to doc|technical doc)"
+      ],
+      "hint": "Docs in plain STE style: verified commands, QRH-first structure, doc-lint check"
+    },
+    {
+      "skill": "plain-talk",
+      "patterns": [
+        "(?i)\\b/?plain[- ]?talk\\b",
+        "(?i)\\b(объясни|перепиши|переформулируй|скажи)\\w*\\s+(\\S+\\s+){0,2}(проще|попроще|простым языком|по ste\\b)",
+        "(?i)\\b(explain|rewrite)\\b.{0,30}\\b(plain (english|language|style)|asd-?ste100|simplified technical english)"
+      ],
+      "hint": "Strict plain technical style (~80% ASD-STE100): point first, short sentences, one term per thing"
+    },
+    {
       "skill": "wiki-query",
       "patterns": [
         "(?i)\\bчто (ты )?знаешь про\\b",

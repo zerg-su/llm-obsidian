@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tech Doc"
+  short_description: "Write or audit runbooks and READMEs in plain STE style"
+  default_prompt: "Use $tech-doc to write or audit this documentation with verified commands and a doc-lint check."

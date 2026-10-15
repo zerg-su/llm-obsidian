@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "records": [
+    {
+      "skill": "tech-doc",
+      "verdict": "fix",
+      "passes": {
+        "invocation": "pass",
+        "hierarchy": "TD-H1 contracts reference not marked as conditional",
+        "steering": "TD-S1 audit-mode step set unspecified; TD-S2 fresh-context smoke: unverified-fact placement, omitted sections, default reader, C-x template, mid-procedure warning",
+        "pruning": "TD-P1 pre-flight limit restated from CLAUDE.md",
+        "goal_preservation": "pass"
+      },
+      "overall_input": "User request to write or audit a named technical document (runbook, README, how-to) for a known reader and language set, plus the repository or configuration it describes.",
+      "overall_outcome": "A document a reader can follow without the author: verified commands, structure per doc-structure.md, style per plain-style.md, and an honest list of unverified facts; or, in audit mode, findings without edits.",
+      "local_subgoal": "Produce or audit the named documentation files only, grounded in repository sources, and report checks and unverified facts.",
+      "completion_proxies": [
+        "doc-lint exit 0",
+        "document file written",
+        "EN/RU pair parity clean",
+        "skill structural audit green"
+      ],
+      "required_outcome_evidence": [
+        "Every command, path, variable and resource name traced to a source or listed as unverified",
+        "Every state-changing procedure step has Expected and, where failure is realistic, If not",
+        "doc-lint result reported with a reason for each remaining error",
+        "Procedures claimed to work only when they were run"
+      ],
+      "evidence": "skills/tech-doc/SKILL.md steps 1-3 and Boundaries; references/doc-structure.md sections 2, 3, 5; fresh-context smoke run (Redis runbook, 10 reported instruction defects)",
+      "change": "Audit flow explicit; pre-flight limit points to CLAUDE.md; default reader; omit empty sections; inline (unverified) mark plus report list; redaction scope for other repositories; conditional v2.6.3 contract pointer; single-language header; C-x template; mid-procedure signal word; location marks by host name.",
+      "behavior_proof": "Triggers, write/audit modes, file-edit boundary, wiki-via-/save rule, no-commit boundary and doc-lint check are unchanged; the edits only make the existing audit boundary explicit and remove a duplicated rule."
+    },
+    {
+      "skill": "plain-talk",
+      "verdict": "fix",
+      "passes": {
+        "invocation": "pass",
+        "hierarchy": "pass",
+        "steering": "PT-S1 audit-mode step set unspecified; PT-S2 fresh-context smoke: meaning vs unsupported puffery, length unit, optional next step, label language",
+        "pruning": "pass",
+        "goal_preservation": "pass"
+      },
+      "overall_input": "Text, a question or an earlier reply that the user wants explained, rewritten or audited in plain technical style.",
+      "overall_outcome": "Text in the user's language with the main point first, short sentences, one term per thing and no listed AI-slop patterns, with the meaning of the input preserved; or audit findings without a rewrite.",
+      "local_subgoal": "Apply plain-style.md strictly to the given text and report what changed.",
+      "completion_proxies": [
+        "doc-lint exit 0",
+        "shorter text",
+        "What changed list present"
+      ],
+      "required_outcome_evidence": [
+        "No claim, number or example added beyond the input",
+        "Main point stated in the first sentence",
+        "Remaining doc-lint errors each have a stated reason",
+        "Code, commands, quotes and names unchanged"
+      ],
+      "evidence": "skills/plain-talk/SKILL.md steps 1-5; plain-style.md sections 2 and 6; fresh-context smoke run (RU rewrite + EN audit, 8 reported instruction defects)",
+      "change": "Audit flow and language explicit; delete unsupported evaluative claims and list them; next step only if present; 150-word threshold; one fact with its reason; localized What changed label; term-form and synonym-doubt rules in plain-style.md; doc-lint limits stated.",
+      "behavior_proof": "Triggers, the three modes, precedence of other skill formats and the always-on rule pointer are unchanged; the edit only makes the existing no-rewrite audit boundary explicit."
+    }
+  ]
+}
