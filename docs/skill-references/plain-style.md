@@ -15,6 +15,8 @@ Sources:
   Karpathy, X, 2026-10-02 (`x.com/karpathy/status/2105819303471976479`):
   "80% of the way to ASD-STE100" for LLM output.
 - GOST 2.601 / 2.610: form of Russian operating documents (infinitive).
+- [GOST R 2.105-2019](https://protect.gost.ru/gost/details/0dd3cdfa-c15a-47b3-9e3b-4a90a43005c8),
+  clauses 5.2.2–5.2.3: Russian technical wording and terms (section 2.4).
 - `petergyang/no-ai-slop` (MIT): word lists and patterns in sections 3–4,
   adapted for technical text.
 
@@ -53,9 +55,15 @@ Sources:
    NOTE: STE approves `approximately`. The cheat sheet attached to the Karpathy
    post marks it as unapproved — that sheet has errors.
 3. Give numbers with units. Put exact names (files, commands, keys) in backticks.
-4. Russian: keep technical terms in English (`CLAUDE.md` language rule), or
-   in the form the input already uses (`реплика-сет`, `бэкап`). Do not
-   translate them. For text published outside the vault, also apply
+4. Russian passages only: also apply GOST R 2.105-2019, clauses 5.2.2–5.2.3.
+   Use them as a guide to technical wording in replies and documents.
+   Write concise, unambiguous text. Use consistent, established terms.
+   Distinguish requirements from permissions and possibilities. Apply these
+   principles within this file's document formats and chat register (section 1.7).
+   Project terminology takes precedence. Keep technical terms in English
+   (`CLAUDE.md` language rule), or in the form the input already uses
+   (`реплика-сет`, `бэкап`). Do not translate them.
+   For text published outside the vault, also apply
    [redaction-rules.md](redaction-rules.md).
 
 ## 3. Word lists (machine-read by `skills/tech-doc/scripts/doc_lint.py`)
