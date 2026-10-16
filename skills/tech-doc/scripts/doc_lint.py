@@ -19,7 +19,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_STYLE = ROOT / "docs" / "skill-references" / "plain-style.md"
 
-FENCE_RX = re.compile(r"^\s*(```|~~~)")
+FENCE_RX = re.compile(r"^\s*(`{3,}|~{3,})\s*([^\s`]*)")
 LIST_RX = re.compile(r"^\s*([-*+]|\d+[.)])\s+")
 HEADING_RX = re.compile(r"^(#{1,6})\s+(.*)$")
 HEADING_KEY_RX = re.compile(r"^((?:\d+(?:\.\d+)*\.?)|[A-Z]{1,3}-\d+)\b")
@@ -31,6 +31,7 @@ SENTENCE_END_RX = re.compile(r"(?<=[.!?])\s+(?=[A-ZА-ЯЁ0-9\"«(\[`])")
 WORD_RX = re.compile(r"[\w'’-]*\w")
 GLOSS_WINDOW = 60
 COMMAND_LANGS = {"bash", "sh", "shell", "fish", "console", "zsh"}
+REF_CONNECTORS = {"then", "and", "or", "затем", "потом", "и", "или"}
 
 
 @dataclass
@@ -69,6 +70,12 @@ def scrub(text: str) -> str:
     return LINK_RX.sub(r"\1", text)
 
 
+def closes(line: str, fence: str) -> bool:
+    """A closing fence: only the fence character, at least as long as the opening."""
+    stripped = line.strip()
+    return len(stripped) >= len(fence) and not stripped.strip(fence[0])
+
+
 def parse_units(lines: list[str]) -> tuple[list[Unit], list[tuple[str, str]]]:
     """Split Markdown into prose units. Also return (lang, line) code lines."""
     units: list[Unit] = []
@@ -78,14 +85,14 @@ def parse_units(lines: list[str]) -> tuple[list[Unit], list[tuple[str, str]]]:
     current: Unit | None = None
     for number, line in enumerate(lines, start=1):
         if fence is not None:
-            if line.strip().startswith(fence):
+            if closes(line, fence):
                 fence = None
             else:
                 code.append((lang, line))
             continue
         match = FENCE_RX.match(line)
         if match:
-            fence, lang, current = match.group(1), line.strip()[3:].split(" ")[0].lower(), None
+            fence, lang, current = match.group(1), match.group(2).lower(), None
             continue
         stripped = line.strip()
         if not stripped:
@@ -148,18 +155,19 @@ def check_words(path: str, unit: Unit, lists: dict[str, list[str]]) -> list[Find
 
 def is_glossed(text: str, start: int, end: int) -> bool:
     if start > 0 and text[start - 1] == "(":
-        return re.match(r"(?:[^()\n]{0,%d}?)\s+[—–-]\s+" % GLOSS_WINDOW, text[end:]) is not None
+        return re.match(r"(?:[^()\n]{0,%d}?)\s+[—–-]\s+[^\s()]" % GLOSS_WINDOW, text[end:]) is not None
     window = text[end : end + GLOSS_WINDOW]
     paren = window.find("(")
     if paren < 0:
         return False
     between = window[:paren]
-    return not ID_RX.search(between) and not re.search(r"[.!?]\s", between)
+    gloss = text[end + paren + 1 :]
+    return not ID_RX.search(between) and not re.search(r"[.!?]\s", between) and re.match(r"\s*[^\s)]", gloss) is not None
 
 
 def ref_only(cell: str) -> bool:
     """A table cell like 'P-5, then P-6': the row itself explains the IDs."""
-    return word_count(ID_RX.sub("", cell)) <= 3
+    return all(word.lower() in REF_CONNECTORS for word in WORD_RX.findall(ID_RX.sub("", cell)))
 
 
 def check_refs(path: str, unit: Unit, defined: set[str]) -> list[Finding]:

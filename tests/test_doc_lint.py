@@ -107,7 +107,18 @@ with tempfile.TemporaryDirectory(prefix="doc-lint-test.") as raw:
     table = "| Situation | Action |\n|---|---|\n| Host is down | Run C-1 and wait for the reply |\n"
     result = lint(tmp, base + table, "--json")
     assert rules(result) == ["unglossed-ref"], result.stdout
+    table = "| Situation | Action |\n|---|---|\n| Host is down | Run C-1 now. |\n"
+    result = lint(tmp, base + table, "--json")
+    assert rules(result) == ["unglossed-ref"], result.stdout
+    table = "| Ситуация | Переход |\n|---|---|\n| Хост недоступен | C-1, затем C-2 |\n"
+    result = lint(tmp, base + "### C-2. Next\n\nText.\n\n" + table, "--json")
+    assert result.returncode == 0 and findings(result) == [], result.stdout
     print("OK   table cell with only IDs needs no gloss, prose cell does")
+
+    for empty in ("Run C-1 ().\n", "Run C-1 (  ).\n", "Step it down first (C-1 — ).\n"):
+        result = lint(tmp, base + empty, "--json")
+        assert rules(result) == ["unglossed-ref"], empty + result.stdout
+    print("OK   an empty gloss is not a gloss")
 
     en = "# T\n\n## 1. Setup\n\n### C-1. Check\n\nRun C-1 (check).\n\n```bash\nls -la\n```\n"
     ru = "# Т\n\n## 1. Подготовка\n\n### C-1. Проверка\n\nВыполнить C-1 (проверка).\n\n```bash\nls -la\n```\n"
@@ -121,6 +132,18 @@ with tempfile.TemporaryDirectory(prefix="doc-lint-test.") as raw:
     result = lint(tmp, en, "--pair", str(tmp / "ru.md"), "--json", name="en.md")
     assert "pair-headings" in rules(result), result.stdout
     print("OK   pair parity: headings and commands")
+
+    for fence in ("````", "~~~"):
+        left = f"# T\n\n{fence}bash\necho left\n{fence}\n"
+        (tmp / "ru.md").write_text(left.replace("left", "right"), encoding="utf-8")
+        result = lint(tmp, left, "--pair", str(tmp / "ru.md"), "--json", name="en.md")
+        assert rules(result) == ["pair-commands"], fence + result.stdout
+    print("OK   pair parity reads the language of longer and tilde fences")
+
+    nested = "# T\n\n````markdown\n```bash\necho a; echo b\n```\nStop it; then start it.\n````\n\nText.\n"
+    result = lint(tmp, nested, "--json")
+    assert result.returncode == 0 and findings(result) == [], result.stdout
+    print("OK   a shorter fence inside a longer fence does not close it")
 
     result = lint(tmp, "# T\n\nStop it; then start it.\n")
     assert result.returncode == 1 and "doc.md:3: error: semicolon:" in result.stdout, result.stdout
