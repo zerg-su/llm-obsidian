@@ -10,6 +10,20 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.9.4] - 2026-10-16
+
+### Changed
+
+- `plain-style.md`: Russian passages also follow GOST R 2.105-2019,
+  clauses 5.2.2–5.2.3, on top of STE. Project terminology still takes
+  precedence.
+
+### Fixed
+
+- `doc_lint.py`: longer code fences (four or more backticks or tildes) and
+  their language tags parse correctly, an empty gloss no longer counts as a
+  gloss, and only connector words keep a table cell reference-only.
+
 ## [2.9.3] - 2026-10-15
 
 ### Added

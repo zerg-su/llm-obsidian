@@ -403,6 +403,7 @@ Acceptance heartbeat хранит только stage/status/counters/timestamps.
 |---|---|
 | Полный путь от идеи и архитектуры до Work Item DAG и Harness | [Architecture Workflow v1](docs/architecture-workflow-v1.ru.md) |
 | Владение вводом Codex и завершение review в v2.9.2 | [Release notes v2.9.2](docs/releases/v2.9.2.md) |
+| ГОСТ для русского простого стиля в v2.9.4 | [Release notes v2.9.4](docs/releases/v2.9.4.md) |
 | Скиллы tech-doc и plain-talk в v2.9.3 | [Release notes v2.9.3](docs/releases/v2.9.3.md) |
 | Запуск Codex и продолжение сессии в v2.9.1 | [Release notes v2.9.1](docs/releases/v2.9.1.md) |
 | Мутационные проверки, контракты скиллов и runtime в v2.9.0 | [Release notes v2.9.0](docs/releases/v2.9.0.md) |
