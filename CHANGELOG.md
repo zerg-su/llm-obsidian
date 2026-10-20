@@ -10,6 +10,19 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.9.5] - 2026-10-20
+
+### Added
+
+- `drilldown` skill and `scripts/drilldown.py`: one self-contained HTML page per
+  object and time window — stat tiles, stacked/bar/line panels on a shared time
+  axis with a synced crosshair, thresholds, and an hourly table. Data comes from a
+  Prometheus-compatible `query_range` API (`fetch`) or from MCP results written as
+  `data.json`; other systems add series with `--extra`. Spec and data stay in a
+  cache dir for re-rendering. Stdlib only; contracts in `tests/test_drilldown.py`.
+- The scripts ratchet is pinned to exactly 307 files / 117,327 measured lines:
+  the one new 571-line `scripts/drilldown.py` module, with zero headroom.
+
 ## [2.9.4] - 2026-10-16
 
 ### Changed
