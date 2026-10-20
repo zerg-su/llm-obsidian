@@ -223,6 +223,16 @@
       "hint": "Communication ADVISOR — 2-3 варианта drafts + историч-штрихи; user пушит сам"
     },
     {
+      "skill": "drilldown",
+      "patterns": [
+        "(?i)\\b/?drill[- ]?down\\b",
+        "(?i)\\b(визуальн\\w*|графическ\\w*)\\s+(детализаци\\w*|разбор\\w*|картин\\w*)",
+        "(?i)\\b(нарисуй|построй|покажи|сделай)\\b.{0,30}\\b(график\\w*|панел\\w*)\\b.{0,40}\\b(по|для)\\s+(под\\w*|pod\\w*|хост\\w*|host\\w*|сервис\\w*|метрик\\w*)",
+        "(?i)\\b(plot|chart|graph|visuali[sz]e)\\b.{0,30}\\b(metrics?|pod|host|service)\\b.{0,40}\\b(over|for|between|during|last)\\b"
+      ],
+      "hint": "Multi-panel time-series HTML: spec → fetch or MCP data → render; read-only queries; one unit per panel"
+    },
+    {
       "skill": "daily",
       "patterns": [
         "(?i)\\bстатус за день\\b",

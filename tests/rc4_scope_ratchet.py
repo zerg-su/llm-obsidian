@@ -685,6 +685,14 @@ keeps the existing function branch ceiling. ComposerPort regressions cover lost
 ownership and newly accepted artifacts at both boundaries. The measured contour
 is 306 files / 116,756 lines with zero headroom.
 
+The ``drilldown`` skill adds one production module, ``scripts/drilldown.py``
+(571 lines): a stdlib-only spec validator, a read-only Prometheus-compatible
+``query_range`` fetcher, and a self-contained HTML renderer with its inline
+template. It touches no existing script and owns no vault write path; its
+contracts live in ``tests/test_drilldown.py``. The file ceiling moves by exactly
+one and the line ceiling by exactly its 571 lines, to 307 files / 117,327 lines
+with zero headroom.
+
 """
 
 from __future__ import annotations
@@ -695,11 +703,12 @@ from pathlib import Path
 #: Maximum tracked Python files under ``scripts/`` for the generic review
 #: target candidate. The six new owners and their boundaries are justified in
 #: the module history above.
-SCRIPT_FILE_CEILING = 306
+SCRIPT_FILE_CEILING = 307
 
 #: Maximum total lines across those files. This is the measured exact candidate
-#: after the 2.9.0 runtime/auth integration, U-R10 binding and cmux I/O, with zero headroom.
-SCRIPT_LINE_CEILING = 116_756
+#: after the 2.9.0 runtime/auth integration, U-R10 binding and cmux I/O, and the
+#: drilldown renderer, with zero headroom.
+SCRIPT_LINE_CEILING = 117_327
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

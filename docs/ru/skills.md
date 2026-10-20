@@ -4,7 +4,7 @@ Skill — versioned reasoning contract. Claude использует plugin skill
 Codex — `$llm-obsidian:name`. Другой agent может прочитать
 `skills/<name>/SKILL.md` вручную. Router даёт hint, но не расширяет разрешения.
 
-## Каталог 41 skills
+## Каталог 42 skills
 
 | Skill и вызов | Когда применять | Вход | Результат и граница | Permission/effect · минимальный пример |
 |---|---|---|---|---|
@@ -23,6 +23,7 @@ Codex — `$llm-obsidian:name`. Другой agent может прочитать
 | `dispatch` · `/dispatch` · `$llm-obsidian:dispatch` | Передать утверждённый plan в worktree | Путь approved plan | Harness task; не выполняет неутверждённый plan | Local worktree/cmux effect · `/dispatch wiki/plans/example.md` |
 | `distill-runbook` · `/distill-runbook` · `$llm-obsidian:distill-runbook` | Превратить captured commands в human runbook | Current session command log | Sanitized procedure; не выполняет её | Vault write · `/distill-runbook` |
 | `draft` · `/draft` · `$llm-obsidian:draft` | Подготовить внешний ответ | Получатель, context, intent | 2–3 redacted варианта; не отправляет | No-send output · `/draft ответ на issue` |
+| `drilldown` · `/drilldown` · `$llm-obsidian:drilldown` | Разобрать, что происходило с объектом (pod, host, сервис) за окно времени | Объект, окно, метрики; Prometheus-совместимый API или данные из MCP | Одна HTML-страница: плитки, панели на общей оси времени, таблица по часам; spec/data сохраняются | Read-only queries + запись в cache dir · `/drilldown pod api-7d9 за сутки` |
 | `find-session` · `/find-session` · `$llm-obsidian:find-session` | Найти похожую прошлую сессию | Поисковая фраза | Read-only top matches | Read-only · `/find-session callback repair` |
 | `implementation-plan` · `/implementation-plan` · `$llm-obsidian:implementation-plan` | Спланировать multi-file change | Approved behavior и constraints | Owned TDD slices, interfaces, evidence | Plan-only · `/implementation-plan docs gate` |
 | `improve-skills` · `/improve-skills` · `$llm-obsidian:improve-skills` | Проверить/улучшить существующие skills | Exact skill set и eval evidence | Five-pass audit без semantic drift | Skill writes только в approved scope · `/improve-skills skills/save` |

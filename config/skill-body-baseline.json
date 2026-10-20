@@ -107,6 +107,13 @@
       "closure_token_estimate": 1960,
       "token_estimate": 1960
     },
+    "drilldown": {
+      "body_bytes": 2948,
+      "body_lines": 46,
+      "token_estimate": 737,
+      "closure_bytes": 6966,
+      "closure_token_estimate": 1742
+    },
     "find-session": {
       "body_bytes": 6745,
       "body_lines": 197,
