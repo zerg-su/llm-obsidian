@@ -10,6 +10,21 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.9.6] - 2026-10-24
+
+### Fixed
+
+- Completed unattended tasks now remove eligible harness-owned Git worktrees
+  after filing the result and releasing provider resources. Branches and commits
+  remain available. Dirty, locked, active, unowned, or ambiguous checkouts stay
+  in place with an explicit retention reason, including unknown ignored files.
+- Durable cleanup receipts let the original coordinator retry `reap` after the
+  checkout is gone, including recovery from a crash immediately after removal,
+  without repeating filing or provider effects. No historical worktree sweep.
+
+- The scripts ratchet is pinned to exactly 308 files / 117,528 lines, with
+  zero headroom, for the cleanup owner and its reap integration.
+
 ## [2.9.5] - 2026-10-20
 
 ### Added

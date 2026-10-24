@@ -185,11 +185,11 @@
       "token_estimate": 171
     },
     "reap": {
-      "body_bytes": 3690,
-      "body_lines": 69,
-      "closure_bytes": 3690,
-      "closure_token_estimate": 923,
-      "token_estimate": 923
+      "body_bytes": 4692,
+      "body_lines": 83,
+      "closure_bytes": 4692,
+      "closure_token_estimate": 1173,
+      "token_estimate": 1173
     },
     "research": {
       "body_bytes": 1183,

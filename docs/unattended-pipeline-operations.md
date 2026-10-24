@@ -125,9 +125,20 @@ rows mirror their one matched operation under `identity.operation_identity`.
 It exits `4` when any active, ambiguous, or mismatched row requires attention
 and `0` for healthy or proven-stale-only results.
 
-Completed worktrees already carrying the reap completion marker retain their
-existing finalization treatment. Live or uncertain 2.2.x state is never silently
-adopted.
+Starting in 2.9.6, successful `reap-runner.py` calls remove eligible completed
+harness-owned worktrees after the provider releases all resources. The branch
+and its commits remain. The runner retains tracked changes, unknown untracked
+or ignored files, live bindings, locked worktrees, unresolved plan-close
+conflicts, and checkouts without an exact ownership marker. Known task metadata
+and Python bytecode caches do not block cleanup. Unknown pipeline output
+artifacts remain for inspection rather than being discarded.
+
+Inspect `worktree_cleanup.status` and its retention `reason` in the reap JSON.
+Cleanup receipts live under `.vault-meta/harness/worktree-cleanup/`; rerunning
+the same command as the original coordinator recovers even after deletion
+without repeating filing or provider effects. A reused path fails closed.
+This is completion-time cleanup, not a startup sweep or a branch-deletion
+policy. Live or uncertain legacy state is never silently adopted.
 
 ### The one same-HEAD review retry
 

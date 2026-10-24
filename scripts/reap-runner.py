@@ -37,6 +37,7 @@ from harness.review_finalization import (  # noqa: E402
 )
 from harness.workflows.reap import run_reap  # noqa: E402
 from task_reap_lifecycle import mark_plan_close_conflict  # noqa: E402
+from task_worktree_cleanup import cleanup_completed_worktree, replay_cleanup  # noqa: E402
 
 
 TYPE_FOLDER = {
@@ -587,6 +588,9 @@ def apply_reap(
 ) -> dict[str, Any]:
     """Route one typed task summary through the durable harness callback seam."""
 
+    replay = replay_cleanup(vault, worktree, current)
+    if replay is not None:
+        return replay
     meta = read_json(worktree / ".task-meta.json")
     summary = validate_summary_for_task(
         read_json(worktree / ".task-summary.json"),
@@ -627,15 +631,16 @@ def apply_reap(
     except RuntimeSessionError as exc:
         raise ReapError(f"provider cleanup failed: {exc}") from exc
     if lifecycle.result is not None:
-        return dict(lifecycle.result)
+        return cleanup_completed_worktree(vault, worktree, current, meta, dict(lifecycle.result))
     prepared = read_json(worktree / ".task-reap-prepared.json")
-    return _public_reap_result(
+    result = _public_reap_result(
         result_path=str(prepared.get("result_path") or ""),
         result_link=str(prepared.get("result_link") or ""),
         plan_close_status=str(prepared.get("plan_close_status") or ""),
         duration_ms=0,
         idempotent=True,
     )
+    return cleanup_completed_worktree(vault, worktree, current, meta, result)
 
 
 def main() -> int:
@@ -647,7 +652,7 @@ def main() -> int:
     try:
         vault = args.vault_root.expanduser().resolve()
         worktree = args.worktree.expanduser().resolve()
-        meta = read_json(worktree / ".task-meta.json")
+        meta = read_json(worktree / ".task-meta.json") if worktree.exists() else {}
         session = args.current_session.strip() or current_session(vault, meta)
         print(json.dumps(apply_reap(vault, worktree, session), ensure_ascii=False, sort_keys=True))
         return 0

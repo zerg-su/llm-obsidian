@@ -397,6 +397,7 @@ There is no speculative roadmap in this README. The repository describes what is
 | Complete idea-to-architecture-to-Harness workflow (Russian) | [Architecture Workflow v1](docs/architecture-workflow-v1.ru.md) |
 | v2.9.2 owned Codex input and review cleanup | [v2.9.2 release notes](docs/releases/v2.9.2.md) |
 | v2.9.4 GOST guidance for Russian plain style | [v2.9.4 release notes](docs/releases/v2.9.4.md) |
+| v2.9.6 completed-task worktree cleanup | [v2.9.6 release notes](docs/releases/v2.9.6.md) |
 | v2.9.5 drilldown skill: multi-panel time-series HTML | [v2.9.5 release notes](docs/releases/v2.9.5.md) |
 | v2.9.3 tech-doc and plain-talk skills | [v2.9.3 release notes](docs/releases/v2.9.3.md) |
 | v2.9.1 Codex startup and continuation recovery | [v2.9.1 release notes](docs/releases/v2.9.1.md) |

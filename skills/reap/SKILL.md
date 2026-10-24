@@ -9,7 +9,8 @@ allowed-tools: Read Write Edit Glob Grep Bash AskUserQuestion
 # /reap — finalize a dispatched task
 
 Reap validates one task's typed summary/review, files it through the canonical
-vault transaction, closes the authorized lifecycle, then arms process exit.
+vault transaction, closes the authorized lifecycle, then exits the provider and
+removes eligible task worktrees.
 A review round is not task completion; reap follows final readiness.
 
 ## Normal v4 unattended path
@@ -44,10 +45,21 @@ Require the exact caller session; never infer focused cmux. The runner:
 6. Call `request-exit` for the exact task. The lifecycle wrapper sends graceful
    agent exit and closes the surface only after process exit. Do not close the
    cmux surface directly.
+7. After provider resources are empty, remove the completed harness-owned Git
+   worktree if its tracked files are clean and it contains only known disposable
+   runtime files or Python bytecode caches. Keep its branch and commits. A shared
+   task can be removed while its master plan remains pending. A plan-close
+   conflict, unknown files (including ignored files), missing ownership, lock,
+   active binding, or in-progress Git operation retains the checkout.
 
 The JSON result contains `status`, exact `result_path`, `result_link`,
 `plan_close_status` (`closed`, `conflict`, or `retained`), content-free
-`warnings`, and `duration_ms`. A `plan-close-conflict` warning means the result
+`warnings`, `duration_ms`, and `worktree_cleanup` (`removed` or `retained`,
+with a reason). Report retained checkouts and their reason. A small durable
+receipt under `.vault-meta/harness/worktree-cleanup/` supports an exact-session
+retry after deletion without repeating filing or provider effects. Unknown
+pipeline outputs are retained for inspection; cleanup never sweeps old worktrees.
+A `plan-close-conflict` warning means the result
 was filed while the concurrently edited pending plan was preserved. Show the
 filed link and both completion states. Do not emit a second vault write, review
 archive, `/reap`, or close command.
@@ -66,7 +78,9 @@ archive, `/reap`, or close command.
   closed plan.
 - Mechanism failures follow the central repair contract. Do not turn a product
   validation rejection into an auto-repair.
-- Push, publish, deploy, task worktree deletion, and branch deletion are never part of reap.
+- Push, publish, deploy, and branch deletion are never part of reap. Only the
+  coordinator runner may remove an eligible completed worktree; executors must
+  never delete their own checkout. Legacy/unowned checkouts remain untouched.
 
 ## Interactive/legacy compatibility
 
