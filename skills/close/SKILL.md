@@ -1,7 +1,7 @@
 ---
 name: close
 metadata:
-  version: 1.3.0
+  version: 1.4.0
 description: >-
   Save this session, then close its Orca chat tab or exit its Claude/Codex
   terminal agent while keeping the cmux surface. Use for save-and-close.
@@ -23,10 +23,11 @@ In an Orca native chat, save and close this chat tab. In cmux, save and queue
    before any close action. Follow its receipt:
    - `blocked`: keep the session open. Report `turn_end.reason`; repair under the
      failure-to-repair contract. No close action is authorized until it passes.
-   - `ready_for_ui_close`: read [Orca chat close](references/orca-chat.md).
-     This is preparation, not proof of a closed tab.
+   - `closed`: the exact Orca chat tab is absent after a clean turn-end.
+     End the turn; no further repository work.
+   - `unknown`: inspect the exact tab read-only; never repeat a blind close.
    - `manual`: report that no automatic close occurred. In Orca, ask the user to
-     close this tab with its close button after a clean turn-end; never prescribe
+     close this tab after a clean turn-end; never prescribe
      `/exit` or `/archive` in the native chat.
    - `queued`: end the turn immediately; no further tools. The cmux runner uses
      only `CMUX_SURFACE_ID`, never focus/ancestry; Claude queues direct `/exit`,
@@ -35,4 +36,5 @@ In an Orca native chat, save and close this chat tab. In cmux, save and queue
 State what was saved and what turn-end actually did. Only `turn_end.status: clean`
 means the flush succeeded; it need not have created a new commit. For cmux Codex,
 include manual `/exit` because injection is best-effort (`/archive` outside cmux).
-Native Orca close may require GUI access; do not claim closure from preparation.
+For native Orca, the runner uses the version-checked tab API; see
+[Orca chat close](references/orca-chat.md). Never infer closure from one RPC receipt.

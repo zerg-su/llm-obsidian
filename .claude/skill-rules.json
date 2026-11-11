@@ -198,6 +198,16 @@
       "hint": null
     },
     {
+      "skill": "orca-open-session",
+      "patterns": [
+        "(?i)orca-open-session",
+        "(?i)(сесси|session).{0,100}(открой|открыть|open|resume).{0,60}orca",
+        "(?i)(открой|открыть|open|resume).{0,100}(сесси|session).{0,100}orca",
+        "(?i)orca.{0,100}(открой|открыть|open|resume).{0,100}(сесси|session)"
+      ],
+      "hint": "Find and open an exact provider session on the verified Orca connection"
+    },
+    {
       "skill": "find-session",
       "patterns": [
         "(?i)\\bнайди\\s+похож\\w*\\s+сесси\\w*\\b",

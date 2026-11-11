@@ -38,11 +38,11 @@
       "token_estimate": 407
     },
     "close": {
-      "body_bytes": 1804,
-      "body_lines": 28,
-      "closure_bytes": 3765,
-      "closure_token_estimate": 942,
-      "token_estimate": 451
+      "body_bytes": 1921,
+      "body_lines": 30,
+      "closure_bytes": 3298,
+      "closure_token_estimate": 825,
+      "token_estimate": 481
     },
     "codebase-design": {
       "body_bytes": 1731,
@@ -115,11 +115,11 @@
       "closure_token_estimate": 1742
     },
     "find-session": {
-      "body_bytes": 6745,
-      "body_lines": 197,
-      "closure_bytes": 6745,
-      "closure_token_estimate": 1687,
-      "token_estimate": 1687
+      "body_bytes": 6483,
+      "body_lines": 185,
+      "closure_bytes": 6483,
+      "closure_token_estimate": 1621,
+      "token_estimate": 1621
     },
     "implementation-plan": {
       "body_bytes": 4846,
@@ -295,6 +295,13 @@
       "closure_bytes": 7322,
       "closure_token_estimate": 1831,
       "token_estimate": 1831
+    },
+    "orca-open-session": {
+      "body_bytes": 2825,
+      "body_lines": 40,
+      "closure_bytes": 8765,
+      "closure_token_estimate": 2192,
+      "token_estimate": 707
     }
   }
 }

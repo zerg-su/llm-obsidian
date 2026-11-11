@@ -4,7 +4,7 @@ Skill — versioned reasoning contract. Claude использует plugin skill
 Codex — `$llm-obsidian:name`. Другой agent может прочитать
 `skills/<name>/SKILL.md` вручную. Router даёт hint, но не расширяет разрешения.
 
-## Каталог 42 skills
+## Каталог 43 skills
 
 | Skill и вызов | Когда применять | Вход | Результат и граница | Permission/effect · минимальный пример |
 |---|---|---|---|---|
@@ -13,7 +13,7 @@ Codex — `$llm-obsidian:name`. Другой agent может прочитать
 | `backlog` · `/backlog` · `$llm-obsidian:backlog` | Быстро добавить/list/promote inbox item | Item или режим list/promote | Append-only capture; полноценная заметка идёт через save | Vault append · `/backlog add проверить индекс` |
 | `canvas` · `/canvas` · `$llm-obsidian:canvas` | Явно создать/изменить Obsidian Canvas | Имя canvas и cards/links | Визуальные cards/embeds; manual-only | Явный `.canvas` write · `/canvas create Architecture` |
 | `clarify` · `/clarify` · `$llm-obsidian:clarify` | Неясный outcome перед кодом | Черновое требование | По одному существенному вопросу, без реализации | Conversation-only · `/clarify новый import flow` |
-| `close` · `/close` · `$llm-obsidian:close` | Сохранить и выйти из текущего agent process | Текущая session | Сохранённый контекст и выход; не закрывает произвольную cmux surface | Vault write + process exit · `/close` |
+| `close` · `/close` · `$llm-obsidian:close` | Сохранить и закрыть текущую сессию | Текущая session | Точная вкладка Orca или выход из агента cmux; ошибка сохранения запрещает закрытие | Vault write + exact-session close · `/close` |
 | `codebase-design` · `/codebase-design` · `$llm-obsidian:codebase-design` | Запутанные границы модулей | Модули и design question | Deep module design и test seams | Read-only · `/codebase-design harness callbacks` |
 | `daily` · `/daily` · `$llm-obsidian:daily` | Итог дня по evidence | Дата и доступные session/git facts | EOD status; не план на будущее | Vault write · `/daily` |
 | `debug` · `/debug` · `$llm-obsidian:debug` | Воспроизводимый defect | Symptom, repro, expected behavior | Root cause; fix только если разрешён | Read-only diagnosis · `/debug validation exits 2` |
@@ -25,6 +25,7 @@ Codex — `$llm-obsidian:name`. Другой agent может прочитать
 | `draft` · `/draft` · `$llm-obsidian:draft` | Подготовить внешний ответ | Получатель, context, intent | 2–3 redacted варианта; не отправляет | No-send output · `/draft ответ на issue` |
 | `drilldown` · `/drilldown` · `$llm-obsidian:drilldown` | Разобрать, что происходило с объектом (pod, host, сервис) за окно времени | Объект, окно, метрики; Prometheus-совместимый API или данные из MCP | Одна HTML-страница: плитки, панели на общей оси времени, таблица по часам; spec/data сохраняются | Read-only queries + запись в cache dir · `/drilldown pod api-7d9 за сутки` |
 | `find-session` · `/find-session` · `$llm-obsidian:find-session` | Найти похожую прошлую сессию | Поисковая фраза | Read-only top matches | Read-only · `/find-session callback repair` |
+| `orca-open-session` · `/orca-open-session` · `$llm-obsidian:orca-open-session` | Найти и открыть прошлую Claude/Codex-сессию в Orca | Тема или полный provider ID, окружение при необходимости | Точная сессия на выбранном подключении; без сообщений | Open/focus · «найди сессию про Python и открой в Orca» |
 | `implementation-plan` · `/implementation-plan` · `$llm-obsidian:implementation-plan` | Спланировать multi-file change | Approved behavior и constraints | Owned TDD slices, interfaces, evidence | Plan-only · `/implementation-plan docs gate` |
 | `improve-skills` · `/improve-skills` · `$llm-obsidian:improve-skills` | Проверить/улучшить существующие skills | Exact skill set и eval evidence | Five-pass audit без semantic drift | Skill writes только в approved scope · `/improve-skills skills/save` |
 | `journal` · `/journal` · `$llm-obsidian:journal` | Датированная заметка/reminder/plan | Дата, item и режим | Journal update и session map | Vault transaction · `/journal на завтра проверить RC` |

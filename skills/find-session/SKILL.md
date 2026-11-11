@@ -1,10 +1,8 @@
 ---
 name: find-session
 metadata:
-  version: 1.1.0
-description: |
-  Find prior Claude Code sessions matching a task: wiki sessions: frontmatter + history.jsonl, top-5 by recency x hits. Read-only.
-  Triggers: найди похожую сессию, было ли подобное, find similar past task, /find-session.
+  version: 1.1.1
+description: Find prior Claude sessions by topic using wiki provenance and history.jsonl. Read-only; returns top five matches.
 allowed-tools: Read Glob Grep Bash AskUserQuestion
 ---
 
@@ -171,6 +169,9 @@ Note: searched the last 30 days. If nothing turned up — try `--all-time` (1 ye
 If `~/.claude/history.jsonl` is unavailable (e.g. fresh install) — skip Prong B, mention it in the output. If `.vault-meta/session-to-pages.jsonl` is empty (vault just initialized) — skip the Prong A reverse lookup, fall back to grepping wiki/ directly.
 
 ---
+
+To open an identified Claude/Codex session in Orca, use
+[orca-open-session](../orca-open-session/SKILL.md) only when the user asks to open it.
 
 ## Reuse pointers
 

@@ -118,7 +118,7 @@ LLM Obsidian — одновременно Obsidian-вольт и набор ин
 | Исправить воспроизводимый дефект | «Dispatch через `engineering/fix`». | Bounded loop выполняет reproduce → root cause → regression → minimal fix и останавливается на архитектурной или бюджетной границе. |
 | Собрать особый pipeline | «Built-in не подходит; предложи минимальный bounded custom pipeline». | Модель пишет typed DSL только после доказанного semantic gap; harness проверяет шаги, loops, hashes и budgets до approval. |
 | Проверить реализацию | «Запусти Deep review», «используй только Opus/Sol» или явно «Full review». | Simple — один выбранный holistic reviewer. Default Deep — два независимых provider holistic review; single-model Deep — отдельные intent и engineering review. Full — только явно выбранная сетка из четырёх provider/responsibility lanes. |
-| Завершить или уйти | «Reap утверждённую задачу» или «сохрани и закрой эту сессию». | `reap` архивирует результат и закрывает plan; `close` сохраняет и завершает только текущий agent process, не угадывая соседнюю cmux surface. |
+| Завершить или уйти | «Reap утверждённую задачу» или «сохрани и закрой эту сессию». | `reap` архивирует результат и закрывает plan; `close` сохраняет и закрывает точную вкладку Orca либо завершает текущего агента cmux; соседние сессии сохраняются. |
 
 Pipeline выбирается и замораживается во время clarification.
 `lifecycle/default` покрывает простой lifecycle, `engineering/change` — обычную
@@ -239,7 +239,7 @@ Claude вызывает их через plugin UI (`/skill`), Codex — чере
 |---|---|
 | **Ориентация и согласование** | `wiki` знакомит с вольтом; `clarify` проводит одно-вопросное интервью по требованиям и дизайну до реализации. |
 | **Capture и запись** | `save`, `save-plan`, `journal`, `backlog`, `daily`, `agenda` превращают разговоры и датированные дела в канонические данные. |
-| **Доступ к знаниям** | `wiki-query`, `find-session`, `wiki-lint`, `wiki-fold` ищут, проверяют и компактно сворачивают историю. |
+| **Доступ к знаниям** | `wiki-query`, `find-session`, `orca-open-session`, `wiki-lint`, `wiki-fold` ищут, проверяют и компактно сворачивают историю. |
 | **Документы и web** | `wiki-ingest`, `defuddle`, `research`, `unsafe-research` нормализуют источники и явно разделяют trust domains. |
 | **Инженерия** | `debug`, `tdd`, `design`, `prototype`, `resolve-conflict` дисциплинируют reasoning, а lifecycle остаётся у harness. |
 | **Мышление и коммуникация** | `draft` предлагает redacted-ответы; `learn` учит по заметкам; `distill-runbook` превращает sanitized shell history в исполняемую человеком процедуру. |
@@ -404,7 +404,7 @@ Acceptance heartbeat хранит только stage/status/counters/timestamps.
 | Полный путь от идеи и архитектуры до Work Item DAG и Harness | [Architecture Workflow v1](docs/architecture-workflow-v1.ru.md) |
 | Владение вводом Codex и завершение review в v2.9.2 | [Release notes v2.9.2](docs/releases/v2.9.2.md) |
 | ГОСТ для русского простого стиля в v2.9.4 | [Release notes v2.9.4](docs/releases/v2.9.4.md) |
-| Сохранение и закрытие чата Orca в v2.9.7 | [Release notes v2.9.7](docs/releases/v2.9.7.md) |
+| Поиск, открытие и закрытие сессий Orca в v2.9.7 | [Release notes v2.9.7](docs/releases/v2.9.7.md) |
 | Удаление worktree завершённых задач в v2.9.6 | [Release notes v2.9.6](docs/releases/v2.9.6.md) |
 | Skill drilldown: многопанельная HTML-детализация по времени в v2.9.5 | [Release notes v2.9.5](docs/releases/v2.9.5.md) |
 | Скиллы tech-doc и plain-talk в v2.9.3 | [Release notes v2.9.3](docs/releases/v2.9.3.md) |

@@ -348,13 +348,18 @@ surface-open, provider-start, and local-verification shapes are absorbed and
 atomically terminalized; live, unknown, or incompletely identified resources
 remain attention-required.
 
-## Orca native chat close
+## Orca native session workflows
 
-`close` detects `ORCA_STRUCTURED_SESSION=1` before cmux. The shared runner
-flushes turn-end and returns `ready_for_ui_close` bound to
-`ORCA_AGENT_SESSION_ID` only after a clean result. This receipt does not close
-the tab. The skill uses native Computer Use, labels the exact session via
-`chat rename`, and closes only the uniquely marked chat tab. The marker remains
-in session history. Missing GUI access or ambiguous UI requires manual closure;
-blocked/incomplete turn-end keeps the tab open. Orca's CLI does not currently
-expose native chat closure. Its browser/terminal close commands are unrelated.
+`orca-open-session` discovers registered connections and pins the runtime,
+workspace, agent and full provider ID before opening. Terminal provider proof
+comes from `session.tabs.list` agent status joined to the returned handle;
+terminal show alone carries no such identity in the inspected host. A private
+write-ahead receipt prevents repeating a launch with an uncertain outcome.
+Screen reads and `navigated: true` are required before completion.
+
+`close` detects `ORCA_STRUCTURED_SESSION=1` before cmux. Its synchronous turn-end
+must be clean before `orca-close-session.cjs` resolves the vault workspace and
+closes the uniquely matching `agent-session` tab with explicit user intent.
+The helper reads inventory again to verify target absence and neighbor retention.
+Internal schemas, selected installation and host/CLI version are checked.
+Unknown close outcomes are inspected without resending. No GUI clicks or renames.

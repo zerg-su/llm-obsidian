@@ -104,7 +104,7 @@ In Codex, use the explicit `$llm-obsidian:<skill>` name.
 | Fix a reproducible defect | “Dispatch this approved plan with `engineering/fix`.” | The built-in bounded loop runs reproduce → root cause → regression → minimal fix and stops on architecture or budget boundaries. |
 | Use a custom pipeline | “No built-in fits; propose the smallest bounded custom pipeline.” | The model may author the typed DSL only after proving the semantic gap; the harness validates allowed steps, loops, hashes, and budgets before approval. |
 | Review implementation | “Run Deep review,” “use only Opus/Sol,” or explicitly “Run Full review.” | Simple is one selected holistic reviewer. Standalone Deep is two provider-independent holistic reviews, but in a finalization cycle the independent lane only joins in cycles 4–5 against fresh availability; single-model Deep is separate intent and engineering reviews. Full is the explicit-only four-lane provider/responsibility grid. |
-| Finish or leave | “Reap the approved task,” or “save and close this session.” | `reap` archives the result and closes the plan; `close` saves and exits only the current agent process without guessing another cmux surface. |
+| Finish or leave | “Reap the approved task,” or “save and close this session.” | `reap` archives the result and closes the plan; `close` saves and closes the exact Orca chat tab or exits the current cmux agent, preserving neighboring sessions. |
 
 Pipeline choice is frozen during clarification. `lifecycle/default` handles a
 plain lifecycle, `engineering/change` is the normal TDD implementation path,
@@ -232,7 +232,7 @@ Claude invokes them through its plugin UI (`/skill`). Codex uses the generated r
 |---|---|
 | **Orientation and alignment** | `wiki` bootstraps the vault; `clarify` performs one-question-at-a-time requirements/design alignment before implementation. |
 | **Capture and writing** | `save`, `save-plan`, `journal`, `backlog`, `daily`, and `agenda` turn conversations and dated work into canonical vault data. |
-| **Knowledge access** | `wiki-query`, `find-session`, `wiki-lint`, and `wiki-fold` retrieve, audit, and compact durable knowledge. |
+| **Knowledge access** | `wiki-query`, `find-session`, `orca-open-session`, `wiki-lint`, and `wiki-fold` retrieve, audit, and compact durable knowledge. |
 | **Documents and web** | `wiki-ingest`, `defuddle`, `research`, and `unsafe-research` normalize sources and keep trust domains explicit. |
 | **Engineering** | `debug`, `tdd`, `mutation-testing`, `design`, `prototype`, and `resolve-conflict` cover implementation and isolated behavioral test checks; the harness owns lifecycle mechanics. |
 | **Thinking and communication** | `draft` proposes redacted external replies; `learn` tutors from your notes; `distill-runbook` turns sanitized shell history into human-executable procedures. |
@@ -397,7 +397,7 @@ There is no speculative roadmap in this README. The repository describes what is
 | Complete idea-to-architecture-to-Harness workflow (Russian) | [Architecture Workflow v1](docs/architecture-workflow-v1.ru.md) |
 | v2.9.2 owned Codex input and review cleanup | [v2.9.2 release notes](docs/releases/v2.9.2.md) |
 | v2.9.4 GOST guidance for Russian plain style | [v2.9.4 release notes](docs/releases/v2.9.4.md) |
-| v2.9.7 Orca chat save and close | [Release notes v2.9.7](docs/releases/v2.9.7.md) |
+| v2.9.7 Orca session search, open and close | [Release notes v2.9.7](docs/releases/v2.9.7.md) |
 | v2.9.6 completed-task worktree cleanup | [v2.9.6 release notes](docs/releases/v2.9.6.md) |
 | v2.9.5 drilldown skill: multi-panel time-series HTML | [v2.9.5 release notes](docs/releases/v2.9.5.md) |
 | v2.9.3 tech-doc and plain-talk skills | [v2.9.3 release notes](docs/releases/v2.9.3.md) |

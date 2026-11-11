@@ -57,6 +57,15 @@ with tempfile.TemporaryDirectory(prefix="queue-session-exit-test.") as raw:
         encoding="utf-8",
     )
     cmux.chmod(0o755)
+    node = tmp / "node"
+    node.write_text(
+        f"#!{sys.executable}\n"
+        "import json, os, sys\n"
+        "r = json.load(sys.stdin)\n"
+        "with open(os.environ['CMUX_TEST_LOG'], 'a') as f: f.write('orca-close:' + r['sessionId'] + '\\n')\n"
+        "print(json.dumps({'status':'closed', 'surface_closed':True, 'session_id':r['sessionId']}))\n"
+    )
+    node.chmod(0o755)
     vault = tmp / "vault"
     (vault / "wiki").mkdir(parents=True)
     (vault / "scripts").mkdir()
@@ -67,6 +76,7 @@ with tempfile.TemporaryDirectory(prefix="queue-session-exit-test.") as raw:
         CMUX_BUNDLED_CLI_PATH=str(cmux),
         CMUX_SURFACE_ID=SURFACE,
         CMUX_TEST_LOG=str(log),
+        PATH=str(tmp) + os.pathsep + os.environ.get("PATH", ""),
         LLM_OBSIDIAN_PROJECT_ROOT=str(vault),
         CLAUDE_PROJECT_DIR=str(vault),
     )
@@ -177,11 +187,11 @@ with tempfile.TemporaryDirectory(prefix="queue-session-exit-test.") as raw:
             native_env = dict(agent_env, ORCA_STRUCTURED_SESSION="1", ORCA_AGENT_SESSION_ID=session)
             result = subprocess.run([sys.executable, str(SCRIPT)], text=True, capture_output=True, env=native_env)
             payload = json.loads(result.stdout)
-            expected = "ready_for_ui_close" if session == "chat-session-123" else "manual"
+            expected = "closed" if session == "chat-session-123" else "manual"
             check("native chat routes without cmux input", payload["status"] == expected
-                  and payload["host"] == "orca-chat" and payload["surface_closed"] is False
-                  and log.read_text().splitlines() == [TURN_END_MARK])
-            if expected == "ready_for_ui_close":
+                  and payload["host"] == "orca-chat" and payload["surface_closed"] is (expected == "closed")
+                  and log.read_text().splitlines() == ([TURN_END_MARK, "orca-close:" + session] if expected == "closed" else [TURN_END_MARK]))
+            if expected == "closed":
                 check("native close binds exact session", payload["session_id"] == session
                       and payload["turn_end"]["status"] == "clean")
         log.write_text("")

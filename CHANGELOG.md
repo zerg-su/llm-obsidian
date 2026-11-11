@@ -14,12 +14,22 @@ packages were published for them.
 
 ### Added
 
-- `close` recognizes Orca native chats before cmux and flushes the vault before
-  preparing exact-session GUI tab closure. The skill binds the tab with a unique
-  session title, then uses native Computer Use. Unavailable GUI access falls
-  back to manual tab closure; the CLI alone cannot close native chats.
-- Blocked or incomplete turn-end never authorizes native tab closure. Existing
-  cmux Claude/Codex exit behavior is preserved.
+- `orca-open-session` finds prior Claude/Codex conversations from wiki provenance
+  and host-scoped Orca search, then opens the exact provider ID on its discovered
+  connection and workspace. Its compatibility-checked bridge proves live tab
+  identity, reads the screen, verifies navigation and prevents blind mutation
+  replay after a lost response.
+- `find-session` links explicitly requested Orca opening to the new skill.
+
+### Fixed
+
+- `close` saves and commits the vault before closing exactly its native Orca chat
+  through the checked tab API. It verifies disappearance and preserved neighboring
+  tabs, without GUI automation or title changes. A blocked flush keeps it open.
+- Live testing corrected provider identity lookup to use tab-status metadata
+  rather than assuming that terminal show or launch replies carry those fields.
+- The generic daily guide includes the installed documentation and metrics skills,
+  so strict turn-end validation no longer blocks an otherwise valid close.
 
 ## [2.9.6] - 2026-10-24
 

@@ -114,8 +114,23 @@ def orca_chat_close(base: dict[str, object], turn_end: dict[str, object]) -> dic
     session = os.environ.get("ORCA_AGENT_SESSION_ID", "")
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,199}", session):
         return {**result, "status": "manual", "reason": "exact Orca chat session unavailable"}
-    return {**result, "status": "ready_for_ui_close", "session_id": session,
-            "reason": "vault flushed; close only this session through verified native UI"}
+    root = vault_root()
+    helper = Path(__file__).with_name("orca-close-session.cjs")
+    if root is None or not helper.is_file():
+        return {**result, "status": "manual", "reason": "Orca close helper unavailable"}
+    try:
+        response = subprocess.run(
+            ["node", str(helper)],
+            input=json.dumps({"turn_end": turn_end, "vault": str(root), "sessionId": session}),
+            text=True, capture_output=True, timeout=60, check=False,
+        )
+        closed = json.loads(response.stdout)
+        if not isinstance(closed, dict) or closed.get("status") not in {"closed", "blocked", "manual", "unknown"}:
+            raise ValueError("invalid close receipt")
+        return {**result, **closed, "manual_fallback": closed.get("status") != "closed"}
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return {**result, "status": "unknown", "reason": "Orca close result unavailable; inspect tab before any retry"}
+
 
 
 def queue_exit() -> dict[str, object]:

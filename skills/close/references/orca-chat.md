@@ -1,30 +1,23 @@
-# Close the current Orca chat tab
+# Close the current Orca chat through the host API
 
-Use only after `ready_for_ui_close` with `turn_end.status: clean`. The runner's
-`session_id` is the current chat identity. Never use an inherited cmux ID.
+`queue-session-exit.py` owns this path after a clean synchronous turn-end.
+It passes the exact `ORCA_AGENT_SESSION_ID` and vault root to
+`scripts/orca-close-session.cjs`; do not invoke another close mechanism.
 
-Orca currently has no `chat close` CLI command. `tab close` addresses browser
-tabs; `terminal close` addresses PTYs. Neither closes a native chat. The
-`computer --session` flag is a snapshot namespace, not a chat selector.
+The helper resolves the selected Orca installation, validates its current
+`CloseTab`/`WorktreeTabSelector` schemas, pins the runtime and checks that host
+and CLI versions agree. `worktree show` resolves the exact vault address.
+`session.tabs.list` must contain exactly one `agent-session` tab with this ID.
+It calls `session.tabs.close` once with that tab ID and `reason: user`, then
+reads the inventory again: the selected tab must be absent and neighboring
+IDs must remain. No title changes, GUI clicks, model input or process kills.
 
-1. Load the installed `orca-cli` skill, resolve its session executable and read
-   its version-matched guide. Use available native Computer Use tooling to
-   observe Orca's window. If no visible window or GUI permission is available,
-   report saved/manual-close and stop. Do not change permissions automatically.
-2. To bind the visible tab to this session, use the documented command:
-   `ORCA chat rename --session <session_id> --name "Saved · close-<session_id>" --json`
-   with the exact receipt ID and resolved executable. This temporary title is
-   deliberate: it remains in history and makes the closing target unambiguous.
-   If rename fails, keep the tab open and report manual close.
-3. Take a fresh native UI snapshot. Locate exactly one chat tab named
-   `Saved · close-<session_id>` and its own close button. Close that button only.
-   Do not send a global close shortcut, close a window, or use a title from an
-   older snapshot. If the title is absent/ambiguous or its button cannot be
-   identified, keep the tab open and report manual close and the new title.
-4. If the tool remains usable, observe that this marked tab disappeared.
-   A click receipt alone is not proof of closure. Follow the computer tool's
-   completion protocol. Do not perform further repository work after closure.
+`blocked` turn-end cannot invoke close. Unsupported APIs, ambiguous routing or
+missing identity return manual/blocked status. A lost reply is reconciled by
+reading inventory, never by repeating the mutation. If absence cannot be
+verified, report the exact blocker and leave manual closure to the user.
 
-Before the close click, give a short status: what was saved, whether turn-end
-succeeded, and that this tab is about to close. If closure cannot be verified,
-say so; do not repeat a blind click. Closing a tab does not delete its history.
+Only the tab is removed; saved provider history remains available. There is
+no CLI `chat close` command in the inspected build; browser `tab close` and
+`terminal close` are different operations. The internal API is version-checked,
+not assumed to exist on every Orca host.
