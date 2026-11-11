@@ -347,3 +347,14 @@ expired, exact subtree. It never replays a pending effect: the narrow supported
 surface-open, provider-start, and local-verification shapes are absorbed and
 atomically terminalized; live, unknown, or incompletely identified resources
 remain attention-required.
+
+## Orca native chat close
+
+`close` detects `ORCA_STRUCTURED_SESSION=1` before cmux. The shared runner
+flushes turn-end and returns `ready_for_ui_close` bound to
+`ORCA_AGENT_SESSION_ID` only after a clean result. This receipt does not close
+the tab. The skill uses native Computer Use, labels the exact session via
+`chat rename`, and closes only the uniquely marked chat tab. The marker remains
+in session history. Missing GUI access or ambiguous UI requires manual closure;
+blocked/incomplete turn-end keeps the tab open. Orca's CLI does not currently
+expose native chat closure. Its browser/terminal close commands are unrelated.

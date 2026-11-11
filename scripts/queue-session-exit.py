@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Queue graceful /exit into this exact cmux surface; never close the surface."""
+"""Flush the vault, then route exact-session close for cmux or Orca chat."""
 
 from __future__ import annotations
 
@@ -104,6 +104,20 @@ def run_turn_end() -> dict[str, object]:
     }
 
 
+def orca_chat_close(base: dict[str, object], turn_end: dict[str, object]) -> dict[str, object]:
+    """Prepare native UI close; there is no Orca CLI chat-close endpoint."""
+    result = {**base, "host": "orca-chat", "manual_fallback": True}
+    if turn_end["status"] == "blocked":
+        return {**result, "status": "blocked", "reason": "turn-end pipeline blocked; keep chat open"}
+    if turn_end["status"] != "clean":
+        return {**result, "status": "manual", "reason": "turn-end did not complete; keep chat open"}
+    session = os.environ.get("ORCA_AGENT_SESSION_ID", "")
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,199}", session):
+        return {**result, "status": "manual", "reason": "exact Orca chat session unavailable"}
+    return {**result, "status": "ready_for_ui_close", "session_id": session,
+            "reason": "vault flushed; close only this session through verified native UI"}
+
+
 def queue_exit() -> dict[str, object]:
     selected_runtime = runtime()
     surface = str(os.environ.get("CMUX_SURFACE_ID") or "").strip()
@@ -118,6 +132,8 @@ def queue_exit() -> dict[str, object]:
         "manual_fallback": selected_runtime == "codex",
         "turn_end": turn_end,
     }
+    if os.environ.get("ORCA_STRUCTURED_SESSION") == "1":
+        return orca_chat_close(base, turn_end)
     if turn_end["status"] == "blocked":
         return {
             **base,

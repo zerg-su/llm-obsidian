@@ -10,6 +10,17 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.9.7] - 2026-11-11
+
+### Added
+
+- `close` recognizes Orca native chats before cmux and flushes the vault before
+  preparing exact-session GUI tab closure. The skill binds the tab with a unique
+  session title, then uses native Computer Use. Unavailable GUI access falls
+  back to manual tab closure; the CLI alone cannot close native chats.
+- Blocked or incomplete turn-end never authorizes native tab closure. Existing
+  cmux Claude/Codex exit behavior is preserved.
+
 ## [2.9.6] - 2026-10-24
 
 ### Fixed

@@ -38,11 +38,11 @@
       "token_estimate": 407
     },
     "close": {
-      "body_bytes": 2280,
-      "body_lines": 45,
-      "closure_bytes": 2280,
-      "closure_token_estimate": 570,
-      "token_estimate": 570
+      "body_bytes": 1804,
+      "body_lines": 28,
+      "closure_bytes": 3765,
+      "closure_token_estimate": 942,
+      "token_estimate": 451
     },
     "codebase-design": {
       "body_bytes": 1731,

@@ -698,6 +698,11 @@ removal and durable replay receipts, called after provider shutdown by reap.
 Real Git lifecycle regressions cover retention, removal and crash recovery.
 The measured contour is 308 files / 117,528 lines with zero headroom.
 
+
+Version 2.9.7 adds 16 measured lines in queue-session-exit.py for
+Orca structured-chat routing, exact-session validation and clean-flush gating.
+The contour remains 308 files; the new ceiling is exactly 117,544 lines with
+zero headroom. GUI tab closure is skill-owned and requires separate live proof.
 """
 
 from __future__ import annotations
@@ -713,7 +718,7 @@ SCRIPT_FILE_CEILING = 308
 #: Maximum total lines across those files. This is the measured exact candidate
 #: after the 2.9.0 runtime/auth integration, U-R10 binding and cmux I/O, and the
 #: drilldown renderer, with zero headroom.
-SCRIPT_LINE_CEILING = 117_528
+SCRIPT_LINE_CEILING = 117_544
 
 
 def measure(scripts_dir: Path) -> tuple[int, int]:

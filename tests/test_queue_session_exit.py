@@ -63,7 +63,7 @@ with tempfile.TemporaryDirectory(prefix="queue-session-exit-test.") as raw:
     (vault / "scripts" / "vault-write.py").write_text("# marker\n", encoding="utf-8")
     stub_turn_end(vault, "sys.exit(0)")
     base = dict(
-        os.environ,
+        {key: value for key, value in os.environ.items() if not key.startswith("ORCA_")},
         CMUX_BUNDLED_CLI_PATH=str(cmux),
         CMUX_SURFACE_ID=SURFACE,
         CMUX_TEST_LOG=str(log),
@@ -168,5 +168,32 @@ with tempfile.TemporaryDirectory(prefix="queue-session-exit-test.") as raw:
         "no vault still queues a graceful exit",
         payload["status"] == "queued" and payload["turn_end"]["status"] == "skipped",
     )
+
+    # Structured chats have no PTY. Stale inherited cmux IDs must be ignored.
+    for agent_env in (claude_env, codex_env):
+        for session in ("chat-session-123", "", "bad\nsession"):
+            log.write_text("")
+            stub_turn_end(vault, "sys.exit(0)")
+            native_env = dict(agent_env, ORCA_STRUCTURED_SESSION="1", ORCA_AGENT_SESSION_ID=session)
+            result = subprocess.run([sys.executable, str(SCRIPT)], text=True, capture_output=True, env=native_env)
+            payload = json.loads(result.stdout)
+            expected = "ready_for_ui_close" if session == "chat-session-123" else "manual"
+            check("native chat routes without cmux input", payload["status"] == expected
+                  and payload["host"] == "orca-chat" and payload["surface_closed"] is False
+                  and log.read_text().splitlines() == [TURN_END_MARK])
+            if expected == "ready_for_ui_close":
+                check("native close binds exact session", payload["session_id"] == session
+                      and payload["turn_end"]["status"] == "clean")
+        log.write_text("")
+        stub_turn_end(vault, "print('COMMIT_BLOCKED: validation failed')")
+        result = subprocess.run([sys.executable, str(SCRIPT)], text=True, capture_output=True,
+                                env=dict(agent_env, ORCA_STRUCTURED_SESSION="1", ORCA_AGENT_SESSION_ID="chat-session-123"))
+        check("native chat cannot close after blocked save", json.loads(result.stdout)["status"] == "blocked"
+              and log.read_text().splitlines() == [TURN_END_MARK])
+
+    stub_turn_end(vault, "sys.exit(0)")
+    result = subprocess.run([sys.executable, str(SCRIPT)], text=True, capture_output=True, cwd=tmp,
+                           env=dict(detached_env, ORCA_STRUCTURED_SESSION="1", ORCA_AGENT_SESSION_ID="chat-session-123"))
+    check("native chat requires completed turn-end", json.loads(result.stdout)["status"] == "manual")
 
 print("All session-exit runner tests passed.")

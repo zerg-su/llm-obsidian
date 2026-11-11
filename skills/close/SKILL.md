@@ -1,55 +1,38 @@
 ---
 name: close
 metadata:
-  version: 1.2.0
+  version: 1.3.0
 description: >-
-  Save the current session, then exit its Claude/Codex agent process without
-  closing the cmux surface. Use for save-and-close; not for closing tabs.
+  Save this session, then close its Orca chat tab or exit its Claude/Codex
+  terminal agent while keeping the cmux surface. Use for save-and-close.
 allowed-tools: Skill Read Write Edit Glob Grep AskUserQuestion Bash
 ---
 
-# close — save, then gracefully exit
+# close — save, then close this session
 
-`close` means save the useful session result, commit it, then queue `/exit` to
-this exact agent process. Never kill a process or close a cmux surface/tab.
+In an Orca native chat, save and close this chat tab. In cmux, save and queue
+`/exit` to this exact agent, leaving its surface at a shell prompt.
 
-## Workflow
+1. Invoke `save`; it owns inference, deduplication, provenance and vault writes.
+   If nothing is worth saving, say so and continue.
+2. For a reusable shell procedure (ten non-trivial successful commands) without
+   a runbook, offer `distill-runbook` and wait for one answer before closing.
+3. Report uncommitted changes outside `wiki/`, `.raw/`, `.vault-meta/` and
+   `.claude-memory/`; turn-end does not commit them.
+4. Run `python3 scripts/queue-session-exit.py`. It flushes turn-end synchronously
+   before any close action. Follow its receipt:
+   - `blocked`: keep the session open. Report `turn_end.reason`; repair under the
+     failure-to-repair contract. No close action is authorized until it passes.
+   - `ready_for_ui_close`: read [Orca chat close](references/orca-chat.md).
+     This is preparation, not proof of a closed tab.
+   - `manual`: report that no automatic close occurred. In Orca, ask the user to
+     close this tab with its close button after a clean turn-end; never prescribe
+     `/exit` or `/archive` in the native chat.
+   - `queued`: end the turn immediately; no further tools. The cmux runner uses
+     only `CMUX_SURFACE_ID`, never focus/ancestry; Claude queues direct `/exit`,
+     Codex uses bounded backspace + Tab. It never closes a cmux surface.
 
-1. Invoke the `save` skill and let it own inference, deduplication, provenance,
-   and `vault-write.py`. Do not reimplement save. If nothing is worth saving,
-   say so and continue.
-2. If this session contains a meaningful reusable shell procedure (at least ten
-   non-trivial successful commands) with no runbook, offer `distill-runbook` and
-   wait for one answer before exit.
-3. Surface any uncommitted changes outside `wiki/`, `.raw/`, `.vault-meta/`, and
-   `.claude-memory/`; they remain on disk and are not committed at turn end.
-4. As the final tool call, run:
-
-   ```bash
-   python3 scripts/queue-session-exit.py
-   ```
-
-   The runner owns turn-end: `/exit` beats the Stop hook, so it commits the
-   vault itself and reports that under `turn_end` before queueing anything. It
-   detects Codex only from Codex env vars, requires the exact `CMUX_SURFACE_ID`,
-   and never uses focused/ancestry state. Claude queues direct `/exit`; Codex
-   performs the bounded backspace + Tab best-effort path. It never calls
-   `cmux close-surface`.
-5. `status: blocked` means the vault stayed dirty and nothing was queued — a
-   failure, a busy lock, or a deliberate no-commit mode. Do not retry and do not
-   exit: report `turn_end.reason` and repair under the failure-to-repair
-   contract; only the user ends such a session, with a plain `/exit`. Any
-   `turn_end.status` other than `clean` means no commit happened; never claim one.
-6. Otherwise end the turn immediately. Do not call another tool after the queue
-   runner.
-
-## Final message
-
-State what was saved, what turn-end did with it, and that graceful exit was
-queued. If runner status is `manual`, tell the user to enter `/exit`
-manually. For Codex always include that fallback (and `/archive` when outside
-cmux), because injected slash commands are best-effort. If status is `blocked`,
-say the session stays open and why. Mention any uncommitted non-vault changes.
-
-`/exit` ends only the agent and leaves the surface at a shell prompt. Closing a
-tab/surface is a separate explicit action and outside this skill.
+State what was saved and what turn-end actually did. Only `turn_end.status: clean`
+means the flush succeeded; it need not have created a new commit. For cmux Codex,
+include manual `/exit` because injection is best-effort (`/archive` outside cmux).
+Native Orca close may require GUI access; do not claim closure from preparation.
