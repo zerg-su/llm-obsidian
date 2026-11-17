@@ -142,6 +142,89 @@ def publish(state_root, **kwargs):
     )
     check("missing hook roots fail open", result.returncode == 0 and not result.stdout, result.stderr)
 
+    codex_home = vault / "codex-home"
+    installed = codex_home / "plugins" / "cache" / "marketplace" / "llm-obsidian" / "2.9.6"
+    shutil.copytree(
+        vault,
+        installed,
+        ignore=shutil.ignore_patterns("codex-home", ".vault-meta"),
+    )
+    installed_env = dict(fallback_env, CODEX_HOME=str(codex_home), PLUGIN_ROOT=str(installed))
+    installed_env.pop("LLM_OBSIDIAN_PROJECT_ROOT")
+    installed_env.pop("CLAUDE_PROJECT_DIR", None)
+    cached_cwd = installed / "scripts"
+    cached_payload = {**fallback_payload, "session_id": "cached-shell", "cwd": str(cached_cwd)}
+    result = subprocess.run(
+        hook_command,
+        shell=True,
+        cwd=cached_cwd,
+        env=installed_env,
+        input=json.dumps(cached_payload),
+        text=True,
+        capture_output=True,
+    )
+    check(
+        "a shell command in the Codex cache never writes to the bundle",
+        result.returncode == 0 and not (installed / ".vault-meta").exists(),
+        result.stderr,
+    )
+
+    (installed / ".task-meta.json").write_text("{}\n", encoding="utf-8")
+    result = subprocess.run(
+        hook_command,
+        shell=True,
+        cwd=cached_cwd,
+        env={**installed_env, "LLM_OBSIDIAN_PROJECT_ROOT": str(vault)},
+        input=json.dumps(cached_payload),
+        text=True,
+        capture_output=True,
+    )
+    fallback_record = json.loads(fallback_log.read_text(encoding="utf-8").splitlines()[-1])
+    check(
+        "a cached task marker cannot override the actual vault",
+        result.returncode == 0
+        and fallback_record["session_id"] == "cached-shell"
+        and not (installed / ".vault-meta").exists(),
+        result.stderr,
+    )
+
+    result = subprocess.run(
+        hook_command,
+        shell=True,
+        cwd=vault,
+        env={**installed_env, "LLM_OBSIDIAN_PROJECT_ROOT": str(installed)},
+        input=json.dumps({**fallback_payload, "session_id": "real-vault"}),
+        text=True,
+        capture_output=True,
+    )
+    fallback_record = json.loads(fallback_log.read_text(encoding="utf-8").splitlines()[-1])
+    check(
+        "an explicit cache hint falls through to the real vault",
+        result.returncode == 0
+        and fallback_record["session_id"] == "real-vault"
+        and not (installed / ".vault-meta").exists(),
+        result.stderr,
+    )
+
+    orphan_task = vault / "cached-origin-task"
+    orphan_task.mkdir()
+    (orphan_task / ".task-meta.json").write_text(
+        json.dumps({"vault_root": str(installed)}), encoding="utf-8"
+    )
+    result = subprocess.run(
+        [sys.executable, str(installed / "hooks" / "run-hook.py"), "router"],
+        cwd=orphan_task,
+        env=installed_env,
+        input=json.dumps({"session_id": "orphan-task", "runtime": "codex", "cwd": str(orphan_task)}),
+        text=True,
+        capture_output=True,
+    )
+    check(
+        "a task cannot send telemetry to a cached origin vault",
+        result.returncode == 0 and not (installed / ".vault-meta").exists(),
+        result.stderr,
+    )
+
     common = {
         "session_id": "codex-session",
         "cwd": str(vault),

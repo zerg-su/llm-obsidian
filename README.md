@@ -394,6 +394,7 @@ There is no speculative roadmap in this README. The repository describes what is
 
 | Topic | Document |
 |---|---|
+| v2.9.8 Codex hook approval and plugin cache writes | [v2.9.8 release notes](docs/releases/v2.9.8.md) |
 | Complete idea-to-architecture-to-Harness workflow (Russian) | [Architecture Workflow v1](docs/architecture-workflow-v1.ru.md) |
 | v2.9.2 owned Codex input and review cleanup | [v2.9.2 release notes](docs/releases/v2.9.2.md) |
 | v2.9.4 GOST guidance for Russian plain style | [v2.9.4 release notes](docs/releases/v2.9.4.md) |

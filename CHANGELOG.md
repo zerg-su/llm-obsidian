@@ -10,6 +10,14 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.9.8] - 2026-11-17
+
+### Fixed
+
+- Codex lifecycle hooks skip the installed plugin cache when locating a writable
+  vault. A shell command run from the cache can no longer add a command log to
+  the package and invalidate its hook approval.
+
 ## [2.9.7] - 2026-11-11
 
 ### Added

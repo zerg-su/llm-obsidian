@@ -12,6 +12,8 @@ from typing import Any
 
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
+CODEX_HOME = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex").expanduser()
+CODEX_PLUGIN_CACHE = (CODEX_HOME / "plugins" / "cache").resolve()
 sys.path.insert(0, str(PLUGIN_ROOT / "scripts"))
 
 # Turn-end markers that mean the vault stayed dirty. Anything else the pipeline
@@ -43,6 +45,8 @@ def task_context(
     """Resolve telemetry origin without granting task hooks coordinator behavior."""
 
     path = context_root(data)
+    if path.is_relative_to(CODEX_PLUGIN_CACHE):
+        return False, None, None
     for candidate in (path, *path.parents):
         if (candidate / ".task-meta.json").is_file():
             return True, origin_vault(candidate), candidate
@@ -61,6 +65,10 @@ def vault_root(data: dict[str, Any]) -> Path | None:
         if not raw:
             continue
         path = Path(str(raw)).expanduser().resolve()
+        # Codex hashes installed bundles to authorize their hooks. The cache can
+        # contain a copy of the vault, but it is never a destination for writes.
+        if path.is_relative_to(CODEX_PLUGIN_CACHE):
+            continue
         for candidate in (path, *path.parents):
             if candidate in seen:
                 continue
@@ -179,7 +187,7 @@ def main() -> int:
     root = vault_root(data)
     is_task, origin, task_root = task_context(data)
     telemetry_root = origin if is_task else root
-    if telemetry_root is None:
+    if telemetry_root is None or telemetry_root.is_relative_to(CODEX_PLUGIN_CACHE):
         return 0
     if route == "router":
         start_turn(telemetry_root, data, context_root=context)
